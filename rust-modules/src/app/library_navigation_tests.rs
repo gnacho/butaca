@@ -15,7 +15,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-strip-navigation");
+    let session = crate::server::session::TempSession::new("library-strip-navigation");
     session.watching("u-library-strip-navigation");
     crate::registry::reset_for_test();
     let own = crate::registry::ServerId::from_raw(0);

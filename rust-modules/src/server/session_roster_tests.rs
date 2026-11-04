@@ -188,7 +188,7 @@ fn a_corrupt_or_absent_roster_never_costs_the_session() {
 /// Both gates the value reaches are stated here, because they fail differently and one does not
 /// imply the other: a bad ROSTER entry costs that entry (no origin to dial and no token to
 /// register with), while a bad PRIMARY costs the resume
-/// (`can_go_local`, the one gate in front of `plex::install`) and lands the app on sign-in.
+/// (`can_go_local`, the one gate in front of `server::install`) and lands the app on sign-in.
 #[test]
 fn a_port_no_socket_could_take_is_refused_rather_than_wrapped() {
     let s: Session = serde_json::from_str(

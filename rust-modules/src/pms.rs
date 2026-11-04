@@ -71,7 +71,7 @@ pub struct PmsMovie {
     /// server-local key that a second server reuses from 1 (docs/shared-servers.md §2 measured the
     /// collision), so the row is only addressable as the PAIR `(sid, rk)`; see
     /// [`crate::registry::same_item`]. Stamped by the parser that produced the row from a value the
-    /// SPAWNING thread captured, never from `plex::current_server()` inside the worker — the row
+    /// SPAWNING thread captured, never from `server::current_server()` inside the worker — the row
     /// is parsed on a worker thread, and by the time it parses, "the current server" may already
     /// be a different machine than the one whose bytes it is holding.
     #[serde(with = "record::server_id")]
@@ -629,7 +629,7 @@ struct Shelf {
     hub_id: String,
     key: String,
     items: Vec<PmsMovie>,
-    /// Every item the hub's listing holds (`plex::Hub::total`) — a collection shelf's "· N".
+    /// Every item the hub's listing holds (`server::Hub::total`) — a collection shelf's "· N".
     #[serde(default)]
     total: usize,
 }
@@ -944,7 +944,7 @@ struct Src {
     /// every row it parses.
     sid: ServerId,
     token_gen: u32,
-    /// **The CREDIT** for this source — `plex::servers::owner_credit`'s answer, stamped onto every
+    /// **The CREDIT** for this source — `server::servers::owner_credit`'s answer, stamped onto every
     /// shelf and hero row this source contributes. `"friend"` for a borrowed server; **empty when
     /// there is nobody to credit**, which is our own server, the household's own server whichever
     /// Plex Home profile is watching, and a share plex.tv never named. Read from the registry at
@@ -1239,7 +1239,7 @@ fn adopt_browse_scope(state: &mut PmsState, scope: &BrowseScope) {
 /// above — three `u32`s do not fit in one `u64` without a truncation that would eventually alias
 /// two states, and this whole mechanism exists to notice a change.
 ///
-/// It is `plex::servers`' facts epoch: what the roster SAYS about a server, as opposed to which
+/// It is `server::servers`' facts epoch: what the roster SAYS about a server, as opposed to which
 /// servers there are. `Src::handle` is a copy of the "Shared by …" credit and `merge` stamps that
 /// copy onto every shelf and hero row, so a credit re-graded by a roster refresh is exactly a
 /// change this table must rebuild for — and the roster epoch alone cannot see one.
@@ -1270,14 +1270,14 @@ fn sync_roster_with_scope(state: &mut PmsState, scope: &BrowseScope) {
     let want = roster_with_scope(scope);
     let mut srcs = std::mem::take(&mut state.srcs);
     let mut out: Vec<Src> = Vec::with_capacity(want.len());
-    // A retained source whose CREDIT moved — `plex::servers::owner_credit`'s answer, which is what
+    // A retained source whose CREDIT moved — `server::servers::owner_credit`'s answer, which is what
     // the shelves and the hero pool were stamped with. Updating `Src::handle` alone left the built
     // rows saying the old thing until the next successful hub fetch, and an OFFLINE source never
     // has one: "keep the last good shelves" would then have preserved a wrong attribution for good.
     // The order can move with it (`roster` groups uncredited first), which the same re-merge fixes.
     let mut restamped = false;
     for (sid, handle) in want {
-        // One slot, one source. The way a roster came to name a slot twice was `plex::register`
+        // One slot, one source. The way a roster came to name a slot twice was `server::register`
         // answering with `current()` when the table was full; that now answers `ServerId::UNSET`,
         // which resolves to nothing and never reaches this list. The guard stays because a second
         // `Src` sharing a sid is worse than the mistake that produced it: every landing resolves to
@@ -1388,7 +1388,7 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     }
     // CAPTURE AT THE SPAWN SITE. The worker is handed this server's own `&'static Client` and its
     // slot id; it never asks which server is current, and a slot re-pointed mid-request cannot
-    // redirect a fetch that is already out (`plex::servers` leaks each client precisely so that
+    // redirect a fetch that is already out (`server::servers` leaks each client precisely so that
     // reference stays live).
     // The Jellyfin flavor's single source is never in the Plex registry, so it is captured
     // from its own client slot (the spawn-site capture rule is the same: the main thread reads

@@ -300,7 +300,7 @@ fn edit_local_with_owners(
             });
         }
         // The one edit that can be stated with certainty: the server hides the item from the deck
-        // and keeps everything else about it (`plex::Client::remove_from_continue_watching`).
+        // and keeps everything else about it (`server::Client::remove_from_continue_watching`).
         Write::Favorite(on) => {
             // The heart is only drawn on the detail page: the loaded item's flag. The show-level
             // roll-up the watched pair performs is NOT wanted here — a heart has no children.

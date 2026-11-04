@@ -439,7 +439,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
     let crate::screens::registry::ItemMenuReq { act, sid, item, loaded_episode, from_home } = req;
     // `sid` is WHICH SERVER this menu's rows are about, captured when the panel was presented.
     // Every arm below turns an rk into a fetch, a scrobble or a play, and resolving one against
-    // `plex::current_server()` is the reported bug itself: on a merged Continue Watching shelf,
+    // `server::current_server()` is the reported bug itself: on a merged Continue Watching shelf,
     // Play from Start on a friend's episode found OUR row with the same key and played a different
     // film under the friend's title.
     //

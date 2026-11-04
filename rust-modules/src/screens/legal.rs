@@ -568,7 +568,7 @@ mod tests {
     /// `env!` again so that re-typing a literal here fails: on any developer build the two differ.
     #[test]
     fn about_names_the_running_version() {
-        let v = crate::plex::identity::VERSION;
+        let v = crate::server::identity::VERSION;
         assert!(
             ABOUT.contains(&format!("Version {v}")),
             "About should name {v}, says: {ABOUT:?}"

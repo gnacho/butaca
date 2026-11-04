@@ -107,7 +107,7 @@ pub(crate) struct Credit {
 /// The item a credit is FOR — a **Discover** row, not a library one. Its `rating_key` is a plex.tv
 /// id and its `thumb` an `image.tmdb.org` URL, so neither addresses anything on a PMS; what does
 /// cross is [`guid`](CreditItem::guid), which is the metadata provider's global id and the key both
-/// sides of the availability join speak (`plex::Metadata::guid` on the library side).
+/// sides of the availability join speak (`server::Metadata::guid` on the library side).
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CreditItem {
     #[serde(rename = "type", default)]

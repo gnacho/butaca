@@ -85,7 +85,7 @@
 //! `https://…plex.direct` name that only public DNS resolves, so a LAN with its uplink down could
 //! not reach a server one hop away. `CurlSource::open*` now asks `net::resolve` for a pin by the
 //! URL's host and port — recorded by the registry from the address plex.tv advertised beside the
-//! name, validated in `plex::origin::ResolvePin` — and applies it as ONE `CURLOPT_RESOLVE` entry
+//! name, validated in `server::origin::ResolvePin` — and applies it as ONE `CURLOPT_RESOLVE` entry
 //! on every easy handle it attaches. The hostname stays in the URL, so SNI and certificate
 //! identity are untouched; libcurl simply never resolves it. There is no `getaddrinfo` here: the
 //! address comes from plex.tv, never from a resolver of ours, so the second-resolution-path
@@ -682,7 +682,7 @@ impl CurlSource {
             .transpose()
             .map_err(|_| OpenErr::Local)?;
         let url_c = CString::new(url).map_err(|_| OpenErr::Local)?;
-        let ua = CString::new(crate::plex::identity::user_agent()).map_err(|_| OpenErr::Local)?;
+        let ua = CString::new(crate::server::identity::user_agent()).map_err(|_| OpenErr::Local)?;
         let multi = unsafe { curl_multi_init() };
         if multi.is_null() {
             return Err(OpenErr::Local);

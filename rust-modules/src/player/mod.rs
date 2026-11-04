@@ -551,7 +551,7 @@ pub(crate) fn state(ps: &crate::route::PlaybackSession) -> shared::PlaybackState
 /// menu alone and is force-closed on leaving playback, so a failed session had no way to show them.
 ///
 /// Pure. Every part is a product identity or a closed vocabulary: the version every surface shares
-/// (`plex::identity`), the firmware release, the set (model · board · hw — the rule
+/// (`server::identity`), the firmware release, the set (model · board · hw — the rule
 /// `app::diagnostics::device_rows` states: shared by every unit LG built, saying nothing about a
 /// household) and [`FailureKind::code`], the same string the telemetry channel sends. It never
 /// carries `ErrorShape::detail`, the server's free text, which is the one thing here that could
@@ -568,8 +568,8 @@ fn support_line_of(i: &crate::webos::Info, hw: &crate::webos::Hardware, kind: Fa
     let set: &str = if set.is_empty() { crate::i18n::msg::settings_login_unknown_device() } else { &set };
     format!(
         "{} {} · {} · {} · {}",
-        crate::plex::identity::PRODUCT,
-        crate::plex::identity::VERSION,
+        crate::server::identity::PRODUCT,
+        crate::server::identity::VERSION,
         i.release_line(),
         set,
         kind.code()
@@ -1471,8 +1471,8 @@ static SUBTITLE_TONE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8:
 
 /// The selected tone. Read once a frame by the two subtitle draws (`ui::player_hud`) and by the
 /// track menu for its checkmark.
-pub(crate) fn subtitle_tone() -> crate::plex::session::SubtitleTone {
-    crate::plex::session::SubtitleTone::from_index(SUBTITLE_TONE.load(Relaxed))
+pub(crate) fn subtitle_tone() -> crate::server::session::SubtitleTone {
+    crate::server::session::SubtitleTone::from_index(SUBTITLE_TONE.load(Relaxed))
 }
 
 /// The viewer's subtitle timing offset in MILLISECONDS — positive draws every client-rendered cue
@@ -1636,21 +1636,21 @@ pub(crate) fn request_audio_enhancement(ps: &mut crate::route::PlaybackSession, 
 }
 
 fn persist_audio_enhancements(a: crate::playback::AudioEnhancements) {
-    let _ = crate::storage_worker::submit_retained(move || crate::plex::session::set_audio_enhancements(a));
+    let _ = crate::storage_worker::submit_retained(move || crate::server::session::set_audio_enhancements(a));
 }
 
 /// Restore the persisted preference without writing it back (boot, and the credentials handoff
 /// after a fresh sign-in — the two places `route::restore_quality` is called from).
-pub(crate) fn restore_subtitle_tone(tone: crate::plex::session::SubtitleTone) {
+pub(crate) fn restore_subtitle_tone(tone: crate::server::session::SubtitleTone) {
     SUBTITLE_TONE.store(tone.index(), Relaxed);
 }
 
 /// Select a tone on the main thread and retain its persistence work for the shared worker.
 /// Takes effect on the next drawn frame —
 /// the draws read the atomic — so there is nothing to reload and no cue store to touch.
-pub(crate) fn set_subtitle_tone(tone: crate::plex::session::SubtitleTone) {
+pub(crate) fn set_subtitle_tone(tone: crate::server::session::SubtitleTone) {
     SUBTITLE_TONE.store(tone.index(), Relaxed);
-    let _ = crate::storage_worker::submit_retained(move || crate::plex::session::set_subtitle_tone(tone));
+    let _ = crate::storage_worker::submit_retained(move || crate::server::session::set_subtitle_tone(tone));
     // the picker's checkmark moves on this — see `route::persist_quality_choice`
     crate::ui::idle::invalidate();
 }
@@ -2484,7 +2484,7 @@ mod tests {
             line,
             format!(
                 "Butaca {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
-                crate::plex::identity::VERSION
+                crate::server::identity::VERSION
             )
         );
         let bare = support_line_of(

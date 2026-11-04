@@ -76,10 +76,10 @@ fn preferences_soft_parse_without_losing_the_session() {
         r#"{"language":42}"#,
         r#"{"language":null}"#,
     ] {
-        let s: crate::plex::session::Session = serde_json::from_str(raw).unwrap();
+        let s: crate::server::session::Session = serde_json::from_str(raw).unwrap();
         assert_eq!(s.language, Preference::System);
     }
-    let s: crate::plex::session::Session = serde_json::from_str(r#"{"language":"be"}"#).unwrap();
+    let s: crate::server::session::Session = serde_json::from_str(r#"{"language":"be"}"#).unwrap();
     assert_eq!(s.language, Preference::Be);
     assert_eq!(serde_json::to_value(&s).unwrap()["language"], "be");
 }
@@ -130,7 +130,7 @@ fn pseudo_locale_exercises_expansion_without_changing_arguments() {
 #[test]
 fn captured_language_changes_the_recorded_session_hash() {
     use crate::ui::machine::LogicalState;
-    let a = crate::auth::SessionInit::captured(crate::plex::session::Session::default());
+    let a = crate::auth::SessionInit::captured(crate::server::session::Session::default());
     let mut b = a.clone();
     b.persisted.language = Preference::Be;
     assert_ne!(a.hash(), b.hash());

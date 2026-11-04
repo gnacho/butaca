@@ -51,7 +51,7 @@
 //! can never be applied to a different server because the source list moved under it.
 //!
 //! **The header still MOUNTS on what it was handed.** `Role[]` already carries the name and the
-//! headshot (`plex::Tag`), so the page draws instantly and the plex.tv fields fade in under the
+//! headshot (`server::Tag`), so the page draws instantly and the plex.tv fields fade in under the
 //! name when they land. That ordering is the whole degrade strategy: the biography request can
 //! fail, or the person can be one plex.tv has never heard of, and the page must then read as
 //! *finished* at portrait + name — never as a row of fields that failed to load. Nothing in the
@@ -303,7 +303,7 @@ pub(crate) struct PersonState {
     generation: u32,
     retry_cd: [u32; NFETCH],
     dev_held: usize,
-    session_watch: crate::plex::session::VisibleSessionWatch,
+    session_watch: crate::server::session::VisibleSessionWatch,
     session_identity: (String, String),
 }
 
@@ -769,7 +769,7 @@ fn open(
     // session cache recovers asynchronously and is not an input in that transcript.
     if !crate::app::bootstrap::stores::active() {
         let _ = state.session_watch.changed();
-        if let Some(session) = crate::plex::session::peek_settled() {
+        if let Some(session) = crate::server::session::peek_settled() {
             state.session_identity = (session.client_id.clone(), session.account_token.clone());
         }
     }
@@ -962,7 +962,7 @@ impl PersonState {
     pub(crate) fn pump_with_gate(&mut self, adapter: &Arc<PersonAdapter>, gate: &crate::ui::landgate::Gate) -> bool {
         let mut session_changed = false;
         if !crate::app::bootstrap::stores::active() && self.session_watch.changed() {
-            if let Some(session) = crate::plex::session::peek_settled() {
+            if let Some(session) = crate::server::session::peek_settled() {
                 let identity = (session.client_id.clone(), session.account_token.clone());
                 if self.session_identity != identity {
                     self.session_identity = identity;
@@ -1975,10 +1975,10 @@ mod tests {
             fn drop(&mut self) { crate::app::bootstrap::stores::reset_for_test(); }
         }
         for replay in [false, true] {
-            let _session = crate::plex::session::TempSession::new("controlled-person-recovery");
+            let _session = crate::server::session::TempSession::new("controlled-person-recovery");
             crate::registry::reset_for_test();
-            let saved = crate::plex::session::peek();
-            crate::plex::session::install_transient_for_test(true);
+            let saved = crate::server::session::peek();
+            crate::server::session::install_transient_for_test(true);
             let initial = crate::app::bootstrap::Initial::synthetic_home(23, 32517, None).unwrap();
             crate::app::bootstrap::stores::init(&initial, replay);
             let _tape = ResetTape;
@@ -1989,7 +1989,7 @@ mod tests {
             let generation = owner.gen();
             // Minimized from ARM: the ambient cache recovered at frame 26 while
             // recording, but frame 20 on replay, retiring/reissuing Person work.
-            crate::plex::session::save(&saved);
+            crate::server::session::save(&saved);
             let changed = owner.pump();
             assert_eq!(owner.gen(), generation,
                 "controlled Person must not retire recorded work on an ambient storage completion");
@@ -2005,16 +2005,16 @@ mod tests {
     #[test]
     fn session_refresh_retries_person_metadata_after_storage_recovers() {
         let _g = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("person-session-refresh");
+        let _session = crate::server::session::TempSession::new("person-session-refresh");
         crate::registry::reset_for_test();
-        let saved = crate::plex::session::peek();
-        crate::plex::session::install_transient_for_test(true);
+        let saved = crate::server::session::peek();
+        crate::server::session::install_transient_for_test(true);
         let mut owner = Owner::default();
         owner.open(S0, "1001", "", "Synthetic person", "");
         owner.state.current.as_mut().unwrap().profiled = true;
         owner.state.current.as_mut().unwrap().credited = true;
         let old_generation = owner.gen();
-        crate::plex::session::save(&saved);
+        crate::server::session::save(&saved);
         assert!(owner.pump());
         assert!(owner.gen() > old_generation, "old credential-bound replies must be retired");
         assert!(!owner.current().unwrap().profiled);

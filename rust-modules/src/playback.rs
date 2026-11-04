@@ -12,7 +12,7 @@
 
 /// What the connection tier a server is reached over lets a playback plan ask for. Both fields
 /// are true on every tier but a capped relay link — the tier reasoning lives with the wire that
-/// has such tiers (`plex::link_policy`); this type is the neutral half every backend's decision
+/// has such tiers (`server::link_policy`); this type is the neutral half every backend's decision
 /// vocabulary composes.
 ///
 /// `quality_policy` returns one, `direct_play_policy` filters one, `flavors_allowed` ANDs two —
@@ -63,7 +63,7 @@ pub enum TranscodeDelivery {
 ///
 /// `Copy`, `Default` (= [`NONE`](Self::NONE)), `Serialize`/`Deserialize` — it rides every
 /// [`EncodeContract`] built on the resolve worker and is persisted as the user's preference
-/// (`plex::session::Session::audio_enhancements`).
+/// (`server::session::Session::audio_enhancements`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AudioEnhancements {
     #[serde(default)]

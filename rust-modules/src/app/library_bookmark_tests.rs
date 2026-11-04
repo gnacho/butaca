@@ -126,7 +126,7 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-bookmark-return");
+    let session = crate::server::session::TempSession::new("library-bookmark-return");
     session.watching("u-library-bookmark-return");
     crate::registry::reset_for_test();
     // The flavor's world: one server, the installed client. A seeded source naming any other

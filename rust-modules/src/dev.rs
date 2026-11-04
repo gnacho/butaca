@@ -486,7 +486,7 @@ pub(crate) fn softfloat_probe() {}
 /// an earlier run. This is deliberately an in-memory boot override: writing the session would
 /// make a test change the owner's real preference. Unknown and empty values fail closed by
 /// producing no override.
-pub(crate) fn playback_quality_override() -> Option<crate::plex::session::PlaybackQuality> {
+pub(crate) fn playback_quality_override() -> Option<crate::server::session::PlaybackQuality> {
     let value = read("quality")?;
     parse_playback_quality(&value)
 }
@@ -496,8 +496,8 @@ pub(crate) fn playback_quality_override() -> Option<crate::plex::session::Playba
 /// The log line a test greps must carry the SAME string the trigger accepts. `Quality::label()`
 /// is display text ("1080p \u{b7} 8 Mbps") and would make a case state its rung twice, in two
 /// spellings, with nothing keeping them in step — which is the shape that rots.
-pub(crate) fn quality_wire_name(q: crate::plex::session::PlaybackQuality) -> &'static str {
-    use crate::plex::session::PlaybackQuality as Q;
+pub(crate) fn quality_wire_name(q: crate::server::session::PlaybackQuality) -> &'static str {
+    use crate::server::session::PlaybackQuality as Q;
     match q {
         Q::Auto => "auto",
         Q::Original => "original",
@@ -509,8 +509,8 @@ pub(crate) fn quality_wire_name(q: crate::plex::session::PlaybackQuality) -> &'s
     }
 }
 
-fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQuality> {
-    use crate::plex::session::PlaybackQuality;
+fn parse_playback_quality(value: &str) -> Option<crate::server::session::PlaybackQuality> {
+    use crate::server::session::PlaybackQuality;
     match value {
         "auto" => Some(PlaybackQuality::Auto),
         "original" => Some(PlaybackQuality::Original),
@@ -540,13 +540,13 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
 /// see it beside the assertions it enables.
 ///
 /// **This writes the stored preference, and that is not incidental.** `route::set_quality` persists
-/// through `plex::session::update`, because a person picking a rung means it. A test therefore
+/// through `server::session::update`, because a person picking a rung means it. A test therefore
 /// leaves the value behind — on the `debug` flavour's own session, never the install you watch
 /// with, and `tests/run.py` writes `butaca-quality` on every server case, so the next boot
 /// overrides whatever this left. Both halves are load-bearing; neither alone would make it safe.
 fn parse_quality_switch_script(
     raw: &str,
-) -> Option<(u32, Vec<crate::plex::session::PlaybackQuality>)> {
+) -> Option<(u32, Vec<crate::server::session::PlaybackQuality>)> {
     let mut steps: Vec<&str> = raw
         .split(',')
         .map(str::trim)
@@ -576,7 +576,7 @@ fn parse_quality_switch_script(
     }
 }
 
-pub(crate) fn quality_switch_script() -> Option<(u32, Vec<crate::plex::session::PlaybackQuality>)> {
+pub(crate) fn quality_switch_script() -> Option<(u32, Vec<crate::server::session::PlaybackQuality>)> {
     parse_quality_switch_script(&read("qualityswitch")?)
 }
 
@@ -654,7 +654,7 @@ pub(crate) fn pause_script() -> Option<PauseScript> {
 /// a given rung means holding that rung for minutes, and nothing in the app could do that.
 /// [`playback_quality_override`] above cannot serve, for two independent reasons — a non-Auto
 /// quality returns `None` from `route::hls_abr_control` before a controller is ever constructed,
-/// so it measures a different transport path entirely; and [`crate::plex::session::PlaybackQuality`]
+/// so it measures a different transport path entirely; and [`crate::server::session::PlaybackQuality`]
 /// has no mid-1080p points, while the ladder this pins has eight of them.
 ///
 /// The value is the actuator's REQUEST rate (`Rung::kbps`) — 320, 720, 2000, 4000, 6000, 8000,
@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn quality_trigger_accepts_only_persisted_policy_spellings() {
-        use crate::plex::session::PlaybackQuality;
+        use crate::server::session::PlaybackQuality;
 
         assert_eq!(
             super::parse_playback_quality("auto"),
@@ -1183,7 +1183,7 @@ mod tests {
     /// correctly and then matches nothing — indistinguishable from the feature not working.
     #[test]
     fn every_quality_wire_name_parses_back_to_itself() {
-        use crate::plex::session::PlaybackQuality as Q;
+        use crate::server::session::PlaybackQuality as Q;
         for q in [
             Q::Auto,
             Q::Original,
@@ -1207,7 +1207,7 @@ mod tests {
     /// `butaca-abrpin` documents for its own value.
     #[test]
     fn a_quality_script_fails_closed_and_never_substitutes() {
-        use crate::plex::session::PlaybackQuality as Q;
+        use crate::server::session::PlaybackQuality as Q;
         let parse = super::parse_quality_switch_script;
         assert_eq!(
             parse("720p_4_mbps"),

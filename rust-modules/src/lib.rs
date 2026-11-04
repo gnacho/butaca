@@ -52,9 +52,9 @@ mod playback; // backend-neutral playback vocabulary: encode contract, delivery/
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5
-mod plex; // typed Plex API layer (rust-modules/src/plex/) — one method per PMS operation (the live READ layer; playback ops still in route.rs)
+mod server; // typed server API layer (rust-modules/src/server/): one method per server operation (the live READ layer; playback ops still in route.rs)
 mod pms;
-mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts — the sid vocabulary shared by every backend (moved out of plex/)
+mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts, the sid vocabulary shared by every backend
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
 // them at runtime — the version rule they implement is applied once, at compile time, by
@@ -290,7 +290,7 @@ mod webos; // which webOS this set is — nyx's os_info.json, read once at boot 
 ///
 /// Matches the parameter name rather than the value: the token is a short unstructured alphanumeric
 /// with no distinguishing shape, so it cannot be recognised on its own — but it only ever reaches a
-/// string as `X-Plex-Token=…`, appended by the single choke point in `plex::client`. The value runs
+/// string as `X-Plex-Token=…`, appended by the single choke point in `server::client`. The value runs
 /// to the next `&` or whitespace, i.e. the end of that query parameter.
 ///
 /// Cheap by construction: the `find` is a no-op scan for the overwhelming majority of lines, and

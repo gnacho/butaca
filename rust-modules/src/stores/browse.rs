@@ -27,10 +27,10 @@ pub(crate) use crate::browse::view::{
 /// Browse publication for this Bridge.
 pub(crate) mod onboard {
     pub(crate) fn asks(directory: super::DirectoryView<'_>) -> bool {
-        let session = crate::plex::session::peek();
-        crate::plex::pins::asks(
+        let session = crate::server::session::peek();
+        crate::server::pins::asks(
             directory.sources().len(),
-            session.pins_for(&crate::plex::session::current_profile_key()),
+            session.pins_for(&crate::server::session::current_profile_key()),
         )
     }
 }
@@ -70,7 +70,7 @@ pub(crate) enum BrowseCmd {
     /// (`screens::onboard`'s `answered`, which is the set of rows a press actually moved, recorded
     /// by the press rather than recovered from the values afterwards). A row missing from this list
     /// is a value nobody chose: it keeps re-deriving from its default rather than being frozen as
-    /// though it were a decision (`plex::pins::answers`). An EMPTY list is still a commit — the
+    /// though it were a decision (`server::pins::answers`). An EMPTY list is still a commit — the
     /// question was put and every default was left alone.
     ApplyPins(Vec<(usize, bool)>),
     RetryDiscovery,
@@ -216,7 +216,7 @@ impl BrowseStore {
     pub(crate) fn apply_discovery(
         &mut self,
         result: &crate::browse::record::Result,
-        preferences: &crate::plex::session::Session,
+        preferences: &crate::server::session::Session,
     ) -> super::StoreOutcome {
         let outcome = crate::browse::record::apply_to(
             &mut self.state, &self.adapter, result, Some(preferences));
@@ -517,7 +517,7 @@ mod contract_tests {
     #[test]
     fn an_owned_discovery_landing_is_consumed_once_and_noticed_once() {
         let _guard = crate::testlock::serial();
-        let session = crate::plex::session::TempSession::new("browse-preowner");
+        let session = crate::server::session::TempSession::new("browse-preowner");
         session.watching("u-browse-preowner");
         crate::registry::reset_for_test();
         let sid = crate::registry::ServerId::from_raw(0);
@@ -549,7 +549,7 @@ mod contract_tests {
         let result = stores.browse.borrow_mut().take_discovery().unwrap();
         let before_discovery = stores.browse.borrow().gen();
         let _ = stores.browse.borrow_mut().apply_discovery(
-            &result, &crate::plex::session::Session::default());
+            &result, &crate::server::session::Session::default());
         assert_eq!(stores.browse.borrow().gen(), before_discovery + 1);
         assert_eq!(stores.take_notices(), [(StoreId::Browse, before_discovery + 1)]);
         assert!(stores.take_notices().is_empty());
@@ -573,7 +573,7 @@ mod contract_tests {
         let _ = stores.take_notices();
         let before = stores.browse.borrow().gen();
         let outcome = stores.browse.borrow_mut().apply_discovery(
-            &result, &crate::plex::session::Session::default());
+            &result, &crate::server::session::Session::default());
         assert!(!outcome.changed);
         assert_eq!(stores.browse.borrow().gen(), before);
         assert!(stores.take_notices().is_empty());

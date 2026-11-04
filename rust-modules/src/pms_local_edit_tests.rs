@@ -43,7 +43,7 @@ fn marking_an_item_watched_flips_every_row_that_names_it_and_retires_its_resume_
 }
 
 /// An item on another server that happens to share the ratingKey is a DIFFERENT item — the rule
-/// `plex::same_item` exists for, applied to the one edit that writes to a row rather than
+/// `server::same_item` exists for, applied to the one edit that writes to a row rather than
 /// reading one. A bare-key match here would tick a friend's film because you finished yours.
 #[test]
 fn an_edit_never_reaches_the_same_rating_key_on_another_server() {
@@ -64,7 +64,7 @@ fn an_edit_never_reaches_the_same_rating_key_on_another_server() {
 
 /// Remove from Continue Watching is a HIDE and nothing else: the card leaves the deck, keeps its
 /// resume point, and its appearances on every OTHER shelf are untouched — which is exactly what
-/// the server does (`plex::Client::remove_from_continue_watching`). Marking it watched instead
+/// the server does (`server::Client::remove_from_continue_watching`). Marking it watched instead
 /// would throw the position away, which is the mistake that endpoint exists to avoid.
 #[test]
 fn a_deck_removal_leaves_the_deck_only_and_keeps_the_resume_point() {

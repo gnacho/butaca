@@ -90,12 +90,12 @@ fn stamp_state(stamp: &mut Stamp, state: crate::browse::SourceState) {
     });
 }
 
-fn stamp_tier(stamp: &mut Stamp, tier: Option<crate::plex::probe::Location>) {
+fn stamp_tier(stamp: &mut Stamp, tier: Option<crate::server::probe::Location>) {
     stamp.tag(match tier {
         None => 0,
-        Some(crate::plex::probe::Location::Local) => 1,
-        Some(crate::plex::probe::Location::Remote) => 2,
-        Some(crate::plex::probe::Location::Relay) => 3,
+        Some(crate::server::probe::Location::Local) => 1,
+        Some(crate::server::probe::Location::Remote) => 2,
+        Some(crate::server::probe::Location::Relay) => 3,
     });
 }
 

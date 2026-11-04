@@ -1,7 +1,7 @@
 //! client — the typed Jellyfin server client.
 //!
 //! One `JfClient` is one server: an [`Origin`], the access token [`authenticate_by_name`] won,
-//! and the user id that token acts as. It mirrors the shape of `plex::Client` on purpose — same
+//! and the user id that token acts as. It mirrors the shape of `server::Client` on purpose — same
 //! "built path carries the token, and the built path is also the cache key" discipline — so the
 //! stores that were written against the Plex client (the poster LRU above all) read this one
 //! without new concepts.
@@ -57,7 +57,7 @@ pub(crate) struct AuthOk {
     pub(crate) server_id: String,
 }
 
-/// The Library grid's full query shape — the Jellyfin counterpart of `plex::SectionQuery`. One
+/// The Library grid's full query shape — the Jellyfin counterpart of `server::SectionQuery`. One
 /// page of one view, with the sort/filter menus applied. All borrows, built at the spawn site and
 /// moved into the worker as a unit.
 #[derive(Clone, Copy)]
@@ -151,7 +151,7 @@ impl JfClient {
     /// The `MediaBrowser` identity, as the standard `Authorization` header the login wants, and
     /// also the value Jellyfin shows in its own device list. The Client is the DISPLAY name (the
     /// fork's own build says Butaca there — issue #35), while Device/DeviceId/Version keep the
-    /// one wire identity the Plex backend reports (`plex::identity`), so an install never
+    /// one wire identity the Plex backend reports (`server::identity`), so an install never
     /// describes its device two ways to two servers.
     ///
     /// Jellyfin 12 removed the legacy `X-Emby-Authorization` line this client used to send:
@@ -161,10 +161,10 @@ impl JfClient {
     fn identity_header(&self) -> String {
         format!(
             "Authorization: MediaBrowser Client=\"{}\", Device=\"{}\", DeviceId=\"{}\", Version=\"{}\"",
-            crate::plex::identity::display_name(),
-            crate::plex::identity::DEVICE,
+            crate::server::identity::display_name(),
+            crate::server::identity::DEVICE,
             self.device_id,
-            crate::plex::identity::VERSION,
+            crate::server::identity::VERSION,
         )
     }
 
@@ -556,7 +556,7 @@ impl JfClient {
     }
 
     /// One page of a library listing with the Library screen's whole query shape — the Jellyfin
-    /// counterpart of `plex::Client::section_items_query`, and the ONLY listing method so no two
+    /// counterpart of `server::Client::section_items_query`, and the ONLY listing method so no two
     /// callers can drift into requesting different row shapes. The caller (the browse adapter)
     /// owns the Plex-menu → Jellyfin-parameter translation; everything here rides the query
     /// string, which is Jellyfin's own convention for this endpoint.
@@ -726,7 +726,7 @@ impl JfClient {
     }
 
     /// GET raw bytes (the poster/artwork pipeline's fetch — the Jellyfin counterpart of
-    /// `plex::Client::get_bytes`). The built image path carries its `api_key`, so no header is
+    /// `server::Client::get_bytes`). The built image path carries its `api_key`, so no header is
     /// needed and none is sent: the path IS the credential, same as the Plex shape.
     pub(crate) fn get_bytes(&self, built_path: &str) -> Option<Vec<u8>> {
         let reply = http::request(&self.origin, built_path, http::Method::Get, &[], None)?;
@@ -878,7 +878,7 @@ impl JfClient {
     }
 
     /// Build an image request path — the Jellyfin counterpart of
-    /// `plex::Client::image_transcode_path`, and like it BOTH the poster store's LRU key and the
+    /// `server::Client::image_transcode_path`, and like it BOTH the poster store's LRU key and the
     /// bytes it fetches. `src_path` is the stored image path (`/Items/{id}/Images/Primary?tag=…`,
     /// see [`super::convert`]); the server scales, so the size the tile wants rides as
     /// `fillWidth`/`fillHeight`, the direct analogue of Plex's `/photo/:/transcode` box.

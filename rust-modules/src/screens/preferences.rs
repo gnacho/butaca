@@ -35,7 +35,7 @@ impl Field {
     }}
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::plex::session::UpNextPolicy), Window(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::server::session::UpNextPolicy), Window(i64) }
 #[derive(Clone)]
 enum Action { Open(Field), Pick(Value) }
 struct State {
@@ -176,9 +176,9 @@ impl PreferencesPage {
                 result
             }
             Field::UpNext => [
-                crate::plex::session::UpNextPolicy::Auto,
-                crate::plex::session::UpNextPolicy::Ask,
-                crate::plex::session::UpNextPolicy::Off,
+                crate::server::session::UpNextPolicy::Auto,
+                crate::server::session::UpNextPolicy::Ask,
+                crate::server::session::UpNextPolicy::Off,
             ].into_iter().map(|p| (up_next_label(p).into(), Value::UpNext(p))).collect(),
             Field::UpNextWindow => {
                 let (min, max) = crate::route::up_next_window_range_s();
@@ -186,7 +186,7 @@ impl PreferencesPage {
                 let mut s = min;
                 while s <= max {
                     result.push((format!("{s} s"), Value::Window(s)));
-                    s += crate::plex::session::UP_NEXT_WINDOW_STEP_S;
+                    s += crate::server::session::UP_NEXT_WINDOW_STEP_S;
                 }
                 result
             }
@@ -296,11 +296,11 @@ fn mode_label(mode: DirectPlayMode) -> &'static str {
 
 /// The next-episode picker's row label. `Auto` is spelled out rather than left as "Automatic":
 /// the card counts down and starts the episode on its own, and that is worth saying plainly.
-fn up_next_label(policy: crate::plex::session::UpNextPolicy) -> &'static str {
+fn up_next_label(policy: crate::server::session::UpNextPolicy) -> &'static str {
     match policy {
-        crate::plex::session::UpNextPolicy::Auto => crate::i18n::msg::settings_playback_up_next_auto(),
-        crate::plex::session::UpNextPolicy::Ask => crate::i18n::msg::settings_playback_up_next_ask(),
-        crate::plex::session::UpNextPolicy::Off => crate::i18n::msg::settings_playback_up_next_off(),
+        crate::server::session::UpNextPolicy::Auto => crate::i18n::msg::settings_playback_up_next_auto(),
+        crate::server::session::UpNextPolicy::Ask => crate::i18n::msg::settings_playback_up_next_ask(),
+        crate::server::session::UpNextPolicy::Off => crate::i18n::msg::settings_playback_up_next_off(),
     }
 }
 
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn force_requires_acknowledgement_and_cancel_never_saves() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("force-confirm-cancel");
+        let _session = crate::server::session::TempSession::new("force-confirm-cancel");
         crate::route::restore_direct_play_mode(DirectPlayMode::Auto);
         let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
         with_fx(|fx| page.activate(1, fx));
@@ -509,7 +509,7 @@ mod tests {
     #[test]
     fn a_picker_slides_in_and_out_on_the_family_push_spring() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("picker-push-spring");
+        let _session = crate::server::session::TempSession::new("picker-push-spring");
         let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
         assert!(page.submenu.resting(false), "no picker: the list is at rest");
         with_fx(|fx| page.activate(0, fx));

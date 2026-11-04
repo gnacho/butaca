@@ -440,7 +440,7 @@ pub(crate) fn enabled() -> bool {
     // never takes `session::IO`, which on the television guards a `recv(2)` round trip to the
     // storage helper, measured at ~27 ms/frame here before the cache existed (2026-09-18, the
     // detail-page 60->26 fps regression). See the doc on `session::IO`/`session::CACHE`.
-    !nopreview_armed() && crate::plex::session::peek().trailer_autoplay()
+    !nopreview_armed() && crate::server::session::peek().trailer_autoplay()
 }
 
 fn slot() -> &'static std::sync::Mutex<Machine> {

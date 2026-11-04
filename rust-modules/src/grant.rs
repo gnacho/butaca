@@ -38,7 +38,7 @@
 //!
 //! A grant whose generations are not the current ones is dead: it admits nothing, and the table
 //! drops it. Nothing about a grant is persisted — a session file that names a plaintext origin
-//! reactivates nothing by itself (`plex::session::SourceRef`); the next discovery re-proves
+//! reactivates nothing by itself (`server::session::SourceRef`); the next discovery re-proves
 //! eligibility and mints a fresh one, or the origin stays tokenless.
 //!
 //! ## Revocation
@@ -73,7 +73,7 @@
 //!
 //! [`credential_allowed`] and [`allowed_under`] are the backend-neutral transport authority used
 //! by both Plex and Jellyfin. The consent lifecycle below is still Plex-specific: discovery
-//! evidence comes from `crate::plex::probe`, consent persistence uses `crate::plex::session`, and
+//! evidence comes from `crate::server::probe`, consent persistence uses `crate::server::session`, and
 //! registry invalidation goes through `crate::plex`. [`UpgradeRetry`] also shares `crate::pms`'s
 //! backoff. Those dependencies remain unchanged until B2 rewires the Plex lifecycle.
 //! `Session::owner_identity` stays in Plex session storage.
@@ -82,8 +82,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use crate::origin::{CredentialPolicy, Origin};
-use crate::plex::probe::PlaintextEligibility;
-use crate::plex::session::{PlaintextChoice, Session};
+use crate::server::probe::PlaintextEligibility;
+use crate::server::session::{PlaintextChoice, Session};
 
 /// The generations a grant is bound to — captured by a discovery worker when it starts, so a grant
 /// it mints after the identity or the network moved is dead on arrival.
@@ -215,7 +215,7 @@ pub(crate) fn allowed_under(policy: CredentialPolicy, origin: &Origin) -> bool {
 
 /// **May `machine_id`'s credential go to `origin`** — the question for whoever is about to put a
 /// server's own token on an origin: registry admission (`crate::plex`), endpoint admission
-/// (`crate::plex::admit_source_until`). A grant admits only the server it was minted for, so another
+/// (`crate::server::admit_source_until`). A grant admits only the server it was minted for, so another
 /// machine whose address collides with a granted origin (a DHCP reshuffle, a share advertising
 /// the same private address) never gets its token sent there. An empty `machine_id` names no
 /// server, and no grant admits it.
@@ -396,7 +396,7 @@ pub(crate) fn adopt_legacy_consent(session: &Session) -> bool {
     {
         return false;
     }
-    crate::plex::session::queue_update(move |current| {
+    crate::server::session::queue_update(move |current| {
         if account_key(current) != account || legacy_account_key(&current.account_token) != legacy {
             return None;
         }
@@ -461,7 +461,7 @@ mod tests {
             account_token: token.into(),
             home_users: owner
                 .into_iter()
-                .map(|id| crate::plex::session::HomeUserRef {
+                .map(|id| crate::server::session::HomeUserRef {
                     id,
                     admin: true,
                     ..Default::default()

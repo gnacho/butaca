@@ -23,7 +23,7 @@ use std::cell::Cell;
 use std::ffi::{CStr, CString};
 
 use crate::auth::{self, PlaintextVerdict, ReadoutSurface, SessionCmd};
-use crate::plex::session::PlaintextChoice;
+use crate::server::session::PlaintextChoice;
 use crate::registry::ServerId;
 use crate::ui::decision_alert::{Choice, DecisionAlert, Tone};
 use crate::ui::machine::{

@@ -142,7 +142,7 @@ pub(crate) fn retry_failed_playback(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
     meta: &mut crate::stores::metadata::MetadataStore,
-    direct_play: Option<crate::plex::session::DirectPlayMode>,
+    direct_play: Option<crate::server::session::DirectPlayMode>,
 ) -> bool {
     // URL/dev-trigger playback has no Plex descriptor.  Check BEFORE teardown: extinguishing its
     // Error Engine and only then discovering it cannot be rebuilt would replace an actionable
@@ -181,7 +181,7 @@ pub(crate) fn play_automatically(
     pa: &mut crate::player::adapter::PlayerAdapter,
     meta: &mut crate::stores::metadata::MetadataStore,
 ) -> bool {
-    use crate::plex::session::DirectPlayMode;
+    use crate::server::session::DirectPlayMode;
     crate::route::restore_direct_play_mode(DirectPlayMode::Auto);
     let _ = crate::storage_worker::submit_retained(|| {
         if !crate::route::set_direct_play_mode(DirectPlayMode::Auto) {
@@ -535,7 +535,7 @@ fn remember_series_pick(ps: &crate::route::PlaybackSession, bridge: &super::brid
             .map(|s| s.lang_code.clone())
             .unwrap_or_default()
     };
-    crate::route::remember_series_tracks(crate::plex::session::SeriesTracks {
+    crate::route::remember_series_tracks(crate::server::session::SeriesTracks {
         series: playing.show_rk.clone(),
         audio_lang: lang_of(&playing.audio, audio_index),
         audio_index,
@@ -1382,7 +1382,7 @@ mod player_return_tests {
     #[test]
     fn a_session_returns_to_the_screen_it_was_launched_from() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-launch");
+        let _session = crate::server::session::TempSession::new("player-return-launch");
         for launched_from in [
             AppArg::Home,
             AppArg::Library,
@@ -1426,7 +1426,7 @@ mod player_return_tests {
     #[test]
     fn a_detail_return_names_the_item_that_was_mounted() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-detail");
+        let _session = crate::server::session::TempSession::new("player-return-detail");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(B, "7"));
@@ -1453,7 +1453,7 @@ mod player_return_tests {
     #[test]
     fn the_page_underneath_keeps_the_spot_it_was_left_at() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-spot");
+        let _session = crate::server::session::TempSession::new("player-return-spot");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(A, "7"));
@@ -1492,7 +1492,7 @@ mod player_return_tests {
     #[test]
     fn auto_advance_keeps_the_page_the_user_came_from() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-upnext");
+        let _session = crate::server::session::TempSession::new("player-return-upnext");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(A, "7"));
@@ -1525,7 +1525,7 @@ mod player_return_tests {
     #[test]
     fn a_second_play_inside_the_push_keeps_the_origin_and_leaves_no_seed() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-dip");
+        let _session = crate::server::session::TempSession::new("player-return-dip");
         let mut p = Pages::new();
         p.d.nav.tabs.stack.transition = Box::new(crate::ui::containers::transition::PageDip::new());
         p.stand_on(AppArg::Home);
@@ -1562,7 +1562,7 @@ mod player_return_tests {
     #[test]
     fn an_origin_that_is_gone_falls_back_to_home() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-strand");
+        let _session = crate::server::session::TempSession::new("player-return-strand");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(A, "7"));
@@ -1604,7 +1604,7 @@ mod player_return_tests {
     #[test]
     fn a_guid_only_person_returns_to_its_retained_entry() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-guid-only");
+        let _session = crate::server::session::TempSession::new("player-return-guid-only");
         let mut p = Pages::new();
         let arg = AppArg::Content(ContentArg::Person { sid: A, key: String::new(),
             guid: "plex://person/synthetic-person".into(), name: String::new(), thumb: String::new() });
@@ -1623,7 +1623,7 @@ mod player_return_tests {
     #[test]
     fn an_identityless_content_origin_falls_back_to_home() {
         let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-identityless");
+        let _session = crate::server::session::TempSession::new("player-return-identityless");
         for origin in [
             AppArg::Content(ContentArg::Detail { sid: A, rk: String::new() }),
             AppArg::Content(ContentArg::Person { sid: A, key: String::new(), guid: String::new(),

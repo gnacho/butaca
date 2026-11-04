@@ -570,7 +570,7 @@ mod deeplink_tests {
     }
 }
 
-    // Everything that has to happen when the server `plex::client()` answers with CHANGES —
+    // Everything that has to happen when the server `server::client()` answers with CHANGES —
     // whether because a new identity signed in or because the user walked into another source.
     // EVERY store below is keyed to whichever server was current when it was filled, and none
     // of them carries a server in its keys, so leaving one behind means server A's ratingKeys
@@ -626,7 +626,7 @@ pub(crate) unsafe fn boot(
 
 pub(super) fn apply_deferred_capture(rec: &mut super::recorder::Recplay,
     gate: &crate::ui::landgate::Gate,
-    deferred: crate::plex::session::DeferredLoad) -> Result<(), &'static str> {
+    deferred: crate::server::session::DeferredLoad) -> Result<(), &'static str> {
     if let Err(reason) = deferred.apply() {
         rec.abort_startup(gate)?;
         return Err(reason);
@@ -637,7 +637,7 @@ pub(super) fn apply_deferred_capture(rec: &mut super::recorder::Recplay,
 pub(crate) unsafe fn construct(
     _pms_host: *const c_char, _pms_port: c_int, mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight, initial: Option<super::bootstrap::Initial>,
-    deferred: Option<crate::plex::session::DeferredLoad>,
+    deferred: Option<crate::server::session::DeferredLoad>,
     launch_params: Option<String>,
 ) -> Result<App, c_int> {
     // The build's own name on one line, before any store is opened: a support report is about ONE
@@ -867,7 +867,7 @@ pub(crate) unsafe fn construct(
     //
     let session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
-        None => crate::plex::session::Session::default(),
+        None => crate::server::session::Session::default(),
     };
     #[cfg(not(test))]
     crate::i18n::initialize(session.language, controlled);
@@ -1344,7 +1344,7 @@ pub(crate) unsafe fn construct(
     // /tmp/butaca-qualityswitch: the rungs still to switch to, the tick of the last one
     // fired, and the gap between them. Same shape as the seek script above, for the same
     // reason — a person changing quality mid-playback does it more than once.
-    let quality_script: Vec<crate::plex::session::PlaybackQuality> = Vec::new();
+    let quality_script: Vec<crate::server::session::PlaybackQuality> = Vec::new();
     let quality_script_at = 0u32;
     let quality_gap_ms = 0u32;
     let quality_tried = false;

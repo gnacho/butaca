@@ -66,7 +66,7 @@ pub(crate) mod probe;
 // never-empty floor are graded on the host rather than observed on a television.
 pub(crate) mod pins;
 
-// The registry surface THIS LAYER still names through `super::…` / `crate::plex::…`. The typed
+// The registry surface THIS LAYER still names through `super::…` / `crate::server::…`. The typed
 // client and its vocabulary (`Client`, `IpVersion`, `ArtFetch`, the registration seams) went
 // with the wire layer (#166); `StreamUrl` moved to `crate::origin`, whose splitter the media
 // plane already read. `link_policy` is the one symbol the wire layer left behind that outside
@@ -75,7 +75,7 @@ pub(crate) mod pins;
 // `crate::playback`; `DP_AUDIO_CODECS`/`is_dp_audio_track` moved to `crate::devcaps` (their
 // implementation home), and the subtitle list went local to `route/plan.rs` with its render
 // consumer.
-// WHERE a server is, as one value. `Origin` keeps its `crate::plex::` spelling for the one
+// WHERE a server is, as one value. `Origin` keeps its `crate::server::` spelling for the one
 // session.rs test that spells a registration call (test-only now); the crate-wide surface lives
 // in `crate::origin` (`crate::registry as servers` above is the alias the in-layer spellings
 // resolve through).

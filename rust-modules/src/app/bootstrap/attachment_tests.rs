@@ -2,7 +2,7 @@
 // `Initial::synthetic_home`), so the whole module is flavor-gated.
 use super::*;
 use crate::app::{boot, recorder::Recplay};
-use crate::plex::session::{self, Session};
+use crate::server::session::{self, Session};
 
 fn initial_for(entropy: Option<[u8; 16]>) -> Initial {
     // The world is the flavor's synthetic one as `synthetic_home` built it; only the captured

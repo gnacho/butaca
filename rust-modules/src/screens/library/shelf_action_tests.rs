@@ -36,7 +36,7 @@ impl LibraryLike for TestHost {
 #[test]
 fn shelf_activate_and_hold_keep_the_deck_promise_and_engine_item_identity() {
     let _guard = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("library-shelf-actions");
+    let session = crate::server::session::TempSession::new("library-shelf-actions");
     session.watching("u-library-shelf-actions");
     let stores = crate::stores::Stores::default();
     stores.browse.borrow_mut().seed_two_source_table_for_test();

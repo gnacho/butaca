@@ -399,12 +399,12 @@ fn replace_quoted_value(s: &str, key: &str, close: char, placeholder: &str) -> S
 ///
 /// # This function is on `crate::log`'s hot path, and the obvious implementation deadlocks
 ///
-/// It used to be `crate::plex::session::peek()`, which is correct and was fine while the only
+/// It used to be `crate::server::session::peek()`, which is correct and was fine while the only
 /// caller was a once-per-upload snapshot on a worker thread. Putting it under `crate::log` made it
 /// two separate disasters at once, both found by the host suite hanging rather than failing:
 ///
 /// * **Deadlock.** `peek()` takes the session I/O mutex. Any code that holds that mutex and then
-///   logs — which is most of `plex::session` and `auth` — waits on itself. The whole `auth::tests`
+///   logs — which is most of `server::session` and `auth` — waits on itself. The whole `auth::tests`
 ///   block hung on this.
 /// * **Disk I/O per log line.** `peek()` walks up to five candidate paths and `read`s each. The
 ///   log is written a few times a second, so that is a syscall storm for a string rewrite.
@@ -530,7 +530,7 @@ fn scrub_authority(s: &str) -> String {
 /// no `scheme://` here for it to anchor on.
 ///
 /// This is the gap the device found: `stream.rs`'s DNS-failure line spells the unresolved name as
-/// bare `host=<fqdn>`, several `plex::servers`/`player::engine` re-point lines do the same for an
+/// bare `host=<fqdn>`, several `server::servers`/`player::engine` re-point lines do the same for an
 /// address, and none of those go through a URL. Rather than teach every such call site its own
 /// redaction, this is keyed the same way [`scrub_params`] is keyed on its credential parameters —
 /// the literal `host=` is the signal, not a guess at what a hostname looks like, so it cannot

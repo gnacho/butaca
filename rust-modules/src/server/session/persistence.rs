@@ -814,16 +814,16 @@ mod db8_policy_tests {
     ///
     /// **Three similarly-named types exist in this crate and must not be conflated; spelled out
     /// fully here so a future reader cannot confuse them:**
-    /// - `crate::plex::session::persistence::ClearCleanupOutcome::AuthorityNotConfirmed` — THIS
+    /// - `crate::server::session::persistence::ClearCleanupOutcome::AuthorityNotConfirmed` — THIS
     ///   enum, in THIS module: the verdict of one `cleanup_after_confirmed_clear()` call, i.e.
     ///   whether the canonical authority read back `Cleared` before any legacy sweep was
     ///   attempted. This is the type this test exercises.
-    /// - `crate::plex::session::ClearOutcome::AuthorityNotConfirmed` — a DIFFERENT enum, declared
+    /// - `crate::server::session::ClearOutcome::AuthorityNotConfirmed` — a DIFFERENT enum, declared
     ///   in the parent module `session.rs`, naming `clear()`'s verdict for its *whole* call.
     ///   `clear()`'s match on this module's `ClearCleanupOutcome` maps this exact variant onto
     ///   that one (see `session.rs`'s `clear()`), but they are two distinct types in two
     ///   different modules that merely share a variant name.
-    /// - `crate::plex::session::async_persistence::ClearOutcome` — an unrelated, private STRUCT
+    /// - `crate::server::session::async_persistence::ClearOutcome` — an unrelated, private STRUCT
     ///   in `async_persistence.rs` with the same short type name, used for the coordinator's
     ///   clear-completion bookkeeping. It shares nothing with either enum above beyond the name.
     ///
@@ -849,7 +849,7 @@ mod db8_policy_tests {
     /// ClearCleanupOutcome::AuthorityNotConfirmed;` line at the top of
     /// `cleanup_after_confirmed_clear()` (so a fresh/`Missing` root falls through into the sweep
     /// loop instead of returning early), running only this test via `cargo +nightly test --lib
-    /// plex::session::persistence::db8_policy_tests::cleanup_after_confirmed_clear_distinguishes_an_unconfirmed_authority_from_a_confirmed_one`,
+    /// server::session::persistence::db8_policy_tests::cleanup_after_confirmed_clear_distinguishes_an_unconfirmed_authority_from_a_confirmed_one`,
     /// and observing the first assertion fail — the fall-through sweep finds zero candidates,
     /// trivially "completes", and reports `Confirmed` where the test asserts
     /// `AuthorityNotConfirmed` — then reverting the mutation. This was actually run live with
@@ -866,7 +866,7 @@ mod db8_policy_tests {
     /// file written to `super::super::fallback_file()` with permissive (group/other-writable)
     /// mode bits — plausible residue, since `crate::storage::read_owned_bytes` treats such a mode
     /// as untrusted — `cargo +nightly test --lib
-    /// plex::session::persistence::db8_policy_tests::cleanup_after_confirmed_clear_distinguishes_an_unconfirmed_authority_from_a_confirmed_one`
+    /// server::session::persistence::db8_policy_tests::cleanup_after_confirmed_clear_distinguishes_an_unconfirmed_authority_from_a_confirmed_one`
     /// failed the SECOND assertion: `left: LegacyRetireFailed, right: Confirmed`. That is this
     /// test's own verdict, not a different test's, so the experiment discriminates the isolation
     /// bug directly rather than merely tripping something else. [`TempLegacyCandidate`] (added

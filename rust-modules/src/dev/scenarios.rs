@@ -110,7 +110,7 @@ pub(crate) struct Scenarios {
     pub(crate) seek_script_at: u32,
     pub(crate) seek_gap_ms: u32,
     pub(crate) seek_script_last: i64,
-    pub(crate) quality_script: Vec<crate::plex::session::PlaybackQuality>,
+    pub(crate) quality_script: Vec<crate::server::session::PlaybackQuality>,
     pub(crate) quality_script_at: u32,
     pub(crate) quality_gap_ms: u32,
     pub(crate) quality_tried: bool,

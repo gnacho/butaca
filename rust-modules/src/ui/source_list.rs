@@ -24,7 +24,7 @@
 //! `browse` hands out owned [`SrcGroup`](crate::browse::SrcGroup)/[`SrcRow`](crate::browse::SrcRow)
 //! projections rather than borrows of its statics).
 use crate::browse::{SourceState, SrcGroup};
-use crate::plex::probe::Location;
+use crate::server::probe::Location;
 use crate::ui::table::{Row, Section};
 
 /// The two levels of the Sources list — **one per surface now, and not swappable from either.**
@@ -100,7 +100,7 @@ fn unreachable() -> &'static str { crate::i18n::msg::widgets_source_unreachable(
 /// else:
 ///
 /// - **Relay** is the one this list exists to say. A relay connection is a ~2 Mbit/s tunnel the
-///   server transcodes down to fit (`plex::probe`'s rule 3), so a library that plays at DVD quality
+///   server transcodes down to fit (`server::probe`'s rule 3), so a library that plays at DVD quality
 ///   over a 200 Mbit link reads as a broken server unless something on screen says why.
 /// - **Remote** is quieter but the same shape: it explains a slower first frame and a transcode on
 ///   a file that direct-plays at home.

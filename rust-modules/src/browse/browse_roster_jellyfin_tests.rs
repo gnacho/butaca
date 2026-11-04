@@ -20,7 +20,7 @@ fn an_unadopted_jellyfin_client_opens_the_discovery_gate() {
     let _guard = crate::testlock::serial();
     let mut state = BrowseState::default();
     // Align the session cursor so the gate's generation arm cannot answer for this test.
-    state.session_generation = crate::plex::session::visible_generation();
+    state.session_generation = crate::server::session::visible_generation();
     let adapter = BrowseAdapter::default();
     assert!(!state.discovery_needs_pump(&adapter),
         "empty roster and no client: nothing to do");

@@ -1,7 +1,7 @@
 //! Backend-neutral records for remembered library state.
 //!
 //! The opaque extension container lives beside [`TypedLib`] so these records do not depend on a
-//! backend's session module. `plex::session` re-exports both types for its existing persistence
+//! backend's session module. `server::session` re-exports both types for its existing persistence
 //! code and fixtures.
 
 use serde::{Deserialize, Serialize};

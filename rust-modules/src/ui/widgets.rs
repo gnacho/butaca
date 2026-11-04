@@ -209,7 +209,7 @@ fn frost_sweep() -> Option<f32> {
 /// friend's share — so the server is always NAMED. There is deliberately no current-server twin of
 /// this or of [`warm_tex_on`]: a bare form would be the shorter name autocomplete offers for the
 /// case where getting it wrong is another item's picture. Art that genuinely belongs to the
-/// browsed server (the profile chip's avatar) passes `plex::current_server()` and says so.
+/// browsed server (the profile chip's avatar) passes `server::current_server()` and says so.
 pub(crate) fn resolve_tex_wh_on(
     srv: ServerId,
     path: &str,

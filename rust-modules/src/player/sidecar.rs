@@ -286,7 +286,7 @@ fn is_ass_script(text: &str) -> bool {
 }
 
 fn decode(bytes: Vec<u8>, codec: &str) -> Result<Content, Failure> {
-    if bytes.len() > crate::plex::SIDECAR_MAX_BYTES { return Err(Failure::Empty); }
+    if bytes.len() > crate::server::SIDECAR_MAX_BYTES { return Err(Failure::Empty); }
     let text = String::from_utf8_lossy(&bytes);
     if is_ass_script(&text) {
         // Validate only the presence of events. libass owns the script grammar, including
@@ -324,7 +324,7 @@ fn cue_at(cues: &[Cue], now_ns: i64) -> Option<&Cue> {
 /// line containing `-->`, text until the next blank line; `,` or `.` before the milliseconds,
 /// hours optional). ASS/SSA belongs to the native renderer and is never flattened here.
 pub(crate) fn parse(bytes: &[u8]) -> Vec<Cue> {
-    if bytes.len() > crate::plex::SIDECAR_MAX_BYTES { return Vec::new(); }
+    if bytes.len() > crate::server::SIDECAR_MAX_BYTES { return Vec::new(); }
     let text = String::from_utf8_lossy(bytes);
     let text = text.trim_start_matches('\u{feff}');
     if is_ass_script(text) { return Vec::new(); }

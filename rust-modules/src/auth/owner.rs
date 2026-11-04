@@ -2,8 +2,8 @@
 //! application adapter; constructing or observing this value performs no external work.
 
 use super::{Phase, Picker, UserTile};
-use crate::plex::session::async_persistence::{PersistencePurpose, RejectionKind};
-use crate::plex::session::{Session as PersistedSession, UserRef};
+use crate::server::session::async_persistence::{PersistencePurpose, RejectionKind};
+use crate::server::session::{Session as PersistedSession, UserRef};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
@@ -94,11 +94,11 @@ pub(crate) struct ProfilePublication {
 pub(crate) struct CredentialPatch {
     pub client_id: String,
     pub account_token: String,
-    pub server: crate::plex::session::ServerRef,
+    pub server: crate::server::session::ServerRef,
     pub user: UserRef,
-    pub home_users: Vec<crate::plex::session::HomeUserRef>,
-    pub sources: Vec<crate::plex::session::SourceRef>,
-    pub profiles: Vec<crate::plex::session::ProfileCreds>,
+    pub home_users: Vec<crate::server::session::HomeUserRef>,
+    pub sources: Vec<crate::server::session::SourceRef>,
+    pub profiles: Vec<crate::server::session::ProfileCreds>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -112,7 +112,7 @@ pub(crate) enum Command {
     /// probe can mint the grant.
     AnswerPlaintext {
         machine_id: String,
-        choice: crate::plex::session::PlaintextChoice,
+        choice: crate::server::session::PlaintextChoice,
         #[serde(with = "super::observation::optional_server_id")]
         sid: Option<crate::registry::ServerId>,
     },
@@ -180,8 +180,8 @@ pub(crate) struct PersistenceEvidence {
 
 impl PersistenceWarning {
     pub(crate) fn from_outcome(key: PersistenceWarningKey, site: PersistenceWarningSite,
-        outcome: &crate::plex::session::async_persistence::CompletionOutcome) -> Self {
-        use crate::plex::session::async_persistence::{CompletionOutcome, Failure};
+        outcome: &crate::server::session::async_persistence::CompletionOutcome) -> Self {
+        use crate::server::session::async_persistence::{CompletionOutcome, Failure};
         let (class, protection) = match outcome {
             CompletionOutcome::Durable(_)
             | CompletionOutcome::Superseded
@@ -234,7 +234,7 @@ pub(crate) struct CommitPlan {
     /// `Routine` for every ordinary write; `FreshReauthentication` only for a write the owner
     /// issues on the strength of THIS flow's own PIN authorization (a completed sign-in or
     /// device-code exchange) — never on a discovery/rediscovery retry that merely reuses it.
-    pub authority: crate::plex::session::SaveAuthority,
+    pub authority: crate::server::session::SaveAuthority,
 }
 
 /// Only the changes whose side effects are awaiting acknowledgement. This is not a second
@@ -259,7 +259,7 @@ pub(crate) struct CommitDelta {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum BootstrapAuthority {
-    Account { extras: Vec<crate::plex::session::SourceRef> },
+    Account { extras: Vec<crate::server::session::SourceRef> },
     /// The controlled Jellyfin world (#166 replay flip). There is no plex.tv account surface
     /// behind it: no registry install, no token rotation, no profile machinery — the typed
     /// Initial carries the exact client identity the controlled boot installs unprobed, and
@@ -271,7 +271,7 @@ pub(crate) enum BootstrapAuthority {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum ReadyInstall {
-    PrimaryAndExtras(Vec<crate::plex::session::SourceRef>),
+    PrimaryAndExtras(Vec<crate::server::session::SourceRef>),
     AlreadyInstalled,
 }
 
@@ -414,7 +414,7 @@ pub(crate) enum SessionFx {
     Pump,
     Acknowledge(Vec<Receipt>),
     Retire { req: u32 },
-    Ready { epoch: u64, scope: ProfileScope, server: crate::plex::session::ServerRef, token: String, install: ReadyInstall },
+    Ready { epoch: u64, scope: ProfileScope, server: crate::server::session::ServerRef, token: String, install: ReadyInstall },
     Cancel { requests: Vec<u32>, epoch: u64 },
     PublishProfile(ProfilePublication),
     Erase { req: u32, epoch: u64, all_local: bool },
@@ -430,11 +430,11 @@ pub(crate) enum SessionEvent {
     Commit(CommitReply),
     /// Resource evidence is delivered even when its original authority permit is gone.
     DiskWrite { before: Identity, after: Identity,
-        outcome: crate::plex::session::async_persistence::CompletionOutcome },
+        outcome: crate::server::session::async_persistence::CompletionOutcome },
     Pump,
     /// A typed durability verdict from the persistence worker, delivered through the ordinary
     /// effect/FIFO path. It is fenced by request/epoch/arrival/revision before it settles anything.
-    Persistence(crate::plex::session::async_persistence::PersistenceCompletion),
+    Persistence(crate::server::session::async_persistence::PersistenceCompletion),
     Erased { epoch: u64, leftovers: usize },
 }
 
@@ -608,7 +608,7 @@ impl SessionInit {
 }
 
 pub(super) fn write_plaintext_verdict(w: &mut Canon, v: &super::PlaintextVerdict) {
-    use crate::plex::session::PlaintextChoice as C;
+    use crate::server::session::PlaintextChoice as C;
     w.str(&v.machine_id).str(&v.name).str(&v.shared_by).str(v.eligibility.code())
         .u8(match v.choice { C::Undecided => 0, C::Allowed => 1, C::Declined => 2, C::Revoked => 3 });
 }
@@ -618,7 +618,7 @@ pub(super) fn write_user(w: &mut Canon, user: &UserRef) {
     w.option(user.plex_tv_token.as_ref(), |w, t| { w.str(t); });
 }
 
-pub(super) fn write_profile(w: &mut Canon, profile: &crate::plex::session::ProfileCreds) {
+pub(super) fn write_profile(w: &mut Canon, profile: &crate::server::session::ProfileCreds) {
     w.str(&profile.uuid);
     write_user(w, &profile.user);
     write_server(w, &profile.server);
@@ -626,19 +626,19 @@ pub(super) fn write_profile(w: &mut Canon, profile: &crate::plex::session::Profi
     w.option(profile.pin.as_ref(), |w, pin| { w.str(&pin.salt).str(&pin.hash).u32(pin.iters); });
 }
 
-pub(super) fn write_server(w: &mut Canon, server: &crate::plex::session::ServerRef) {
+pub(super) fn write_server(w: &mut Canon, server: &crate::server::session::ServerRef) {
     w.str(&server.name).str(&server.machine_id).str(&server.address)
         .u64(server.port as u64).str(&server.token).str(&server.origin_url);
     write_tier(w, server.tier);
 }
 
-pub(super) fn write_tier(w: &mut Canon, tier: Option<crate::plex::probe::Location>) {
-    use crate::plex::probe::Location;
+pub(super) fn write_tier(w: &mut Canon, tier: Option<crate::server::probe::Location>) {
+    use crate::server::probe::Location;
     w.u8(match tier { None => 0, Some(Location::Local) => 1,
         Some(Location::Remote) => 2, Some(Location::Relay) => 3 });
 }
 
-pub(super) fn write_sources(w: &mut Canon, sources: &[crate::plex::session::SourceRef]) {
+pub(super) fn write_sources(w: &mut Canon, sources: &[crate::server::session::SourceRef]) {
     w.seq(sources.len());
     for s in sources {
         // The carried household EVIDENCE joins the canonical digest beside raw `owned`. It has to:
@@ -693,7 +693,7 @@ pub(super) fn write_persisted(w: &mut Canon, s: &PersistedSession) {
         for corner in blur { for channel in corner { w.f32(channel); } }
     });
     w.option(s.playback_quality, |w, quality| {
-        use crate::plex::session::PlaybackQuality;
+        use crate::server::session::PlaybackQuality;
         w.u8(match quality { PlaybackQuality::Auto => 0, PlaybackQuality::Original => 1,
             PlaybackQuality::P1080High => 2, PlaybackQuality::P1080 => 3,
             PlaybackQuality::P720 => 4, PlaybackQuality::P720Low => 5, PlaybackQuality::P480 => 6 });
@@ -879,8 +879,8 @@ impl SessionMachine {
     /// Physical completion remains evidence even after its authority permit was superseded.
     /// Advance only the comparison fence; never publish obsolete credentials as trusted state.
     fn observe_disk_write(&mut self, before: &Identity, after: &Identity,
-        outcome: crate::plex::session::async_persistence::CompletionOutcome) -> bool {
-        use crate::plex::session::async_persistence::{CompletionOutcome, Operation};
+        outcome: crate::server::session::async_persistence::CompletionOutcome) -> bool {
+        use crate::server::session::async_persistence::{CompletionOutcome, Operation};
         if self.state.disk_identity != *before || before == after
             || !matches!(outcome, CompletionOutcome::Durable(Operation::Write { .. })) { return false; }
         self.state.disk_identity = after.clone();
@@ -921,11 +921,11 @@ impl SessionMachine {
     /// this logical identity; channels and receipts stay in the adapter.
     fn apply_persistence_completion(
         &mut self,
-        completion: crate::plex::session::async_persistence::PersistenceCompletion,
+        completion: crate::server::session::async_persistence::PersistenceCompletion,
     ) -> bool {
-        use crate::plex::session::async_persistence::CompletionOutcome;
+        use crate::server::session::async_persistence::CompletionOutcome;
         let Some(admitted) = self.state.admitted_persistence else { return false };
-        let correlation = crate::plex::session::async_persistence::PersistenceCorrelation {
+        let correlation = crate::server::session::async_persistence::PersistenceCorrelation {
             req: admitted.req, epoch: admitted.epoch, arrival: admitted.arrival,
         };
         if !completion.acts_on(correlation, admitted.revision) { return false; }

@@ -207,7 +207,7 @@ pub(crate) enum UnderlaySource {
     /// The host page itself, read off the framebuffer before any dim is on it — every surface
     /// presented over a page.
     Page,
-    /// A four-corner envelope (tl, tr, br, bl — `plex::UltraBlurColors::corners`' ring): a surface
+    /// A four-corner envelope (tl, tr, br, bl — `server::UltraBlurColors::corners`' ring): a surface
     /// over the hardware video plane, which GL cannot read back, inherits the playing item's own
     /// UltraBlur colours instead.
     Corners([[f32; 3]; 4]),

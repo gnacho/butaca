@@ -167,7 +167,7 @@ impl Rung {
     /// number that goes on the wire as the ceiling, which is stable across catalog re-measurement
     /// — unlike `planning`/`expected_wire_kbps`, which moves when somebody probes the server, and
     /// unlike the UI quality enum, which has no mid-1080p points at all
-    /// (`plex::session::PlaybackQuality`). Used only by the dev rung pin (I0-D).
+    /// (`server::session::PlaybackQuality`). Used only by the dev rung pin (I0-D).
     pub(crate) fn from_request_kbps(kbps: u32) -> Option<Rung> {
         LADDER.into_iter().find(|r| r.kbps() == kbps)
     }

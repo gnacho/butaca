@@ -289,9 +289,9 @@ fn a_picks_sibling_matches_across_iso_639_spellings() {
 // Issue #88: a series reopens with the tracks it was last watched with. The stored id belongs to
 // the FILE (container stream ids are per-file), so the language tag is what travels; the id is the
 // fallback for a re-encode whose tags moved. Everything below is pure: the table itself is
-// `plex::session::SeriesTracks`.
+// `server::session::SeriesTracks`.
 
-use crate::plex::session::SeriesTracks;
+use crate::server::session::SeriesTracks;
 
 fn remembered(series: &str, audio: &str, audio_index: i64) -> SeriesTracks {
     SeriesTracks {

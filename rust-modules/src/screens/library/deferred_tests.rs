@@ -38,11 +38,11 @@ struct Fixture {
     directory: crate::stores::browse::DirectorySnapshot,
     hubs: crate::stores::browse::HubsSnapshot,
     sids: [crate::registry::ServerId; 2],
-    _session: crate::plex::session::TempSession,
+    _session: crate::server::session::TempSession,
 }
 impl Fixture {
     fn new() -> Self {
-        let session = crate::plex::session::TempSession::new("library-deferred-ports");
+        let session = crate::server::session::TempSession::new("library-deferred-ports");
         session.watching("u-library-deferred-ports");
         crate::registry::reset_for_test();
         let own = crate::registry::ServerId::from_raw(0);

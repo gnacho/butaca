@@ -17,7 +17,7 @@ fn a_remembered_sort_belongs_to_the_profile_that_chose_it() {
     let _g = crate::testlock::serial();
     let session = TempPins::new("sort-memory-profile");
     session.watching("u-sorter");
-    crate::plex::session::update(|current| {
+    crate::server::session::update(|current| {
         let mut next = current.clone();
         next.set_sort_for("u-sorter", "mac-mini", 1, Some(("viewCount", true)));
         Some(next)
@@ -73,7 +73,7 @@ fn choosing_the_default_order_forgets_the_entry() {
     };
     let held = |browse: &TestBrowse| {
         let machine = browse.state.sources()[0].machine_id.clone();
-        crate::plex::session::peek().sorts_for("u-sorter")
+        crate::server::session::peek().sorts_for("u-sorter")
             .and_then(|sorts| sorts.get(&machine, 1).map(|(sort, desc)| (sort.to_string(), desc)))
     };
     menu(&mut browse, &[("SortName", false), ("addedAt", true)]);
@@ -84,7 +84,7 @@ fn choosing_the_default_order_forgets_the_entry() {
     menu(&mut browse, &[("SortName", false)]);
     commit(&mut browse, "SortName", false);
     assert_eq!(held(&browse), None, "the default order needs no record");
-    assert!(crate::plex::session::peek().library_sorts.is_empty(),
+    assert!(crate::server::session::peek().library_sorts.is_empty(),
         "and a profile with nothing remembered leaves no empty record behind");
     // A Collections view's sort is that view's menu, not the library's: never remembered.
     assert!(browse.state.set_library_type(LibraryType::Collections));
@@ -96,7 +96,7 @@ fn choosing_the_default_order_forgets_the_entry() {
 /// The per-profile list is bounded: the most recently sorted libraries are kept.
 #[test]
 fn the_remembered_sorts_are_capped_most_recent_first() {
-    use crate::plex::session::LibrarySorts;
+    use crate::server::session::LibrarySorts;
     let mut sorts = LibrarySorts::default();
     for key in 0..(LibrarySorts::CAP as i64 + 5) {
         sorts.set("m", key, Some(("addedAt", true)));

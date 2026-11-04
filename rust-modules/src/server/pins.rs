@@ -14,7 +14,7 @@
 //!   The household and not the account, because plex.tv answers a Plex Home managed profile with
 //!   `owned:false` on the family's own server — so a rule written on raw ownership gave the
 //!   household's own shelves a stranger's defaults for every profile but the admin's. The verdict
-//!   is [`crate::plex::is_household`]'s and arrives here as a bool; see [`LibRef::household`].
+//!   is [`crate::server::is_household`]'s and arrives here as a bool; see [`LibRef::household`].
 //! * **An account with no server of its OWN HOUSEHOLD is not a special case.** Every source it has
 //!   is borrowed, so "a friend's arrives Off" would open the app on nothing at all; with nothing of
 //!   the household's to prefer, a borrowed library is simply a library.
@@ -50,14 +50,14 @@ pub(crate) struct LibRef<'a> {
     /// the section key, server-local: both servers in the measured pair have a section `1`
     pub(crate) key: i64,
     /// **This HOUSEHOLD's server rather than an outsider's** — half of the default's input, and
-    /// [`crate::plex::is_household`]'s verdict rather than plex.tv's raw `owned`.
+    /// [`crate::server::is_household`]'s verdict rather than plex.tv's raw `owned`.
     ///
     /// It was `owned` until the managed-profile fix, and the rename is the fix: a Plex Home
     /// managed profile is told `owned:false` about the family server it watches every day, so the
     /// old field put a stranger's defaults on the household's own shelves — and, because
     /// *everything* was then unowned, put a genuine friend's share on Home beside them. A `bool`
     /// and not the evidence, so these rules stay a leaf: the grant, the `home` flag and the Home
-    /// roster are all `plex::servers`' business, and `browse::lib_refs` hands down the answer.
+    /// roster are all `server::servers`' business, and `browse::lib_refs` hands down the answer.
     pub(crate) household: bool,
     /// **Does this HOUSEHOLD have any library of THIS library's type?** The other half, and the
     /// reason the default is per-type rather than per-roster since 2026-09-05.

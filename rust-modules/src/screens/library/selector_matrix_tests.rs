@@ -9,7 +9,7 @@ fn sid(n: u16) -> crate::registry::ServerId {
 }
 
 fn group(name: &str, handle: &str, state: crate::browse::SourceState,
-    tier: Option<crate::plex::probe::Location>) -> crate::browse::SrcGroup {
+    tier: Option<crate::server::probe::Location>) -> crate::browse::SrcGroup {
     crate::browse::SrcGroup { name: name.into(), handle: handle.into(), state, tier }
 }
 
@@ -30,7 +30,7 @@ fn section(source: crate::registry::ServerId, key: i64, index: usize, title: &st
 fn every_connection_tier_and_source_state_draws_the_same_selector() {
     let _guard = crate::testlock::serial();
     use crate::browse::SourceState;
-    use crate::plex::probe::Location;
+    use crate::server::probe::Location;
     let tiers = [None, Some(Location::Local), Some(Location::Remote), Some(Location::Relay)];
     let states = [SourceState::NotProbed, SourceState::Reachable,
         SourceState::Unreachable];

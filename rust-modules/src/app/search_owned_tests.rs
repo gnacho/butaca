@@ -53,7 +53,7 @@ impl crate::ui::dispatch::Tap<AppHost> for OwnedLeaveTrace {
 #[test]
 fn every_back_reachable_owned_page_is_retained_and_restored_by_identity() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-leave-retention");
+    let session = crate::server::session::TempSession::new("owned-leave-retention");
     session.watching("synthetic-leave-retention");
     crate::registry::reset_for_test();
     // Search is owned per-Bridge now; each iteration below constructs its own `rig`, so there is
@@ -148,7 +148,7 @@ fn every_back_reachable_owned_page_is_retained_and_restored_by_identity() {
 #[test]
 fn owned_search_is_covered_for_a_result_then_unmounted_for_good_at_home() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-leave-contract");
+    let session = crate::server::session::TempSession::new("owned-search-leave-contract");
     session.watching("synthetic-search-leave-contract");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -214,7 +214,7 @@ fn owned_search_is_covered_for_a_result_then_unmounted_for_good_at_home() {
 #[test]
 fn owned_search_external_departure_never_submits_the_draft() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-external-leave");
+    let session = crate::server::session::TempSession::new("owned-search-external-leave");
     session.watching("synthetic-external-leave");
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("unfinished draft".into()));
@@ -270,7 +270,7 @@ fn owned_search_ticks_request_search_work_once_after_step() {
 #[test]
 fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-wheel");
+    let session = crate::server::session::TempSession::new("owned-search-wheel");
     session.watching("synthetic-wheel");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -322,7 +322,7 @@ fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
 #[test]
 fn owned_search_dispatch_advances_debounce_once_and_only_while_page_updates() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-debounce");
+    let session = crate::server::session::TempSession::new("owned-search-debounce");
     session.watching("synthetic-debounce");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -347,7 +347,7 @@ fn owned_search_dispatch_advances_debounce_once_and_only_while_page_updates() {
 #[test]
 fn owned_search_carried_work_keeps_the_originating_tick_delta() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-carried-pump");
+    let session = crate::server::session::TempSession::new("owned-search-carried-pump");
     session.watching("synthetic-carried-pump");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -373,7 +373,7 @@ fn owned_search_carried_work_keeps_the_originating_tick_delta() {
 #[test]
 fn owned_search_observed_keyboard_dismissal_releases_native_latch_and_reopens() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-observed-dismissal");
+    let session = crate::server::session::TempSession::new("owned-search-observed-dismissal");
     session.watching("synthetic-observed-dismissal");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -392,7 +392,7 @@ fn owned_search_observed_keyboard_dismissal_releases_native_latch_and_reopens() 
 #[test]
 fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-adopt");
+    let session = crate::server::session::TempSession::new("owned-search-adopt");
     session.watching("synthetic-adopt-profile");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -430,7 +430,7 @@ fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
 #[test]
 fn owned_search_opens_edits_and_closes_in_one_input_batch_in_order() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-ingress-order");
+    let session = crate::server::session::TempSession::new("owned-search-ingress-order");
     session.watching("synthetic-ingress-order");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -455,7 +455,7 @@ fn owned_search_opens_edits_and_closes_in_one_input_batch_in_order() {
 #[test]
 fn an_old_search_keyboard_request_cannot_close_the_new_instances_keyboard() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-keyboard-owner");
+    let session = crate::server::session::TempSession::new("owned-search-keyboard-owner");
     session.watching("synthetic-keyboard-owner");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -487,7 +487,7 @@ fn an_old_search_keyboard_request_cannot_close_the_new_instances_keyboard() {
 #[test]
 fn covering_owned_search_releases_its_native_keyboard() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-covered-keyboard");
+    let session = crate::server::session::TempSession::new("owned-search-covered-keyboard");
     session.watching("synthetic-covered-search");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -505,7 +505,7 @@ fn covering_owned_search_releases_its_native_keyboard() {
 #[test]
 fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-ack");
+    let session = crate::server::session::TempSession::new("owned-search-ack");
     session.watching("synthetic-ack-profile");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -532,7 +532,7 @@ fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
 #[test]
 fn owned_search_keeps_several_commits_while_the_frame_view_is_frozen() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-text");
+    let session = crate::server::session::TempSession::new("owned-search-text");
     session.watching("synthetic-search-profile");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -558,7 +558,7 @@ fn owned_search_keeps_several_commits_while_the_frame_view_is_frozen() {
 #[test]
 fn owned_search_opens_system_ownership_and_empty_down_keeps_editing() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-keyboard");
+    let session = crate::server::session::TempSession::new("owned-search-keyboard");
     session.watching("synthetic-empty-search-profile");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -583,11 +583,11 @@ fn owned_search_opens_system_ownership_and_empty_down_keeps_editing() {
 #[test]
 fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-results");
+    let session = crate::server::session::TempSession::new("owned-search-results");
     session.watching("synthetic-result-profile");
     // This test grades navigation, not disk workers. The accepted term is already first, so
     // RememberRecent remains the production no-op and no detached save can outlive the fixture.
-    crate::plex::session::update(|s| {
+    crate::server::session::update(|s| {
         let mut next = s.clone();
         next.set_recents_for("synthetic-result-profile", vec!["synthetic".into()]);
         Some(next)
@@ -640,10 +640,10 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
 #[test]
 fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-profile");
+    let session = crate::server::session::TempSession::new("owned-search-profile");
     session.watching("synthetic-departing-profile");
     crate::registry::reset_for_test();
-    let old_generation = crate::plex::session::current_gen();
+    let old_generation = crate::server::session::current_gen();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -654,7 +654,7 @@ fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
     frame(&mut d, &mut rig, AppArg::Search, tick(1), vec![]);
     assert_eq!(rig.stores.search.query(), "");
     assert!(owned_search_probe(&d).contains("caret=0"));
-    let next_generation = crate::plex::session::current_gen();
+    let next_generation = crate::server::session::current_gen();
     d.emit(MachineId::Input, Fx::App(AppFx::Store(StoreId::Search, StoreCmd::Search(
         crate::stores::search::SearchCmd::SetQueryScoped { profile_generation: next_generation, query: "replacement text".into() }))));
     frame(&mut d, &mut rig, AppArg::Search, tick(2), vec![]);
@@ -666,7 +666,7 @@ fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
 #[test]
 fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-return");
+    let session = crate::server::session::TempSession::new("owned-search-return");
     session.watching("synthetic-return-profile");
     crate::registry::reset_for_test();
     let catalog = || vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
@@ -724,7 +724,7 @@ fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
 #[test]
 fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-strip");
+    let session = crate::server::session::TempSession::new("owned-search-strip");
     session.watching("synthetic-strip");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -774,7 +774,7 @@ fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
 #[test]
 fn a_seeded_boot_query_survives_the_freshly_mounted_screens_first_sync() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-boot-seed");
+    let session = crate::server::session::TempSession::new("owned-search-boot-seed");
     session.watching("synthetic-boot-seed");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -817,7 +817,7 @@ fn a_seeded_boot_query_survives_the_freshly_mounted_screens_first_sync() {
 #[test]
 fn leaving_owned_search_through_a_real_route_change_releases_its_keyboard() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-real-nav-teardown");
+    let session = crate::server::session::TempSession::new("owned-search-real-nav-teardown");
     session.watching("synthetic-real-nav-teardown");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();
@@ -1004,7 +1004,7 @@ fn update_still_steps_the_shared_strip_on_search_the_way_home_and_library_do() {
 #[test]
 fn owned_search_content_probe_reports_zone_row_col_pill_and_card_as_focus_moves() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-fingerprint");
+    let session = crate::server::session::TempSession::new("owned-search-fingerprint");
     session.watching("synthetic-fingerprint");
     crate::registry::reset_for_test();
     let mut d = Dispatcher::<AppHost>::new();

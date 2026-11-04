@@ -352,7 +352,7 @@ pub(crate) struct Dovi {
     // exists for ("is the base layer a correct picture"); these three are read by
     // `screens::tracks_panel` and by nothing else. They live here rather than on `Detail` so there is
     // one home for "what the server said about Dolby Vision" — but do not reach for them in a
-    // decision without the live sweep `plex::Stream`'s DOVI comment records.
+    // decision without the live sweep `server::Stream`'s DOVI comment records.
     /// `DOVILevel` — the DV level (a bitrate/resolution tier); 0 = the server did not say.
     pub(crate) level: i64,
     /// `DOVIVersion`, DECOMPOSED — the server sends the dotted string `"1.0"`, and this holds it
@@ -982,7 +982,7 @@ impl Season {
 /// parses, carrying `viewCount`, `viewOffset`, `duration`, `type` and `Media[0].Part[0]`;
 /// `fetch_related` simply copied three fields out and dropped the rest. So the fix is not to widen
 /// this struct field by field but to stop having one: `crate::pms::parse_item` WAS the ONE
-/// `plex::Metadata` → row mapping that the hub catalog, the Library grid and the person page
+/// `server::Metadata` → row mapping that the hub catalog, the Library grid and the person page
 /// shared, and it owned rules a re-derivation gets wrong. The sharpest is that a related
 /// **SHOW** is watched on `viewedLeafCount >= leafCount` and never on `viewCount > 0`, so a series
 /// you are three episodes into is neither watched nor unwatched — which is exactly the state whose
@@ -993,7 +993,7 @@ impl Season {
 /// number their ratingKeys from 1 (`docs/shared-servers.md` §2). The fetch that fills the shelf
 /// stamps each row with the sid it fetched from, so every downstream use — the art request, the
 /// context menu's `SID`, the scrobble — addresses the right machine BY CONSTRUCTION rather than by
-/// a comment asking the next caller to remember `plex::current_server()` is the wrong answer here.
+/// a comment asking the next caller to remember `server::current_server()` is the wrong answer here.
 pub(crate) type Related = crate::pms::PmsMovie;
 
 /// Clone because the playing-item store keeps the played leaf's OWN chapters (see [`PlayingItem`]) —
@@ -1061,7 +1061,7 @@ fn mark_skipped(state: &mut MetadataState, m: Marker) {
 /// clip does not spend a third of its runtime offering the next one).
 /// The pure half of [`MetadataView::synthesized_tail_marker`] — the window geometry alone, host-testable.
 /// `window_ms` is the user's `Up Next` timing (`route::up_next_window_ms`), whose default is
-/// [`crate::plex::session::UP_NEXT_WINDOW_DEFAULT_S`]. There is no second constant here on purpose:
+/// [`crate::server::session::UP_NEXT_WINDOW_DEFAULT_S`]. There is no second constant here on purpose:
 /// a default spelled in two places drifts. The guard scales with it, so a short episode
 /// never spends a third of its running time offering a card, and a window of zero (the card at the
 /// very end) would leave nothing to show, hence `None`.
@@ -1220,7 +1220,7 @@ pub(crate) struct Detail {
     pub(crate) acodec: String, // Media[0].audioCodec
     #[serde(with = "record::float_bits")]
     pub(crate) video_fps: f64, // video Stream frameRate (0 = unknown); feeds the Load esInfo
-    // ---- the PRIMARY version's technical fields (plex::Metadata::primary_media = Media[0], NOT a
+    // ---- the PRIMARY version's technical fields (server::Metadata::primary_media = Media[0], NOT a
     // best-of pick — a multi-version item has more, and choosing among them needs a version picker
     // that does not exist yet). For a SHOW these are borrowed from its first episode, like the
     // About footer's audio/subtitle lists. `bitrate`/`width`/`height` are unused by the UI today
@@ -1268,7 +1268,7 @@ pub(crate) struct Detail {
     pub(crate) art: String,
     pub(crate) thumb: String,
     /// The item's own `UltraBlurColors` corners (tl, tr, br, bl — the ring order
-    /// [`plex::UltraBlurColors::corners`](crate::media::UltraBlurColors::corners) owns) and whether
+    /// [`server::UltraBlurColors::corners`](crate::media::UltraBlurColors::corners) owns) and whether
     /// the server sent a usable envelope — what keys the detail page's ambient GROUND. It lives on
     /// the LOADED item and not only on the catalog row because a page opened from the Library grid,
     /// a Related tile or the person page is never in the home catalog (`pms::index_of_rk` searches
@@ -1348,7 +1348,7 @@ impl Detail {
     }
 
     /// **WHOSE copy this is** — the credit for the server this item came from, or empty when there
-    /// is nobody to credit. `plex::servers::owner_credit` decides it, `ServerFacts::handle` holds
+    /// is nobody to credit. `server::servers::owner_credit` decides it, `ServerFacts::handle` holds
     /// the answer, and `ui::fmt::shared_by` turns it into the words; this is only where the detail
     /// page asks.
     ///
@@ -1678,7 +1678,7 @@ pub(crate) fn trailer_now_playing(
 
 // ---- fetches (all via the typed crate::plex client; serde DTOs, no Value scraping) ----
 //
-// Every one of them takes the `ServerId` rather than reaching for `plex::client()`: they run on the
+// Every one of them takes the `ServerId` rather than reaching for `server::client()`: they run on the
 // detail/season workers, and the house rule is that a worker reads no statics. It is also what
 // stamps the row — an item fetched from slot 1 must be
 // recorded as slot 1's whatever `client()` answers with by the time the fetch returns.
@@ -1716,7 +1716,7 @@ fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
 }
 
 /// Convert a part's Stream[] into (audio, subs, video_fps, video_is_hdr, dovi) — the ONE
-/// plex::Stream → Stream mapping (the detail parse and the playing-tracks store both use it).
+/// server::Stream → Stream mapping (the detail parse and the playing-tracks store both use it).
 /// HDR is the video stream's transfer characteristic (PQ or HLG) or a Dolby Vision flag — the
 /// input to the facts row's "HDR → SDR without tone-mapping" warning, which only matters where
 /// the item would transcode on a server that cannot tone-map. [`Dovi`] is the finer-grained
@@ -2667,7 +2667,7 @@ struct AltResult {
 /// `screens::alt_sources` only orders, marks and draws them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct AltCopy {
-    /// The registry slot the copy lives on ([`crate::plex::servers`]). It is the row's IDENTITY —
+    /// The registry slot the copy lives on ([`crate::server::servers`]). It is the row's IDENTITY —
     /// the gate counts distinct values of it, and OK resolves the destination client through it —
     /// so a copy whose source is not registered carries [`crate::registry::ServerId::UNSET`] and can be
     /// listed but never navigated to.
@@ -2676,7 +2676,7 @@ pub(crate) struct AltCopy {
     /// Libraries are what a person browses; the machine name (`nas-home`) belongs to the Sources
     /// list and to a failure read-out, and appears nowhere else in the product.
     pub(crate) library: String,
-    /// **The CREDIT for that server** — `plex::servers::owner_credit`'s answer, the same one the
+    /// **The CREDIT for that server** — `server::servers::owner_credit`'s answer, the same one the
     /// shelf headings and the Sources list draw, and NOT the raw `sourceTitle` it used to be.
     /// `Some(handle)` for a person outside this household; `None` when there is nobody to credit,
     /// which is our own server, the household's own server whichever Plex Home profile is watching,
@@ -2796,7 +2796,7 @@ fn alt_install(
 }
 
 /// **Re-read every retained copy's CREDIT from the registry.** Called when the facts epoch moves —
-/// `plex::servers::facts_gen`, i.e. a source has been re-described — which is a different event
+/// `server::servers::facts_gen`, i.e. a source has been re-described — which is a different event
 /// from the roster changing and must not be answered the same way.
 ///
 /// The copies themselves are still correct: a re-grade of who is credited for a server does not
@@ -3153,7 +3153,7 @@ fn load_season(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAdapt
     // `prev` rides along so a FAILED fetch can put the tab back on the season whose episodes are
     // still listed (see `pump_season`) — the optimistic flip below is what has to be undone.
     // the loaded show's own server, read here on the MAIN thread — a season belongs to the item it
-    // hangs off, so this is the one honest source for it (never `plex::current_server()`, which the
+    // hangs off, so this is the one honest source for it (never `server::current_server()`, which the
     // user may have moved since the page was opened)
     let (sid, rk, season_rk, prev) = match state.current.as_ref().and_then(|d| {
         d.seasons
@@ -3320,7 +3320,7 @@ mod marker_tests {
     /// the geometry is asserted against the configured value rather than a constant.
     #[test]
     fn the_tail_window_stands_in_for_undetected_credits() {
-        let w = crate::plex::session::UP_NEXT_WINDOW_DEFAULT_S * 1_000;
+        let w = crate::server::session::UP_NEXT_WINDOW_DEFAULT_S * 1_000;
         let tail = |pos_ms, dur_ms| tail_marker_with(pos_ms, dur_ms, w);
         let dur = 22 * 60 * 1000; // a 22-minute episode
         assert!(tail(0, dur).is_none(), "the open");

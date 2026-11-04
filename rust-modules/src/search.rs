@@ -441,7 +441,7 @@ impl Source {
 ///
 /// **Exact ids, not a prefix or a range.** Slot
 /// numbers are permanent and a sign-out RETIRES the departing account's slots without renumbering
-/// what registers after them (`plex::servers`' module doc), so after signing into a second account
+/// what registers after them (`server::servers`' module doc), so after signing into a second account
 /// the live roster is `2..3` and not `0..1`: a prefix would have asked the revoked slots (which
 /// resolve to no client at all) and never asked the server the user is actually signed in to.
 /// A profile switch can additionally deactivate only the middle slot, so even that post-sign-out
@@ -1216,7 +1216,7 @@ fn run_with_optional_directory(
             true
         }
         SearchCmd::SetQueryScoped { profile_generation, query } => {
-            if profile_generation != crate::plex::session::current_gen() { return false; }
+            if profile_generation != crate::server::session::current_gen() { return false; }
             match directory {
                 Some(directory) => set_query_from_directory(state, adapter, &query, directory),
                 None => set_query(state, adapter, &query),

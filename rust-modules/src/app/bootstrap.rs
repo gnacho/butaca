@@ -17,11 +17,11 @@ mod attachment_tests;
 /// admission answer (including refusal); only recorded ingress completes admitted work.
 pub(crate) struct HomeIo {
     pub replay: bool,
-    pub preferences: crate::plex::session::Session,
+    pub preferences: crate::server::session::Session,
     pub requests: Vec<serde_json::Value>,
     pub admissions: std::collections::VecDeque<serde_json::Value>,
     pub failure: Option<&'static str>,
-    pub profile: std::sync::Arc<crate::plex::session::CurrentProfile>,
+    pub profile: std::sync::Arc<crate::server::session::CurrentProfile>,
 }
 
 impl HomeIo {
@@ -190,7 +190,7 @@ impl Initial {
     pub(crate) fn synthetic_home(seed: u32, port: u16, settings: Option<String>)
         -> Result<Self, &'static str> {
         if port == 0 { return Err("invalid synthetic port"); }
-        let saved = crate::plex::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
+        let saved = crate::server::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
         let origin = crate::origin::Origin::http("127.0.0.1", i32::from(port));
         // The synthetic world IS the flavor's (the #166 replay flip): a Jellyfin controlled
         // world. The recorder stamps the flavor into the recording header
@@ -225,13 +225,13 @@ impl Initial {
         if matches!(&self.session.authority, crate::auth::owner::BootstrapAuthority::DevJf { .. }) { 0 }
         else { self.primary_client }
     }
-    pub(crate) fn capture_home(_host: &str, _port: i32) -> Result<(Self, Option<crate::plex::session::DeferredLoad>), &'static str> {
+    pub(crate) fn capture_home(_host: &str, _port: i32) -> Result<(Self, Option<crate::server::session::DeferredLoad>), &'static str> {
         if let Some(value) = crate::dev::scenarios::app_init_value() {
             return Self::from_value(value?).map(|initial| (initial, None));
         }
         // No token is read here: the controlled Jellyfin world carries its fixture identity in
         // the typed Initial (`app_init_value`), and a live capture has no Plex session to name.
-        let (saved, entropy, deferred) = crate::plex::session::load_capturing_entropy();
+        let (saved, entropy, deferred) = crate::server::session::load_capturing_entropy();
         let initial = Self { version: 1,
             session: crate::auth::SessionInit::captured(saved),
             clock_start: 0, entropy: Entropy::Captured(entropy),
@@ -312,7 +312,7 @@ impl Initial {
             }
         }
         match self.entropy {
-            Entropy::Captured(Some(bytes)) if crate::plex::session::client_id_from_entropy(bytes) != s.persisted.client_id =>
+            Entropy::Captured(Some(bytes)) if crate::server::session::client_id_from_entropy(bytes) != s.persisted.client_id =>
                 return Err("initial entropy mismatch"),
             Entropy::Seeded(seed) if format!("s{seed:08x}") != s.persisted.client_id =>
                 return Err("initial seed mismatch"),

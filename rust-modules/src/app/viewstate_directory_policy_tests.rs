@@ -597,18 +597,18 @@ fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 #[test]
 fn two_bridges_keep_their_own_captured_profile_and_labels_for_a_scrim_lift() {
     let _guard = crate::testlock::serial();
-    struct Restore(std::sync::Arc<crate::plex::session::CurrentProfile>);
+    struct Restore(std::sync::Arc<crate::server::session::CurrentProfile>);
     impl Drop for Restore {
         fn drop(&mut self) {
-            crate::plex::session::publish_profile_for_test(self.0.user.clone(), self.0.generation);
+            crate::server::session::publish_profile_for_test(self.0.user.clone(), self.0.generation);
         }
     }
-    let _restore = Restore(crate::plex::session::current_snapshot());
+    let _restore = Restore(crate::server::session::current_snapshot());
     let mut a = Bridge::for_test(|| 0);
     let mut b = Bridge::for_test(|| 0);
     a.seed_chrome_for_test("Owner A", "A", &["Home", "Movies", ""]);
     b.seed_chrome_for_test("Owner B", "B", &["Home", "TV Shows", ""]);
-    crate::plex::session::publish_profile_for_test(Some(crate::plex::session::UserRef {
+    crate::server::session::publish_profile_for_test(Some(crate::server::session::UserRef {
         title: "Global B".into(),
         ..Default::default()
     }), 41);
