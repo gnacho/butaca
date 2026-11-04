@@ -36,9 +36,9 @@ D="$OUT/root"; mkdir -p "$D"
 python3 "$ROOT/tests/serve_fixtures.py" --root "$(dirname "$CLIP")" --port "$MEDIA_PORT" \
   > "$OUT/media.log" 2>&1 &
 MEDIA_PID=$!
-# …and a synthetic server, only so the boot lands on HOME. The autoplay arm that reads `playurl` is
-# skipped on `Route::Login`, so a boot with no session never reaches the player at all.
-python3 "$ROOT/tests/mock_server.py" --port "$SERVER_PORT" --seed 1 > "$OUT/server.log" 2>&1 &
+# …and a synthetic Jellyfin server, only so the boot lands on HOME. The autoplay arm that reads
+# `playurl` is skipped on the sign-in screen, so a boot with no server never reaches the player.
+python3 "$ROOT/tests/mock_jf.py" --port "$SERVER_PORT" --seed 1 > "$OUT/server.log" 2>&1 &
 SERVER_PID=$!
 cleanup() {
   [ -n "${SIM_PID:-}" ] && kill "$SIM_PID" 2>/dev/null || true
@@ -49,7 +49,10 @@ cleanup() {
 trap cleanup EXIT
 sleep 1
 
-printf 'synthetic-token' > "$D/butaca-token"
+# The boot gate's dev trigger (`jellyfin/boot.rs`): a JSON config naming the server, searched in
+# the instance root before the install's own file. The mock accepts any user and password.
+printf '{"url":"http://127.0.0.1:%s","user":"demo","password":"x"}' "$SERVER_PORT" \
+  > "$D/butaca-jellyfin"
 touch "$D/butaca-noidle" "$D/butaca-clocksink"
 printf '{"url":"http://127.0.0.1:%s/%s","vcodec":"h264","acodec":"aac","fps":24.0}' \
   "$MEDIA_PORT" "$(basename "$CLIP")" > "$D/butaca-playurl"

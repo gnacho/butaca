@@ -643,7 +643,7 @@
       "run_secs": 20,
       "warmup_s": 6,
       "item": "collection_member_movie",
-      "comment": "Detail page of a movie that belongs to a collection with at least two members, so /related carries a collection.related hub and the page draws the collection shelf under its linked heading above Related. detailsec=3 walks focus from the hero to that shelf (hero, extras, cast, collection: the item needs extras and cast too), which scrolls the page and lifts the heading label with the shelf's focus. On the simulator, mock_server movie 1041 (a member of collection 50001) has that shape. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 60-61, median 61; fps robust_max 1, median 0 once the page settles.",
+      "comment": "Detail page of a movie that belongs to a collection with at least two members, so /related carries a collection.related hub and the page draws the collection shelf under its linked heading above Related. detailsec=3 walks focus from the hero to that shelf (hero, extras, cast, collection: the item needs extras and cast too), which scrolls the page and lifts the heading label with the shelf's focus. The 2026-09-28 numbers below were taken on a movie that is a member of that collection (the retired mock's 1041). MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 60-61, median 61; fps robust_max 1, median 0 once the page settles.",
       "triggers": {
         "butaca-detail": "$rk",
         "butaca-detailsec": 3

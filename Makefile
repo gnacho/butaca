@@ -1194,7 +1194,6 @@ check-unlocked: lint check-localization
 	python3 tests/test_harness.py
 	python3 tests/player_pointer.py --selftest
 	python3 tests/test_replay_fixtures.py
-	python3 tests/test_mock_server_library.py
 	@# The demo library and the screenshot scene manifest (make screenshots). Offline: the cases
 	@# that serve the catalog skip, and say so, where the derived artwork cache is absent.
 	python3 tests/test_demo_library.py
@@ -1206,7 +1205,6 @@ check-unlocked: lint check-localization
 	@# The direct-screen TV command's own host-only contract: `--server N` must suppress the
 	@# singular token boot (which cannot register N>0) and must construct the exact identity marker
 	@# that `up` requires after launch. No SSH or television access occurs in this self-test.
-	python3 tools/mock-guest.py --selftest
 	tools/tv-session.sh selftest
 	python3 ci/test_tv_session.py
 	@# The three PreToolUse/PostToolUse hooks' own suites (~0.6s together). They were not in this
@@ -1569,8 +1567,9 @@ check-replay: sim-linux
 	python3 tests/replay_fixtures.py --sim "$$SIM_LINUX_TDIR_ENV/release/butaca-sim"
 
 # **`make screenshots` — the documentation screenshots, regenerated.** Boots the simulator once per
-# scene in `tests/screenshots/scenes.json` against the mock server's DEMO LIBRARY (openly licensed
-# films, `tests/demo_library/`), waits for each scene's settled frame, and writes the JPEGs, and
+# scene in `tests/screenshots/scenes.json` against the synthetic server's DEMO LIBRARY
+# (`tests/mock_jf.py --catalog`: openly licensed films from `tests/demo_library/`), waits for each
+# scene's settled frame, and writes the JPEGs, and
 # the CREDITS.md that goes with them, into `docs/screenshots/` (or `SHOT_OUT=dir`), then the website's
 # `site/credits.html` from the same manifests. No account, no
 # television, no gitignored file.

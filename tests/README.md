@@ -47,14 +47,16 @@ default alone.**
 Two more host-side pieces landed with phase 0 of the UI restructure (2026-09-06), and both exist
 so that a recording of the UI can be COMMITTED to this public repository:
 
-- **`tests/mock_server.py`** is a synthetic media server - the endpoints the data layer actually
-  requests, answered with the fields its own types read, from a library GENERATED from `--seed`
-  in which every title, name, summary and tag is one word of a closed alphabet (`s` + eight hex
-  digits). No household byte can enter a fixture recorded against it, so no scrub pass is needed
-  — and `scrub.rs` cannot recognise a title anyway. `--selftest` proves the shapes and the
-  determinism (two servers, one seed, byte-identical answers) with no app. Boot the simulator
-  against it (pass `127.0.0.1 32499` to the binary) with any non-empty
-  token in the instance root's `butaca-token`.
+- **`tests/mock_jf.py`** is a synthetic Jellyfin server - the endpoints the data layer actually
+  requests, answered with the fields its own types read. Its generated world is built from
+  `--seed`, and every title, name, summary and tag is one word of a closed alphabet (`s` + eight
+  hex digits): no household byte can enter a fixture recorded against it, so no scrub pass is
+  needed — and `scrub.rs` cannot recognise a title anyway. `--catalog` serves the demo library
+  (`tests/demo_library/`, real openly licensed films and their artwork) instead, which is the
+  world `make screenshots` records. `--selftest` proves the shapes and the determinism (two
+  servers, one seed, byte-identical answers) with no app. Boot the simulator against it (pass
+  `127.0.0.1 <port>` to the binary) with a `butaca-jellyfin` file in the instance root naming
+  that server (`jellyfin/boot.rs` documents the shape).
 - **`tests/focusfp.sh`** drives eleven focus flows (boot → grid, grid → detail → BACK, the
   Library, Search with a seeded query, detail ↔ person, the Settings family, first-run consent,
   press-and-hold, the player read-out, pointer clicks; flow 10 — root BACK — is a television flow

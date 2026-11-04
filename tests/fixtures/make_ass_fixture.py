@@ -13,7 +13,7 @@ checked for complete events, timestamps, attachment metadata and interleaving.
 The PLX73 attachment is a renamed bold face; its otherwise regular-style caption
 looks different from fallback. styled-ass-no-font.mkv contains the identical
 tracks without attachments, so comparing the caption proves font selection.
-Serve with tests/mock_server.py --extra-media <output>/styled-ass.mkv.
+Publish <output>/styled-ass.mkv on a Jellyfin server to watch it on the device.
 """
 import argparse
 from collections import Counter

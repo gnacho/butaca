@@ -31,9 +31,10 @@ a case's seek depth — because none of those exist down there. `PIPE_SHAPES`' o
 where that tier's shapes, and the three it deliberately cannot contain, are argued.
 
 ONE STANDALONE SET (`--only mockverify`) is intentionally outside both manifest packs. It makes
-two small 150-second MKVs and an SRT for `tests/mock_server.py --media`, so a television can verify
-language preferences and client-rendered subtitles without a Plex server or account. The mock
-ffprobes those files itself; this generator still verifies their exact stream layouts at creation.
+two small 150-second MKVs and an SRT to publish on a server, so a television can verify language
+preferences and client-rendered subtitles without an account. Any Jellyfin server serves them;
+the retired Plex mock used to ffprobe those files itself. This generator still verifies their
+exact stream layouts at creation.
 
 --------------------------------------------------------------------------------------
 THE TRAPS THIS SCRIPT IS BUILT AROUND. Every one of them fails SILENTLY — the command
@@ -404,7 +405,7 @@ def write_srt(path, idx, label, duration, step=SUB_STEP, hold=SUB_HOLD, cover_en
 
 
 def build_mockverify(root, duration=150):
-    """Build the compact, account-free media set consumed by tests/mock_server.py --media."""
+    """Build the compact, account-free media set published on a server for the TV checks."""
     root = Path(root).expanduser().resolve()
     try:
         root.relative_to(REPO_ROOT)

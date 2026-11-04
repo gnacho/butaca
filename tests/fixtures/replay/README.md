@@ -1,8 +1,8 @@
 # Replay fixtures
 
 A directory here is one RECORDING (restructure spec §5.3): `manifest.json` (the header) and
-`rec-NNNN.jsonl` segments, taken on the simulator against `tests/mock_server.py` by arming
-`butaca-rec`. They are regression assertions pinned to the build lineage that recorded them
+`rec-NNNN.jsonl` segments, taken on the simulator by arming `butaca-rec` against the synthetic
+mock server of the day (deleted with the Plex wire, so a re-recording needs `tests/mock_jf.py`). They are regression assertions pinned to the build lineage that recorded them
 (§5.5): `tools/butaca-rec diff` compares two, `tools/butaca-rec check` verifies one against
 `ALPHABET.json`, and `tests/test_harness.py` checks their schema and closed vocabulary on every
 `make check`. **`make check-replay` builds the Linux simulator and executes every committed
