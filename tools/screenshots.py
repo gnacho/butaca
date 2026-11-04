@@ -7,7 +7,7 @@ driver:
   1. starts `tests/mock_server.py` in catalog mode (the demo library, `tests/demo_library/`) on a
      free loopback port, in this process;
   2. makes a fresh instance root and arms the scene's triggers in it, plus three the driver owns:
-     `token` (a placeholder the mock accepts), `plextv` (the account service replaced by
+     `token` (a placeholder the mock accepts), `account` (the account service replaced by
      the mock, so nothing
      leaves the machine) and `stillclock` (free-running animation held still);
   3. runs the simulator with `BUTACA_SHOT_SETTLE`: the app itself writes one PNG once its
@@ -179,7 +179,7 @@ def capture(binary, scene, defaults, hero, keep):
     port = httpd.server_address[1]
     rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-shot-{scene['name']}-"))
     try:
-        triggers = {"plextv": f"http://127.0.0.1:{port}", "stillclock": str(defaults["stillclock_ms"])}
+        triggers = {"account": f"http://127.0.0.1:{port}", "stillclock": str(defaults["stillclock_ms"])}
         if not scene.get("no_token"):
             triggers["token"] = PLACEHOLDER_TOKEN
         triggers.update(scene.get("triggers", {}))

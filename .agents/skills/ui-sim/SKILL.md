@@ -241,7 +241,7 @@ make screenshots SHOT_HERO_VARIANTS=1 # also home-hero-<film>.jpg for each hero 
 
 - **Scenes are target STATES, reached by triggers.** `tests/screenshots/scenes.json` names each
   state, the triggers that reach it, the event-log lines that prove it was reached (`expect`)
-  and the files it becomes. No key is sent. `tools/screenshots.py` arms `token`, `plextv` (the
+  and the files it becomes. No key is sent. `tools/screenshots.py` arms `token`, `account` (the
   account service replaced by the mock) and `stillclock` itself on every scene, and refuses a run
   whose log shows a `BADTRIGGER`, a trigger that gave up, or a request the mock could not answer.
 - **An output is a file, a crop and a size.** An output's `dest` is `docs` (default,

@@ -52,7 +52,7 @@ refuse it, correctly.
 
 Every mode also answers the four account-service calls of the QR sign-in (`/api/v2/pins`, the
 poll, the QR image, and `/api/v2/user`) with a fixed demo code, for an app booted with
-`butaca-plextv=http://127.0.0.1:<port>`: the sign-in screen can then be driven and captured
+`butaca-account=http://127.0.0.1:<port>`: the sign-in screen can then be driven and captured
 without touching the account service. The poll stays pending unless `--authorize-after N`
 (implied, N=2, by the
 `--plaintext-only-lan`) links the code on the Nth poll with a synthetic account token, so a
@@ -96,7 +96,7 @@ sign-in against this mock (it authorizes the code by itself, on the 2nd poll):
     3. in the install's runtime root, arm (empty files unless shown):
          butaca-storepolicy                       store HttpsOnly policy (dev builds only)
          butaca-login                             boot to the QR sign-in
-         butaca-plextv = http://127.0.0.1:32499
+         butaca-account = http://127.0.0.1:32499
     4. launch. The events log shows, in order:
          - the sign-in read-out "Couldn't sign in", with the reason the app gives for a server
            that is on this network but cannot be reached securely (its Connect action).
@@ -115,17 +115,17 @@ read-out; the consent flow itself needs the TV and a real LAN address.
     # TV (replace 192.168.0.10 with the host's actual LAN IPv4; never a real private address from
     # a gitignored file — hold the TV lock for the device commands below):
     python3 tests/mock_server.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip 192.168.0.10
-    # `butaca-plextv` only ever accepts a loopback address (see step 2 above), so make
+    # `butaca-account` only ever accepts a loopback address (see step 2 above), so make
     # the account service
     # loopback ON THE DEVICE with a reverse tunnel from the host, then arm the loopback trigger:
     # ssh -N -R 32499:127.0.0.1:32499 root@<TV-HOST>
-    # butaca-plextv=http://127.0.0.1:32499
+    # butaca-account=http://127.0.0.1:32499
 
     # Simulator (loopback is both the account service and the LAN address it advertises;
     # still exercises
     # HTTPS-fails / plaintext-answers shape, just not the loopback-ineligibility warning):
     python3 tests/mock_server.py --plaintext-only-lan --advertise-ip 127.0.0.1
-    # butaca-plextv=http://127.0.0.1:32499
+    # butaca-account=http://127.0.0.1:32499
 
 Issue #266 (Boost Dialog / Normalize Loudness) fixtures and flags, every one default-off except
 the loudness attribute itself:
@@ -1569,7 +1569,7 @@ class MockServer:
         if write_path and not (method in ("GET", "HEAD") and p.startswith("/library/parts/")):
             self.note_write(method, path, body)
 
-        # The account service's QR sign-in, for `butaca-plextv` (see the module doc). Pending.
+        # The account service's QR sign-in, for `butaca-account` (see the module doc). Pending.
         # The state
         # the sign-in screen is captured in — unless `--authorize-after N` links it on the Nth poll.
         if p == "/api/v2/pins" and method == "POST":
