@@ -1632,8 +1632,9 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   `devtriggers` build otherwise lets a token ride plaintext, so the BUTACA-10 "Connect without
   encryption?" flow — reachable only when plaintext needs a consented grant — cannot be reached in
   the sim or on the TV without it. It only tightens, and a store build has no trigger to read. The
-  end-to-end reproduction against `tests/mock_server.py --plaintext-only-lan` is in the mock's
-  `--help`. **Controlled-bootstrap update:** `butaca-rec` and
+  end-to-end reproduction of the "plaintext needs a consented grant" flow ran in the retired Plex
+  mock's `--plaintext-only-lan` mode, which went with the wire; nothing reproduces it on the
+  Jellyfin wire today, so the trigger is the only half still reachable. **Controlled-bootstrap update:** `butaca-rec` and
   `butaca-recplay` support Home, Settings, and typed Flow 12 content with typed pre-effect
   initialization, explicit recorded Client bindings, recorded Home/Browse and Detail/Person
   results, and exact request admissions. Replay denies content resource execution and compares
@@ -1655,8 +1656,9 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   from AppInit or complete all-domain replay. It writes `butaca-recordings/latest/` in the
   runtime root — a DIFFERENT name from the trigger file, which is why the directory is not
   `butaca-rec/` — private, gitignored and refused by the outbound guard; `tests/focusfp.sh
-  --rec` records a flow and `tools/butaca-rec import` turns a recording taken against
-  `tests/mock_server.py` into a committed fixture), **`/tmp/butaca-recplay=<dir>`** (REPLAY that
+  --rec` recorded a flow and `tools/butaca-rec import` turned a recording taken against
+  that mock into a committed fixture. Both halves are retired with the wire: `focusfp.sh` still
+  refuses by name until its flows are re-recorded against `tests/mock_jf.py`), **`/tmp/butaca-recplay=<dir>`** (REPLAY that
   recording: the loop runs on the recorded ticks through `app::clock`, re-injects each frame's
   inputs through the remote FIFO's own synthesis, grades the state hash frame by frame — every
   mismatch is its own `replay: diverge` line and the run continues — and ends with one `replay:

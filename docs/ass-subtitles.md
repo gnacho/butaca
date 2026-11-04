@@ -53,7 +53,8 @@ The device fixture generator requires FFmpeg/ffprobe and MKVToolNix (`mkvmerge`)
 subtitle packet counts, timestamps and mux interleaving before publishing a video.
 
 Verification commands (set `MOCK_SERVER_PORT` to an unused local port and configure the developer
-build to reach that mock server):
+build to reach that mock server): the synthetic media path went with the Plex wire, so the
+end-to-end half is a real Jellyfin server carrying the fixture, not a mock.
 
 ```sh
 make check
@@ -62,15 +63,16 @@ CARGO_INCREMENTAL=0 cargo +nightly check --manifest-path rust-modules/Cargo.toml
   --lib --no-default-features
 make
 python3 tests/fixtures/make_ass_fixture.py /tmp/ass-render-test
-python3 tests/mock_server.py --host 0.0.0.0 --port "$MOCK_SERVER_PORT" \
-  --extra-media /tmp/ass-render-test/styled-ass.mkv
 ```
+
+`/tmp/ass-render-test/styled-ass.mkv` is the file to publish on that server, and the developer
+build points at it through the boot gate's `butaca-jellyfin` config (`jellyfin/boot.rs`).
+`tests/mock_jf.py` serves no media at all, so it cannot carry this fixture.
 
 The native host test checks actual libass pixels; ordinary host tests check source preservation,
 selection/seek fencing, overlap, bounds and download policy. Neither proves TV performance.
-Boot the fixture with `tools/tv-session.sh up --guest --mock --screen player=990001`.
-`--mock` verifies the configured server’s synthetic identity and supplies a fabricated guest token;
-it never resolves a real account. Configure and build the developer app against that mock first.
+Boot the fixture with `tools/tv-session.sh up --guest --screen player=990001` (the `--mock` mode
+that used to supply a synthetic identity is retired with the mock).
 
 Device checks must hold the TV lease and keep both the panel and sound off. Release the lease
 while building or reviewing captures. Compare the unchanged
