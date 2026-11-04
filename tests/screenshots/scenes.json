@@ -97,7 +97,7 @@
     },
     {
       "name": "player",
-      "state": "The player HUD, paused at 7:26 of Sintel (`@sintel`, the complete 14:48 film) on a close-up of Sintel, its Chapters tab beside Info: the clock sink plays the file the mock serves from the resume point (7:15), simvideo decodes it under the UI, and autopause pauses once the published playhead reaches 7:26.02 - mid-frame, where the clock sink is told to stop, so the pause freezes the same frame, clock and knob every run. The mock serves no video stream yet, so this scene cannot reach its state and fails by name.",
+      "state": "The player HUD, paused at 7:26 of Sintel (`@sintel`, the complete 14:48 film) on a close-up of Sintel, its Chapters tab beside Info: the clock sink plays the file the mock serves from the resume point (7:15), simvideo decodes it under the UI, and autopause pauses once the published playhead reaches 7:26.02 - mid-frame, where the clock sink is told to stop, so the pause freezes the same frame, clock and knob every run. The mock serves the film the item names, so the resume point and the pause use the real 14:48 file.",
       "triggers": {"server": "0", "play": "@sintel", "clocksink": "", "simvideo": "", "autopause": "at=446020"},
       "expect": ["simvideo: first picture decoded", "autopause: Pause accepted"],
       "outputs": [{"file": "player.jpg", "size": "1600x900"}]

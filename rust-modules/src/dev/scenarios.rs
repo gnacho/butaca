@@ -1339,10 +1339,9 @@ fn autopause_arm(app: &mut App, fr: &mut Frame) {
         let reached = at_ms.is_none_or(|ms| crate::app::playback::playpos() >= i64::from(ms) * 1_000_000);
         if matches!(app.route(), AppArg::Player) && script_step_due(fr.now, pause_at, 0) && reached {
             if crate::app::lifecycle::set_transport_paused(&mut app.adapters.player, true) {
-                crate::log(&format!(
-                    "autopause: Pause accepted hold={}ms",
-                    hold_ms.map_or_else(|| "forever".to_string(), |ms| ms.to_string()),
-                ));
+                let hold = hold_ms.map_or_else(|| "forever".to_string(),
+                                               |ms| format!("{}ms", ms));
+                crate::log(&format!("autopause: Pause accepted hold={hold}"));
                 app.scenarios.pause_script = None;
                 app.scenarios.pause_resume_at = hold_ms.map(|hold| fr.now.wrapping_add(hold));
                 #[cfg(feature = "hostsim")]
