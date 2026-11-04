@@ -1,6 +1,6 @@
 """The demo library and the screenshot manifest: the contracts `make screenshots` relies on.
 
-The first half needs nothing but this checkout — the manifests, the QR encoder, the plex.tv
+The first half needs nothing but this checkout — the manifests, the QR encoder, the account-service
 stand-in and the scene manifest. The second half serves the catalog itself, which needs the
 derived artwork cache (`make demo-library`, ~390 MB of downloads); it is skipped, loudly, where
 the cache is absent, so a fresh clone's `make check` stays offline.
@@ -342,7 +342,7 @@ class Qr(unittest.TestCase):
         self.assertEqual(rem, 0, "BCH(15,5) remainder")
         self.assertEqual(word >> 13, 0b00, "ECC level M")
 
-    def test_the_plex_style_png_is_white_modules_on_a_transparent_ground(self):
+    def test_the_styled_png_is_white_modules_on_a_transparent_ground(self):
         w, h, colour, raw = decode_png(qr.png(self.m, scale=2, border=0, plex_style=True))
         self.assertEqual((w, h, colour), (50, 50, 4))
         stride = 1 + 2 * w
@@ -358,7 +358,7 @@ class Qr(unittest.TestCase):
         self.assertEqual(raw[4 * 34 + 1 + 4], 0)     # first finder module
 
 
-class PlexTvStandIn(unittest.TestCase):
+class AccountServiceStandIn(unittest.TestCase):
     """`butaca-plextv` points the sign-in at the mock: the pin never links."""
 
     def setUp(self):
@@ -372,7 +372,7 @@ class PlexTvStandIn(unittest.TestCase):
         status, _, body = self.pms.handle("GET", f"/api/v2/pins/{mock_pms.DEMO_PIN_ID}")
         self.assertEqual((status, json.loads(body)["authToken"]), (200, None))
 
-    def test_the_qr_is_a_plex_style_png(self):
+    def test_the_qr_is_a_styled_png(self):
         status, ctype, body = self.pms.handle("GET", "/api/v2/pins/qr/DEMO")
         self.assertEqual((status, ctype), (200, "image/png"))
         self.assertEqual(decode_png(body)[2], 4)

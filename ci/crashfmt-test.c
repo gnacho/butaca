@@ -1,4 +1,4 @@
-/* Butaca — an unofficial native Plex client for LG webOS.
+/* Butaca - an unofficial native media client for LG webOS.
  * Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository root.
  *
  * crashfmt-test.c — host test for `src/crashfmt.h`, the pure half of the crash tracer.

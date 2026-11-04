@@ -466,7 +466,7 @@ def _chunk(tag: bytes, data: bytes) -> bytes:
 
 
 def png(matrix: list[list[bool]], scale: int = 8, border: int = 4, plex_style: bool = False) -> bytes:
-    """Black modules on white by default. `plex_style` draws what plex.tv's
+    """Black modules on white by default. `plex_style` draws what the account service's
     `/api/v2/pins/qr/<code>` serves instead: WHITE modules on a TRANSPARENT ground (grayscale +
     alpha), which the client tints dark over its own white card."""
     n = len(matrix)

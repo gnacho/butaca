@@ -177,7 +177,7 @@ if [ "${BUTACA_STAGE_TOKEN:-}" = 1 ]; then
     fi
     umask 077
     printf '%s' "$token" > "$runtime/butaca-token"
-    echo "Plex token staged in the private simulator runtime directory."
+    echo "Server token staged in the private simulator runtime directory."
 elif [ -s "$runtime/butaca-token" ]; then
     echo "Using the token already staged in the simulator runtime directory."
 fi

@@ -7,7 +7,8 @@ this one produces the version that passes. Both read the private set through
 
 WHY IT EXISTS. On 2026-08-26 captured logs were committed and pushed carrying a third party's
 server address, port, machine hash and handle. The app enumerates the signed-in account's servers
-at boot, so **even a no-Plex pipeline case logs them** -- which is the trap: a tier that needs no
+at boot, so **even a pipeline case with no server behind it logs them** -- which is the
+trap: a tier that needs no
 token still produces a log that cannot be published. Scrubbing by hand is how the leak happened.
 
 Placeholders are STABLE and DISTINCT: one private value always becomes the same label and two
@@ -42,11 +43,11 @@ PUBLIC_IP = re.compile(
 PEER_HANDLE = re.compile(r'(auth: reached\s+)"([^"]+)"')
 
 # **Three more shapes of the same address, and missing them is how the first fix of this stayed
-# incomplete for a day.** Plex reaches a server through `https://<dashed-ip>.<hash>.plex.direct`,
-# so the SAME address appears a second time with dashes for dots -- invisible to any dotted-quad
-# pattern -- alongside a hash derived from the server's machineIdentifier, which identifies it just
-# as uniquely. And `(shared by <user>)` names the OWNER outright, which is the disclosure the
-# address is only a proxy for.
+# incomplete for a day.** The retired client reached a server through a dashed-address name under
+# the service's own DNS suffix, so the SAME address appears a second time with dashes for dots --
+# invisible to any dotted-quad pattern -- alongside a hash derived from the server's
+# machineIdentifier, which identifies it just as uniquely. And `(shared by <user>)` names the
+# OWNER outright, which is the disclosure the address is only a proxy for.
 DASHED_HOST = re.compile(r"(?<![0-9.-])\d{1,3}(?:-\d{1,3}){3}(?=\.[0-9a-f]{20,}\.plex\.direct)")
 PLEX_DIRECT_HASH = re.compile(r"(?<=\.)[0-9a-f]{20,}(?=\.plex\.direct)")
 SHARED_BY = re.compile(r"(\(shared by\s+)([^)]+)(\))")
@@ -114,7 +115,7 @@ def scrub(text, guard, secrets):
     # real person -- and the app reaches other people's servers by construction. `auth: reached
     # "<handle>" <ip>:<port> (shared...)` is logged for every server the account can see, so a
     # friend's shared server lands in EVERY captured log, under an address that appears in no
-    # declared private file because it arrives at runtime from plex.tv.
+    # declared private file because it arrives at runtime from the account service.
     #
     # This was not hypothetical. 42 occurrences across 21 committed logs survived a commit whose
     # message was "scrub third-party and device identifiers from the captured logs", because both

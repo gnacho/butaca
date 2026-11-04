@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A SYNTHETIC Plex Media Server — enough of the PMS REST surface for the app to boot to Home,
+"""A SYNTHETIC media server — enough of the PMS REST surface for the app to boot to Home,
 browse a library, open a detail page, a season, a person, search, mark watched, and start a play,
 with NOT ONE household byte anywhere in it.
 
@@ -11,11 +11,11 @@ would fill with a title, a name, a summary or a tag is drawn here from one CLOSE
 `h264`, `home.continue`, …). `tests/test_harness.py` verifies committed fixtures against exactly
 that alphabet, which is decidable; "does this look like a title" is not.
 
-What it is NOT: a PMS emulator. It answers the endpoints `plex/{library,hubs,transcoder,
-timeline}.rs` request (`docs/plex-openapi.json` is the spec they follow) with the FIELDS
-`plex/models.rs` deserialises, and nothing else. An unknown path gets an empty container and a
-line on stderr naming it, so extending it is one function. Numbers go on the wire as numbers;
-the models fold either form.
+What it is NOT: a PMS emulator. It answers the endpoints the app's data layer requests
+(`library`, `hubs`, `transcoder`, `timeline`) with the FIELDS its own model types
+deserialise, and nothing else. An unknown path gets an empty container and a line on stderr
+naming it, so extending it is one function. Numbers go on the wire as numbers, the models
+fold either form.
 
 Deterministic: the library is generated from `--seed` and never from the clock, so two servers
 started with one seed answer byte-identically, which is what a fixture recorded against one and
@@ -50,10 +50,11 @@ of an episode carries the rest of its show after it, as PMS's does, so Up Next h
 Nothing recorded against it may be committed as a fixture — the harness's alphabet check would
 refuse it, correctly.
 
-Every mode also answers the four plex.tv calls of the QR sign-in (`/api/v2/pins`, the poll, the
-QR image, and `/api/v2/user`) with a fixed demo code, for an app booted with
+Every mode also answers the four account-service calls of the QR sign-in (`/api/v2/pins`, the
+poll, the QR image, and `/api/v2/user`) with a fixed demo code, for an app booted with
 `butaca-plextv=http://127.0.0.1:<port>`: the sign-in screen can then be driven and captured
-without touching plex.tv. The poll stays pending unless `--authorize-after N` (implied, N=2, by
+without touching the account service. The poll stays pending unless `--authorize-after N`
+(implied, N=2, by the
 `--plaintext-only-lan`) links the code on the Nth poll with a synthetic account token, so a
 sign-in completes end to end without any real account.
 `GET`/`PUT /api/v2/user/profile` also reads and edits an in-memory synthetic profile;
@@ -66,10 +67,11 @@ The app reaches it as any other server: run the simulator with `127.0.0.1 32499`
 any non-empty string in the instance root's `butaca-token` (the token is accepted, never checked).
 
 `--plaintext-only-lan` reproduces Sentry BUTACA-10: a person's OWN server (`owned=true`) on
-their LAN, whose owner never turned on port forwarding, so every HTTPS route plex.tv could name
-for it — a `*.plex.direct` connection AND relay — fails, while the plaintext local address still
+their LAN, whose owner never turned on port forwarding, so every HTTPS route the account service
+could name for it (a dashed-address connection AND relay) fails, while the plaintext local
+address still
 answers. It makes `/api/v2/resources` return exactly ONE resource, no relay connection at all,
-and two connections: an `https://<dashed-ip>.<hash>.plex.direct:<port>` one with `local=true` that
+and two connections: a dashed-address `https` one with `local=true` that
 FAILS (a real TCP listener that accepts and immediately closes, i.e. a genuine TLS handshake
 failure — or, with `--insecure-fail-mode unreachable`, a port nothing listens on at all), and a
 plain `http://<advertise-ip>:<port>` one with `local=true` that is THIS SAME server, answering
@@ -86,9 +88,9 @@ sign-in against this mock (it authorizes the code by itself, on the 2nd poll):
 
     1. python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip <HOST-LAN-IP>
        (the LAN plaintext leg the app connects to directly).
-    2. `plex_tv()` in rust-modules/src/plex/account.rs accepts only a `127.0.0.1`/`localhost`
-       trigger — the trigger carries the account token, and that restriction is deliberate and
-       must stay. So make plex.tv loopback ON THE DEVICE with a reverse tunnel from the host
+    2. The account sign-in accepts only a `127.0.0.1`/`localhost` trigger — the trigger
+       carries the account token, and that restriction is deliberate and must stay. So make
+       the account service loopback ON THE DEVICE with a reverse tunnel from the host
        (hold the TV lock first):
          ssh -N -R 32499:127.0.0.1:32499 root@<TV-HOST>
     3. in the install's runtime root, arm (empty files unless shown):
@@ -96,8 +98,8 @@ sign-in against this mock (it authorizes the code by itself, on the 2nd poll):
          butaca-login                             boot to the QR sign-in
          butaca-plextv = http://127.0.0.1:32499
     4. launch. The events log shows, in order:
-         - the sign-in read-out "Couldn't sign in" with the reason "Your Plex server is on this
-           network but can't be reached securely. Select Connect to connect without encryption."
+         - the sign-in read-out "Couldn't sign in", with the reason the app gives for a server
+           that is on this network but cannot be reached securely (its Connect action).
            and the primary *Connect*
          - *Connect* opens "Connect without encryption?" seated on *Not now*; its *Connect* logs
            `plaintext: user allowed an unencrypted connection on this network` and retries
@@ -113,12 +115,14 @@ read-out; the consent flow itself needs the TV and a real LAN address.
     # TV (replace 192.168.0.10 with the host's actual LAN IPv4; never a real private address from
     # a gitignored file — hold the TV lock for the device commands below):
     python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip 192.168.0.10
-    # `butaca-plextv` only ever accepts a loopback address (see step 2 above), so make plex.tv
+    # `butaca-plextv` only ever accepts a loopback address (see step 2 above), so make
+    # the account service
     # loopback ON THE DEVICE with a reverse tunnel from the host, then arm the loopback trigger:
     # ssh -N -R 32499:127.0.0.1:32499 root@<TV-HOST>
     # butaca-plextv=http://127.0.0.1:32499
 
-    # Simulator (loopback is both plex.tv and the LAN address it advertises; still exercises the
+    # Simulator (loopback is both the account service and the LAN address it advertises;
+    # still exercises
     # HTTPS-fails / plaintext-answers shape, just not the loopback-ineligibility warning):
     python3 tests/mock_pms.py --plaintext-only-lan --advertise-ip 127.0.0.1
     # butaca-plextv=http://127.0.0.1:32499
@@ -133,7 +137,7 @@ otherwise carries `canNormalizeLoudness="1"` (PMS string-encodes booleans on the
 analysis on the source.
 
 `/video/:/transcode/universal/decision` answers a live `boostDialog=1` or `normalizeLoudness=1`
-like measured PMS 1.43.4 with Plex Pass (M1/M2 in the design plan): the Part's decision becomes
+like measured PMS 1.43.4 with the paid tier (M1/M2 in the design plan): the Part's decision becomes
 "transcode", the video stream stays "copy", and the audio stream becomes "transcode" with
 `codec=ac3` at the SAME channel count as the source — whether the request shape was a remux
 (`directPlay=0&directStream=1`) or an MDE probe (`directPlay=1&directStreamAudio=1`); a param of
@@ -213,7 +217,7 @@ VERIFY_PREFS = [
     {"id": "subtitleMode", "value": "2"},
 ]
 # `--plaintext-only-lan` (BUTACA-10). Not a name — the fixed 32-hex label a real
-# `*.plex.direct` hostname carries ahead of the dashed IP; the closed alphabet governs the
+# generated hostname carries ahead of the dashed IP; the closed alphabet governs the
 # synthetic library's titles/tags, not a protocol constant like this or "h264".
 PLEX_DIRECT_HASH = "0123456789abcdef0123456789abcdef"
 
@@ -332,7 +336,7 @@ class Library:
         if extra_media:
             self._add_extra_media([pathlib.Path(p) for p in extra_media])
         if rail_fixture:
-            # Plex's sort title can differ from its displayed title. Only this explicit mode
+            # The server's sort title can differ from its displayed title. Only this explicit mode
             # gives it a prefix; ordinary seeded fixtures keep every generated byte unchanged.
             # Gaps between letters exercise directory-based movement, not a hardcoded A–Z list.
             for section in self.sections:
@@ -981,7 +985,7 @@ DEMO_PIN_CODE = "DEMO"
 # token alphabet (`ALPHABET_TOKEN`), and accepted — never checked — by every endpoint here.
 DEMO_ACCOUNT_TOKEN = "s" + hashlib.sha1(b"mock-pms-demo-account").hexdigest()[:8]
 # What the demo sign-in QR encodes: the page a person types a code into. A scan of a screenshot
-# lands on plex.tv's own link page, which asks for a code this server invented — harmless.
+# lands on the account service's own link page, which asks for a code this server invented.
 DEMO_QR_TEXT = b"https://plex.tv/link"
 
 
@@ -1398,12 +1402,12 @@ def open_insecure_fail_listener(fail_mode):
 
 def plaintext_only_lan_resources(lib, ip, http_port, fail_port, access_token):
     """The exact `/api/v2/resources` BUTACA-10 needs: ONE owned server, no relay connection at
-    all, and two connections — the failing `https://…plex.direct` one and the plaintext LAN one,
+    all, and two connections — the failing dashed-address `https` one and the plaintext LAN one,
     which is this same mock (`ip`:`http_port`). Field names match what
-    `rust-modules/src/plex/account.rs`'s `Resource`/`Connection` deserialize (`clientIdentifier`,
+    `rust-modules/src/server/`'s `Resource`/`Connection` deserialise (`clientIdentifier`,
     `provides`, `owned`, `accessToken`, `httpsRequired`, `publicAddressMatches`,
     `connections[{protocol,address,port,uri,local,relay,IPv6}]`); the top-level shape is a bare
-    JSON array, not a `MediaContainer` — plex.tv's envelope, not a PMS one."""
+    JSON array, not a `MediaContainer` — the account service's envelope, not a PMS one."""
     dashed = ip.replace(".", "-")
     https_uri = f"https://{dashed}.{PLEX_DIRECT_HASH}.plex.direct:{fail_port}"
     return [{
@@ -1564,7 +1568,8 @@ class MockPms:
         if write_path and not (method in ("GET", "HEAD") and p.startswith("/library/parts/")):
             self.note_write(method, path, body)
 
-        # plex.tv's QR sign-in, for `butaca-plextv` (see the module doc). Pending — the state
+        # The account service's QR sign-in, for `butaca-plextv` (see the module doc). Pending.
+        # The state
         # the sign-in screen is captured in — unless `--authorize-after N` links it on the Nth poll.
         if p == "/api/v2/pins" and method == "POST":
             return j({"id": DEMO_PIN_ID, "code": DEMO_PIN_CODE, "expiresIn": 1800, "authToken": None,
@@ -1859,7 +1864,7 @@ class MockPms:
                        if item else None)
             # #266: a LIVE boostDialog=1 or normalizeLoudness=1 — a `0` or absent param is
             # byte-identical to the branches below, untouched. Measured against PMS 1.43.4 with
-            # Plex Pass (design plan M1/M2): whether the request shape was the remux one
+            # paid tier (design plan M1/M2): whether the request shape was the remux one
             # (directPlay=0&directStream=1) or the MDE probe (directPlay=1&directStreamAudio=1),
             # the Part becomes a transcode — video stays "copy", audio becomes "transcode" at
             # `ac3`, same channel count as the source — so both shapes are modelled identically
@@ -2399,11 +2404,12 @@ def main():
     ap.add_argument("--hero", help="with --catalog: the film at the head of Continue Watching (the hero)")
     ap.add_argument("--plaintext-only-lan", action="store_true",
                     help="BUTACA-10: /api/v2/resources answers with ONE owned server, no "
-                         "relay, whose only HTTPS route (a plex.direct connection) fails before "
+                         "relay, whose only HTTPS route (a dashed-address connection) fails before "
                          "the app's own logic runs, and whose plaintext http://<advertise-ip>:"
                          "<port> connection is this same server, answering /identity tokenless. "
                          "TV: `python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan "
-                         "--advertise-ip 192.168.0.10`, then point the device's plex.tv trigger "
+                         "--advertise-ip 192.168.0.10`, then point the device's account "
+                         "service trigger "
                          "at http://192.168.0.10:<port>. Simulator: `python3 tests/mock_pms.py "
                          "--plaintext-only-lan --advertise-ip 127.0.0.1`. Expect the app to offer "
                          "\"Connect without encryption?\", never a dead end. The full reproduction "

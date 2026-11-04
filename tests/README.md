@@ -1,6 +1,6 @@
 # On-device regression harness
 
-Headless regression tests for the native webOS Plex player. Nothing on the host decodes a frame or
+Headless regression tests for the native webOS media client. Nothing on the host decodes a frame or
 talks to Starfish/ACB, so every test here drives the **real app on the real TV** via the
 `butaca-*` dev triggers and asserts on the on-device event log (`butaca-events.log`) — both
 of them inside that install's **runtime root**, which is `/tmp` for the stable install and
@@ -15,14 +15,14 @@ how a green run means nothing.
 | | **synthetic** — the DEFAULT | **server** (`--server`) |
 |---|---|---|
 | what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from PMS metadata, markers, resume, the `/:/timeline` reporter |
-| what it needs | a TV address and `make fixtures-pipeline` | a Plex server, a token, a `manifest.local.json`, and a library holding the shapes the matrix names |
+| what it needs | a TV address and `make fixtures-pipeline` | a media server, a token, a `manifest.local.json`, and a library holding the shapes the matrix names |
 | media | generated clips, served off your Mac | real items on your PMS |
 | who can run it | **anyone** | whoever owns that library |
 | cost | ~0.9 GB, a few minutes to build; seconds per case | ~3 GB, ~20 minutes to build; ten to twenty minutes to run |
 
 ```sh
 ./tests/run.py                  # the synthetic tier — 20 cases, ~7 min, needs nothing
-./tests/run.py --server         # the library-backed 21, through the whole Plex chain
+./tests/run.py --server         # the library-backed 21, through the whole server chain
 ```
 
 **The synthetic tier is the default**, and that inversion (2026-08-22) is about what a bare
@@ -47,8 +47,8 @@ default alone.**
 Two more host-side pieces landed with phase 0 of the UI restructure (2026-09-06), and both exist
 so that a recording of the UI can be COMMITTED to this public repository:
 
-- **`tests/mock_pms.py`** is a synthetic Plex Media Server — the endpoints `plex/*.rs` actually
-  request, answered with the fields `plex/models.rs` reads, from a library GENERATED from `--seed`
+- **`tests/mock_pms.py`** is a synthetic media server - the endpoints the data layer actually
+  requests, answered with the fields its own types read, from a library GENERATED from `--seed`
   in which every title, name, summary and tag is one word of a closed alphabet (`s` + eight hex
   digits). No household byte can enter a fixture recorded against it, so no scrub pass is needed
   — and `scrub.rs` cannot recognise a title anyway. `--selftest` proves the shapes and the
@@ -194,7 +194,7 @@ two pids, in an order busybox does not promise. Use `fuser <appdir>/butaca`, or 
 
 ## Security
 
-The PMS **X-Plex-Token is secret and is never committed**. `run.py` reads it from the
+The PMS **access token is secret and is never committed**. `run.py` reads it from the
 gitignored `src/config.local.h` (`#define PMS_TOKEN "..."`) at runtime and never prints,
 logs, or writes it — progress URLs are redacted to `<token>` in output. The TV ssh
 credentials are already in the committed `Makefile`, so the runner shells out to `make` /
@@ -207,9 +207,9 @@ before every case, and again by `teardown()` on *every* exit path, including Ctr
 
 ## Test identity — runs as a managed user (no watch-history pollution)
 
-> **Legacy note.** The binary no longer reads the `butaca-token` file: the dev-token arm went with the Plex account flow (#190). `tests/run.py` and the on-device tooling still write it for archived scenarios.
+> **Legacy note.** The binary no longer reads the `butaca-token` file: the dev-token arm went with the account flow (#190). `tests/run.py` and the on-device tooling still write it for archived scenarios.
 
-By default the harness plays **as the Plex Home managed user in `manifest.local.json` →
+By default the harness plays **as the household-roster managed user in `manifest.local.json` →
 `test_user`**, so test playback + timeline scrobbles land on *that* user's history and your real
 account stays clean. It works without storing any new secret:
 
@@ -249,9 +249,9 @@ you have no such server):
 - `machine_id` (the server's `clientIdentifier`) is the match key; `name` alone also works,
   case-insensitively, but is not stable. **No token here** — `run.py` looks the server up in
   `GET https://plex.tv/api/v2/resources` with the owner token from `config.local.h` and takes the
-  `accessToken` plex.tv returns for it, exactly like it does for `test_user`.
+  `accessToken` the account service returns for it, exactly like it does for `test_user`.
 - `host`/`port` are **optional but usually right to set**. Without them the runner picks a
-  connection from plex.tv and prints which — and for a *shared* server plex.tv's `local` flag means
+  connection the account service advertises and prints which - and for a *shared* server its `local` flag means
   the **owner's** LAN, not yours (a real one here advertises `10.9.9.5:32400 local=true`, which
   the TV can never reach), so the public address is preferred instead, dotted quads before
   hostnames (the app's transport has no DNS). Anything but a LAN address prints a NOTE saying so.
@@ -276,7 +276,7 @@ server is needed, never *which*):
 - `./tests/run.py --shared-server` injects it into **every** case/scene of one run — for bringing a
   second-source screen up by hand. It exits if the overlay has no `shared_server` block.
 - `./tests/run.py --list` marks such entries `[+2nd server]` and says whether one is configured.
-  It is offline: nothing is resolved, plex.tv is not called.
+  It is offline: nothing is resolved, the account service is not called.
 
 On the device the app parses the file in `dev::servers()` (`rust-modules/src/dev.rs`) and logs
 
@@ -296,7 +296,7 @@ the wrong screen.
 
 **The matrix is a superset of what any one library can exercise.** It was derived from a survey of
 the maintainer's server, so it names shapes — 4K Dolby Vision P8, a TrueHD default with an AC-3
-sibling, a PGS subtitle track, AV1 with no direct-playable audio — that most Plex libraries simply
+sibling, a PGS subtitle track, AV1 with no direct-playable audio — that most media-server libraries simply
 do not contain. Until 2026-08-22 that made the suite unrunnable by anyone else: a single
 unresolvable key called `_die_no_overlay` and killed all 21 cases, so the honest answer to "can I
 test my change?" was no.
@@ -331,7 +331,7 @@ Three things are worth knowing before you read a green run as a portable claim:
 - **A mis-mapped item fails as a player bug.** The harness cannot tell "this ratingKey is the wrong
   shape" from "the player regressed": map an mp4 to a case expecting mkv direct play and you get a
   transcode assertion failure that reads exactly like a routing regression. When a case fails on a
-  fresh installation, confirm the item's shape in Plex before believing the failure.
+  fresh installation, confirm the item's shape on the server before believing the failure.
 
 **Watch history:** every case clears the item's resume point (`/:/unscrobble`) before it runs and
 may seed a fake one. That is intentional and documented below, but it is destructive against a
@@ -579,7 +579,7 @@ Base playback (decision + codec + not-stuck), one case each:
 | `dp_mp4_container` | `movie_hevc_aac_mp4` | HEVC + AAC, **mp4 container** direct-play (mov demuxer over HTTP, AAC→ADTS), sidecar subs |
 | `dp_h264_aac_episode` | `episode_h264_aac` | H264 + AAC direct-play, TV episode, no subs |
 | `dp_h264_ac3_many_audio` | `movie_h264_ac3_many_audio` | H264 + AC3 direct-play, 8 audio tracks (TrueHD/vorbis present) |
-| `transcode_av1_no_dp_audio` | `movie_av1_no_dp_audio` | **must-transcode** (AV1 + no DP audio) → **HEVC 4K HDR10**/AC3 on this Plex-Pass server (the target chain ends in h264 since issue #22, so a server that cannot encode HEVC re-encodes to h264 instead of dropping video) |
+| `transcode_av1_no_dp_audio` | `movie_av1_no_dp_audio` | **must-transcode** (AV1 + no DP audio) → **HEVC 4K HDR10**/AC3 on this paid-tier server (the target chain ends in h264 since issue #22, so a server that cannot encode HEVC re-encodes to h264 instead of dropping video) |
 
 Operation cases (each also re-checks not-stuck / no-error afterward):
 
@@ -702,7 +702,7 @@ matrix is built on — prefer it to `min_video_width` in any case where the reso
 and **`reaches_eos`** turns on the `finished` assertion, which only `pipe_finish_eos` may set,
 because it needs a fixture short enough to actually run out.
 
-## The synthetic tier (the default) — the player, with no Plex behind it
+## The synthetic tier (the default) — the player, with no server behind it
 
 ```sh
 make fixtures-pipeline          # ~0.9 GB into $FIXTURES_OUT/pipeline; ~4 min, once
@@ -751,7 +751,7 @@ the seek assertions, and **`server_wire`** — the counters from the fixture ser
 the one assertion no log line can give: the pump logs its seek intent whether or not the demuxer
 ever reached the AVIO, so a counted `206` is the only proof the `Range` reopen actually happened.
 
-### Auto under a changing link, without Plex
+### Auto under a changing link, without a server
 
 `pipe_auto_original_slow_recover` is the synthetic equivalent of changing the TV's router limit
 while a movie is already playing. One fixture-server response follows a wall-clock schedule whose

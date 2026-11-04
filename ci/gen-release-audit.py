@@ -79,8 +79,9 @@ DEV_WITNESSES = (
 
 # A build machine's directory layout inside a shipped file. Same shape, and the same two
 # calibration bugs designed around, as `ci/check-package.py` and `ci/verify-published.sh`: the
-# match keeps its leading boundary character so plex.tv's own `/api/v2/home/users` is not read as
-# `/home/users`, and it is applied per PATH rather than per line so that FFmpeg's single
+# match keeps its leading boundary character so the account service's own `/api/v2/home/users`
+# is not read as `/home/users`, and it is applied per PATH rather than per line so that
+# FFmpeg's single
 # configure blob cannot have one allowed token vouch for a forbidden one beside it.
 HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]+)")
 ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/")

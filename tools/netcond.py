@@ -102,7 +102,7 @@ human at the keyboard before going headless, and read "netcond logs nothing" as 
 as a quiet television. `tests/serve_fixtures.py` carries the same warning for the same reason.
 
 Nothing here is deployed to the TV and nothing is secret: it forwards bytes it does not inspect
-beyond the first line, and it never logs the query string — a PMS URL carries `X-Plex-Token`.
+beyond the first line, and it never logs the query string — a PMS URL carries the access token.
 """
 import argparse
 import ipaddress
@@ -145,7 +145,7 @@ def say(msg):
 
 
 def _redact(s: str) -> str:
-    """A PMS request line carries X-Plex-Token in the query string. Never print it."""
+    """A PMS request line carries the access token in the query string. Never print it."""
     return re.sub(r"([?&](?:X-Plex-Token|token)=)[^&\s]*", r"\1<redacted>", s)
 
 
