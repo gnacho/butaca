@@ -696,8 +696,7 @@ impl Bridge {
         let listing_changed = !self.listing.view().same_items(listing.view())
             || self.listing.view().fetch() != listing.view().fetch();
         self.listing = listing;
-        let browse_changed = listing_changed || !self.directory.same_publication(&directory_before)
-            || hubs_before != (self.section_hubs.view().id(), self.section_hubs.view().revision());
+        let browse_changed = listing_changed || !self.directory.same_publication(&directory_before);
         let search = if self.home_io.is_some() { self.search.clone() } else {
             self.stores.search_snapshot(self.directory.view())
         };
@@ -712,6 +711,14 @@ impl Bridge {
         if hubs.hub_count() > 0 {
             self.section_hubs = crate::browse::section_hubs::HubsSnapshot::projected(hubs);
         }
+        // The shelf projection is compared ONLY once it is final. On a route with no `home_io`
+        // the browse-owned snapshot lands first and the catalog projection overwrites it below,
+        // so reading the pair before this block compared two different owners: the revision went
+        // 3 -> 0 -> 3 within the frame, `browse_changed` came out true every frame, and every
+        // screen was handed a `StoreChanged(Browse, …)` landing for data that never moved. That
+        // is what kept the detail scene presenting at 144fps until its capture timed out.
+        let browse_changed = browse_changed
+            || hubs_before != (self.section_hubs.view().id(), self.section_hubs.view().revision());
         let after = (self.hubs.view().generation, self.hubs.view().state);
         let hubs_changed = before != after;
         (browse_changed, hubs_changed, search_changed)
@@ -3047,6 +3054,9 @@ mod person_lifecycle_tests;
 #[cfg(test)]
 #[path = "collection_lifecycle_tests.rs"]
 mod collection_lifecycle_tests;
+#[cfg(test)]
+#[path = "capture_views_tests.rs"]
+mod capture_views_tests;
 
 // The controlled preferences contract boots the synthetic Jellyfin world, which
 // `Initial::validate` refuses without the feature.

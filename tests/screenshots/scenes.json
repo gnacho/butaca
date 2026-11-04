@@ -14,6 +14,8 @@
       "state": "Home at rest: the catalog's hero film pinned in hero slot 0 (the head of Continue Watching, so its button reads Continue), the deck's first shelf peeking below.",
       "triggers": {"heropin": "0"},
       "expect": ["home: hero pinned at slot 0", "hubs: landed"],
+      "max_delta": 2,
+      "tolerance_reason": "Measured over two capture pairs at 1920x1080: 67 and 32 pixels differ, always inside the Continue label's antialiased box (x 123..254, y 713..778) and only on the glyph run's top and bottom edge rows, by at most 2 levels per channel. Every other pixel of the canvas is identical and the scene arms stillclock, so nothing is animating: the label rasterizes a hair apart between captures.",
       "hero_variants": true,
       "outputs": [
         {"file": "home.jpg", "size": "1600x900"},
@@ -82,10 +84,10 @@
     },
     {
       "name": "signin",
-      "state": "The QR sign-in screen. No `butaca-jellyfin` is written on this scene, so the boot has no server and lands on sign-in (see the manifest comment: the QR half needs an origin, which this scene does not arm yet).",
+      "state": "The sign-in screen with no server configured: the manual form on the right (server address focused with its placeholder, then user and password) and, under it, Connect and Sign in with a code. No `butaca-jellyfin` is written for this scene, so boot lands here; it arms no origin either, and the QR half of sign-in needs one, so the capture shows the form rather than a code nobody could scan.",
       "triggers": {"login": ""},
       "no_token": true,
-      "expect": ["auth: qr png", "coldopen screen=login"],
+      "expect": ["coldopen screen=login"],
       "outputs": [{"file": "ux-signin.jpg", "size": "1920x1080"}]
     },
     {
