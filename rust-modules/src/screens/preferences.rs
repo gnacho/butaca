@@ -25,17 +25,21 @@ pub(crate) const SHAPE: &str = "PreferencesV2{kind:u8,picker:u8,selection:u32,bu
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind { Playback }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow }
+enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow, SubtitleSize, SubtitlePosition, SubtitleBackground }
 impl Field {
     fn title(self) -> &'static str { match self {
         Self::Quality => crate::i18n::msg::settings_playback_quality(), Self::DirectPlay => crate::i18n::msg::settings_playback_direct_play(),
         Self::LipSync => crate::i18n::msg::settings_playback_lip_sync(),
         Self::UpNext => crate::i18n::msg::settings_playback_up_next(),
         Self::UpNextWindow => crate::i18n::msg::settings_playback_up_next_window(),
+        Self::SubtitleSize => crate::i18n::msg::settings_playback_subtitle_size(),
+        Self::SubtitlePosition => crate::i18n::msg::settings_playback_subtitle_position(),
+        Self::SubtitleBackground => crate::i18n::msg::settings_playback_subtitle_background(),
     }}
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::server::session::UpNextPolicy), Window(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::server::session::UpNextPolicy), Window(i64),
+    SubtitleSize(u8), SubtitlePosition(u8), SubtitleBackground(u8) }
 #[derive(Clone)]
 enum Action { Open(Field), Pick(Value) }
 struct State {
@@ -145,6 +149,9 @@ impl PreferencesPage {
             Value::LipSync(offset_ms) => PreferenceCmd::LipSync { offset_ms, reply },
             Value::UpNext(policy) => PreferenceCmd::UpNext { policy, reply },
             Value::Window(seconds) => PreferenceCmd::UpNextWindow { seconds, reply },
+            Value::SubtitleSize(step) => PreferenceCmd::SubtitleScale { step, reply },
+            Value::SubtitlePosition(step) => PreferenceCmd::SubtitlePosition { step, reply },
+            Value::SubtitleBackground(step) => PreferenceCmd::SubtitleBackground { step, reply },
         };
         self.pending = Some(Pending::Local(rx)); self.state.busy = true;
         self.state.status = crate::i18n::msg::settings_playback_saving().into();
@@ -157,6 +164,9 @@ impl PreferencesPage {
             Field::LipSync => Value::LipSync(crate::route::lip_sync_offset_ms()),
             Field::UpNext => Value::UpNext(crate::route::up_next_policy()),
             Field::UpNextWindow => Value::Window(crate::route::up_next_window_s()),
+            Field::SubtitleSize => Value::SubtitleSize(crate::route::subtitle_scale_step()),
+            Field::SubtitlePosition => Value::SubtitlePosition(crate::route::subtitle_position_step()),
+            Field::SubtitleBackground => Value::SubtitleBackground(crate::route::subtitle_background_step()),
         }
     }
     fn options(&self, field: Field) -> Vec<(String, Value)> {
@@ -190,6 +200,25 @@ impl PreferencesPage {
                 }
                 result
             }
+            Field::SubtitleSize => [
+                crate::i18n::msg::settings_playback_subtitle_size_smaller(),
+                crate::i18n::msg::settings_playback_subtitle_size_small(),
+                crate::i18n::msg::settings_playback_subtitle_size_normal(),
+                crate::i18n::msg::settings_playback_subtitle_size_large(),
+                crate::i18n::msg::settings_playback_subtitle_size_larger(),
+            ].into_iter().enumerate().map(|(i, label)| (label.into(), Value::SubtitleSize(i as u8))).collect(),
+            Field::SubtitlePosition => [
+                crate::i18n::msg::settings_playback_subtitle_position_bottom(),
+                crate::i18n::msg::settings_playback_subtitle_position_low(),
+                crate::i18n::msg::settings_playback_subtitle_position_middle(),
+                crate::i18n::msg::settings_playback_subtitle_position_high(),
+                crate::i18n::msg::settings_playback_subtitle_position_top(),
+            ].into_iter().enumerate().map(|(i, label)| (label.into(), Value::SubtitlePosition(i as u8))).collect(),
+            Field::SubtitleBackground => [
+                crate::i18n::msg::settings_playback_subtitle_background_off(),
+                crate::i18n::msg::settings_playback_subtitle_background_half(),
+                crate::i18n::msg::settings_playback_subtitle_background_solid(),
+            ].into_iter().enumerate().map(|(i, label)| (label.into(), Value::SubtitleBackground(i as u8))).collect(),
         }
     }
     fn value_label(&self, field: Field) -> String {
@@ -210,6 +239,11 @@ impl PreferencesPage {
             Kind::Playback => {
                 let mut f = vec![Field::Quality, Field::DirectPlay, Field::LipSync, Field::UpNext];
                 if crate::route::up_next_offered() { f.push(Field::UpNextWindow); }
+                // The look of a subtitle track the app composes. Tail position: these never
+                // displace the transport rows a person reaches for while watching.
+                f.push(Field::SubtitleSize);
+                f.push(Field::SubtitlePosition);
+                f.push(Field::SubtitleBackground);
                 f
             }
         };
@@ -269,7 +303,8 @@ impl PreferencesPage {
     fn commit(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         match value {
             Value::Quality(_) | Value::DirectPlay(_) | Value::LipSync(_)
-            | Value::UpNext(_) | Value::Window(_) => self.save_local(value, fx),
+            | Value::UpNext(_) | Value::Window(_) | Value::SubtitleSize(_)
+            | Value::SubtitlePosition(_) | Value::SubtitleBackground(_) => self.save_local(value, fx),
         }
     }
     fn poll(&mut self) -> bool {

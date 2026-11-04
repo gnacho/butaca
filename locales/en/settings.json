@@ -572,6 +572,70 @@
     "value": "Up Next card timing",
     "description": "Settings, consent or sign-in UI: settings.playback.up_next_window"
   },
+  "settings.playback.subtitle_size": {
+    "value": "Subtitle size",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size"
+  },
+  "settings.playback.subtitle_size_smaller": {
+    "value": "Smaller",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_smaller"
+  },
+  "settings.playback.subtitle_size_small": {
+    "value": "Small",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_small"
+  },
+  "settings.playback.subtitle_size_normal": {
+    "value": "Normal",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_normal"
+  },
+  "settings.playback.subtitle_size_large": {
+    "value": "Large",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_large"
+  },
+  "settings.playback.subtitle_size_larger": {
+    "value": "Larger",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_larger"
+  },
+  "settings.playback.subtitle_position": {
+    "value": "Subtitle position",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position"
+  },
+  "settings.playback.subtitle_position_bottom": {
+    "value": "Bottom edge",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_bottom"
+  },
+  "settings.playback.subtitle_position_low": {
+    "value": "Low",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_low"
+  },
+  "settings.playback.subtitle_position_middle": {
+    "value": "Middle",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_middle"
+  },
+  "settings.playback.subtitle_position_high": {
+    "value": "High",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_high"
+  },
+  "settings.playback.subtitle_position_top": {
+    "value": "Top edge",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_top"
+  },
+  "settings.playback.subtitle_background": {
+    "value": "Subtitle background",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background"
+  },
+  "settings.playback.subtitle_background_off": {
+    "value": "Off",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_off"
+  },
+  "settings.playback.subtitle_background_half": {
+    "value": "Light box",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_half"
+  },
+  "settings.playback.subtitle_background_solid": {
+    "value": "Solid box",
+    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_solid"
+  },
   "settings.audio.language": {
     "value": "Preferred audio language",
     "description": "Settings, consent or sign-in UI: settings.audio.language"

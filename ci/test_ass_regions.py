@@ -38,6 +38,7 @@ static void ass_renderer_done(ASS_Renderer *r) {}
 static void ass_library_done(ASS_Library *l) {}
 static void ass_set_message_cb(ASS_Library *l, void (*cb)(int,const char *,va_list,void *), void *d) {}
 static void ass_set_extract_fonts(ASS_Library *l, int v) {}
+static void ass_set_style_overrides(ASS_Library *l, char **list) {}
 static void ass_set_cache_limits(ASS_Renderer *r, int g, int b) {}
 static void ass_add_font(ASS_Library *l, const char *n, const char *d, int z) {}
 static void ass_process_codec_private(ASS_Track *t, char *d, int z) {}

@@ -513,6 +513,17 @@ pub struct Session {
     /// field existed round-trips byte-identical.
     #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
     pub(crate) lip_sync_offset_ms: i64,
+    /// Install-wide subtitle size step, applied to text tracks the app turns into ASS itself
+    /// (SRT/VTT). 0 is the built-in size, so a session persisted before the field existed
+    /// round-trips byte-identical. Auxiliary ASS/SSA tracks keep the style their author wrote.
+    #[serde(default, deserialize_with = "de_soft_u8", skip_serializing_if = "is_zero_u8")]
+    pub(crate) subtitle_scale: u8,
+    /// Install-wide subtitle vertical position step, same scope and same default-as-absence.
+    #[serde(default, deserialize_with = "de_soft_u8", skip_serializing_if = "is_zero_u8")]
+    pub(crate) subtitle_position: u8,
+    /// Install-wide subtitle background step (none, box, heavier box), same scope.
+    #[serde(default, deserialize_with = "de_soft_u8", skip_serializing_if = "is_zero_u8")]
+    pub(crate) subtitle_background: u8,
     /// What an episode ending does. `Auto` starts the next one when the Up Next countdown runs
     /// out, `Ask` leaves the card up until the user acts on it, and `Off` never offers it, so the
     /// credits roll and the player stays where it is. Skipped on write while `Auto`, so a session
@@ -615,6 +626,12 @@ struct CanonicalSessionPreferences {
     direct_play_mode: DirectPlayMode,
     #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
     lip_sync_offset_ms: i64,
+    #[serde(default, deserialize_with = "de_soft_u8", skip_serializing_if = "is_zero_u8")]
+    subtitle_scale: u8,
+    #[serde(default, deserialize_with = "de_soft_u8", skip_serializing_if = "is_zero_u8")]
+    subtitle_position: u8,
+    #[serde(default, deserialize_with = "de_soft_u8", skip_serializing_if = "is_zero_u8")]
+    subtitle_background: u8,
     #[serde(default, deserialize_with = "de_soft_up_next_policy", skip_serializing_if = "UpNextPolicy::is_auto")]
     up_next_policy: UpNextPolicy,
     #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
@@ -658,6 +675,9 @@ impl Default for CanonicalSessionPreferences {
             playback_quality: None,
             direct_play_mode: DirectPlayMode::Auto,
             lip_sync_offset_ms: 0,
+            subtitle_scale: 0,
+            subtitle_position: 0,
+            subtitle_background: 0,
             up_next_policy: UpNextPolicy::default(),
             up_next_window_s: None,
             auto_sign_in: false,
@@ -706,6 +726,9 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         playback_quality: session.playback_quality,
         direct_play_mode: session.direct_play_mode,
         lip_sync_offset_ms: session.lip_sync_offset_ms,
+        subtitle_scale: session.subtitle_scale,
+        subtitle_position: session.subtitle_position,
+        subtitle_background: session.subtitle_background,
         up_next_policy: session.up_next_policy,
         up_next_window_s: session.up_next_window_s,
         auto_sign_in: session.auto_sign_in,
@@ -776,6 +799,9 @@ pub(crate) fn join_canonical(
         playback_quality: preferences.playback_quality,
         direct_play_mode: preferences.direct_play_mode,
         lip_sync_offset_ms: preferences.lip_sync_offset_ms,
+        subtitle_scale: preferences.subtitle_scale,
+        subtitle_position: preferences.subtitle_position,
+        subtitle_background: preferences.subtitle_background,
         up_next_policy: preferences.up_next_policy,
         up_next_window_s: preferences.up_next_window_s,
         auto_sign_in: preferences.auto_sign_in,
@@ -806,6 +832,9 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         playback_quality: preferences.playback_quality,
         direct_play_mode: preferences.direct_play_mode,
         lip_sync_offset_ms: preferences.lip_sync_offset_ms,
+        subtitle_scale: preferences.subtitle_scale,
+        subtitle_position: preferences.subtitle_position,
+        subtitle_background: preferences.subtitle_background,
         up_next_policy: preferences.up_next_policy,
         up_next_window_s: preferences.up_next_window_s,
         auto_sign_in: preferences.auto_sign_in,
@@ -1778,6 +1807,22 @@ fn is_zero(v: &i64) -> bool {
     *v == 0
 }
 
+/// The subtitle appearance steps read the same way as `de_soft_i64`: a value this build cannot
+/// interpret degrades to the built-in look rather than making the enclosing [`Session`] disappear.
+fn de_soft_u8<'de, D>(d: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Ok(v) = serde_json::Value::deserialize(d) else {
+        return Ok(0);
+    };
+    Ok(v.as_u64().and_then(|n| u8::try_from(n).ok()).unwrap_or(0))
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
+
 /// Playback quality is a preference, not a credential gate. A value written by a newer build or
 /// damaged by a hand edit therefore degrades to the legacy-safe Original mode rather than making
 /// the enclosing [`Session`] disappear.
@@ -1860,6 +1905,24 @@ impl Session {
     pub(crate) fn with_lip_sync_offset_ms(&self, offset_ms: i64) -> Self {
         let mut next = self.clone();
         next.lip_sync_offset_ms = offset_ms;
+        next
+    }
+
+    pub(crate) fn with_subtitle_scale(&self, step: u8) -> Self {
+        let mut next = self.clone();
+        next.subtitle_scale = step;
+        next
+    }
+
+    pub(crate) fn with_subtitle_position(&self, step: u8) -> Self {
+        let mut next = self.clone();
+        next.subtitle_position = step;
+        next
+    }
+
+    pub(crate) fn with_subtitle_background(&self, step: u8) -> Self {
+        let mut next = self.clone();
+        next.subtitle_background = step;
         next
     }
 

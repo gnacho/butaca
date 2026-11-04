@@ -64,6 +64,10 @@ pub(crate) enum PreferenceCmd {
     Quality { quality: crate::server::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
     DirectPlay { mode: crate::server::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
     LipSync { offset_ms: i64, reply: std::sync::mpsc::Sender<bool> },
+    /// Subtitle appearance steps: only text tracks the app composes (SRT/VTT) read these.
+    SubtitleScale { step: u8, reply: std::sync::mpsc::Sender<bool> },
+    SubtitlePosition { step: u8, reply: std::sync::mpsc::Sender<bool> },
+    SubtitleBackground { step: u8, reply: std::sync::mpsc::Sender<bool> },
     UpNext { policy: crate::server::session::UpNextPolicy, reply: std::sync::mpsc::Sender<bool> },
     UpNextWindow { seconds: i64, reply: std::sync::mpsc::Sender<bool> },
     Language { language: crate::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
