@@ -104,10 +104,10 @@
     },
     {
       "name": "site-glass",
-      "state": "The website's glass close-up, supersampled 3x. The Movies library lists its collections after Recently Added, as a real server does; focus is seated on the third card of the last one (Silent Classics), so the Blender Open Movies shelf above it has scrolled up under the tab bar and fills it edge to edge in the collection's pinned custom order (catalog.json `collection_order`): Wing It! behind Home and Movies, Spring behind TV Shows, Sprite Fright past the search button. Measured as the area under the bar, mean HSV saturation 0.49 and mean chroma 0.16, against 0.16 and 0.04 for Continue Watching under it. Crop in canvas pixels: centred on the bar, which the app centres on the canvas (canvas x 688 to 1233, centre 960): 880 wide, so 168 px of shelf shows either side, at the page's 5.5:1 desktop shape. The phone crop (site-glass-narrow) stays cut from the bar's left end.",
-      "triggers": {"library": "0", "libshelf": "3,2"},
+      "state": "The website's glass close-up, supersampled 3x. The Movies library publishes the server's own hubs, so the rows are its Continue Watching deck followed by Next Up; focus is seated on the second card of Next Up, which scrolls the seven Continue Watching posters up under the tab bar where they fill the capsule edge to edge. Measured across the bar, mean HSV saturation 0.28 and mean chroma 0.10, against 0.04 and 0.01 for the page under it, where the two Next Up stills stand at the left margin and everything to their right is bare. Crop in canvas pixels: centred on the bar, which the app centres on the canvas (canvas x 688 to 1233, centre 960): 880 wide, so 168 px of shelf shows either side, at the page's 5.5:1 desktop shape. The phone crop (site-glass-narrow) stays cut from the bar's left end.",
+      "triggers": {"library": "0", "libshelf": "1,1"},
       "render_scale": 3,
-      "expect": ["libshelf: focus seated on shelf 3 col 2", "hubs: landed"],
+      "expect": ["libshelf: focus seated on shelf 1 col 1", "hubs: landed"],
       "outputs": [{"file": "closeup-glass.jpg", "dest": "site", "crop": [520, 0, 880, 160]}]
     },
     {
@@ -120,10 +120,10 @@
     },
     {
       "name": "site-glass-narrow",
-      "state": "The website's phone crop of the glass close-up: the same state as site-glass, supersampled 4x, cut from 13 canvas px left of the bar's left end (where the hand cut began). 4x because the phone layout shows it up to 698 CSS px wide, 1396 px at DPR 2, which the 3x cut (1120 px) could not fill.",
-      "triggers": {"library": "0", "libshelf": "3,2"},
+      "state": "The website's phone crop of the glass close-up: the same state as site-glass, supersampled 4x, cut from 13 canvas px left of the bar's left end (where the hand cut began). 4x because the phone layout shows it up to 698 CSS px wide, 1396 px at DPR 2, which the 3x cut (1120 px) could not fill. Measured over this narrower cut, mean HSV saturation 0.24 and mean chroma 0.08.",
+      "triggers": {"library": "0", "libshelf": "1,1"},
       "render_scale": 4,
-      "expect": ["libshelf: focus seated on shelf 3 col 2", "hubs: landed"],
+      "expect": ["libshelf: focus seated on shelf 1 col 1", "hubs: landed"],
       "outputs": [{"file": "closeup-glass-narrow.jpg", "dest": "site", "crop": [675, 0, 373.333, 176.667]}]
     },
     {
