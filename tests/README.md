@@ -28,7 +28,7 @@ how a green run means nothing.
 **The synthetic tier is the default**, and that inversion (2026-08-22) is about what a bare
 `./tests/run.py` should mean. The default has to be the thing that runs for everybody, needs no
 credentials, touches nobody's watch history, and answers *"is the player broken"* — which is asked
-far more often than *"is my library's metadata right"*. Charging a server, a token and a filled-in
+far more often than *"is my library's metadata right"*. Charging a PMS, a token and a filled-in
 overlay for the obvious command meant most people could not type it at all. `--server` is the
 explicit opt-in; `--fps` / `--fps-player` imply it, because those scenes navigate a real signed-in
 Home and would otherwise grade a QR screen. `--pipeline` still parses — it names the default — but

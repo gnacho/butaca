@@ -322,11 +322,11 @@ fn plaintext_credential_report(
     allowed: bool,
 ) -> Option<&'static str> {
     let (bit, line) = if policy == CredentialPolicy::AllowPlaintext {
-        (1, "security: developer build allows plaintext server credentials")
+        (1, "security: developer build allows plaintext PMS credentials")
     } else if allowed {
-        (2, "security: plaintext server credentials sent under a consented grant")
+        (2, "security: plaintext PMS credentials sent under a consented grant")
     } else {
-        (4, "security: refused plaintext server credentials; HTTPS required")
+        (4, "security: refused plaintext PMS credentials; HTTPS required")
     };
     (seen.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0).then_some(line)
 }
@@ -585,7 +585,7 @@ mod tests {
         );
         assert!(
             !r(301).ok(),
-            "a redirect is a response, not a successful server operation"
+            "a redirect is a response, not a successful PMS operation"
         );
         assert!(!r(500).ok());
     }
@@ -608,12 +608,12 @@ mod tests {
         let store = CredentialPolicy::HttpsOnly;
         assert_eq!(
             plaintext_credential_report(&seen, store, false),
-            Some("security: refused plaintext server credentials; HTTPS required")
+            Some("security: refused plaintext PMS credentials; HTTPS required")
         );
         assert_eq!(plaintext_credential_report(&seen, store, false), None, "once per outcome");
         assert_eq!(
             plaintext_credential_report(&seen, store, true),
-            Some("security: plaintext server credentials sent under a consented grant"),
+            Some("security: plaintext PMS credentials sent under a consented grant"),
             "a consented send after a refusal is a different outcome"
         );
         assert_eq!(plaintext_credential_report(&seen, store, true), None);

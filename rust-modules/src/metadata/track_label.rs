@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(
             track_name("English", "Full SDH", "English"),
             "Full SDH",
-            "a useless server title falls through to the container's"
+            "a useless PMS title falls through to the container's"
         );
         assert_eq!(track_name("  ", " Full ", "English"), "Full", "both sides are trimmed");
     }

@@ -1316,7 +1316,7 @@ library-backed cases everything above describes are **`./tests/run.py --server`*
 still parses (it names the default); pairing it with `--server`/`--fps` is refused rather than
 silently resolved. The inversion is about what the obvious command should mean: the default has to
 be the thing that runs for everybody, needs no credentials, touches nobody's watch history, and
-answers "is the PLAYER broken" — charging a server, a token and a filled-in overlay for typing
+answers "is the PLAYER broken" — charging a PMS, a token and a filled-in overlay for typing
 `./tests/run.py` meant most people could not type it at all. **Never ship on the default alone**
 (what it cannot see is three paragraphs down). The server tier is still the right shape for what it
 grades — SELECTION: `/decision`, direct-play vs transcode, track menus from server metadata, markers,
@@ -1681,7 +1681,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   it; `make softfloat-probe` fetches it), `/tmp/butaca-url` (override the streamed part
   URL) and **`/tmp/butaca-playurl`** (the same, plus the LOAD DECLARATION — one JSON object,
   `{"url":…,"vcodec":…,"acodec":…,"fps":…,"dovi":{…},"atmos":…}`, which is what the pipeline test
-  tier drives and the only way to declare HEVC / `"AC3 PLUS"` / Dolby for a stream no server chose;
+  tier drives and the only way to declare HEVC / `"AC3 PLUS"` / Dolby for a stream no PMS chose;
   it also ENTERS the player on its own from a boot with no session, since there is no home grid to
   press OK on), **`/tmp/butaca-replay[=N]`** (once a `playurl` stream reaches EOS,
   start it AGAIN, N times — LG checklist #46's replay half; a COUNTER rather than a lifted latch

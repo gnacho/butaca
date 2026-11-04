@@ -711,7 +711,7 @@ pub(crate) struct Stream {
     pub(crate) profile: String,
     /// Video track only: bits per component (10 for Main 10); 0 = not said.
     pub(crate) bit_depth: i64,
-    /// Video track only: chroma subsampling as server spells it, e.g. `"4:2:0"`.
+    /// Video track only: chroma subsampling as the server spells it, e.g. `"4:2:0"`.
     pub(crate) chroma: String,
     pub(crate) title: String,
     pub(crate) sdh: bool,

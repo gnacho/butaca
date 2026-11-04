@@ -210,7 +210,7 @@ class LibraryRail(unittest.TestCase):
 
 
 class DoviAndExtraMedia(unittest.TestCase):
-    """The DOVI*/container derivation `--extra-media` relies on — the field NAMES a real server
+    """The DOVI*/container derivation `--extra-media` relies on — the field NAMES a real PMS
     sends (docs/pms-api.md, verified live 2026-08-21), mapped from ffprobe's own "DOVI
     configuration record" side-data shape rather than probed against a real DV file here."""
 

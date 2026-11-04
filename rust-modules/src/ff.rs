@@ -3677,7 +3677,7 @@ fn hls_open_plain(
     let landed = crate::hls::Resource::from_request_path(target.origin.clone(), &target.path)
         .map_err(|_| HlsExit::Failed("HTTP redirect refused"))?;
     let host =
-        CString::new(target.origin.host()).map_err(|_| HlsExit::Failed("invalid server host"))?;
+        CString::new(target.origin.host()).map_err(|_| HlsExit::Failed("invalid PMS host"))?;
     let port = target.origin.port() as c_int;
     let path =
         CString::new(target.path).map_err(|_| HlsExit::Failed("invalid HLS request path"))?;
@@ -6411,11 +6411,11 @@ fn hls_demux(
         if !encoder_cleanup_ready && !cleanup_wait_logged {
             cleanup_wait_logged = true;
             crate::player::log(
-                "abr: waiting for server to release the stopped encoder before another experiment",
+                "abr: waiting for PMS to release the stopped encoder before another experiment",
             );
         } else if encoder_cleanup_ready && cleanup_wait_logged {
             cleanup_wait_logged = false;
-            crate::player::log("abr: server encoder release observed; exploration may resume");
+            crate::player::log("abr: PMS encoder release observed; exploration may resume");
         }
         // A pause between two segments really is unmeasured wall-clock time. Age the estimate by
         // it rather than letting a rate measured before the interruption decide what happens after.
@@ -6835,7 +6835,7 @@ fn hls_demux(
                 now_ms(),
             );
             crate::player::log(
-                "abr: quality exploration deferred until server confirms prior encoder cleanup",
+                "abr: quality exploration deferred until PMS confirms prior encoder cleanup",
             );
             continue;
         }

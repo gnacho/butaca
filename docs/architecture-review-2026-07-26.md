@@ -134,7 +134,7 @@ Four confirmed defects in `stream.rs`, all on the path every screen depends on:
 | | Site | Problem |
 |---|---|---|
 | No connect timeout | `stream.rs:122-126` | `connect()` is blocking with no deadline; the only timeout, `SO_RCVTIMEO`, is set at `:131` — *after* `connect` returns, so it cannot bound it. An unreachable server freezes the SDL main loop for the kernel's SYN-retry budget (~2 min), multiplied by every request in the chain. |
-| Status discarded | `stream.rs:208-212` | The status is parsed at `:193` then thrown away; `http_get` returns `None`. 401, 404, 500, 3xx and "cable unplugged" are one value. There is no re-auth path anywhere (`grep -i 401 rust-modules/src` → nothing in the server layer). |
+| Status discarded | `stream.rs:208-212` | The status is parsed at `:193` then thrown away; `http_get` returns `None`. 401, 404, 500, 3xx and "cable unplugged" are one value. There is no re-auth path anywhere (`grep -i 401 rust-modules/src` → nothing in the PMS layer). |
 | `close()` as interrupt | `stream.rs:290-300` | `pump.rs:75`, `pump.rs:146` and `engine.rs:482` close the socket to wake a demux thread blocked in `recv`. On Linux `close(2)` does not wake a blocked reader — `shutdown(2)` does. So BACK during a stall blocks the main loop on `join()` for up to the 15 s `SO_RCVTIMEO`. `fd` is a bare `c_int` (`stream.rs:10`) mutated from two threads, so the freed number can also be recycled by a poster worker. |
 | No completeness check | `stream.rs:316-324` | The struct tracks `content_length` and `consumed` faithfully, then the one-shot wrappers ignore both and return `Some(body)` unconditionally. A body truncated by a reset is a "successful" response. |
 

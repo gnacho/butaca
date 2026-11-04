@@ -179,7 +179,7 @@ TYPE43_SPAM = re.compile(r"smp_cb type=43 num=0 str=\s*$")
 def _die_no_overlay(extra=""):
     sys.exit(f"missing test configuration: {MANIFEST_LOCAL}\n"
              f"  This file is gitignored — it maps the manifest's symbolic item keys to the\n"
-             f"  ratingKeys on YOUR server, and carries the server host, TV address and test user.\n"
+             f"  ratingKeys on YOUR server, and carries the PMS host, TV address and test user.\n"
              f"  Create it with:  cp {MANIFEST_LOCAL_EXAMPLE} {MANIFEST_LOCAL}\n"
              f"  then replace every <placeholder> in it.{extra}")
 
@@ -363,7 +363,7 @@ def read_token():
             txt = f.read()
     except OSError as e:
         sys.exit(f"cannot read {CONFIG_LOCAL_H}: {e}\n"
-                 f"(this file is gitignored and holds the server token; create it locally)")
+                 f"(this file is gitignored and holds the PMS token; create it locally)")
     m = re.search(r'#define\s+SERVER_TOKEN\s+"([^"]+)"', txt)
     if not m:
         sys.exit(f"no SERVER_TOKEN macro found in {CONFIG_LOCAL_H}")
@@ -499,7 +499,7 @@ def primary_ipv6_server(admin_token, machine_id=""):
                     "host": host, "port": int(c.get("port") or 32400), "scheme": "https",
                     "tier": "local", "token": hit.get("accessToken") or admin_token, "pin": addr}
     sys.exit("primary_ipv6: the account service advertises no local IPv6 pinned connection for an owned "
-             "server (is the server's host on a v6 LAN, and does server see it?)")
+             "server (is the server's host on a v6 LAN, and does PMS see it?)")
 
 
 def resolve_shared_server(admin_token, spec):
@@ -1212,7 +1212,7 @@ RE_TOKEN = re.compile(r"(X-Plex-Token=)[^&\s]+")
 
 
 def redact(s):
-    """Never let the server token reach stdout: replace any token argument's value with <token>."""
+    """Never let the PMS token reach stdout: replace any token argument's value with <token>."""
     return RE_TOKEN.sub(r"\1<token>", s)
 
 
@@ -1519,7 +1519,7 @@ def a_play_rate(lines, floor_pm):
 
 
 def a_timeline_post(lines):
-    """At least one /:/timeline progress report reached server.
+    """At least one /:/timeline progress report reached PMS.
 
     a_timeline_climb reads the 1Hz heartbeat now, so this is what keeps the SERVER-side
     reporting path (threads::timeline_thread -> route::report_timeline -> viewOffset and
@@ -1528,8 +1528,8 @@ def a_timeline_post(lines):
     """
     ts = timeline_secs(lines)
     if not ts:
-        return False, "no `timeline playing t=` line — progress never reported to server"
-    return True, f"{len(ts)} timeline report(s) to server, last t={ts[-1][0]}s"
+        return False, "no `timeline playing t=` line — progress never reported to PMS"
+    return True, f"{len(ts)} timeline report(s) to PMS, last t={ts[-1][0]}s"
 
 
 # ---- pipeline-tier assertions ----
@@ -1923,7 +1923,7 @@ class LinkConditioner:
 
     def start(self):
         if self.listen is None:
-            self.why = ("the deployed binary names no server port — src/config.local.h is missing "
+            self.why = ("the deployed binary names no PMS port — src/config.local.h is missing "
                         "or has no SERVER_PORT")
             return
         # netcond binds 0.0.0.0, so "direct" is decided by the PORT alone: the compiled host IS
@@ -3408,7 +3408,7 @@ def op_seek_rapid(lines, final_s):
     resumed (the historical rapid-back-tap bug was 10+ s of post-burst silence).
 
     DO NOT go back to counting `seek(in-place)` lines. That is what this assertion used to do
-    (">= 2 fired, so coalescing was exercised") and it measured server latency, not merging:
+    (">= 2 fired, so coalescing was exercised") and it measured PMS latency, not merging:
 
       * a tap that arrives mid-seek is applied by the next pump tick after the in-flight seek
         anchors — which logs `seek(in-place)`;
@@ -4135,7 +4135,7 @@ def check_install(lines, cfg):
             raise SystemExit(
                 f"RELEASE BUILD on {got}: its boot line says features={feats}, so the whole "
                 f"`devtriggers` surface was compiled out and it reads NOTHING under {RUNDIR} — not "
-                f"the injected server token, not one trigger this harness wrote. It boots to the "
+                f"the injected PMS token, not one trigger this harness wrote. It boots to the "
                 f"who's-watching picker and plays nothing, and every case would burn its full cap "
                 f"failing as if the player were broken. Ship a dev build to this install: "
                 f"`make FLAVOR={FLAVOUR} deploy` without RELEASE=1.\n"
@@ -4867,7 +4867,7 @@ def save_case_log(cfg, name, lines):
 
 
 def run_pipeline_case(case, cfg, srv, url_base, verbose):
-    """One pipeline case. A sibling of `run_case` with every server step removed.
+    """One pipeline case. A sibling of `run_case` with every PMS step removed.
 
     Kept from it: the `make kill` that opens (the app is a singleton on the television, and the
     previous case's is still up), `apply_triggers`' single round-trip that recreates the runtime
@@ -6060,7 +6060,7 @@ def main():
                     help="run the SERVER tier instead of the default synthetic one: the 21 "
                          "library-backed cases driven through the whole server chain (account-service auth, "
                          "/decision, direct-play vs transcode, markers, resume, timeline). Needs a "
-                         "server, a token and a filled-in manifest.local.json")
+                         "PMS, a token and a filled-in manifest.local.json")
     ap.add_argument("--pipeline", action="store_true",
                     help="run the synthetic pipeline tier — the DEFAULT, so this flag is a no-op "
                          "kept for the recipes that name it")
@@ -6175,7 +6175,7 @@ def main():
             print(f"{c['name']:30s} {decl:22s} {size:11s} {ops:8s} {c.get('fixture','?')}{mark}")
         print(f"\nfixtures: {root}")
         print(f"install:  {APPID} [{FLAVOUR}] — triggers and log under {RUNDIR}")
-        print("\nThe pipeline tier needs no server, no token and no manifest.local.json — only a TV "
+        print("\nThe pipeline tier needs no PMS, no token and no manifest.local.json — only a TV "
               "address and\na pack built by `make fixtures-pipeline`.")
         return 0
 
@@ -6233,7 +6233,7 @@ def main():
             sys.exit("--suite selects among the SERVER tier's cases; pass --server with it. "
                      "(The synthetic tier is the default and has no logic/codec split.)")
         if args.owner or args.shared_server:
-            sys.exit("--owner / --shared-server are identities on a server; the default tier talks to "
+            sys.exit("--owner / --shared-server are identities on a PMS; the default tier talks to "
                      "no server. Pass --server if you meant the library-backed cases.")
         root, pcases = fixtures_root, pipeline_cases
         if args.filter:
@@ -6391,7 +6391,7 @@ def main():
     shaped, link_skipped = [c for c in cases if c.get("link_profile")], []
     if shaped:
         if cond.usable:
-            print(f"link conditioner: :{listen} -> server, {len(shaped)} shaped case(s)")
+            print(f"link conditioner: :{listen} -> PMS, {len(shaped)} shaped case(s)")
         else:
             print(f"link conditioner UNAVAILABLE — {cond.why}")
             for c in shaped:

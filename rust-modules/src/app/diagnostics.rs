@@ -1257,7 +1257,7 @@ fn abr_quality(d: &crate::player::Diag, selected: crate::route::Quality) -> Stri
         crate::player::ABR_MODE_HLS => {
             let mut now = crate::i18n::msg::browse_diagnostics_quality_request(abr_raster(d.abr_kbps), &abr_rate(d.abr_kbps));
             if d.abr_declared_kbps > 0 {
-                now.push_str(&format!(" · server {}", abr_rate(d.abr_declared_kbps)));
+                now.push_str(&format!(" · PMS {}", abr_rate(d.abr_declared_kbps)));
             }
             now.push_str(&crate::i18n::msg::browse_diagnostics_decoded(&decoded_raster(d)));
             now
@@ -2114,7 +2114,7 @@ mod tests {
         assert_eq!(
             chart_demand_kbps(&hls, crate::route::Quality::Auto),
             17_900,
-            "actual measured HLS demand outranks both server declaration and request ceiling",
+            "actual measured HLS demand outranks both PMS declaration and request ceiling",
         );
     }
 
@@ -2616,7 +2616,7 @@ mod tests {
         let v = build(&hls);
         assert_eq!(
             val(&v, "Quality"),
-            "request ≤4.0 Mbps / ≤720p · server 3.5 Mbps · decoded 1280×720",
+            "request ≤4.0 Mbps / ≤720p · PMS 3.5 Mbps · decoded 1280×720",
         );
         assert_eq!(val(&v, "Sample"), "12.4 Mbps · stream-limited · ±20% · n=7");
         assert_eq!(
@@ -2644,7 +2644,7 @@ mod tests {
         });
         assert_eq!(
             val(&mismatched, "Quality"),
-            "request ≤22.0 Mbps / ≤4K · server 896 kbps · decoded 720×404",
+            "request ≤22.0 Mbps / ≤4K · PMS 896 kbps · decoded 720×404",
         );
 
         // Every actuator on the ladder names its raster, including the ones added after this panel
@@ -2693,7 +2693,7 @@ mod tests {
         );
         assert_eq!(
             val(&build(&unavailable), "Reason"),
-            "server refused Original source · HTTP 503",
+            "PMS refused Original source · HTTP 503",
         );
 
         let refreshing = crate::player::Diag {
@@ -2709,7 +2709,7 @@ mod tests {
         );
         assert_eq!(
             val(&build(&refreshing), "Reason"),
-            "server output below request"
+            "PMS output below request"
         );
 
         // A fixed rung keeps the schema. Model-only rows state that they are inactive, while the
@@ -2755,7 +2755,7 @@ mod tests {
         );
         assert_eq!(
             val(&idle_after_original_failure, "Reason"),
-            "server failed Original source · HTTP 500",
+            "PMS failed Original source · HTTP 500",
             "a controller restart must not hide the typed source failure behind a generic idle state",
         );
 

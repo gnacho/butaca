@@ -2268,7 +2268,7 @@ mod tests {
         assert!(!forced.caption.to_str().unwrap().contains("convert"));
         assert!(forced.panel.contains("automatic fallback is disabled"));
         let server = with_forced_playback_context(
-            error_shape(false, true, Some("server cannot convert this item"), RuntimeFailure::Unknown), false);
+            error_shape(false, true, Some("PMS cannot convert this item"), RuntimeFailure::Unknown), false);
         assert_eq!(server.kind, FailureKind::DecisionRefused);
         assert!(server.readout.contains("server"));
     }

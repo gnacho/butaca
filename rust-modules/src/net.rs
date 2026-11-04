@@ -402,13 +402,13 @@ pub fn global_init() -> bool {
         crate::dynlib::Loaded::NoLibrary => {
             crate::log(
                 "net: no libcurl on this device (tried .so.4 and .so.5) — \
-                 account calls and HTTPS server control unavailable",
+                 account calls and HTTPS PMS control unavailable",
             );
             false
         }
         crate::dynlib::Loaded::Incomplete(soname, n) => {
             crate::log(&format!(
-                "net: {soname} is missing {n} symbol(s) — account calls and HTTPS server control unavailable"
+                "net: {soname} is missing {n} symbol(s) — account calls and HTTPS PMS control unavailable"
             ));
             false
         }

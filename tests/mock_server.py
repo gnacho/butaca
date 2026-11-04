@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A SYNTHETIC media server — enough of the server REST surface for the app to boot to Home,
+"""A SYNTHETIC media server — enough of the PMS REST surface for the app to boot to Home,
 browse a library, open a detail page, a season, a person, search, mark watched, and start a play,
 with NOT ONE household byte anywhere in it.
 
@@ -132,7 +132,7 @@ the loudness attribute itself:
 
 `--no-plex-pass` answers `/` and `/identity` with `myPlexSubscription=false` (the version string
 is untouched — `tools/mock-guest.py` keys off it). Every generated and verification audio stream
-otherwise carries `canNormalizeLoudness="1"` (server string-encodes booleans on the wire); pass
+otherwise carries `canNormalizeLoudness="1"` (PMS string-encodes booleans on the wire); pass
 `--no-loudness-analysis` to omit the key entirely, modelling a server that never ran loudness
 analysis on the source.
 
@@ -246,7 +246,7 @@ def search_matcher(query):
     "sp" finds "Spring" and "Sprite Fright"; "in" finds neither "Spring" nor "Sintel".
 
     The WORD-PREFIX rule is an assumption, not a measurement: docs/pms-api.md §3b probed the
-    response shape, not the matching, and the spec only says server "looks for partial matches" and
+    response shape, not the matching, and the spec only says PMS "looks for partial matches" and
     spell-checks. It is the conservative reading — a mid-word match would make figures show hits a
     real server may not return. Spell-checking is not modelled; the related results are, in
     `Library.search`."""
@@ -367,9 +367,9 @@ class Library:
 
     @staticmethod
     def _resolution_label(width, height):
-        """The (videoResolution, displayTitle-prefix) pair server derives from the DECODED frame
+        """The (videoResolution, displayTitle-prefix) pair PMS derives from the DECODED frame
         size — e.g. `("4k", "4K")` — never a hardcoded 1080p regardless of the source file.
-        Thresholds follow server's own videoResolution buckets (sd/720/1080/4k)."""
+        Thresholds follow PMS's own videoResolution buckets (sd/720/1080/4k)."""
         if width >= 3800 or height >= 2000:
             return "4k", "4K"
         if height >= 1000:
@@ -380,7 +380,7 @@ class Library:
 
     @staticmethod
     def _dovi_wire(stream):
-        """The eight `DOVI*` keys (docs/pms-api.md; spellings verified live against a real server
+        """The eight `DOVI*` keys (docs/pms-api.md; spellings verified live against a real PMS
         2026-08-21), derived from ffprobe's "DOVI configuration record" side-data entry on this
         VIDEO stream. Returns {} — sending none of the keys — when no such side-data is present,
         which is the shape `metadata::Dovi`'s never-convict-on-silence rule expects from an
@@ -576,7 +576,7 @@ class Library:
         return out
 
     def _maybe_loudness(self, audio):
-        """server string-encodes this boolean on the wire (#266)."""
+        """PMS string-encodes this boolean on the wire (#266)."""
         if self.loudness_analysis:
             audio["canNormalizeLoudness"] = "1"
         return audio
@@ -1192,7 +1192,7 @@ class CatalogLibrary(Library):
 
     @staticmethod
     def _chapters(marks, duration, slug):
-        """`[{"start": "m:ss", "title": …}, …]` from the catalog → server's `Chapter[]`: each chapter
+        """`[{"start": "m:ss", "title": …}, …]` from the catalog → PMS's `Chapter[]`: each chapter
         ends where the next begins, the last at the end of the file. The first must start at 0:00
         and the starts must rise, as they do on a real file."""
         def ms(stamp):
@@ -1208,7 +1208,7 @@ class CatalogLibrary(Library):
     @staticmethod
     def _blur_of(path):
         """The four UltraBlur corner colours the server would compute, taken from the backdrop itself: a
-        2×2 area-average of the image, darkened the way server's own colours are."""
+        2×2 area-average of the image, darkened the way PMS's own colours are."""
         raw = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-vf",
                                        "scale=2:2:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
         px = [tuple(int(c * 0.55) for c in raw[i:i + 3]) for i in range(0, 12, 3)]
@@ -1271,7 +1271,7 @@ class CatalogLibrary(Library):
                 it.setdefault("Collection", []).append({"tag": tag, "id": cid})
 
     def collection_metadata(self, section):
-        """The base listing, plus each collection's member order as server states it
+        """The base listing, plus each collection's member order as PMS states it
         (`collectionSort`: 0 release date, 2 custom) — custom where the catalog orders it."""
         orders = getattr(self, "catalog", {}).get("collection_order", {})
         return [dict(row, collectionSort="2" if row["title"] in orders else "0")
@@ -1407,7 +1407,7 @@ def plaintext_only_lan_resources(lib, ip, http_port, fail_port, access_token):
     `rust-modules/src/server/`'s `Resource`/`Connection` deserialise (`clientIdentifier`,
     `provides`, `owned`, `accessToken`, `httpsRequired`, `publicAddressMatches`,
     `connections[{protocol,address,port,uri,local,relay,IPv6}]`); the top-level shape is a bare
-    JSON array, not a `MediaContainer` — the account service's envelope, not a server one."""
+    JSON array, not a `MediaContainer` — the account service's envelope, not a PMS one."""
     dashed = ip.replace(".", "-")
     https_uri = f"https://{dashed}.{PLEX_DIRECT_HASH}.plex.direct:{fail_port}"
     return [{
@@ -2055,7 +2055,7 @@ def serve(port, seed=1, host="127.0.0.1", verbose=False, movies=48, rail_fixture
           plaintext_only_lan=False, advertise_ip=None, insecure_fail_mode="handshake",
           authorize_after=None, plex_pass=True, loudness_analysis=True,
           refuse_enhancements=False, ignore_enhancements=False, transcode_fixture=None):
-    """Start a mock server in a daemon thread; returns (server, pms). Loopback only by default: the
+    """Start a mock PMS in a daemon thread; returns (server, pms). Loopback only by default: the
     app on the simulator is on this machine, and a LAN-facing listener would be one more thing
     the outbound guard has to reason about. `catalog` serves the demo library instead of a seed.
 
@@ -2432,7 +2432,7 @@ def main():
                          "string is untouched — tools/mock-guest.py depends on it)")
     ap.add_argument("--no-loudness-analysis", action="store_true",
                     help="#266: omit canNormalizeLoudness from every audio stream — by default "
-                         "it is sent as \"1\" (server string-encodes it), modelling a server that "
+                         "it is sent as \"1\" (PMS string-encodes it), modelling a server that "
                          "never analysed the source for loudness")
     ap.add_argument("--refuse-enhancements", action="store_true",
                     help="#266: a live boostDialog=1/normalizeLoudness=1 on /decision gets the "

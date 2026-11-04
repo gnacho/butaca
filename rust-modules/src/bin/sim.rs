@@ -79,7 +79,7 @@ fn main() {
     // screen at somebody expecting Home.
     if host.is_empty() {
         eprintln!(
-            "butaca-sim: no server host given — starting the plex.tv sign-in flow.\n\
+            "butaca-sim: no PMS host given — starting the plex.tv sign-in flow.\n\
              (pass one as `butaca-sim <numeric-ip> [port]`, or set BUTACA_SERVER_HOST, to boot\n\
              straight at a known server. It must be a NUMERIC IP: stream.rs speaks HTTP/1.1 over a\n\
              raw socket with no DNS resolver, on the desktop exactly as on the television.)"

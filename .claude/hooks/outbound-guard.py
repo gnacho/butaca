@@ -87,7 +87,7 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
     test user's account id, this library's ratingKeys, and the shared_server block when there is
     one), `pkg/auth.json` (the persisted session: `account_token` and each source's per-server
     token), plus three more that `.gitignore` names and its comments explain — `local.env` ("real
-    server host + access token"), `.tv-dpad-pass` (a generated password; "NEVER commit a password")
+    PMS host + access token"), `.tv-dpad-pass` (a generated password; "NEVER commit a password")
     and `.tv-remote-url` ("never commit a URL that is live while it is live"). Missing files are
     skipped, so a checkout with none of them simply has less to match. An exact substring hit on a
     real secret is never a false positive, which makes this the precise half.
@@ -196,9 +196,9 @@ BYPASS = re.compile(r"\bBUTACA_PUBLISH_BYPASS=1\b")
 
 # The gitignored files that hold private values. All eight are named in `.gitignore`, and seven of
 # them carry their own reason in its comments - `src/config.local.h` and `local.env` under "local
-# dev overrides (real server host + access token)", `.tv-host` as "the maintainer's home network, not
+# dev overrides (real PMS host + access token)", `.tv-host` as "the maintainer's home network, not
 # a project fact", `tests/manifest.local.json` as "the private library inventory", `pkg/auth.json`
-# as holding "account-service and server tokens, and this repository is public", and `.tv-dpad-pass` /
+# as holding "account-service and PMS tokens, and this repository is public", and `.tv-dpad-pass` /
 # `.tv-remote-url` under "NEVER commit a password, and never commit a URL that is live while it is
 # live". `.tv-mac` is the one bare line. (An earlier draft of this comment split the list five/three
 # by whether a reason was attached; checked against the file, that split does not exist.)
