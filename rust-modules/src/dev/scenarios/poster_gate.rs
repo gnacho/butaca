@@ -1,6 +1,6 @@
 //! Finite UI workloads that grade work deferred during motion and completed at rest.
 //! Focus is seeded, then ordinary navigation keys drive measured motion. No media
-//! activation or Plex viewing-history write is performed.
+//! activation or viewing-history write is performed.
 use crate::app::{bridge::Bridge, App};
 use crate::screens::registry::{AppArg, HomeCmd, LibraryCmd};
 use crate::ui::card_motion_metrics::{self as metrics, Stats};

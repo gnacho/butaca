@@ -342,8 +342,8 @@ impl LibraryScreen {
             // A SINGLE candidate never draws a selector, whatever owns the section it names.
             // The prior rule kept the row up for a `borrowed` singleton — carried forward
             // wholesale from the 0.6.x server picker by `3c2de7ad` — so a Guest or managed
-            // profile, whose own household server always arrives `owned: false`
-            // (`plex/account.rs`), saw a lone `Library · <name> ⌄` chip on every section with one
+            // profile, whose own household server always arrives `owned: false` (the retired
+            // account client), saw a lone `Library · <name> ⌄` chip on every section with one
             // favourite: issue #100/#165, reported as a stray "Sources" control on a real TV. A
             // single library carries nothing to disambiguate for ANY profile, so ownership must
             // not decide this; only the CANDIDATE COUNT does, and only 2+ ever reaches the

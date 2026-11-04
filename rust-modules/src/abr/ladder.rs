@@ -334,8 +334,8 @@ pub(crate) struct HlsCandidate {
 /// 22,000 does not get 22 Mbit/s of bits. Both halves have to be stored, or the controller spends
 /// a budget it does not have on a raster it did not ask for.
 ///
-/// None of it is a claim about Plex in general — it is this server, this profile, this media
-/// shape, taken by `tools/pms-hls-probe.py` (see `docs/pms-hls-protocol-probe.md`). A different
+/// None of it is a claim about media servers in general - it is this server, this profile, this
+/// media shape, taken by `tools/pms-hls-probe.py` (see `docs/pms-hls-protocol-probe.md`). Another
 /// PMS may hold a different boundary, which is survivable exactly because the transaction in
 /// [`Controller::candidate_ready`] grades the actual segment rather than trusting this table.
 ///

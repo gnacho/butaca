@@ -38,7 +38,7 @@ impl LibraryScreen {
     pub(super) fn watch_plaintext<H: LibraryLike>(&mut self, _cx: &Cx<'_, H>) {
         use super::super::plaintext_question::{asks, Near};
         // The registry half (`client_for(sid)` → the slot's machine id) went with the client
-        // slots (#166): no Plex slot carries a machine any more, so the question's machine
+        // slots (#166): no slot carries a machine any more, so the question's machine
         // subject is always absent and the refresh below only ever withdraws.
         let machine = None;
         self.plaintext.refresh(machine, Near::Only);
@@ -65,8 +65,8 @@ impl LibraryScreen {
                 let source = directory.source().map(|(_, source)| source);
                 let name = source.map(|source| source.name.as_str()).filter(|name| !name.is_empty()).unwrap_or(crate::i18n::msg::browse_library_server());
                 let owner = source.map(|source| source.handle.as_str()).filter(|owner| !owner.is_empty());
-                // Your own server is "your Plex server", the words Home uses for the same fault;
-                // a borrowed one is named, since "your" would be untrue of it.
+                // Your own server is "your Jellyfin server", the words Home uses for the same
+                // fault, and a borrowed one is named, since "your" would be untrue of it.
                 let caption = match owner {
                     None => crate::i18n::msg::browse_home_failed().to_string(),
                     Some(_) => crate::i18n::msg::browse_library_unreachable(name),

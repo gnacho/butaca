@@ -266,9 +266,9 @@ macro_rules! dynlib_sym {
 /// `_platform_strlen`, from a `dlopen`'d library, with nothing in the app's own log.
 ///
 /// It was latent for exactly as long as the desktop build could not open a libcurl at all, and it
-/// surfaced the moment one could — on the FIRST plex.tv call, i.e. sign-in, i.e. the first thing a
-/// new user does. ARM32 (the television) and x86-64 pass these two ways identically, which is
-/// precisely why no amount of device testing could have found it.
+/// surfaced the moment one could: on the FIRST account-service call, i.e. sign-in, i.e. the first
+/// thing a new user does. ARM32 (the television) and x86-64 pass these two ways identically,
+/// which is precisely why no amount of device testing could have found it.
 #[macro_export]
 macro_rules! dynlib {
     (

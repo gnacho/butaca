@@ -64,7 +64,7 @@ pub(crate) struct OnboardScreen {
     /// It was `draft != entry_pins` until 2026-09-20, which is the same inference the store
     /// removed from `browse::apply_pins` and it survived here. The comparison needs a baseline
     /// that stays true, and [`draft_rows`](Self::draft_rows) can only keep one for a row NOBODY
-    /// has touched — so once a row was edited its baseline froze, and a Plex Home roster landing
+    /// has touched, so once a row was edited its baseline froze, and a roster landing
     /// while the editor was open left it stale: toggle a row Off, let the live default drift Off
     /// underneath it, toggle it back On, and `draft == entry_pins` again reads as "never
     /// answered". The row the viewer pressed twice was then recorded nowhere and went straight
@@ -290,7 +290,7 @@ impl OnboardScreen {
     /// with whatever the live default has since drifted to.
     ///
     /// It was gated on `self.settings` and is not any more, and the ungating is the point. A
-    /// FIRST-RUN draft opens on whatever the defaults were at that instant, and for a Plex Home
+    /// FIRST-RUN draft opens on whatever the defaults were at that instant, and for a person in a
     /// managed profile that instant is routinely *before* `/api/v2/home/users` lands — so the
     /// draft held a table computed from "nothing here is ours", the roster arrived and corrected
     /// the live pins underneath it, and the commit then wrote the stale values back as though the
@@ -1175,7 +1175,7 @@ mod tests {
 
         // 1. Off — an edit, so this row's baseline is now stale the moment the world moves.
         s.toggle_row(0, browse.capture());
-        // 2. The Plex Home roster lands while the editor is open and the live default for this
+        // 2. The profile roster lands while the editor is open and the live default for this
         //    row drifts Off on its own, with no press behind it.
         browse.set_pinned(0, false);
         s.rebuild(true, browse.capture());
@@ -1643,7 +1643,7 @@ mod tests {
     /// rather than the rows shown.
     ///
     /// The viewer toggles a row; the live pin then drifts, on its own, onto the value they chose —
-    /// `resolve_pins` re-deriving a still-unrecorded default as the Plex Home roster lands is
+    /// `resolve_pins` re-deriving a still-unrecorded default as the roster lands is
     /// exactly this. Browse used to reconstruct "the viewer touched this" by comparing the
     /// command's rows against the live pins, so a row the world had agreed with arrived looking
     /// untouched and was left unrecorded: it goes on re-deriving, and comes back On the next time

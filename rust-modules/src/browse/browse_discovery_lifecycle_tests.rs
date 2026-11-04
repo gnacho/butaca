@@ -1,6 +1,6 @@
 //! Discovery landing lifecycle: retry addressing, page work and single-flight reset. The
-//! repoint/retoken/profile staleness guards belonged to the Plex registry lifecycle and went
-//! with the Plex discovery arm (#166); the roster's one source has no lifecycle beyond the
+//! repoint/retoken/profile staleness guards belonged to the old registry lifecycle and went
+//! with the retired discovery arm (#166). The roster's one source has no lifecycle beyond the
 //! client install itself.
 
 use super::*;

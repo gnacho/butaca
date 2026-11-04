@@ -1,9 +1,9 @@
 //! SHA-256, HMAC-SHA-256 and PBKDF2-HMAC-SHA-256, written out here because the crate has no
 //! hashing dependency and the one consumer needs a **password verifier, not a hash**.
 //!
-//! The consumer is [`crate::server::session::PinVerifier`]: the four-digit Plex Home PIN a
-//! protected profile is behind has to be checked with plex.tv unreachable, and plex.tv is the only
-//! party that knows the PIN. What this stores instead is PBKDF2 of the PIN under a random salt,
+//! The consumer is [`crate::server::session::PinVerifier`]: the four-digit profile PIN a protected
+//! profile is behind has to be checked with the account service unreachable, and that service is
+//! the only party that knows the PIN. This stores a PBKDF2 of the PIN under a random salt,
 //! so the file holds something a PIN can be checked AGAINST and never the PIN itself — a household
 //! PIN is the kind of number people reuse for their phone. Nothing here is a secrecy claim beyond
 //! that: the space of four-digit PINs is ten thousand entries, so anybody who can read the

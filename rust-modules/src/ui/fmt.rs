@@ -156,9 +156,10 @@ pub(crate) fn episode_ordinal(season: i64, index: i64) -> String {
 /// `server::servers::owner_credit` is the one place that says whether a server is credited to
 /// anybody, `server::ServerFacts::handle` is where its answer rests, and every caller here reads
 /// that field. So an empty handle does not mean "an owned server" — it means *our own server, or
-/// the household's server whichever Plex Home profile is watching, or a share plex.tv has not
-/// named* — and this function must never grow a second opinion about which of those it is. The
-/// field it reads used to be plex.tv's raw `sourceTitle`, which is how the app came to tell a
+/// the household's server whichever profile is watching, or a share the account service has not
+/// named*, and this function must never grow a second opinion about which of those it is. The
+/// field it reads used to be the raw `sourceTitle` the account service advertised, which is how
+/// the app came to tell a
 /// managed user that their own house's library was "Shared by" the person who pays for it.
 ///
 /// `None` rather than an empty `String`, because ABSENCE is what the design specifies: no
@@ -184,10 +185,10 @@ pub(crate) fn episode_kicker(season: i64, index: i64, title: &str) -> String {
 /// The media badge for a video version — `"4K"` / `"1080p"` / `"SD"`, or None when the item has no
 /// video (a show container, a music item, an unparsed response).
 ///
-/// `res` is PMS's `Media.videoResolution` and is PREFERRED over the frame size, because the frame
+/// `res` is the server's `Media.videoResolution` and is PREFERRED over the frame size, because the
 /// size is the STORED one: a 2.35:1 1080p film is 1918x802 on the dev server, and a height rule
-/// would badge it 720p. Verified values are `"4k"`, `"1080"`, `"720"`, `"576"`, `"sd"` — and PMS
-/// sends every one of them as a numeric-looking STRING, which is exactly the shape this maps.
+/// would badge it 720p. Verified values are `"4k"`, `"1080"`, `"720"`, `"576"`, `"sd"`, and the
+/// server sends every one of them as a numeric-looking STRING, which is exactly the shape it maps.
 /// `width`/`height` are only the fallback for a version that omits the class.
 pub(crate) fn resolution(res: &str, width: i64, height: i64) -> Option<String> {
     let r = res.trim().to_ascii_lowercase();
@@ -225,9 +226,9 @@ pub(crate) fn resolution(res: &str, width: i64, height: i64) -> Option<String> {
 mod tests {
     use super::{episode_address, resolution};
 
-    /// The mapping is fed PMS's own values, and PMS string-encodes them — including the ones that
-    /// look like integers ("1080"), which is the case that must come out as "1080p" and not as a
-    /// number or an empty badge.
+    /// The mapping is fed the server's own values, and it string-encodes them, including the ones
+    /// that look like integers ("1080"), which is the case that must come out as "1080p" and not
+    /// as a number or an empty badge.
     #[test]
     fn resolution_labels_pms_string_encoded_classes() {
         // verified live on the dev server: every videoResolution is a JSON string
@@ -282,7 +283,7 @@ mod tests {
     }
 }
 
-/// A calendar date from a Plex `YYYY-MM-DD` — `"1 Feb 1921"`. ONE spelling, because the same value
+/// A calendar date from a `YYYY-MM-DD` - `"1 Feb 1921"`. ONE spelling, because the same value
 /// is now drawn by two screens: detail's episode air dates and the person page's Born/Died line.
 /// `year` is the fallback when the item carries only a year (an episode with no `originallyAvailableAt`);
 /// pass 0 when there is none, and an unparseable date yields the empty string rather than a
@@ -307,8 +308,8 @@ pub(crate) fn pretty_date(iso: &str, year: i64) -> String {
     }
 }
 
-/// A review score, in the shape its own provider publishes it. PMS normalises every provider onto
-/// one 0–10 scale, which is not how any of them are quoted: Rotten Tomatoes and TMDB are
+/// A review score, in the shape its own provider publishes it. The server normalises every provider
+/// onto one 0-10 scale, which is not how any of them are quoted: Rotten Tomatoes and TMDB are
 /// PERCENTAGES (9.1 → "91%") and IMDb is out of ten ("7.4"). Printing the raw 9.1 beside a tomato
 /// would read as a 9.1% score, so the badge's number is put back into the provider's own units here.
 pub(crate) fn rating_score(art: crate::metadata::RatingArt, value: f64) -> String {

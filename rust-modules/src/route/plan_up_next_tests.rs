@@ -42,7 +42,7 @@ fn a_next_episode_becomes_a_playable_up_next() {
 #[test]
 fn a_non_episode_answer_means_no_up_next() {
     // NextUp answers an episode in practice; the gate stays anyway — "up next" is a show idea,
-    // the same rule the Plex lane's up_next_of applies to its queue rows.
+    // the same rule the retired lane's up_next_of applied to its queue rows.
     let it = dto(r#"{"Id": "m1", "Name": "A Film", "Type": "Movie",
         "ImageTags": {}, "BackdropImageTags": []}"#);
     assert!(up_next_from_dto(&it).is_none());

@@ -115,7 +115,7 @@ pub enum Icon {
     Trailer,
     Info,
     /// Warning triangle — `info.svg`'s sibling (same 24 viewBox, 2.2 stroke, round caps/joins,
-    /// dot-and-bar inverted). From `Plex Pass Awareness.dc.html`: the facts row's HDR chip at
+    /// dot-and-bar inverted). From the design kit's awareness frame: the facts row's HDR chip at
     /// ~24px and the playback-failed read-out at 96px. Outline, not filled — a solid triangle
     /// reads as an error state where this marks a warning or a verdict already worded in text.
     Alert,
@@ -194,8 +194,8 @@ pub enum Icon {
     // ---- read-out glyphs (the 112px mark `StatusOverlay::page` draws above a page-filling
     // `Failed` verdict — spec "1A") ----
     //
-    // Twelve marks, one family: a BASE says what is involved (a server, plex.tv, an account, a
-    // sign-in's stored key, a profile roster, a wait's clock), a BADGE knocked out of it says what
+    // Twelve marks, one family: a BASE says what is involved (a server, the sign-in service, a
+    // stored sign-in key, a profile roster, a wait's clock), a BADGE knocked out of it says what
     // went wrong (a plus/minus/x/question/alert), and `telemetry::incident::IncidentContext::
     // readout_glyph` is the ONE place that reads an `IncidentKind` and picks which. `WifiSlash`
     // stands alone — there is no server to blame when the TV itself has no link. Drawn by
@@ -205,21 +205,21 @@ pub enum Icon {
     // hand-drawn badge-on-base composite would recreate exactly the seam that doc warns about.
     /// A clock, alert badge — a wait that ran out (`IncidentKind::PinExpired`/`LinkStalled`).
     ClockBadgeAlert,
-    /// A cloud, alert badge — plex.tv answered but with an error, or the app's own machinery
+    /// A cloud, alert badge: the account service answered with an error, or the app's own machinery
     /// failed (an `Internal` cause, the closest honest read among these twelve).
     CloudBadgeAlert,
-    /// A globe, minus badge — plex.tv did not answer and the failure is not DNS or TLS.
+    /// A globe, minus badge: the account service did not answer and the failure is not DNS or TLS.
     GlobeBadgeMinus,
-    /// A globe, question badge — plex.tv could not be found (DNS).
+    /// A globe, question badge: the account service could not be found (DNS).
     GlobeBadgeQuestion,
     /// A key, alert badge — the sign-in could not be saved or read back
     /// (`IncidentKind::SaveFailed`/`StoredLocked`).
     KeyBadgeAlert,
-    /// A lock, alert badge — plex.tv could not be reached securely (TLS).
+    /// A lock, alert badge: the account service could not be reached securely (TLS).
     LockBadgeAlert,
     /// Two people, alert badge — a profile switch failed (`IncidentKind::ProfileSwitch`).
     PeopleBadgeAlert,
-    /// One person, X badge — plex.tv refused the account token (`IncidentKind::Authorization`).
+    /// One person, X badge: the account service refused the token (`IncidentKind::Authorization`).
     PersonBadgeXmark,
     /// A server, minus badge — a known server did not answer (Home's and the Library's own
     /// "can't reach" verdict, and `Discovery(Silent)` targeting `Servers`).
@@ -228,7 +228,7 @@ pub enum Icon {
     ServerBadgePlus,
     /// A server, X badge — a server answered and refused (`DiscoveryClass::Refused`).
     ServerBadgeXmark,
-    /// A crossed-out wifi arc — no internet to even reach plex.tv (`IncidentKind::PinCreate`).
+    /// A crossed-out wifi arc: no internet for the account service (`IncidentKind::PinCreate`).
     WifiSlash,
 }
 

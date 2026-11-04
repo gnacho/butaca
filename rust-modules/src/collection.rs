@@ -90,7 +90,7 @@ pub(crate) struct Collection {
     pub(crate) total: usize,
     pub(crate) status: CollectionStatus,
     pub(crate) more: bool,
-    /// Server rows consumed so far — the next page's `X-Plex-Container-Start`. NOT
+    /// Server rows consumed so far, the next page's start offset. NOT
     /// `items.len()`: `run_job` drops rows that are not `pms::listable` (a clip, an artist), so
     /// the grid can hold fewer members than the server has handed over, and paging from
     /// `items.len()` would re-request rows already seen and append them twice.
@@ -203,7 +203,7 @@ impl CollectionState {
     fn maybe_spawn(&mut self, adapter: &Arc<CollectionAdapter>) {
         if adapter.fetch.busy() || self.retry_cd > 0 { return; }
         let Some(c) = self.current.as_ref() else { return };
-        // The installed-client guard is load-bearing: slot 0 is also a valid Plex slot in this
+        // The installed-client guard is load-bearing: slot 0 is also a valid server slot in this
         // build. A collection opened with no item id (a search tag fold's second identity) names
         // nothing this server can answer — there is no tag-id space to resolve it against — so
         // the page it opened stays Loading rather than guessing a fetch.

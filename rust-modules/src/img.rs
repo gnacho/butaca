@@ -37,8 +37,9 @@ use crate::log;
 /// | `ui/info_panel.rs` episode still | 480×270 |
 /// | `ui/widgets.rs` catalog poster | 250×375 |
 ///
-/// — plus the plex.tv sign-in QR PNG, a few hundred pixels square. 1920×1080 is thus the largest
-/// thing we ever ASK for, but the cap cannot be set there: `minSize=1` means *cover*, not *fit*, so
+/// One more source sits outside the table: the sign-in QR PNG, a few hundred pixels square, so
+/// 1920×1080 is still the largest thing we ever ASK for, but the cap cannot be set there:
+/// `minSize=1` means *cover*, not *fit*, so
 /// the server scales until the box is filled and an extreme source aspect comes back longer on its
 /// long edge (a 2.4:1 backdrop into a 16:9 box → ~2592×1080; a 2:3 poster into it → 1920×2880).
 /// **4096 on each axis** is over twice the requested box, so no legitimate cover-scaled result can

@@ -188,7 +188,7 @@ pub mod size {
     /// Full-bleed hero title — the home + detail hero headline.
     pub const HERO: c_int = 72;
     /// Full-card display title — the post-play (Up Next) card's episode name
-    /// (`Plex Pass Awareness.dc.html` deliverable D): a one-line headline for a card that owns
+    /// (the paid-tier awareness design deliverable D): a one-line headline for a card that owns
     /// the FRAME but not the page, one ~1.2× ladder step past [`TITLE`] without [`HERO`]'s
     /// billboard weight (a 72px line over live credits would read as a new screen, not a prompt).
     pub const DISPLAY: c_int = 48;
@@ -843,7 +843,7 @@ pub const WASH_WARM: [f32; 4] = SAND_100;
 /// [`crate::ui::route_screen::RouteGround`] uses that instead.
 pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
-/// Warm amber Continue-Watching progress fill (Plex-specific; no player equivalent). `#fab82e`.
+/// Warm amber Continue-Watching progress fill (Home only, no player equivalent). `#fab82e`.
 pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
 /// Unfilled track behind the Continue-Watching resume bar — the full-bleed card-bottom rail. A
 /// hair lighter than the player scrubber's so the amber reads against a bright poster.
@@ -1170,15 +1170,16 @@ pub const OVERLAY_FOCUS_SOFT: [f32; 4] = with_a(WHITE, 0.07);
 /// Outlined-badge / meta-badge border.
 pub const OVERLAY_BORDER: [f32; 4] = with_a(WHITE, 0.55);
 /// The keyline PILL's stroke — a secondary action outlined over scrimmed video (the post-play
-/// card's "Watch credits"; `Plex Pass Awareness.dc.html` deliverable D: stroke 1.5, white .38).
+/// card's "Watch credits", the paid-tier awareness design deliverable D: stroke 1.5, white .38).
 /// Deliberately a step quieter than [`OVERLAY_BORDER`]: that value is tuned for a 2px chip border
 /// on a panel, and at .55 a 60px capsule outline over a ~.85 black scrim becomes the row's
 /// brightest object, outshining the filled primary beside it.
 pub const PILL_KEYLINE: [f32; 4] = with_a(WHITE, 0.38);
 /// The keyline pill's knockout interior — and here the knockout is the DESIGN, not a limitation.
-/// (`Painter::rring` draws a genuinely hollow outline now, which is what `keyline_chip` and the
-/// PLEX PASS capsule use.) This pill sits over LIVE VIDEO, where a hollow ring would leave the
-/// label on whatever frame happens to be under it; the interior is a translucent near-black that
+/// (`Painter::rring` draws a genuinely hollow outline now, which is what `keyline_chip` uses, and
+/// what the retired capsule for the missing paid feature used.) This pill sits over LIVE VIDEO,
+/// where a hollow ring would leave the label on whatever frame happens to be under it. The
+/// interior is a translucent near-black that
 /// keeps the scrimmed credits part of the surface instead of punching an opaque hole in them (and
 /// doubles as the quiet plate [`TEXT_HEADING`] ink needs).
 pub const PILL_KEYLINE_BG: [f32; 4] = scrim_black(0.55);

@@ -1185,8 +1185,8 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
             }
         }
     }
-    // The Jellyfin flavor's heart shifts every row one wider than the Plex shape this test
-    // was written against.
+    // The Jellyfin flavor's heart shifts every row one wider than the shape this test was
+    // written against.
         assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![3, 4, 5]);
         assert_eq!(cases, 192);
     clear();

@@ -1480,9 +1480,9 @@ pub(crate) enum AppArg {
     /// The Collection page's summary sheet — the About panel over `collection::current()`. **It
     /// carries nothing**, for `PersonBio`'s reasons.
     CollectionAbout,
-    /// plex.tv sign-in (QR) — shown when there is no usable session.
+    /// Account sign-in (QR), shown when there is no usable session.
     Login,
-    /// The "who's watching" Plex Home picker.
+    /// The "who's watching" profile picker.
     #[cfg_attr(not(test), expect(dead_code, reason = "ARG_SHAPE is frozen and the picker route         died with the plex.tv account flow; the variant stays for the recorded-shape census only"))]
     Profiles,
     /// **"Which libraries do you want?"** — the *Favorite libraries* screen, the third and last
@@ -1785,7 +1785,7 @@ where
                 // and its fps scenes, stays "login".
                 Box::new(crate::screens::jf_login::JfLoginScreen::new(entry))
             }
-            // The who's-watching picker died with the plex.tv account flow (Jellyfin-only pivot,
+            // The who's-watching picker died with the account flow (Jellyfin-only pivot,
             // #166): nothing constructs this route any more, and `ARG_SHAPE` keeps the variant
             // because the recorded-shape census is frozen. A mount here is a routing bug.
             AppArg::Profiles => unreachable!("the profiles route has no mount without the plex.tv account flow"),
@@ -2055,11 +2055,11 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// eighth identity-keyed slot for the collection shelf, and `DetailIdentity` grows
 /// `CollectionMember`. Re-record replay fixtures like any other shape-pin bump.
 ///
-/// **Plex collections removal** (`0xd4f7_ab4b_d0e9_e119` → this): the promoted-hub collection
-/// links die with the PMS collection reads — the Library shelf loses `heading`,
+/// **Collection removal** (`0xd4f7_ab4b_d0e9_e119` → this): the promoted-hub collection
+/// links die with the collection reads: the Library shelf loses `heading`,
 /// `DetailIdentity` loses `CollectionMember`, detail `Spot.saved_col` drops back to seven
 /// slots, and the metadata `Detail` record loses `collection`. The collection PAGE stays (it is
-/// the Jellyfin BoxSet detail route); only the Plex-only surfaces leave. Re-record replay
+/// the Jellyfin BoxSet detail route), and only the old server's surfaces leave. Re-record replay
 /// fixtures like any other shape-pin bump.
 #[cfg(test)]
 // Playback/account preference pages add their arguments and logical state to the inventory.

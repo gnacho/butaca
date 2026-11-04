@@ -1,7 +1,7 @@
-//! Plex library fetch/parse into the private catalog (was src/pms.c), read by the UI
+//! Jellyfin library fetch/parse into the private catalog (was src/pms.c), read by the UI
 //! via the retained publication (`hubs_snapshot()` → `HubsView`) and movie()/hub_item(), plus
 //! urlenc_str (shared by posters/route).
-//! The fetch + JSON parse go through the typed `crate::plex` client (serde DTOs) — no
+//! The fetch + JSON parse go through the typed `crate::jellyfin` client (serde DTOs), with no
 //! hand-built paths or `Value` scraping here.
 //!
 //! **This is the data module `stores::hubs` (`docs/stores-as-machines.md`) is a machine over** —
@@ -279,7 +279,7 @@ struct HubRow {
     title: String,
     hub_id: String, // locale-independent hubIdentifier ("home.continue", "home.movies.recent", …)
     // Provider listing path. Part of an identified hub's identity as well as the fallback when
-    // `hubIdentifier` is absent: PMS reuses one identifier for section-specific Home rows while
+    // `hubIdentifier` is absent: the old wire reused one identifier for section-specific rows while
     // publishing distinct keys. Kept verbatim — observed keys carry content-defining query terms
     // (`type`, `sectionID`, filters/sort), not the parent `/hubs?count=…` request's page size.
     key: String,
@@ -368,7 +368,7 @@ pub(crate) struct HubRef<'a> {
 
 /// Provider identities are tagged: a listing key cannot collide with an identifier that
 /// happens to contain the same bytes. An identifier is scoped by both server and its
-/// provider-published listing key: PMS reuses `home.television.recent` for section-specific rows,
+/// provider-published listing key: the old wire reused `home.television.recent` for section rows,
 /// while a cross-section row keeps one key even when its leading item's library changes. Neither
 /// display text, item content nor position participates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -379,10 +379,10 @@ pub(crate) enum HubIdentity<'a> {
 }
 
 /// Which shelves may feed the rotating hero pool, in one place so a backend's hub-id shape
-/// cannot drift out of the rule unnoticed. Plex: the Continue Watching deck plus every
+/// cannot drift out of the rule unnoticed. On the old wire: the Continue Watching deck plus every
 /// Recently Added variant (home.movies.recent, home.television.recent, promoted
 /// <type>.recentlyadded.<id>) all carry "recent". Jellyfin: the per-view Latest shelves stamp
-/// `jf.latest.<viewId>` (issue #43 — that shape matched neither Plex arm, so the billboard
+/// `jf.latest.<viewId>` (issue #43, that shape matched neither arm, so the billboard
 /// never promoted Recently Added on this backend).
 fn hero_eligible(hub_id: &str) -> bool {
     hub_id == "home.continue" || hub_id.contains("recent") || hub_id.starts_with("jf.latest.")
@@ -653,7 +653,7 @@ struct SourceBuild {
 /// Watching is `/Items/Resume` (the deck, server-sorted by last-played) and each
 /// movies/tvshows view contributes one Recently Added shelf from `/Items/Latest`.
 fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -> Option<SourceBuild> {
-    // A row earns its card the same way the Plex projection's `keep` decides it: a title to
+    // A row earns its card the same way the retired projection's `keep` decided it: a title to
     // name it and a poster to draw. Jellyfin ids are GUIDs, so the catalog pin (`sec`) has no
     // per-library meaning here and stays 0 — listings are scoped at query time instead.
     let keep = |it: &crate::jellyfin::BaseItemDto| {
@@ -668,8 +668,8 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
         .iter()
         .filter_map(|it| {
             keep(it).map(|m| CwItem {
-                // Jellyfin's resume list is already last-played ordered; the Plex merge key
-                // (`lastViewedAt`) has no counterpart on the row and 0 keeps that order intact.
+                // Jellyfin's resume list is already last-played ordered. The retired merge key
+                // (`lastViewedAt`) has no counterpart on the row, so 0 keeps that order intact.
                 last_viewed_at: 0,
                 m,
             })
@@ -715,7 +715,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
         out.shelves.push(Shelf {
             title: format!("{} - {}", crate::i18n::msg::browse_library_hub_recently_added(), v.name),
             hub_id: format!("jf.latest.{}", v.id),
-            // The hub key Plex's shelves carry (what a click resolves to) has no Jellyfin
+            // The hub key the old shelves carried (what a click resolves to) has no Jellyfin
             // counterpart — a Latest shelf is a query, not an addressable hub.
             key: String::new(),
             total: items.len(),
@@ -918,7 +918,7 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
 //
 // The third only appears with a second server, and every piece of it was process-global before:
 // **a verdict belongs to a SOURCE, not to Home.** One `?` chain meant a dead share aborted the whole
-// build and nothing committed — on a cold boot, a whole-screen "Can't reach your Plex server" about
+// build and nothing committed, so a cold boot said "Can't reach your Jellyfin server" about
 // a library that was answering perfectly well. One in-flight latch meant a share that takes eight
 // seconds to time out held the owned server's retry behind it. One backoff meant the ladder a dead
 // share had climbed to 30 s was the ladder every other source then waited on.
@@ -947,7 +947,7 @@ struct Src {
     /// **The CREDIT** for this source — `server::servers::owner_credit`'s answer, stamped onto every
     /// shelf and hero row this source contributes. `"friend"` for a borrowed server; **empty when
     /// there is nobody to credit**, which is our own server, the household's own server whichever
-    /// Plex Home profile is watching, and a share plex.tv never named. Read from the registry at
+    /// profile is watching, and a share the account service never named. Read from the registry at
     /// [`sync_roster`] time, never inside a worker.
     ///
     /// [`roster`] groups the uncredited ones first, so an empty string also orders Home. That is
@@ -1017,14 +1017,13 @@ impl Src {
 // now — `state.srcs`/`state.seen`/`state.seen_facts` — rebuilt from the roster by
 // `sync_roster_with_scope`; main-thread only, so no lock is needed.
 
-/// The one-fetch resource a request carries to its worker. Plex sources hold their registry
-/// client; the Jellyfin flavor's single source holds the installed Jellyfin client instead.
-/// Both are leaked-static precisely so this reference stays valid across a mid-request
-/// re-point, exactly as the Plex arm documents below.
+/// The one-fetch resource a request carries to its worker. The Jellyfin flavor's single source
+/// holds the installed Jellyfin client, leaked-static precisely so this reference stays valid
+/// across a mid-request re-point. The retired per-source arm leaked its registry slot the same way.
 #[derive(Clone, Copy)]
 enum HubClientRef {
     /// The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
-    /// and no Plex registry slot behind it, so no instance/token generation to fingerprint.
+    /// and no registry slot behind it, so no instance/token generation to fingerprint.
     Jellyfin(&'static crate::jellyfin::JfClient),
 }
 
@@ -1090,8 +1089,8 @@ pub(crate) fn backoff_secs(fails: u32) -> f32 {
 /// Home's fetch state, folded from every source — what the loading / empty / error read-out reads.
 ///
 /// **Any source answering makes Home answered**, and the total-failure read-out is reserved for the
-/// case where every one of them failed. That is the whole point of the fold: "Can't reach your Plex
-/// server", drawn because a friend's machine is asleep, is a lie about the library that is working.
+/// case where every one of them failed. The whole point of the fold: "Can't reach your Jellyfin
+/// server", drawn because a friend's machine is asleep, is a lie about the library that works.
 /// No source at all (before the first install) is Loading — nothing to show is not an answer.
 // Only `hubs_snapshot` and this module's own tests read the fold; nothing outside `pms.rs` names
 // it, so it stays module-private — the D3 hardening this file's other mutators cannot get (a
@@ -1178,10 +1177,10 @@ fn item_pinned(pins: &[(ServerId, i64, bool)], m: &PmsMovie) -> bool {
 /// is the grouping device, so "own first, then each shared server's, contiguously" is true by
 /// construction rather than by convention.
 ///
-/// The registry IS the granted roster — a server is in it only once plex.tv (or the
-/// `butaca-servers` dev trigger) handed us a token for it — and [`feeds_home`] is what narrows
-/// the grant to a pin. The handle comes from the same place (`ServerFacts`), so nothing here has an
-/// opinion about who a server belongs to that the Sources list does not share.
+/// The registry names the servers the app knows, and today the installed Jellyfin client is the
+/// one source. [`feeds_home`] is what narrows the grant to a pin. The handle comes from the same
+/// place (`ServerFacts`), so nothing here has an opinion about who a server belongs to that the
+/// Sources list does not share.
 fn roster_with_scope(_scope: &BrowseScope) -> Vec<(ServerId, String)> {
     // Jellyfin is the only backend: one source, the server the boot flow authenticated against.
     // Listed the moment the client exists; before that the roster is empty.
@@ -1206,7 +1205,7 @@ fn roster_key() -> u64 {
 }
 
 fn roster_key_with_scope(scope: &BrowseScope) -> u64 {
-    // The Jellyfin client's install is an event no plex-registry generation can see, so under
+    // The Jellyfin client's install is an event no registry generation can see, so under
     // the flavor it IS the high bit: boot order (sync first, install second) must still rebuild.
     if crate::jellyfin::client().is_some() {
         return u64::MAX;
@@ -1296,9 +1295,9 @@ fn sync_roster_with_scope(state: &mut PmsState, scope: &BrowseScope) {
             None => out.push(Src::new(sid, handle)),
         }
     }
-    // Whatever is left in `srcs` has left the roster — un-pinned, or a share plex.tv no longer
-    // grants. A worker still out for one of them posts a landing for a sid this table no longer
-    // holds, which `pump` drops.
+    // Whatever is left in `srcs` has left the roster, un-pinned, or a share the account service
+    // no longer grants. A worker still out for one of them posts a landing for a sid this table no
+    // longer holds, which `pump` drops.
     let dropped = srcs.iter().any(|x| x.last.is_some());
     state.srcs = out;
     if dropped || restamped || scope_moved {
@@ -1339,7 +1338,7 @@ fn commit(state: &mut PmsState, build: HubBuild) -> c_int {
 fn landed_ok(s: &mut Src, b: SourceBuild) {
     // The success twin of `landed_fail`'s line. Without it a source that fetched and answered was
     // indistinguishable in the log from one still in flight — "hubs: source 1 fetching" with
-    // nothing after it says only that the worker started. The SLOT, never the handle (a plex.tv
+    // nothing after it says only that the worker started. The SLOT, never the handle (a server
     // username is the friend's, and the event log is what users send us).
     crate::log(&format!(
         "hubs: source {} ok — {} shelves, {} in CW",
@@ -1359,7 +1358,7 @@ fn landed_fail(s: &mut Src) {
     s.retry_s = backoff_secs(s.retry_n);
     s.state = HubState::Failed;
     // the ONE line that says a dead source is dead ON PURPOSE and is coming back — without it the
-    // whole recovery is invisible in the event log. The SLOT, never the handle: a plex.tv username
+    // whole recovery is invisible in the event log. The SLOT, never the handle: a server username
     // is the friend's, and the event log is what users send us.
     crate::log(&format!(
         "hubs: source {} FAILED (attempt {}) — retrying in {:.0}s",
@@ -1390,12 +1389,12 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     // slot id; it never asks which server is current, and a slot re-pointed mid-request cannot
     // redirect a fetch that is already out (`server::servers` leaks each client precisely so that
     // reference stays live).
-    // The Jellyfin flavor's single source is never in the Plex registry, so it is captured
+    // The Jellyfin flavor's single source is never in the registry, so it is captured
     // from its own client slot (the spawn-site capture rule is the same: the main thread reads
     // the `&'static` here and the worker holds it, never a lookup).
     // The guard is load-bearing, not redundant: the jellyfin slot is 0, which test fixtures also
-    // hand to `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH to
-    // the Plex registry, not shadow it.
+    // hand to `register_for_test` clients, and an absent jellyfin client fails the fetch closed,
+    // rather than shadowing the slot.
     // Jellyfin is the only backend: the spawn site captures its client from the process slot
     // (the main thread reads the `&'static` here and the worker holds it, never a lookup).
     if s.sid != crate::jellyfin::SERVER_ID {

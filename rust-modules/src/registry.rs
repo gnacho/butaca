@@ -1,16 +1,16 @@
 //! The SERVER REGISTRY — the backend-neutral slot vocabulary every store keys on.
 //!
 //! This was the table of leaked `server::Client`s behind `client_for`/`client()`/`register`. The
-//! dispatch collapse (#202) removed every path that could publish a Plex client, so the table
+//! dispatch collapse (#202) removed every path that could publish such a client, so the table
 //! over `server::Client` was unreachable code, and this slice (#166) retired it together with the
-//! wire layer it existed to index (`plex/client.rs` and siblings). What survives is the
-//! vocabulary the app still shares across backends:
+//! wire layer it existed to index. What survives is the vocabulary the app still shares across
+//! its stores:
 //!
 //! * [`ServerId`] — the stable per-process slot handle that sits in UI state, routes and queued
 //!   jobs. The Jellyfin backend names its one server `crate::jellyfin::SERVER_ID` (raw slot 0);
-//!   every Plex slot is permanently empty.
+//!   every other slot is permanently empty.
 //! * [`same_item`] — THE item-identity rule every server-scoped key comparison goes through.
-//! * [`current`]/[`ids`] — the reads, honest over an always-empty Plex roster:
+//! * [`current`]/[`ids`]: the reads, honest over an always-empty roster:
 //!   `current()` answers [`ServerId::UNSET`], `ids()` yields nothing.
 //! * the generation counters ([`roster_gen`]/[`facts_gen`]) and the client-generation sequence
 //!   ([`capture_generation_seed`]) the persisted bootstrap vocabulary carries.
@@ -25,7 +25,7 @@
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// Slot ceiling. A Plex account's server list is a handful (own + shared); this is the number
+/// Slot ceiling. An account's server list is a handful (own + shared), and this is the number
 /// that decides which slot ids can ever exist.
 ///
 /// `pub` because [`crate::server::serverinfo`] holds one entry PER SERVER in a flat array indexed
@@ -69,7 +69,7 @@ impl Default for ServerId {
 
 /// **THE item-identity rule**: do two server-scoped keys name the same item?
 ///
-/// Every `ratingKey`, `librarySectionID`, `Part.key`, `Stream.id` and `personId` Plex issues is a
+/// Every `ratingKey`, `librarySectionID`, `Part.key`, `Stream.id` and `personId` is a
 /// server-local integer dense from 1, so with two servers registered a bare key names an item on
 /// *neither* of them in particular. Two servers colliding is therefore the NORMAL case, not an edge
 /// one — it was measured on a household with a shared server: that share's only key is `1`, exactly
@@ -84,8 +84,8 @@ impl Default for ServerId {
 /// UNSET vs a real slot is deliberately NOT a match — a "server unknown" row must not be handed to
 /// a caller asking about a specific machine, because the whole failure this rule exists to stop is
 /// a confident answer about the wrong one. Every such miss degrades safely at its call site (a
-/// catalog miss opens the page off-catalog, a playing-item miss costs one PMS fetch), which is the
-/// property that makes strict equality the safe default here.
+/// catalog miss opens the page off-catalog, a playing-item miss costs one server fetch), which is
+/// the property that makes strict equality the safe default here.
 pub fn same_item(a: (ServerId, &str), b: (ServerId, &str)) -> bool {
     a.0 == b.0 && a.1 == b.1
 }
@@ -144,7 +144,7 @@ pub(crate) fn restore_generation_seed(seed: u32) -> Result<(), &'static str> {
 // ---- reads ----
 
 /// Which server `client()` used to answer with. [`ServerId::UNSET`] on every boot of the
-/// single-source app: the installation path that wrote this retired with the Plex wire layer, so
+/// single-source app: the installation path that wrote this retired with the wire layer, so
 /// the current-server slot is permanently unnamed. Callers that need the LIVE backend name
 /// `crate::jellyfin::SERVER_ID` directly.
 ///
@@ -168,7 +168,7 @@ pub fn facts_gen() -> u32 {
 /// Every LIVE slot, in registration order — **the granted roster**. With registration retired
 /// (#166) the roster is always empty; the walk keeps its exact shape (floor-bounded, active-bit
 /// filtered, ordered) because `browse`'s discovery wire, `search`'s fan-out, `person`'s sources
-/// and `metadata`'s alt panel all read it and must keep reading "no Plex sources" rather than a
+/// and `metadata`'s alt panel all read it and must keep reading "no sources" rather than a
 /// guessed slot.
 pub fn ids() -> impl Iterator<Item = ServerId> {
     let hi = COUNT.load(Ordering::Acquire);

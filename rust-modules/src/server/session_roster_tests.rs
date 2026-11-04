@@ -6,8 +6,9 @@ use super::test_support::*;
 
 /// The other side of the gate: once an origin IS written down it is what gets dialled, and it
 /// beats the address pair beside it. That is not a tie-break for its own sake — for an https
-/// server the two genuinely differ (the certificate is issued for the `plex.direct` NAME, not
-/// for the quad), so reading the pair would connect and then fail validation.
+/// server the two genuinely differ (the certificate is issued for a public wildcard NAME, which
+/// only public DNS resolves, not for the quad), so reading the pair would connect and then fail
+/// validation.
 #[test]
 fn a_stored_origin_beats_the_address_pair_beside_it() {
     let json = r#"{"client_id":"c","account_token":"a",
@@ -304,7 +305,7 @@ fn a_profiles_search_history_is_its_own() {
         s.recents_for("uu-never-searched").is_empty(),
         "an unknown profile reads empty, not someone else's"
     );
-    // the owner with no Plex Home selection keys on "" and is nobody else
+    // the owner with no household roster selection keys on "" and is nobody else
     assert!(s.recents_for("").is_empty());
 
     // …and a write for one leaves the others intact — the bug `set_recents_for` exists to make
@@ -382,8 +383,8 @@ fn only_the_account_owners_own_profile_may_refresh_the_roster_with_the_account_t
         "a managed profile is not the account"
     );
 
-    // An account with no Plex Home never writes a profile at all — auth's single-user path
-    // enters Home on the owner's server token — so an empty uuid IS the owner.
+    // An account with no household roster never writes a profile at all. Auth's single-user path
+    // enters the roster on the owner's server token, so an empty uuid IS the owner.
     let solo = Session {
         client_id: "cid".into(),
         account_token: "acct".into(),
@@ -392,7 +393,7 @@ fn only_the_account_owners_own_profile_may_refresh_the_roster_with_the_account_t
     assert!(solo.active_profile_is_admin());
 
     // …but an unknown uuid is NOT the owner. `home_users` is empty for "never fetched" as much
-    // as for "no Plex Home" (see `Session::account`), and on a question whose wrong answer is
+    // as for "no household roster" (see `Session::account`). On a question whose wrong answer is
     // somebody else's credentials, "cannot prove it" must not read as "yes".
     let mut unknown = home("u-kid");
     unknown.home_users.clear();

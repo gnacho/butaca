@@ -65,7 +65,7 @@ struct RetryContext {
 /// fixed it, in [`build_stream`] — the part id used to be published by the CALLER after the
 /// resolve returned, so the server-side selection PUT, which ran INSIDE the resolve, addressed
 /// the PREVIOUS item's part, and the server-default subtitle that PUT existed to suppress was
-/// burned into the transcode instead. (That PUT went with the Plex wire layer; the lesson is
+/// burned into the transcode instead. (That PUT went with the wire layer, the lesson is
 /// why `part_id` is derived at the top of [`build_stream`] to this day.)
 ///
 /// Route ownership and worker/main route transitions are deliberately not fields here: the
@@ -116,7 +116,7 @@ pub(crate) struct PlaybackSession {
     resolve_failed: bool,
     /// This playback's encode shape — flavor, delivery, the no-copy switch, the fixed quality
     /// ceiling and (issue #266) the audio-DSP flags. A seek or retranscode rebuilds the stream
-    /// from (`cur_rk`, `sess`, the `cur_*_sid` pair, this contract); on the Plex backend that was
+    /// from (`cur_rk`, `sess`, the `cur_*_sid` pair, this contract). On the old backend it was
     /// the `TranscodeSpec` query, and on the Jellyfin backend it is the PlaybackInfo body
     /// (`jellyfin::profile`) — either way the contract, not a stored query string, is the source.
     ///
@@ -134,7 +134,7 @@ pub(crate) struct PlaybackSession {
     /// the pump for a fresh transcode when the answer actually changed). Nothing measures a link
     /// or moves a rung on its own — the adaptive switch is not here.
     cur_contract: crate::playback::EncodeContract,
-    /// What the last successful transcode decision actually did with the Plex Pass audio DSP
+    /// What the last successful transcode decision actually did with the requested audio DSP
     /// (issue #266) — distinct from `cur_contract.audio`, which is what the accepted decision
     /// carried. Installed by `apply_plan` from `Plan::enhancement`; reset to `Off` by a new
     /// request. See `route::decision::EnhancementOutcome`.
@@ -239,7 +239,7 @@ pub(crate) struct PlaybackSession {
     cur_audio: Option<CarriedAudio>,
     /// current subtitle selection carried by any TRANSCODE of the current item (0 = none). The
     /// subtitle is BURNED into the video (our client profile advertises no soft-sub support, so
-    /// Plex's decision is burn); direct-play subtitles are separate (client-rendered from the
+    /// the server's decision is burn), direct-play subtitles are separate (client-rendered from the
     /// demuxer, player::request_subtitle).
     cur_sub_sid: i64,
     /// The subtitle-language preference this play resolved under — the show's pref if it set one,
@@ -336,9 +336,9 @@ pub(crate) struct PlaybackSession {
     resolved_as_preview: bool,
 }
 
-/// What the server actually did with a requested Plex Pass audio enhancement (issue #266) — as
+/// What the server actually did with a requested audio enhancement (issue #266), as
 /// opposed to `EncodeContract::audio`, which is what was ASKED for. Distinguishing "on and
-/// working" from "the server ignored it" matters because PMS 1.43.4 does both: measurement M2
+/// working" from "the server ignored it" matters because the measured server does both: M2
 /// (`/tmp/butaca266/measurements.md`) found an AC3 2.0 source where the params changed the decision
 /// (a real DSP transcode) beside an AAC 5.1 source where the audio was transcoded to AC3 either
 /// way, params or not — so "the decision shows a transcode" alone cannot tell the two apart.
@@ -2266,15 +2266,15 @@ impl HlsAbrControl {
         observe_active_hls(expected, variant, evidence_kbps);
     }
 
-    /// Whether every superseded/rejected physical encoder on this PMS has crossed the server's
+    /// Whether every superseded/rejected physical encoder on this server has crossed the server's
     /// exact cleanup point, without starting a request. The ledger that tracked those objects
-    /// went with the Plex stop/ping lifecycle; nothing pends, so the answer is always clear.
+    /// went with the stop/ping lifecycle, so nothing pends and the answer is always clear.
     pub(crate) fn encoder_cleanup_ready(&self) -> bool {
         true
     }
 
     /// Drive one coalesced background check from a newly completed active HLS quantum. Nothing
-    /// pends without the Plex encoder lifecycle, so there is nothing to drive.
+    /// pends without the retired encoder lifecycle, so there is nothing to drive.
     pub(crate) fn observe_encoder_cleanup(&self) -> bool {
         true
     }
@@ -2313,8 +2313,8 @@ impl HlsAbrControl {
     where
         F: FnOnce() -> bool,
     {
-        // The ABR original probe was a Plex capability: it measured the original file through
-        // the Plex client. Jellyfin playback stays on HLS, so the probe never measures.
+        // The ABR original probe was a wire capability: it measured the original file through
+        // the old client. Jellyfin playback stays on HLS, so the probe never measures.
         let _ = (expected, plan, cancelled);
         OriginalProbeResult::Failed { failure: OriginalProbeFailure::Other }
     }
@@ -2371,9 +2371,9 @@ impl HlsAbrControl {
                 encoder_session,
             });
         }
-        // The wire half (the Plex `/decision` registration and its `start.m3u8` URL) is gone
-        // with the Plex transcoder. Every real server now resolves through the Jellyfin backend,
-        // whose slot is not in the Plex registry, so production priming refuses exactly as it
+        // The wire half (the `/decision` registration and its `start.m3u8` URL) went with the
+        // retired transcoder. Every real server now resolves through the Jellyfin backend,
+        // whose slot is not in the old registry, so production priming refuses exactly as it
         // did when `client_for` missed: `Err(Session)`, which says nothing about the rung. The
         // fixture path stays: the dev ABR rig drives rung transitions without a server.
         let _ = rung;
@@ -2415,8 +2415,8 @@ impl HlsAbrControl {
         })
     }
 
-    /// Retire a superseded or abandoned candidate encoder. The Plex stop+ping lifecycle that
-    /// did the retiring is gone with the transcoder; the Jellyfin backend reaps its own quiet
+    /// Retire a superseded or abandoned candidate encoder. The stop+ping lifecycle that
+    /// did the retiring went with the transcoder, the Jellyfin backend reaps its own quiet
     /// encoders (`jellyfin_retranscode_as`'s stop worker), so there is nothing to ask here.
     pub(crate) fn retire(&self, _encoder: String) {}
 
@@ -2630,11 +2630,11 @@ pub(crate) fn auto_original_watch(ps: &PlaybackSession) -> Option<AutoOriginalWa
     })
 }
 
-/// Arm the no-Plex pipeline tier for the same Original→HLS transaction production uses. The only
+/// Arm the no-server pipeline tier for the same Original→HLS transaction production uses. The only
 /// substitution is URL allocation: [`HlsAbrControl`] maps a rung to fixture playlists rather than
-/// asking PMS to create an encoder. Transport, FFmpeg, buffer measurement, the controller, pump
-/// handoff and Starfish are unchanged, which makes a mid-request bandwidth profile testable on a
-/// TV without a library, account, token, or external server.
+/// asking the server to create an encoder. Transport, FFmpeg, buffer measurement, the controller,
+/// pump handoff and Starfish are unchanged, which makes a mid-request bandwidth profile testable
+/// on a TV without a library, account, token, or external server.
 ///
 /// `start_hls` skips the Original phase entirely, removes the synthetic Original candidate and
 /// returns the playlist to open. Use it for every case that grades the HLS CONTROLLER; leave it
@@ -2697,7 +2697,7 @@ pub(crate) fn arm_auto_fixture(
     if !start_hls {
         // The fixture is a real playback entry point (used by the device harness), not a bag of
         // Session test setters.  Publish the installed Original through the same reducer landing
-        // as a resolved Plex item so its worker owns the selected Auto contract.  Without this,
+        // as a resolved item so its worker owns the selected Auto contract.  Without this,
         // the durable picker said Auto while `applied_quality` still named the previous playback,
         // and the progressive watchdog was correctly refused as belonging to another contract.
         settle_plan_start_in_unit_test(ps, prepare_playback_landing(ps, true));
@@ -3031,10 +3031,10 @@ pub(crate) fn recover_auto_to_original_for(
         );
     };
 
-    // The remux replacement WAS a Plex `/decision` registration plus its `start.mkv` publish;
-    // the wire half is gone with the Plex transcoder, so a remux recovery cannot be built. Fail
-    // with the held route untouched — on the only remaining backend this is exactly what the old
-    // call resolved to, since `prepare_original_remux` found no Plex client for its slot.
+    // The remux replacement WAS a `/decision` registration plus its `start.mkv` publish, and
+    // that wire went with the transcoder, so a remux recovery cannot be built. Fail with the
+    // held route untouched: on the only remaining backend this is exactly what the old call
+    // resolved to, since `prepare_original_remux` found no client for its slot.
     let _ = audio;
     None
 }
@@ -3512,7 +3512,7 @@ pub(crate) fn drop_original_recovery(ps: &PlaybackSession) {
 }
 
 fn retire_replaced_encoder(_ps: &PlaybackSession, _encoder: String) {
-    // The stop this used to background was the Plex `/stop`, gone with the transcoder. The
+    // The stop this used to background was the old `/stop`, gone with the transcoder. The
     // Jellyfin backend reaps its own quiet encoders, and a fixture never has one running.
 }
 
@@ -3520,7 +3520,7 @@ fn retire_replaced_encoder(_ps: &PlaybackSession, _encoder: String) {
 /// producer; keeping the resource alive is what lets the current body and every later seek remain
 /// admitted. [`scrobble_stop`] still owns the id in `ACTIVE_ENCODER` and closes it at teardown.
 fn retire_hls_encoder_keep_source(_ps: &PlaybackSession, _encoder: String) {
-    // The physical-only stop went with the Plex transcoder; without the wire there is no
+    // The physical-only stop went with the retired transcoder, without the wire there is no
     // encoder identity this side could retire.
 }
 /// true while this playback is a server transcode (a live transcode session exists). Cheap
@@ -3583,7 +3583,7 @@ pub(crate) fn cur_sub_sid(ps: &PlaybackSession) -> i64 {
     ps.cur_sub_sid
 }
 /// The subtitle-language preference this play resolved under (show pref, else account pref), as
-/// a BCP-47 code — `metadata::sub_layout::sub_sections`'s "yours" grouping reads this, never a Plex
+/// a BCP-47 code: `metadata::sub_layout::sub_sections`'s "yours" grouping reads this, never an
 /// account type.
 pub(crate) fn cur_sub_pref_lang(ps: &PlaybackSession) -> Option<&str> {
     ps.cur_sub_pref_lang.as_deref()
@@ -3599,8 +3599,8 @@ pub(crate) fn cur_rk(ps: &PlaybackSession) -> String {
 pub(crate) fn cur_sid(ps: &PlaybackSession) -> ServerId {
     ps.cur_sid
 }
-/// The `Client` for the currently-playing item's server — went with the wire layer (#166): no
-/// Plex client exists to resolve, and the Jellyfin arm hands its own client by value. The
+/// The `Client` for the currently-playing item's server, went with the wire layer (#166): no
+/// such client exists to resolve, and the Jellyfin arm hands its own client by value. The
 /// resolve worker receives everything it needs at spawn; nothing in-playback resolves a client
 /// by sid any more.
 /// Projection: the wire id of the carried audio track, `0` for "server default / none" — the
@@ -3735,8 +3735,8 @@ pub(crate) fn set_stream_source_raster(ps: &mut PlaybackSession, w: u16, h: u16)
 /// Four separate setters would be four ways to leave it half-written.
 ///
 /// This touches neither `cur_rk`/`cur_sid` nor `tsession`, which is what keeps a URL-fed playback
-/// free of Plex entirely: the `/:/timeline` reporter stays unspawned and `is_transcoding()` stays
-/// false.
+/// free of the wire entirely: the `/:/timeline` reporter stays unspawned and `is_transcoding()`
+/// stays false.
 pub(crate) fn set_stream_declaration(
     ps: &mut PlaybackSession,
     vc: &str,
@@ -3818,7 +3818,7 @@ pub(crate) fn set_stream_declaration_for_test(
 pub(crate) fn is_remux(ps: &PlaybackSession) -> bool {
     ps.cur_contract.remux
 }
-/// The Plex Pass DSP the live route was ASKED for (issue #266) — `cur_contract.audio`, gated to
+/// The audio DSP the live route was ASKED for (issue #266): `cur_contract.audio`, gated to
 /// what the server DEMONSTRABLY applied: `NONE` unless `cur_enhancement` is `Applied`
 /// (`Unverified`/`Refused`/`Off` say nothing was provably added to this stream, so a caller
 /// quoting the params must not claim them). Read by the diagnostics Audio row's suffix, which used
@@ -3908,9 +3908,9 @@ impl ScrobbleWork {
             let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
             // The final `stopped` report. `session` is already tsession-when-set (the capture in
             // `scrobble_stop`), which on the Jellyfin side is the PlaySessionId rule
-            // `jellyfin::profile` states. The Plex arm of this report went with the Plex
-            // transcoder; without a Jellyfin client (host fixtures) there is no wire, and the
-            // honest line is the ok=0 it used to resolve to.
+            // `jellyfin::profile` states. The old arm of this report went with the transcoder.
+            // Without a Jellyfin client (host fixtures) there is no wire, and the honest line is
+            // the ok=0 it used to resolve to.
             if let Some(jc) = self.jf_client {
                 let ok = jc.session_stopped(&rk, t_ms, &self.session);
                 crate::log(&format!(
@@ -3935,8 +3935,8 @@ impl ScrobbleWork {
         }
         if !self.transcode_session.is_empty() {
             // The server-side encoder kill, on whichever backend holds the session. Jellyfin's
-            // is a best-effort DELETE (the server reaps a quiet HLS encoder on its own); Plex's
-            // is the transcode-session stop.
+            // is a best-effort DELETE (the server reaps a quiet HLS encoder on its own). The
+            // retired backend's was the transcode-session stop.
             let ok = self
                 .jf_client
                 .is_some_and(|jc| jc.stop_active_encodings(&self.transcode_session));
@@ -3986,7 +3986,7 @@ pub(crate) fn scrobble_stop(
     }
     // The server this playback came FROM — the resume point and the transcode session both
     // live there, and by the time a stop runs the user may well have walked back to a different
-    // source's Home. One backend: the Jellyfin client lives outside the (Plex) registry.
+    // source's Home. One backend: the Jellyfin client lives outside the server registry.
     let jf_client = if cur_sid(ps) == crate::jellyfin::SERVER_ID {
         crate::jellyfin::client()
     } else {
@@ -4228,11 +4228,11 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         return None;
     }
     // The Jellyfin flavor re-cuts the server session with a StartTimeTicks PlaybackInfo instead
-    // of PMS's start.mkv decision+spec handshake. Same route-ownership machinery publishes the
-    // replacement, so the teardown (and a later scrobble_stop) resolves the server resource from
-    // ACTIVE_ENCODER exactly as on the Plex arm.
-    // The guard is load-bearing: the jellyfin slot is 0, which host fixtures also hand to
-    // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
+    // of the retired start.mkv decision+spec handshake. Same route-ownership machinery publishes
+    // the replacement, so the teardown (and a later scrobble_stop) resolves the server resource
+    // from ACTIVE_ENCODER exactly as a fresh start does.
+    // The guard is load-bearing: the jellyfin slot is 0, which host fixtures also use, so an
+    // absent jellyfin client must fall THROUGH.
     if cur_sid(ps) != crate::jellyfin::SERVER_ID || crate::jellyfin::client().is_none() {
         return None;
     }
@@ -4248,7 +4248,7 @@ fn jellyfin_transcode_seek(
     rk: &str,
 ) -> Option<String> {
     let c = crate::jellyfin::client()?;
-    // Reserve the same start transaction the Plex arm reserves, so a seek cannot publish a
+    // Reserve the start transaction before publishing, so a seek cannot publish a
     // replacement beneath a Load that is already on its way.
     let route_start = begin_route_start();
     let reject_preparation = || {
@@ -4256,8 +4256,8 @@ fn jellyfin_transcode_seek(
             let _ = reject_route_start_preparation(ticket);
         }
     };
-    // Reconcile the worker-owned projection (if any) into the session before snapshotting, exactly
-    // like the Plex arm — the URL/ceiling to replace is the one live NOW, not the bootstrap one.
+    // Reconcile the worker-owned projection (if any) into the session before snapshotting, so
+    // the URL/ceiling to replace is the one live NOW, not the bootstrap one.
     let live_hls = sync_active_hls_to_session(ps);
     let expected = live_hls
         .as_ref()
@@ -4308,7 +4308,7 @@ fn jellyfin_transcode_seek(
         .clone()
         .filter(|session_id| !session_id.is_empty())
         .unwrap_or_else(|| previous.clone());
-    // Publish the replacement through the SAME route ownership machinery the Plex arm uses.
+    // Publish the replacement through the SAME route ownership machinery the start path uses.
     let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
         replace_active_hls_for(&expected, &replacement, &url, hls.rung, None).is_some()
     } else {
@@ -4329,8 +4329,8 @@ fn jellyfin_transcode_seek(
             return None;
         }
     }
-    // Retire the OLD server-side session off the main thread — the same backgrounded hand-off the
-    // Plex arm performs.
+    // Retire the OLD server-side session off the main thread, best-effort: Jellyfin reaps a
+    // quiet encoder on its own.
     if replacement != previous {
         let old = previous.clone();
         let jc = c; // 'static
@@ -4712,7 +4712,7 @@ pub(crate) fn restore_quality(q: Quality) {
     // `QUALITY` is a process global `quality()` reads without taking any lock, so a test that
     // writes it without `testlock::serial()` lands the write mid some OTHER test's read —
     // `on_deck_hevc_p5_preview_uses_the_selected_episodes_codec` flaked exactly this way. Same
-    // guard as the plex server registry (`server::servers::register_with_client_id`).
+    // guard as the server registry (`server::servers::register_with_client_id`).
     #[cfg(test)]
     crate::testlock::assert_held("the playback quality ceiling (restore_quality)");
     QUALITY.store(supported_quality(q).index(), Ordering::Relaxed);
@@ -4842,7 +4842,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
         crate::player::request_adaptive_reload(ps);
         return;
     }
-    // The link tier was the Plex slot's connection fact (`client_for(sid).link()`); that world
+    // The link tier was the server slot's connection fact (`client_for(sid).link()`), that world
     // is retired (#166), so nothing can prove a tier any more and the policy reads `None` —
     // "nobody has said", which leaves every flavor free (`link_policy`'s table).
     let location = None;
@@ -4969,8 +4969,8 @@ pub(crate) fn up_next(ps: &PlaybackSession) -> Option<&UpNext> {
 impl ResolveEnv {
     /// Mark this resolve as a hero preview. A preview is direct play or nothing
     /// (`preview::accepts_direct_play`) and an enhancement is a remux by definition, so a preview
-    /// never asks for one — without this, a Plex Pass viewer's opt-in would turn every trailer
-    /// preview into a refused remux.
+    /// never asks for one, so without this an opted-in viewer's enhancement would turn every
+    /// trailer preview into a refused remux.
     pub(super) fn set_preview(&mut self, preview: bool) {
         self.preview = preview;
         if preview {
@@ -5043,7 +5043,7 @@ fn playback_preview_with_capability(
     // promise "Direct Play" for a source the rung is about to send to an encoder, which is the
     // exact mismatch this preview's doc says it exists to avoid. `d.bitrate`/`width`/`height` are
     // `Media[0]`'s, i.e. the same numbers `ResolveEnv` hands the resolve.
-    // The link tier was the Plex slot's connection fact (`client_for(d.sid).link()`); that world
+    // The link tier was the server slot's connection fact (`client_for(d.sid).link()`), that world
     // is retired (#166), so nothing can prove a tier any more and the policy reads `None` —
     // "nobody has said", which leaves every flavor free (`link_policy`'s table).
     let location = None;
@@ -5323,7 +5323,7 @@ fn request_play_inner(
             // The mailbox dance keeps the slot MONOTONE: a newer resolve replaces an older
             // unconsumed landing, supersession before publication installs nothing, and an even
             // newer unconsumed landing already owns the slot. The dropped plan's server objects
-            // were the abandoned-stop worker's business; that stop was the Plex `/stop`, gone
+            // were the abandoned-stop worker's business, that stop was the old `/stop`, gone
             // with the wire layer (a quiet Jellyfin encoder is reaped by the server).
             let mut slot = PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner());
             if gen == PLAY_GEN.load(Ordering::SeqCst)
@@ -5365,7 +5365,7 @@ fn reset_track_selection(retry: Option<RetryContext>) {
 ///
 /// The caller owns Engine teardown; this module owns the immutable request descriptor, track
 /// selection and generation-bound resume point.  Returning `false` is honest for URL/dev-trigger
-/// playback, which never entered the Plex request funnel and therefore has no item to resolve.
+/// playback, which never entered the resolve funnel and therefore has no item to resolve.
 pub(crate) fn can_retry_current_play(ps: &PlaybackSession) -> bool {
     ps.request.is_some()
 }
@@ -5795,7 +5795,7 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
     }
     // Jellyfin arm — a re-transcode that selects a track is a NEW PlaybackInfo POST with that
     // stream named in the body (the server cuts the playlist with it selected), exactly the shape
-    // `jellyfin_transcode_seek` uses for a seek. The Plex machinery below resolves its client
+    // `jellyfin_transcode_seek` uses for a seek. The retired wire arm resolved its client
     // from a registry the Jellyfin slot is not in, so without this arm an audio switch to a
     // non-direct-playable track is silently rejected on this backend.
     if cur_sid(ps) != crate::jellyfin::SERVER_ID || crate::jellyfin::client().is_none() {
@@ -5862,7 +5862,7 @@ fn jellyfin_retranscode_as(
         .clone()
         .filter(|session_id| !session_id.is_empty())
         .unwrap_or_else(|| next_encoder_session(&namespace));
-    // Publish through the SAME route ownership machinery the Plex arm uses, so the teardown that
+    // Publish through the SAME route ownership machinery the start path uses, so the teardown that
     // follows (and a later scrobble_stop) resolves the server resource from ACTIVE_ENCODER rather
     // than from a session field the reload already moved past.
     if replace_active_encoder_for(expected, &replacement).is_none() {
@@ -5881,9 +5881,9 @@ fn jellyfin_retranscode_as(
         s.stream_dovi = crate::metadata::Dovi::NONE;
         s.stream_immersive = false;
     } };
-    // Retire the previous server session off the main thread — the same backgrounded hand-off the
-    // Plex arm performs. Best-effort: Jellyfin reaps a quiet encoder on its own. Empty on the
-    // common direct-play → transcode switch, where there is no old encoder to stop.
+    // Retire the previous server session off the main thread, best-effort: Jellyfin reaps a
+    // quiet encoder on its own. Empty on the common direct-play → transcode switch, where there
+    // is no old encoder to stop.
     let previous = expected.encoder().to_owned();
     if !previous.is_empty() && previous != replacement {
         let old = previous.clone();
@@ -6172,7 +6172,7 @@ pub(crate) fn execute_retranscode_claim(
             RecoveryCause::EnhancementReleased,
         )
         .map(ClaimTail::Original),
-        // The enhanced remux was a Plex `/decision` re-registration; the wire is gone, so this
+        // The enhanced remux was a `/decision` re-registration, and that wire is gone, so this
         // primary can no longer be honoured. Unreachable on the remaining backend: the offer is
         // gated on the server's subscription state, which the Jellyfin slot never reports as Yes.
         ClaimPrimary::Remux(_) => None,
@@ -6276,7 +6276,7 @@ pub(crate) fn menu_enhancements(ps: &PlaybackSession) -> Option<crate::playback:
 /// `pub(crate)` surface — cannot build one field-by-field the way this module's own tests do.
 /// This is the one door: it drives every input `audio_enhancements_offered_live`/
 /// `displayed_audio_enhancements` read (I1-I7), registers a throwaway server carrying the given
-/// Plex Pass tristate, and returns the session plus that server's id so the caller can
+/// subscription tristate, and returns the session plus that server's id so the caller can
 /// `crate::registry::reset_for_test()` when done. Caller holds `crate::testlock::serial()`.
 #[cfg(test)]
 pub(crate) struct EnhTestFixture {
@@ -6591,7 +6591,7 @@ pub(crate) fn report_timeline(lease: &TimelineLease) -> bool {
     // captured an earlier generation and never wait on the stop worker which is joining them.
     TIMELINE_STOP_FENCE.wait(lease.required_stop);
     let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
-    // The wire arm went with the Plex transcoder: this POST was the Plex `/:/timeline`, and
+    // The wire arm went with the transcoder: this POST was the old `/:/timeline` report, and
     // the Jellyfin backend reports progress through its own session machinery. What stays is
     // the gate (a stale Engine's reporter must stay silent across a teardown) and the fence/
     // effect serialization around it.

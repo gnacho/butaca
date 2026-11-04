@@ -14,18 +14,16 @@
 //! MEDIA plane uses `crate::curlio` as a libcurl-multi pull source. What
 //! `(host, port)` still could not say is the SCHEME, which is this type's reason for existing.
 //!
-//! It is not a complete description of the servers plex.tv actually advertises, and the gap is not
-//! cosmetic. [`crate::server::probe`] builds ranked candidates from an account's `/api/v2/resources`, and
-//! the one field that says where a candidate really is is [`Candidate::url`](crate::server::probe::Candidate::url)
-//! — **not** `Candidate::address`. plex.tv advertises the `plex.direct` HOSTNAME in `uri` while
-//! `address` stays the dotted quad hiding behind it, and `probe`'s own doc says outright that
-//! "https to the bare IP fails validation by design": the certificate is issued for
-//! `203-0-113-9.hash.plex.direct`, so a TLS connection made to `203.0.113.9` fails hostname
-//! validation however well the packets flow. An origin rebuilt from `address` therefore *looks*
-//! like it speaks TLS and cannot: it is exactly the bug this type is here to make unwriteable.
+//! It is not a complete description of a server, and the gap is not cosmetic. The account service
+//! this app used to sign in through advertised each server twice, as a URL and as a dotted quad,
+//! and only the URL was dialable: the certificate was issued for the NAME, so a TLS connection
+//! made to the bare quad failed hostname validation however well the packets flowed. An origin
+//! rebuilt from an address therefore *looks* like it speaks TLS and cannot: it is exactly the bug
+//! this type is here to make unwriteable. That discovery engine is retired (#166), and its lesson
+//! outlives it: what an origin is gets decided by a URL, never by an address.
 //!
 //! **So an `Origin` is PARSED from a URL, never assembled from an address.** [`Origin::parse`] is
-//! the front door, [`crate::server::probe::Candidate::origin`] is the one that matters, and
+//! the front door, [`split`] is what the media plane uses on a stored URL, and
 //! [`Origin::http`] is the deliberately-named plaintext constructor — every remaining caller of
 //! *that* is a place that still assumes cleartext, and `Origin::http(` is the grep that finds them.
 //!
@@ -44,12 +42,12 @@
 //! `base() == "http://[::1]:32400"` is pinned by a test, because the failure mode without it is
 //! silent: URL construction keeps looking right while name resolution quietly stops working.
 //!
-//! ## This is a PMS origin parser, not a general URL parser
+//! ## This is a media-server origin parser, not a general URL parser
 //!
-//! Two deliberate narrowings, both because every origin in this app is a Plex server's:
+//! Two deliberate narrowings, both because every origin in this app names a media server:
 //!
 //! * **The default port is 32400**, not 80/443. It is what `StreamUrl::parse` has always defaulted
-//!   to, and a PMS with no port in its URL is a PMS on the default port.
+//!   to, so a stored URL with no port keeps resolving where it always did.
 //! * **Only `http` and `https` are recognised.** [`Origin::parse`] refuses anything else rather
 //!   than inventing a meaning for it.
 #![allow(dead_code)]
@@ -63,8 +61,8 @@
 /// **The two declarations were the other way round until the TLS control plane landed**, and this
 /// note is kept rather than replaced because the reversal is the whole of what changed. The old
 /// order was not a claim about which transport is better; it was a claim about which one this app
-/// could *dial*: the app spoke plain HTTP and nothing else, so an https `plex.direct` origin ranked
-/// first would have spent the first probe slot on something that could not connect. `crate::http`
+/// could *dial*: the app spoke plain HTTP and nothing else, so an https origin ranked first would
+/// have spent the first probe slot on something that could not connect. `crate::http`
 /// now routes an https origin through libcurl, and https is the better connection on every axis
 /// that matters here — it is the only one a certificate can authenticate, the only one that
 /// survives an owner's *Require secure connections*, and the only one that reaches a server from
@@ -97,21 +95,21 @@ impl Scheme {
     }
 }
 
-/// The port a PMS origin means when its URL names none. See the module doc: 32400, not 80/443.
+/// The port an origin means when its URL names none. See the module doc: 32400, not 80/443.
 pub const DEFAULT_PORT: i32 = 32400;
 
 /// A port this client could actually dial, narrowed to the `i32` the transport takes — `None` for
 /// anything outside `1..=65535`.
 ///
-/// **The narrowing is the point.** `port` arrives from plex.tv (and from the session file, and from
-/// the `butaca-servers` trigger) as an `i64`, because PMS and plex.tv both string-encode numbers
-/// and every numeric field here goes through the lenient `de_i64` — so what lands in a `Candidate`
-/// is whatever the JSON said, not whatever a port can be. `port as i32` on that WRAPS: an answer of
+/// **The narrowing is the point.** `port` arrives from a server's JSON (and from the session
+/// file, and from the `butaca-servers` trigger) as an `i64`, because the wire string-encodes
+/// numbers and every numeric field here goes through the lenient `de_i64`, so what arrives is
+/// whatever the JSON said, not whatever a port can be. `port as i32` on that WRAPS: an answer of
 /// `4_294_999_696` becomes `32400` and the app dials a port nobody advertised, quietly and with a
 /// plausible-looking result. Every site that turns an advertised port into a connection goes
 /// through here.
 ///
-/// Out of range drops the CANDIDATE, never the server: another of its addresses may still be
+/// Out of range drops the candidate, never the server: another of its addresses may still be
 /// dialable, and the same rule already applies to an address this transport cannot speak to.
 pub fn dial_port(p: i64) -> Option<i32> {
     (1..=65535).contains(&p).then_some(p as i32)
@@ -252,15 +250,15 @@ impl Origin {
     /// Parse an advertised `Connection.uri`, but fall back to the connection's own advertised
     /// `port` — not [`DEFAULT_PORT`] — when the URI wrote none.
     ///
-    /// plex.tv's `plex.direct` URIs always spell their port (`…plex.direct:32400`). A **custom
-    /// server-access URL** does not: `https://plex.example.com` carries no port, and its owner is
+    /// The account service's connection URIs always spelled their port, `name:32400`-style. A
+    /// **custom server-access URL** did not: `https://<custom>` carried no port, and its owner was
     /// serving it on 443 (a reverse proxy), which is exactly what the connection's `port` field
-    /// reports. Parsing such a URI through [`parse`] would apply the 32400 PMS default and dial a
-    /// closed port — the whole server then reads as unreachable, with no relay to fall back on
+    /// reported. Parsing such a URI through [`parse`] would apply the 32400 default and dial a
+    /// closed port, the whole server then reads as unreachable, with no relay to fall back on
     /// (observed live: a share whose only remote was `https://<custom>` at `port:443`, timing out
     /// at every probe deadline while the official client reached it fine). A URI that DID write a
-    /// port keeps it; `advertised` is the fallback, and only a `port_bad` URI (a written-but-
-    /// garbage port) is still refused.
+    /// port keeps it, `advertised` is the fallback, and only a `port_bad` URI (a written-but-
+    /// garbage port) is still refused. Nothing fills this from product code any more (#166).
     pub fn parse_connection(uri: &str, advertised: i64) -> Option<Origin> {
         let p = Parts::of(uri);
         if !p.scheme_known || p.host.is_empty() || p.port_bad {
@@ -350,7 +348,7 @@ pub fn split(url: &str) -> (Origin, &str) {
 /// passes its origin and path straight to `crate::stream::http_open`. Range headers for seeks
 /// are added by the player as `http_open`'s `extra`, never here. `path` includes the `?query`.
 ///
-/// Originally the typed Plex layer's return type; it moved here with the wire layer's retirement
+/// Originally the typed wire layer's return type, it moved here with that layer's retirement
 /// because its one surviving reader is the media plane itself, which splits ANY stored playback
 /// URL — a Jellyfin transcode target included — back into origin + path (`player::engine`, `ff.rs`).
 pub struct StreamUrl {
@@ -409,11 +407,11 @@ impl StreamUrl {
 /// The HOST of a URL, **bare** — a borrowed view for a caller that only wants to look at the host
 /// and has no use for an owned [`Origin`].
 ///
-/// Its one caller is [`crate::server::probe`]'s ranking, which asks whether a candidate's host is a numeric
-/// literal or a name that needs resolving — and it must ask that of the URL's host and **not** of
-/// [`Candidate::address`](crate::server::probe::Candidate::address), which is the dotted quad hiding behind
-/// a `plex.direct` NAME. This lives here so that there is exactly one reading of a URL in the
-/// codebase; probe used to carry a second copy of it.
+/// Its one caller is [`crate::net`]'s name policy, which asks whether a URL's host is a numeric
+/// literal or a name that needs resolving, and it must ask that of the URL's host and **not** of a
+/// stored address, which can be the dotted quad hiding behind a name only public DNS resolves.
+/// This lives here so that there is exactly one reading of a URL in the codebase, and the second
+/// copy probe carried is gone with its ranking.
 pub fn url_host(url: &str) -> &str {
     Parts::of(url).host
 }
@@ -598,11 +596,11 @@ mod tests {
         );
         assert_eq!(o.base(), "https://plex.example.com:443");
 
-        // a plex.direct URL that spells its port keeps it, ignoring the advertised fallback
+        // a URL that spells its port keeps it, ignoring the advertised fallback
         let o = Origin::parse_connection("https://1-2-3-4.hash.plex.direct:32400", 443).unwrap();
         assert_eq!(o.port(), 32400);
 
-        // an empty advertised port is not a port — fall through to the PMS default rather than 0
+        // an empty advertised port is not a port, fall through to the default rather than 0
         let o = Origin::parse_connection("https://plex.example.com", 0).unwrap();
         assert_eq!(o.port(), DEFAULT_PORT);
 
@@ -661,7 +659,7 @@ mod tests {
         assert!(!o.is_tls());
     }
 
-    /// **The whole reason this type is parsed and not assembled**: an https `plex.direct` origin
+    /// **The whole reason this type is parsed and not assembled**: an https origin
     /// keeps the NAME, which is what the certificate is issued for. Rebuilding it from the dotted
     /// quad behind that name gives a URL that connects and fails validation.
     #[test]
@@ -713,7 +711,7 @@ mod tests {
             None,
             "a scheme this app does not speak"
         );
-        // The port narrowing that `dial_port` exists for: plex.tv and the session file both
+        // The port narrowing that `dial_port` exists for: the wire and the session file both
         // string-encode numbers, so an out-of-range one is a shape that really arrives — and
         // `4_294_999_696 as i32` is 32400, a port nobody advertised.
         assert_eq!(Origin::parse("http://192.0.2.10:4294999696"), None);
@@ -785,8 +783,8 @@ mod tests {
         );
     }
 
-    /// [`url_host`] is the borrowed reading `probe`'s ranking uses, and it must give the URL's own
-    /// host — the `plex.direct` NAME — not the address behind it.
+    /// [`url_host`] is the borrowed reading [`crate::net`]'s name policy uses, and it must give the
+    /// URL's own host, the NAME a certificate validates, not the address behind it.
     #[test]
     fn url_host_reads_the_urls_own_host_without_scheme_or_port() {
         assert_eq!(url_host("http://203.0.113.9:31234"), "203.0.113.9");

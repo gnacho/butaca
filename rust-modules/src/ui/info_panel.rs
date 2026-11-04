@@ -701,10 +701,10 @@ pub(crate) fn video_codec_name(codec: &str) -> String {
 /// quietly re-encoded.
 ///
 /// Three answers, because the server has three behaviours and only one of them touches the pixels:
-/// a direct play (we pull the file), a container-only REMUX (the codecs are copied — Plex's own
-/// "Direct Stream"; the mock has no case for it because its model has only "direct play" and
-/// "converts", but calling a copy a conversion would state that the server re-encoded when it did
-/// not), and a real re-encode, which names the codec it is producing. Hardware vs software is
+/// a direct play (we pull the file), a container-only REMUX (the codecs are copied, the old
+/// client's own "Direct Stream", and the mock has no case for it because its model has only
+/// "direct play" and "converts", but calling a copy a conversion would say the server re-encoded
+/// when it did not), and a real re-encode names the codec it produces. Hardware vs software is
 /// deliberately NOT stated: that is the server's runtime choice and it reaches the client only in
 /// the live transcode session, so naming it would be a guess.
 ///

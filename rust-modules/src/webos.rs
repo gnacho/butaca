@@ -780,7 +780,7 @@ pub(crate) mod ls2 {
         /// The SUBSCRIPTION half of the same pair: `LSCallOneReply` retires the callback after one
         /// message, this one leaves it attached, which is what a service's `{"subscribe":true}`
         /// method needs to deliver more than its first reply. The Jellyfin flavour's lifecycle
-        /// subscriber is its one caller, so the Plex build does not carry the declaration at all.
+        /// subscriber is its one caller, so the retired build carried no such declaration.
         fn LSCall(
             handle: *mut c_void,
             uri: *const c_char,
@@ -1298,9 +1298,9 @@ pub(crate) mod ls2 {
 ///
 /// The whole module is the Jellyfin flavour's, and that is a product decision rather than a
 /// compile-tidiness one: this flavour is the one whose launcher sends `jellyfinItemId`, so it is
-/// the one with a deep link for the event to carry. The Plex flavour has no launch-param deep link
-/// at boot either (`app::boot::deeplink_item_id`), so a subscription there would receive events
-/// nothing could act on.
+/// the one with a deep link for the event to carry. The retired flavour had no launch-param
+/// deep link at boot either (`app::boot::deeplink_item_id`), so a subscription there would have
+/// received events nothing could act on.
 pub(crate) mod lifecycle {
     use std::sync::Mutex;
 

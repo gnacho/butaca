@@ -1,8 +1,8 @@
 //! The relay policy — what the LINK to a server allows a plan to ask for.
 //!
-//! Split out of the deleted `plex/transcoder.rs`: the policy itself is the only part the live
+//! Split out of the deleted transcoder module: the policy itself is the only part the live
 //! tree still reads (`route::playback_preview` and the routing tests). The wire half it used to
-//! govern (`transcode_query`'s two flavors) is gone with the Plex transcoder.
+//! govern (`transcode_query`'s two flavors) is gone with the retired transcoder.
 
 use super::probe::Location;
 use crate::playback::LinkPolicy;
@@ -10,7 +10,7 @@ use crate::playback::LinkPolicy;
 /// **The relay policy**, and the only place it is spelled out. `None` = nobody has said how this
 /// server is reached (see [`LinkPolicy::UNRESTRICTED`]).
 ///
-/// Plex's relay is a tunnel the server holds open to a Plex relay host: a second https connection,
+/// The relay is a tunnel the server holds open to a relay host: a second https connection,
 /// conventionally port 8443, **capped at 2 Mbit/s**, with the server transcoding down to fit
 /// whatever the client asks for. [`probe`](super::probe) ranks it last, so it only ever wins when
 /// there is nothing else — a share behind CGNAT, an owner with no port forward. When it does win,
@@ -43,7 +43,7 @@ use crate::playback::LinkPolicy;
 ///
 /// **No relay connection has been observed on a device by this codebase.** Before discovery racing,
 /// the old chooser discarded every relay. Relay is now a second-phase candidate, but the 2 Mbit/s
-/// figure and port-8443 convention remain Plex documentation rather than our measurement, and this
+/// figure and port-8443 convention remain documentation rather than our measurement, and this
 /// policy is **unverified against a real relay**. What is
 /// asserted is the shape, not the number: whatever the ceiling turns out to be, only the server can
 /// apply it, and only if an encoder runs.

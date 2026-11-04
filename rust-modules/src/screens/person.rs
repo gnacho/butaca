@@ -2041,7 +2041,7 @@ mod tests {
     }
 
     /// **The mount-on-entry-pill rule's PENDING half** (module doc, point 2 of `ui/person.rs`'s
-    /// own doc): with no filmography answered yet but a guid to ask plex.tv with,
+    /// own doc): with no filmography answered yet but a guid to resolve credits with,
     /// `entry_reachable_of` holds the entry group open even though `has_entry_of` is false — which
     /// is exactly what lets a fresh mount's default `ContainerGroup(GroupId(0))` target
     /// (`ENTRY_GROUP`) have somewhere to land before credits have answered at all.
@@ -2603,7 +2603,7 @@ mod tests {
     /// The return-hydration fixture, single-source: the saved card is the ORIGIN's own, and the
     /// page is reopened WITHOUT its landing, so the card sits in the one resolving interval that
     /// still exists (the origin's own media fetch). The old share-source variant of this fixture
-    /// retired with the Plex read layer: a non-origin source is born settled and never enters
+    /// retired with the old read layer: a non-origin source is born settled and never enters
     /// this interval at all.
     fn pending_return(
         measure: &FixtureMeasure,

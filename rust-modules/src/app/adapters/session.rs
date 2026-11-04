@@ -236,7 +236,7 @@ impl SessionAdapter {
     }
 
     fn commit_current(&self, _req: u32, _plan: &CommitPlan) -> bool {
-        // The registry plans this validated are gone with the plex.tv account surface;
+        // The registry plans this validated are gone with the old account surface. The
         // the remaining registry plan (Install) carries no per-request lifecycle.
         true
     }
@@ -438,7 +438,7 @@ impl SessionAdapter {
             for commit in &self.commits { commit.cancelled.store(true, Ordering::Release); }
             crate::registry::revoke_all();
             crate::server::session::revoke_cached_session();
-            // The Jellyfin flavor's sign-out retires ITS credential instead of a Plex PIN: the
+            // The Jellyfin flavor's sign-out retires ITS credential instead of a sign-in PIN: the
             // config file goes (the next boot asks again), the installed client is retired (the
             // stores fail closed at once), and the form's flow resets. One site covers both
             // sign-out and delete-all-local-data: every account teardown funnels through here.

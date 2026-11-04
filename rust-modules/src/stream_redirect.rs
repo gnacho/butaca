@@ -1,19 +1,19 @@
 //! **HTTP redirects on the plaintext MEDIA path** — the one place a `3xx` answer to a media
 //! open is turned into the next request.
 //!
-//! PMS answers some Part URLs (Plex-hosted trailers: `/services/iva/assets/…`) with a `302` to a
-//! presigned CDN URL on another origin — typically https, sometimes a relative `Location`. The
-//! socket client in [`super`] is one request per open and cannot speak TLS, so following is a
-//! loop ABOVE it: [`open_following`] re-opens the same [`HttpStream`] for each plaintext hop and
-//! stops at the first https hop, handing that target back for the caller to open through
-//! `curlio` (which follows any further hops itself, under its own `CURLOPT_MAXREDIRS` and
+//! The server answers some Part URLs (trailers it hosts: `/services/iva/assets/…`) with a `302`
+//! to a presigned CDN URL on another origin, typically https, and the `Location` is sometimes
+//! relative. The socket client in [`super`] is one request per open and cannot speak TLS, so
+//! following is a loop ABOVE it: [`open_following`] re-opens the same [`HttpStream`] for each
+//! plaintext hop and stops at the first https hop, handing that target back for the caller to open
+//! through `curlio` (which follows any further hops itself, under its own `CURLOPT_MAXREDIRS` and
 //! no-downgrade `CURLOPT_REDIR_PROTOCOLS`).
 //!
-//! Credentials: the ORIGINAL request's credential header block and its `X-Plex-Token` query pair
+//! Credentials: the ORIGINAL request's credential header block and its access-token query pair
 //! ride a hop only when the hop's scheme+host+port equal the ORIGINAL origin's. A cross-origin
 //! hop is requested exactly as its `Location` spells it — a presigned URL carries its own
-//! authority, and the PMS token must never reach a third party. A `Range` is not a credential and
-//! rides every hop. Log lines carry an origin and a query-less path, never a query.
+//! authority, and the access token must never reach a third party. A `Range` is not a credential
+//! and rides every hop. Log lines carry an origin and a query-less path, never a query.
 //!
 //! **Every plaintext hop that would carry a credential asks the credential authority first**
 //! (`crate::http::credential_transport_allowed`, i.e. `grant`) — the first request, every
@@ -21,9 +21,9 @@
 //! grant therefore stops at its next request once that grant is revoked: [`FollowError::Refused`],
 //! with nothing dialled.
 //!
-//! A caller whose contract confines it to one origin — HLS, whose playlists may only name
-//! children on the PMS origin (`crate::hls`) — sets [`Request::same_origin_only`], and a hop
-//! elsewhere (a scheme change included) is refused before anything is dialled there.
+//! A caller whose contract confines it to one origin (HLS, whose playlists may only name children
+//! on the server origin, `crate::hls`) sets [`Request::same_origin_only`], and a hop elsewhere, a
+//! scheme change included, is refused before anything is dialled there.
 //!
 //! The control plane (`crate::http`) does not come through here; its redirect policy is the
 //! per-request `follow_redirects` option in `crate::net`, off by default.
@@ -94,7 +94,7 @@ pub(crate) enum FollowError {
 /// One media GET to be opened with redirects followed.
 pub(crate) struct Request<'a> {
     pub(crate) origin: &'a Origin,
-    /// Absolute path plus optional query. May carry `X-Plex-Token`.
+    /// Absolute path plus optional query. May carry the access token as a query pair.
     pub(crate) path: &'a str,
     /// A credential header block (`Name: value\r\n`…), sent to the original origin only.
     pub(crate) credentials: Option<&'a str>,
@@ -224,7 +224,7 @@ pub(crate) fn same_origin(a: &Origin, b: &Origin) -> bool {
     a.scheme() == b.scheme() && a.port() == b.port() && a.host().eq_ignore_ascii_case(b.host())
 }
 
-/// The `X-Plex-Token=…` pair of a path's query, if it has one.
+/// The access-token pair of a path's query, if it has one.
 fn token_pair(path: &str) -> Option<&str> {
     let (_, query) = path.split_once('?')?;
     query

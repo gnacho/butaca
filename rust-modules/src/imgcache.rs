@@ -1,4 +1,4 @@
-//! Shared durable tier for all Plex image transcodes and for the images the app bakes from them
+//! Shared durable tier for all image transcodes and for the images the app bakes from them
 //! The poster workers own fetch/decode/bake;
 //! this module owns canonical identities, bounded disk storage, and sign-out generations.
 //!
@@ -49,7 +49,7 @@ pub(crate) struct Snapshot {
 }
 
 /// Every transcode option participates, except the outer authentication token. Namespace is
-/// the stable Plex machine identifier (or server origin when discovery has no identifier).
+/// the stable server machine identifier (or server origin when discovery has no identifier).
 #[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn classify(server_namespace: &str, built_key: &str) -> Option<DiskKey> {
     let (path, query) = built_key.split_once('?')?;
@@ -349,8 +349,8 @@ impl Cache {
         })
     }
 
-    /// The disk-cache write path. No production caller remains (the one writer was the Plex
-    /// art-refresh queue, retired with the wire layer, #166; the Jellyfin arm fetches without a
+    /// The disk-cache write path. No production caller remains (the one writer was the old
+    /// art-refresh queue, retired with the wire layer, #166. The Jellyfin arm fetches without a
     /// disk namespace), so the write semantics stay graded by this module's own suite and the
     /// path waits frozen for a backend that wants the disk cache back.
     #[cfg_attr(not(test), expect(dead_code))] // frozen until the art cache goes

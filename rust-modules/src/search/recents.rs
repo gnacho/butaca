@@ -167,7 +167,7 @@ fn promote(list: &mut Vec<String>, term: &str) {
 }
 
 
-// Resource ceiling, not a Plex profile limit. Coalesce per profile, never evict another
+// Resource ceiling, not a profile limit. Coalesce per profile, never evict another
 // profile's accepted edit. If workers cannot drain 64 distinct profiles, refuse new entries.
 const PENDING_CAP: usize = 64;
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());

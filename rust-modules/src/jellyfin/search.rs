@@ -1,21 +1,21 @@
 //! search — the Search screen's wire side: one `/Items?searchTerm=` page plus a people lookup,
 //! projected into the screen's fixed shelves.
 //!
-//! Plex answers a search as a hub list (`/hubs/search`: media in `Metadata[]`, people and
-//! collections as tags in `Directory[]`) and `search.rs`'s `project` shelves it. Jellyfin answers
-//! as ONE flat item page, so the shelfing happens HERE instead. Movies, shows and episodes
+//! The retired wire answered a search as a hub list (`/hubs/search`: media in `Metadata[]`, people
+//! and collections as tags in `Directory[]`) and `search.rs`'s `project` shelved it. Jellyfin
+//! answers as ONE flat item page, so the shelfing happens HERE instead. Movies, shows and episodes
 //! convert through the same [`super::convert::movie_from_dto`] as every other listing — watched
 //! flags, resume points and codec badges come free — and people and collections become
-//! `search::TagHit`s, the same struct the Plex arm hands the screen, so `merge`, the round-robin
+//! `search::TagHit`s, the same struct the old arm handed the screen, so `merge`, the round-robin
 //! and every tile path draw this backend unchanged.
 //!
 //! Two deliberate PoC edges, both documented where they land:
 //!
-//! * A `TagHit`'s `key` is empty. On Plex that field is the listing path the press opens; the
-//!   Jellyfin person/collection page is its own arm (`person.rs`), and until it exists a press
-//!   on one of these rows is the one dead end this shelf can produce.
-//! * A person's portable id is absent by definition — `tag_key` is a plex.tv concept. The
-//!   server-local GUID rides in `id`, which `search::same_tag` only ever compares within one
+//! * A `TagHit`'s `key` is empty. On the retired wire it held the listing path a press opened.
+//!   The Jellyfin person/collection page is its own arm (`person.rs`), and until it exists a
+//!   press on one of these rows is the one dead end this shelf can produce.
+//! * A person's portable id is absent by definition: `tag_key` was an account-service concept.
+//!   The server-local GUID rides in `id`, which `search::same_tag` only ever compares within one
 //!   server, and this backend has exactly one.
 
 use super::client::JfClient;
@@ -24,7 +24,7 @@ use super::SERVER_ID;
 use crate::search::{Item, Kind, Projection, TagHit};
 
 /// One source's whole answer to the settled query, in [`crate::search::KINDS`] order — the exact
-/// mailbox shape the Plex worker fills. `None` is the FAILURE sentinel (`search.rs`'s rule: a
+/// mailbox shape the search worker fills. `None` is the FAILURE sentinel (`search.rs`'s rule: a
 /// failed fetch and an empty answer are different states, and only the first retries).
 ///
 /// The people fetch failing degrades its shelf to empty rather than failing the query — see
@@ -45,7 +45,7 @@ pub(crate) fn search(c: &JfClient, terms: &str, limit: i64) -> Option<Projection
                 }
             }
             // A collection opens a listing, not a detail page — the `TagHit` shape, with its
-            // extent (ChildCount) as the caption, exactly what `items_word` reads on Plex rows.
+            // extent (ChildCount) as the caption, what `items_word` reads on collection rows.
             "BoxSet" => out[shelf(Kind::Collection)].push(Item::Tag(tag_hit(it, true))),
             _ => {} // a kind this screen has no shelf for is dropped, as `project` drops them
         }
@@ -69,14 +69,14 @@ fn tag_hit(it: &BaseItemDto, collection: bool) -> TagHit {
         sid: SERVER_ID,
         sec: 0, // one virtual library: hits carry no section grain on this backend
         name: it.name.clone(),
-        tag_key: String::new(), // a plex.tv global person guid — this backend has no such thing
+        tag_key: String::new(), // no global person guid: this backend has no such thing
         fav: false,
         id: it.id.clone(),
         thumb: match it.image_tags.get("Primary") {
             Some(t) => format!("/Items/{}/Images/Primary?tag={t}", it.id),
             None => String::new(),
         },
-        key: String::new(), // the Plex listing path — see the module doc for the dead-end note
+        key: String::new(), // the listing path, see the module doc for the dead-end note
         count: if collection {
             it.child_count.unwrap_or(0)
         } else {

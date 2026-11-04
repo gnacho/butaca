@@ -157,9 +157,10 @@ something.
   unreachable in buffer-feed. Plain text and image (PGS/VobSub) subs are decoded and drawn by
   us; styled ASS/SSA uses the bundled libass worker (`ass.rs`, `ass_source.rs`) with original
   headers, events and attached fonts. Sidecar ASS keeps the complete script rather than requesting
-  a SubRip conversion. Don't expect the pipeline to burn or overlay them. See `[[tv-subtitle-engine]]` and the `plex/`
-  soft-subs note. An image sub's rect coords are in **the subtitle stream's own authoring canvas** —
-  1920×1080 for Blu-ray PGS but 720×480/576 for a DVD VobSub rip — so `ff::sub_canvas` reads that
+  a SubRip conversion. Don't expect the pipeline to burn or overlay them. See the soft-subs note
+  in `[[tv-subtitle-engine]]`. An image sub's rect coords are in **the subtitle stream's own
+  authoring canvas**: 1920×1080 for Blu-ray PGS but 720×480/576 for a DVD VobSub rip, so
+  `ff::sub_canvas` reads that
   canvas off the decoder (via `avcodec_parameters_from_context`, no raw struct offset; the ABI proof
   is in its doc comment) and `player_hud::sub_screen_rect` scales the whole display set into the
   video rect. Assuming 1080p unconditionally is what made VobSub render as a corner postage stamp.

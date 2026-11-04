@@ -818,7 +818,7 @@ fn fps_milli_str(fps_milli: i64) -> String {
 
 fn connection_line(ps: &crate::route::PlaybackSession) -> String {
     let sid = crate::route::cur_sid(ps);
-    // The Plex client lookup that used to name a tier and a PMS build went with the wire layer
+    // The old client lookup that used to name a tier and a server build went with the wire layer
     // (#166). The one live backend names itself; its server has no tier and its build string is
     // not fetched, so the row says which kind of server the byte came from and nothing more.
     if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
@@ -839,7 +839,7 @@ fn route_line(ps: &crate::route::PlaybackSession, d: &crate::player::Diag) -> St
         (true, true) => crate::i18n::msg::browse_diagnostics_remux(),
         (true, false) => crate::i18n::msg::browse_diagnostics_transcode(),
     };
-    // Issue #266: the server's own verdict on the Plex Pass DSP ask, distinct from `transform`
+    // Issue #266: the server's own verdict on the paid tier's DSP ask, distinct from `transform`
     // (which only says remux vs re-encode) — absent entirely while the enhancement is Off, so an
     // ordinary playback's route line is unchanged.
     match crate::route::cur_enhancement_label(ps) {
@@ -1478,9 +1478,9 @@ fn chain(src: String, sent: String, payload: &str) -> String {
     }
 }
 
-/// The Server row's value: "<release> · Plex Pass" / "<release> · no Plex Pass", or
-/// "not yet queried" while the `GET /` worker has not landed (an empty version IS that state —
-/// `serverinfo` stores the two fields together).
+/// The Server row's value: the release alone, or "not yet queried" while the `GET /` worker
+/// has not landed (an empty version IS that state, as `serverinfo` stores both fields in one
+/// record).
 ///
 /// A Jellyfin server has no subscription to report, so the row is the release alone. Pure so every
 /// arm is host-testable without touching the process-global store.
@@ -3065,7 +3065,7 @@ mod tests {
     }
 
     /// A free server reads as a fact, never a fault: the danger tint is reserved for rows that say
-    /// "something broke", and `no Plex Pass` is the server working exactly as sold. (The value
+    /// "something broke", and a server without the paid tier is working exactly as sold. (The value
     /// itself depends on the process-global store this test deliberately does not touch — the
     /// tone is a property of the ROW, fixed at build time, so it is assertable regardless.)
     #[test]

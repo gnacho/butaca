@@ -532,7 +532,7 @@ const ENVELOPE_FHD60: SinkEnvelope = SinkEnvelope {
 ///   measured (a 1080p source's transcode), and stays 4K60 otherwise — a real 4K H.264 file, or an
 ///   Auto session whose catalog can reach the 4K actuator, keeps today's behaviour and today's
 ///   known refusal on 10.3.1. "Fits FHD" is width ≤ 1920 and height ≤ 1088: a 1080p H.264 stream's
-///   CODED height is 1088 (16-aligned), and PMS reports coded sizes, so 1088 has to read as 1080
+///   CODED height is 1088 (16-aligned), and the server reports coded sizes, so 1088 reads as 1080
 ///   or every 1080p file would be promoted to the 4K declaration it was meant to escape.
 /// * **Unknown raster (0 on an axis) means 4K60**, today's value: "nobody said" must not
 ///   under-declare a file that might be 4K.
@@ -723,7 +723,7 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
 ///   way down: libpf validates nothing and passes the string through.
 /// - The VALUE therefore has to come from whoever fills it, and **the bare literal `ATMOS` exists in
 ///   exactly one library on this device: `libcbe.so`** — Chromium's media backend, i.e. the path
-///   LG's own web apps (Plex's included) take. In its string pool that literal sits immediately
+///   LG's own web apps take. In its string pool that literal sits immediately
 ///   after `immersive` and in the same run as `externalStreamingInfo`, `esInfo`, `seperatedPTS`,
 ///   `provider`, `DolbyHdrInfo`, `encryptionType`, `profileId` and `contents` — the payload we
 ///   build, key for key. So `"ATMOS"` is not our invention; it is the value the working client
@@ -883,7 +883,7 @@ fn with_window_id(mt: &MainThread, p: &str) -> String {
     p.replace(&anchor, &format!(r#"{anchor},"windowId":"{id}""#))
 }
 
-/// Plex decimal fps → (value, scale) rational for the Load esInfo. Broadcast rates map to their
+/// Decimal fps → (value, scale) rational for the Load esInfo. Broadcast rates map to their
 /// exact NTSC/film ratios; integer rates to n/1; anything else to milli-fps. None if fps is unknown.
 fn fps_rational(fps: f64) -> Option<(i64, i64)> {
     if fps <= 0.0 {
@@ -1019,7 +1019,7 @@ fn start_bufferfeed_inner(
         // library item behind it. This is the player-PIPELINE test tier's entry (tests/README.md):
         // `butaca-url` below hands over a URL only, which leaves the payload describing
         // whatever the route happened to hold — an empty string, i.e. H264 + "AC3" — so a 4K HEVC
-        // or a Dolby file could never be declared honestly without Plex. Read HERE rather than at
+        // or a Dolby file could never be declared honestly without a server. Read HERE rather than
         // the app.rs entry point because the declaration has to be in `route` before the payload
         // is composed a few lines below, and because a reload (a seek that escalates) comes back
         // through this same function and must re-apply it.
@@ -1248,10 +1248,10 @@ fn start_bufferfeed_inner(
                                                       // transport**: `ff::demux` reads http through `crate::stream`'s cleartext socket and https
                                                       // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
                                                       // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
-                                                      // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
+                                                      // what a remote QA reviewer, with no server on their LAN, would have hit on every Play.
                                                       // Rebuilding the origin from an address would put the refusal back in a subtler form: the
-                                                      // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
-                                                      // behind it fails validation however well the packets flow (`plex/origin.rs`).
+                                                      // certificate is issued for a public wildcard NAME, so a TLS connection to the dotted quad
+                                                      // behind it fails validation however well the packets flow (`origin.rs`).
         if !crate::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
             crate::log("stream: refused insecure credential transport");
             return Err(crate::route::RouteStartResult::StartFailed);
@@ -1414,7 +1414,7 @@ fn start_bufferfeed_inner(
     Ok(route_attempt)
 }
 
-/// Validate and publish the no-Plex synthetic route as one admission step. The URL must remain
+/// Validate and publish the synthetic route as one admission step. The URL must remain
 /// absent when declaration policy refuses it: a later PLAY uses URL presence to decide whether to
 /// revisit this validation, so publishing first turns a one-time refusal into a retry bypass.
 fn install_synthetic_playurl(
@@ -1656,7 +1656,7 @@ pub(crate) fn suspend_bufferfeed_if_attempt(
 /// stop: preserve the playback session so start_bufferfeed can restart the SAME item — skip
 /// the "stopped" timeline scrobble, the server transcode stop, and the URL clear.
 fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, for_reload: bool) {
-    // A prepared route whose native start failed has no Engine but still owns its exact PMS
+    // A prepared route whose native start failed has no Engine but still owns its exact server
     // resource and Session projection. A real stop must retire that ownership exactly once;
     // returning here used to leak the candidate forever while the reducer remained Failed.
     if !pa.is_live() {
@@ -1776,7 +1776,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     }
     // Final position report (state=stopped, so the server commits the resume point) + the
     // server-side transcode stop, both dispatched to a worker. They used to run inline HERE and
-    // twelve lines below — two blocking PMS round trips on the SDL thread, ~17 s each worst case,
+    // twelve lines below: two blocking server round trips on the SDL thread, ~17 s each worst case,
     // on 100% of real stops. `scrobble_stop` reads and clears route's session statics on THIS
     // thread and hands the worker owned copies; `butaca_run` drains it at exit so the report still
     // lands. Skipped for a reload, which is not a stop.
@@ -1850,7 +1850,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
         // skip re-ramp the ladder for ten to twenty seconds.
         SHARED.clear_abr_seed();
         // The failure is retained across the rollback reload only; a new playback must not carry
-        // another item's PMS response into its diagnostics.
+        // another item's server response into its diagnostics.
         SHARED.clear_abr_failure();
         // A deferred Original recovery outlives nothing: the playback it belonged to is over, so
         // there is no frame left that could confirm it and no route left to roll back to. The

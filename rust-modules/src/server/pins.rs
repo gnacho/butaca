@@ -11,8 +11,8 @@
 //!
 //! * **Your HOUSEHOLD's libraries arrive On, a friend's arrive Off.** The point of asking is not
 //!   to put a stranger's shelves on your front door unannounced (`Shared Sources.dc.html` §F).
-//!   The household and not the account, because plex.tv answers a Plex Home managed profile with
-//!   `owned:false` on the family's own server — so a rule written on raw ownership gave the
+//!   The household and not the account: a managed profile used to be told `owned:false` on the
+//!   family's own server, so a rule written on raw ownership gave the
 //!   household's own shelves a stranger's defaults for every profile but the admin's. The verdict
 //!   is [`crate::server::is_household`]'s and arrives here as a bool; see [`LibRef::household`].
 //! * **An account with no server of its OWN HOUSEHOLD is not a special case.** Every source it has
@@ -50,10 +50,10 @@ pub(crate) struct LibRef<'a> {
     /// the section key, server-local: both servers in the measured pair have a section `1`
     pub(crate) key: i64,
     /// **This HOUSEHOLD's server rather than an outsider's** — half of the default's input, and
-    /// [`crate::server::is_household`]'s verdict rather than plex.tv's raw `owned`.
+    /// [`crate::server::is_household`]'s verdict rather than the raw `owned` flag.
     ///
-    /// It was `owned` until the managed-profile fix, and the rename is the fix: a Plex Home
-    /// managed profile is told `owned:false` about the family server it watches every day, so the
+    /// It was `owned` until the managed-profile fix, and the rename is the fix: a managed
+    /// profile is told `owned:false` about the family server it watches every day, so the
     /// old field put a stranger's defaults on the household's own shelves — and, because
     /// *everything* was then unowned, put a genuine friend's share on Home beside them. A `bool`
     /// and not the evidence, so these rules stay a leaf: the grant, the `home` flag and the Home
@@ -95,8 +95,9 @@ pub(crate) fn default_on(lib: LibRef<'_>) -> bool {
 ///
 /// **A whole-table function on purpose.** Two of its callers arrive holding one new row, and the
 /// floor still cannot be decided per row — "is anything on?" is a question about the table. The
-/// third is the one that makes the shape load-bearing rather than merely convenient: a Plex Home
-/// roster landing reclassifies SOURCES, and a source changing sides moves `household_type` for
+/// third is the one that makes the shape load-bearing rather than merely convenient: the
+/// managed-profile roster landing reclassifies SOURCES, and a source changing sides moves
+/// `household_type` for
 /// every library of its kind on every other source at once, so there is no such thing as
 /// re-resolving the row that changed.
 ///
@@ -168,8 +169,8 @@ pub(crate) fn asks(sources: usize, rec: Option<&HomePins>) -> bool {
 ///
 /// **A default nobody chose must not outlive the reason it was chosen.** The editor commits once
 /// per session rather than once per toggle, and until this function existed [`record`] froze every
-/// row that commit could see — so a default computed *before* the Plex
-/// Home roster landed became indistinguishable from a deliberate answer, permanently, with no
+/// row that commit could see, so a default computed *before* the
+/// roster landed became indistinguishable from a deliberate answer, permanently, with no
 /// provenance anywhere to tell them apart. A managed profile's very first boot computes its
 /// defaults from `owned:false` on every source it has; if the editor is committed in that window
 /// the wrong defaults are the user's answer for good. Leaving them unrecorded is what lets the
@@ -181,7 +182,7 @@ pub(crate) fn asks(sources: usize, rec: Option<&HomePins>) -> bool {
 ///
 /// **`touched` is the editor's own account of which rows it was ANSWERED about, not a comparison
 /// anybody made here or in the store.** A row can be answered to the value it already held — the
-/// viewer switches a friend's films off while they read On, and a Plex Home roster landing moves
+/// viewer switches a friend's films off while they read On, and a roster landing moves
 /// the live pin to Off before the commit — and the two are indistinguishable from the values
 /// alone. Inferring `touched` from "differs from the live pin" is precisely what dropped such an
 /// answer and let a later reclassification raise it again.
@@ -367,8 +368,8 @@ mod tests {
     ///
     /// **"Household" and not "own" is the whole of the managed-profile fix seen from here.** The
     /// borrowed-only account this was written for is genuinely rare; the shape it describes is
-    /// not, because plex.tv hands a Plex Home managed profile `owned:false` on the family server
-    /// too — so under the old rule EVERY managed profile looked like this test, and every library
+    /// not, because a managed profile used to be handed `owned:false` on the family server too, so
+    /// under the old rule EVERY managed profile looked like this test, and every library
     /// it could see, a real stranger's included, came On. The mixed roster is
     /// [`a_mixed_household_roster_keeps_a_friends_share_off`] below; this one is now what it says
     /// on the tin, an account with no household server at all.
@@ -383,7 +384,7 @@ mod tests {
     /// **THE managed-profile case: a household server and a genuine friend's share, both
     /// `owned:false`.**
     ///
-    /// This is the roster a Plex Home managed or Guest profile actually gets, and the one the old
+    /// This is the roster a managed or Guest profile actually gets, and the one the old
     /// rule could not express at all. Reading raw ownership, nothing here is ours, so the
     /// per-type bit was false for every type too and `default_on` answered On for every row — the
     /// friend's films landed on the family's Home beside the family's own, on first boot, with
@@ -394,9 +395,9 @@ mod tests {
     /// On because the house has none and the strip would otherwise lose the whole type.
     #[test]
     fn a_mixed_household_roster_keeps_a_friends_share_off() {
-        // The family server's Movies, seen by a profile plex.tv tells `owned:false`; the friend's
-        // Movies, of a type the house already has; and the friend's Shows, of a type it has none
-        // of. All three arrive `owned:false` on the wire — the house's included.
+        // The family server's Movies, seen by a profile the old wire called `owned:false`, the
+        // friend's Movies, of a type the house already has, and the friend's Shows, of a type it
+        // has none of. All three arrive `owned:false` on that wire, the house's included.
         let house_films = lib("house", 1, true);
         let friend_films = lib("friend", 1, false);
         let friend_shows = lib_of_new_type("friend", 2);

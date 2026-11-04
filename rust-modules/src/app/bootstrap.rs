@@ -116,12 +116,12 @@ pub(crate) fn validate_admission(value: &serde_json::Value, client: u32) -> Resu
 /// The controlled-boot init census.
 ///
 /// **V3 / `SessionInitV2` (household evidence).** `SourceRef` gained `home:bool` and
-/// `ownerId:i64` — plex.tv's raw grant evidence, carried beside `owned` rather than instead of it
-/// — and `write_sources` folds both into the canonical digest. `SessionInit` is spelled here as a
+/// `ownerId:i64`, the account's raw grant evidence, carried beside `owned` rather than instead
+/// of it, and `write_sources` folds both into the digest. `SessionInit` is spelled here as a
 /// NAME, so the field census moving inside it is invisible unless the term itself moves: hence
 /// `SessionInitV2`, and hence the `ControlledHomeInitV3` that carries it. Without the bump a
-/// recording made before the change would replay against a session that now distinguishes a Plex
-/// Home managed profile's own household server from a stranger's share, and grade it `SAME`.
+/// recording made before the change would replay against a session that now distinguishes a
+/// managed profile's own household server from a stranger's share, and grade it `SAME`.
 ///
 /// **V4 / `SessionInitV3` (the unsaved-login answer).** `SessionInit` gained
 /// `persistence_warning_answered:bool`, folded into the digest right after `held_handoff` by
@@ -217,10 +217,10 @@ impl Initial {
         initial.validate()?;
         Ok(initial)
     }
-    /// The client identity a controlled world's recorded resource traffic carries: the Plex
-    /// world's primary registry instance, or the Jellyfin world's single client (instance 0 —
-    /// one install, no registry behind it, nothing to rotate). `validate` forbids a Plex
-    /// primary_client of 0, so the two vocabularies never collide.
+    /// The client identity a controlled world's recorded resource traffic carries: the old
+    /// backend's primary registry instance, or the Jellyfin world's single client (instance 0,
+    /// one install, no registry behind it, nothing to rotate). `validate` refuses a zero
+    /// primary_client, so the two vocabularies never collide.
     pub(crate) fn recorded_client(&self) -> u32 {
         if matches!(&self.session.authority, crate::auth::owner::BootstrapAuthority::DevJf { .. }) { 0 }
         else { self.primary_client }
@@ -230,7 +230,7 @@ impl Initial {
             return Self::from_value(value?).map(|initial| (initial, None));
         }
         // No token is read here: the controlled Jellyfin world carries its fixture identity in
-        // the typed Initial (`app_init_value`), and a live capture has no Plex session to name.
+        // the typed Initial (`app_init_value`), and a live capture has no account session to name.
         let (saved, entropy, deferred) = crate::server::session::load_capturing_entropy();
         let initial = Self { version: 1,
             session: crate::auth::SessionInit::captured(saved),
@@ -281,7 +281,7 @@ impl Initial {
                 }
                 // The typed detail input names the item the detail page opens: on this backend
                 // that is the server's own GUID for it, which no product code can derive, so the
-                // contract is "a non-empty id the recording proves real" instead of Plex's
+                // contract is "a non-empty id the recording proves real" instead of the
                 // pinned first-movie ratingKey.
                 |content: &str| !content.is_empty()
             }

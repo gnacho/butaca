@@ -82,17 +82,17 @@ pub enum Picker {
     /// — not even an unprotected previous profile. The whole argument is on
     /// [`detaches_active_profile`] and [`may_resume`].
     ChangeProfile,
-    /// The picker the QR sign-in raises when the account turns out to have a Plex Home roster —
-    /// accepted QR completion, not StartSwitch. Whoever is standing there completed a plex.tv sign-in
-    /// seconds ago, but an account credential is not a household PIN and no profile has been chosen
-    /// yet, so BACK resumes nothing here either — [`may_resume`].
+    /// The picker the QR sign-in raises when the account turns out to have a profile roster:
+    /// accepted QR completion, not StartSwitch. Whoever is standing there completed an account
+    /// sign-in seconds ago, but an account credential is not a household PIN and no profile has
+    /// been chosen yet, so BACK resumes nothing here either. See [`may_resume`].
     SignedIn,
 }
 
 /// One "who's watching" tile.
 #[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UserTile {
-    /// This member's plex.tv account id. Nothing on screen reads it — it rides through so that
+    /// This member's account id. Nothing on screen reads it. It rides through so that
     /// [`session::Session::household_ids`] is filled on the one path that writes the persisted
     /// roster, which is what lets the "Shared by …" rule tell the household's own server from a
     /// friend's share (`server::servers::owner_credit`).
@@ -132,7 +132,7 @@ impl SessionIdentity {
 /// credential and link facts the old worker-side `activate_candidate` call used; applying them is
 /// delayed until the main thread accepts the epoch/session identity.
 ///
-/// Canon-only since the plex.tv roster workers were removed: the observation vocabulary and its
+/// Canon-only since the roster workers were removed: the observation vocabulary and its
 /// canonical digest are frozen (SessionInit::write layout), so the type and its serialization
 /// survive with no producer.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -142,7 +142,7 @@ pub(crate) struct CandidateActivation {
     name: String,
     credit: String,
     owned: bool,
-    /// The grant EVIDENCE beside the credit — plex.tv's `home` and `ownerId`, carried so the
+    /// The grant EVIDENCE beside the credit: the account's `home` and `ownerId`, carried so the
     /// registry slot this activation publishes can answer "is this our household's server?"
     /// rather than only "does this account own it?". Defaulted on a legacy observation for the
     /// same reason, and with the same self-correction, as `SourceRef::owner_id` documents.
@@ -157,7 +157,7 @@ pub(crate) struct CandidateActivation {
     ipv6: bool,
 }
 
-/// Canon-only since the plex.tv roster workers were removed: the observation vocabulary and its
+/// Canon-only since the roster workers were removed: the observation vocabulary and its
 /// canonical digest are frozen (SessionInit::write layout), so the type and its serialization
 /// survive with no producer.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -294,7 +294,7 @@ pub(crate) struct SettledProbe {
     tier: Option<probe::Location>,
     /// The candidate address that answered, kept ONLY so a background application of this
     /// verdict (`publish_settled_probe`) can derive the connection's IP generation without ever
-    /// reading `origin.host()` (R3/A3) — a `plex.direct` NAME there, not the dotted quad. `None`
+    /// reading `origin.host()` (R3/A3): a public wildcard NAME there, not the dotted quad. `None`
     /// whenever `tier` is: nothing verified, so there is nothing to derive from.
     #[serde(default)]
     address: Option<String>,

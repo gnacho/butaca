@@ -162,7 +162,7 @@ pub(crate) enum MetadataCmd {
     Reset,
     /// The heart toggle's optimistic half: the loaded detail's flag flips now, the server write
     /// lands when it lands (a failure leaves no rollback — the next detail fetch re-reads it).
-    /// Jellyfin-only: a Plex build has no heart to toggle.
+    /// Jellyfin-only: the backend carries the favourite flag this flips.
     SetFavoriteLocal { sid: ServerId, rk: String, on: bool },
     /// The season strip: flip optimistically, fetch the episodes off-thread.
     LoadSeason(usize),
