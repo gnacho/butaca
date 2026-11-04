@@ -19,7 +19,7 @@ pub(crate) struct AuthResponse {
     pub(crate) access_token: String,
     #[serde(rename = "User")]
     pub(crate) user: AuthUser,
-    /// The server's own machine id — the Jellyfin counterpart of a Plex `machineIdentifier`,
+    /// The server's own machine id, the counterpart of the retired `machineIdentifier`,
     /// persisted so a later session can notice it is talking to a DIFFERENT server at the same
     /// address rather than silently wearing stale credentials.
     #[serde(rename = "ServerId")]
@@ -49,7 +49,7 @@ pub(crate) struct QuickConnectResult {
     pub(crate) code: String,
 }
 
-/// `GET /Users/{userId}/Views` — the library list (Jellyfin's counterpart of PMS
+/// `GET /Users/{userId}/Views`: the library list (the counterpart of the retired
 /// `/library/sections`). Each view is one browsable library; its `Id` is the `ParentId` a
 /// section listing is scoped by.
 #[derive(Debug, Deserialize)]
@@ -71,12 +71,12 @@ pub(crate) struct ViewDto {
 }
 
 /// `GET /System/Info/Public` — the server naming ITSELF, for the Sources list's group header
-/// (Plex's `GET /` `friendlyName` counterpart). Public by design: no user scope, no token.
+/// (the retired `GET /` `friendlyName` counterpart). Public by design: no user scope, no token.
 #[derive(Debug, Deserialize)]
 pub(crate) struct PublicInfo {
     #[serde(rename = "ServerName")]
     pub(crate) server_name: String,
-    /// The server's machine id — the Plex `machineIdentifier` counterpart.
+    /// The server's machine id, the retired `machineIdentifier` counterpart.
     #[serde(rename = "Id", default)]
     pub(crate) id: String,
     /// Dotted `Major.Minor.Patch` version — `client::quick_connect_supported` reads it to gate
@@ -145,7 +145,7 @@ pub(crate) struct BaseItemDto {
     #[serde(rename = "MediaSources")]
     pub(crate) media_sources: Option<Vec<MediaSourceDto>>,
     // ---- detail-page fields (present on the single-item fetch; empty on listings) ----
-    /// Marketing one-liners; the first is the About panel's line (Plex's `tagline`).
+    /// Marketing one-liners, whose first is the About panel's line (the retired `tagline`).
     #[serde(rename = "Taglines", default)]
     pub(crate) taglines: Vec<String>,
     #[serde(rename = "Genres", default)]
@@ -155,7 +155,7 @@ pub(crate) struct BaseItemDto {
     pub(crate) people: Vec<PersonDto>,
     #[serde(rename = "Chapters", default)]
     pub(crate) chapters: Vec<ChapterDto>,
-    /// Where it was made — Plex's `Country[]` row on the About panel.
+    /// Where it was made, the retired `Country[]` row on the About panel.
     #[serde(rename = "ProductionLocations", default)]
     pub(crate) production_locations: Vec<String>,
     /// ISO timestamp ("1976-11-12T00:00:00.0000000Z") — only its date part is ever drawn.
@@ -165,7 +165,7 @@ pub(crate) struct BaseItemDto {
     /// Same ISO shape; same date-part-only consumption.
     #[serde(rename = "EndDate")]
     pub(crate) end_date: Option<String>,
-    /// Season/folder only: how many leaves it holds (Plex's `leafCount`).
+    /// Season/folder only: how many leaves it holds (the retired `leafCount`).
     #[serde(rename = "ChildCount")]
     pub(crate) child_count: Option<i64>,
     /// The trickplay manifest, present only when the server generated trickplay images AND the
@@ -200,7 +200,7 @@ pub(crate) struct TrickplayInfoDto {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct UserDataDto {
-    /// Fully watched — the direct counterpart of Plex's `viewCount > 0` for a leaf, and of
+    /// Fully watched, the direct counterpart of the retired `viewCount > 0` for a leaf, and of
     /// `viewedLeafCount >= leafCount` when the leaf counts are aggregated server-side.
     #[serde(rename = "Played")]
     pub(crate) played: bool,
@@ -209,27 +209,27 @@ pub(crate) struct UserDataDto {
     /// Resume point in 100-ns ticks; 0 when unwatched or finished.
     #[serde(rename = "PlaybackPositionTicks")]
     pub(crate) playback_position_ticks: i64,
-    /// Container rows only: leaves NOT yet played under it. Plex sends `viewedLeafCount` and the
-    /// app computes the complement; Jellyfin sends the complement directly.
+    /// Container rows only: leaves NOT yet played under it. The retired wire sent `viewedLeafCount`
+    /// and the app computed the complement. Jellyfin sends the complement directly.
     /// The heart: `UserData.IsFavorite` (absent/false = not favorited).
     #[serde(default, rename = "IsFavorite")]
     pub(crate) is_favorite: bool,
     #[serde(rename = "UnplayedItemCount")]
     pub(crate) unplayed_item_count: Option<i64>,
-    /// RFC3339 — the Continue Watching deck's merge key (Plex's `lastViewedAt`).
+    /// RFC3339, the Continue Watching deck's merge key (the retired `lastViewedAt`).
     #[serde(rename = "LastPlayedDate")]
     pub(crate) last_played_date: Option<String>,
 }
 
 /// One cast/crew row (`People[]`). `kind` is Jellyfin's job vocabulary: "Actor" carries `role`
 /// as the character name; "Director"/"Writer" are crew and their job is the kind itself —
-/// exactly the shape `metadata::Cast` already uses for Plex crew rows.
+/// exactly the shape `metadata::Cast` already uses for crew rows.
 #[derive(Debug, Deserialize)]
 pub(crate) struct PersonDto {
     #[serde(rename = "Name")]
     pub(crate) name: String,
     /// The person's own item id — their headshot is `/Items/{id}/Images/Primary`, and the id is
-    /// the person page's address (Plex's `tagKey`).
+    /// the person page's address (the retired `tagKey`).
     #[serde(rename = "Id")]
     pub(crate) id: String,
     #[serde(rename = "Role")]
@@ -250,7 +250,7 @@ pub(crate) struct ChapterDto {
 }
 
 /// `GET /MediaSegments/{itemId}` (Jellyfin 10.9+) — intro/credits ranges, the counterpart of
-/// Plex's `Marker[]`. Absent endpoint (older server, plugin not installed) is a 404, which the
+/// the retired `Marker[]`. Absent endpoint (older server, plugin not installed) is a 404, which the
 /// fetch folds to an empty list: a show simply shows no Skip pill.
 #[derive(Debug, Deserialize)]
 pub(crate) struct SegmentsResult {
@@ -271,7 +271,7 @@ pub(crate) struct SegmentDto {
 }
 
 /// The `POST /Items/{id}/PlaybackInfo` answer — Jellyfin's Media Decision Engine verdict, the
-/// counterpart of Plex's `/decision`. We read exactly two things off it: WHICH source the server
+/// counterpart of the retired `/decision`. We read two things off it: WHICH source the server
 /// chose (so a multi-version item plays the one the server adjudicated) and HOW it must be
 /// delivered (`TranscodingUrl` present → HLS; absent → the file direct-plays). The full stream
 /// list of the chosen source is NOT re-read here — the playing-item store already carries it
@@ -310,18 +310,18 @@ pub(crate) struct MediaSourceDto {
     #[serde(rename = "Id")]
     pub(crate) id: String,
     /// Container short name ("mkv", "mp4", "mov,mp4,m4a,…") — informational; the direct-play
-    /// decision is taken on STREAMS, matching how the Plex path trusts `Stream` over `Part`.
+    /// decision is taken on STREAMS, matching how the retired path trusted `Stream` over `Part`.
     #[serde(rename = "Container")]
     pub(crate) container: Option<String>,
     #[serde(rename = "MediaStreams", default)]
     pub(crate) streams: Vec<MediaStreamDto>,
-    /// The part's absolute path ON THE SERVER (the Track-information panel's header line; Plex's
-    /// `Part.file`). Not a URL, not reachable from the TV.
+    /// The part's absolute path ON THE SERVER (the Track-information panel's header line, the
+    /// retired `Part.file`). Not a URL, not reachable from the TV.
     #[serde(rename = "Path")]
     pub(crate) path: Option<String>,
     #[serde(rename = "Size")]
     pub(crate) size: Option<i64>,
-    /// Whole-stream bitrate in bps (Plex's `Media.bitrate` is kbps — the converter divides).
+    /// Whole-stream bitrate in bps (the retired `Media.bitrate` was kbps, the converter divides).
     #[serde(rename = "Bitrate")]
     pub(crate) bitrate: Option<i64>,
 }
@@ -336,8 +336,8 @@ pub(crate) struct MediaStreamDto {
     #[serde(rename = "Codec")]
     pub(crate) codec: Option<String>,
     /// The stream's index WITHIN THE MEDIA SOURCE — what playback selection addresses
-    /// (`?AudioStreamIndex=`/`SubtitleStreamIndex=`). Plex has both a stream id and an index;
-    /// Jellyfin addresses by index alone, so the internal `Stream.id` mirrors this value.
+    /// (`?AudioStreamIndex=`/`SubtitleStreamIndex=`). The old wire had a stream id and an index,
+    /// while Jellyfin addresses by index alone, so the internal `Stream.id` mirrors this value.
     #[serde(rename = "Index")]
     pub(crate) index: Option<i32>,
     #[serde(rename = "Language")]
@@ -375,10 +375,10 @@ pub(crate) struct MediaStreamDto {
     pub(crate) is_default: bool,
     #[serde(rename = "IsForced", default)]
     pub(crate) is_forced: bool,
-    /// Sidecar file vs embedded — the player treats them differently (Plex's `Stream.external`).
+    /// Sidecar file vs embedded, the player treats the two differently (retired `Stream.external`).
     #[serde(rename = "IsExternal", default)]
     pub(crate) is_external: bool,
-    /// SDH flag (Plex's `hearingImpaired`); Jellyfin 10.9+.
+    /// SDH flag (the retired `hearingImpaired`), Jellyfin 10.9+.
     #[serde(rename = "IsHearingImpaired")]
     pub(crate) is_sdh: Option<bool>,
 }

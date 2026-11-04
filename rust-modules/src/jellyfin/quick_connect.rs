@@ -1,5 +1,5 @@
-//! Quick Connect: the passwordless sign-in flow (flavor `jellyfin` only — this module does not
-//! exist on a Plex build).
+//! Quick Connect: the passwordless sign-in flow (flavor `jellyfin` only, with no counterpart on
+//! the retired wire).
 //!
 //! One worker runs the whole dance: `POST /QuickConnect/Initiate` for a secret + code, then a
 //! BOUNDED, CANCELABLE poll of `GET /QuickConnect/Connect?secret=` until the server reports the

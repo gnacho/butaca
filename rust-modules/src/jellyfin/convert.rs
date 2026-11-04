@@ -1,18 +1,17 @@
 //! convert — Jellyfin `BaseItemDto` → the app's catalog row (`pms::PmsMovie`).
 //!
 //! This is the whole "impedance match" between the two backends, and it is small precisely
-//! because the internal row was never really Plex's: it is a title, a year, a duration, a resume
-//! point, image paths and watch state. Everything here is one such field's mapping; anything
-//! cleverer belongs to the layer that asked for the row.
+//! because the internal row was never one backend's: it is a title, a year, a duration, a
+//! resume point, image paths and watch state. Everything here is one such field's mapping, and
+//! anything cleverer belongs to the layer that asked for the row.
 //!
 //! ## Image paths are PATHS, not URLs
 //!
 //! `PmsMovie.thumb`/`still`/`art` hold server-relative paths that the poster store later boxes
-//! with a size (Plex: `/photo/:/transcode?url=…`; Jellyfin: [`JfClient::image_path`]'s
-//! `fillWidth`/`fillHeight` suffix). What this module stores is therefore the UNSIZED form —
-//! `/Items/{id}/Images/Primary?tag=…` — and the tag is embedded now because it is the server's
-//! cache-buster: leave it out and a re-scraped poster would be served stale from the app's LRU
-//! under a key that no longer names the current image.
+//! with a size ([`JfClient::image_path`]'s `fillWidth`/`fillHeight` suffix). What is stored here is
+//! therefore the UNSIZED form, `/Items/{id}/Images/Primary?tag=…`, and the tag is embedded now
+//! because it is the server's cache-buster: leave it out and a re-scraped poster would be served
+//! stale from the app's LRU under a key that no longer names the current image.
 
 use super::dto::BaseItemDto;
 use crate::registry::ServerId;
@@ -20,12 +19,12 @@ use crate::pms::PmsMovie;
 use std::os::raw::c_int;
 
 /// `None` for kinds the app has no shelf for (music, photos, box sets) — the caller skips the
-/// row, exactly as it skips a Plex row whose type is not in its filter.
+/// row, exactly as it skips any row whose type is not in its filter.
 ///
 /// `sec` is Jellyfin's containing-library id collapsed to the row's `i64`: Jellyfin library ids
 /// are GUIDs, which do not fit, and the browse adapter already scopes every listing by
-/// `ParentId` at QUERY time, so the per-row pin the Plex layer needs (`/hubs` answers mix every
-/// library into one response) has no counterpart here. `0` is "not pinned", not a bug.
+/// `ParentId` at QUERY time, so the per-row pin the retired layer needed (`/hubs` answers mixed
+/// every library into one response) has no counterpart here. `0` is "not pinned", not a bug.
 pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Option<PmsMovie> {
     let kind: c_int = match it.kind.as_str() {
         "Movie" => 0,
@@ -47,7 +46,7 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
     };
 
     // Images. An episode's own Primary is its 16:9 still and the poster shown for it is the
-    // SERIES' — Plex models exactly this as `thumb` (substitute) vs the episode's own art, and
+    // SERIES': the retired row modelled that as `thumb` (substitute) vs the episode's own art, and
     // the two fields on the row keep that distinction. A movie's Primary is both.
     let own_primary = image_path(it, "Primary", it.image_tags.get("Primary"));
     let series_poster = it.series_id.as_deref().map(|sid_| {
@@ -94,7 +93,7 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
         vcodec,
         acodec,
         blur: [[0.0; 3]; 4],
-        // Jellyfin ships BlurHash strings, not Plex's four corner colours; decoding them is a
+        // Jellyfin ships BlurHash strings, not four corner colours, and decoding them is a
         // rendering nicety, not a PoC blocker. The hero scrim falls back to its default tint.
         has_blur: false,
         kind,

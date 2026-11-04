@@ -1,16 +1,16 @@
 //! signin — the onboarding form's flow: one `AuthenticateByName` attempt on a worker, then
 //! Ready (client installed, config persisted) or a reason the form can say out loud.
 //!
-//! This is the Jellyfin flavor's counterpart to Plex's QR/pin flow, at a tenth of the moving
-//! parts: there is no plex.tv, no pin to poll, no server discovery — the user types the three
-//! facts (server, name, password) and the answer comes back from one POST. The shape it shares
-//! with every other store in this crate: the worker never touches the screen's statics, the
+//! This is the Jellyfin flavor's counterpart to the retired QR/pin flow, at a tenth of the moving
+//! parts: there is no account service, no pin to poll, no server discovery, so the user types the
+//! three facts (server, name, password) and the answer comes back from one POST. The shape it
+//! shares with every other store in this crate: the worker never touches the screen's statics, the
 //! mailbox carries the outcome, and an epoch discards a slow attempt's answer after a retry.
 //!
 //! Success does THREE things, in this order, all on the worker: authenticate (token in RAM),
 //! install the client (stores can answer the moment the route flips), persist the config (the
 //! next boot signs in by itself — `boot::save_config`). The main thread then sees [`take_ready`]
-//! and routes Home, exactly as the Plex flow's handoff does.
+//! and routes Home, exactly as the retired flow's handoff did.
 
 use super::client::{AuthError, JfClient};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

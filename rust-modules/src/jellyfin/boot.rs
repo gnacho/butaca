@@ -1,6 +1,6 @@
 //! boot — the Jellyfin flavor's boot gate arm: config file → authenticated client → installed.
 //!
-//! There is no plex.tv on this backend, so "signing in" is reading a small JSON config the
+//! There is no account service on this backend, so "signing in" is reading a small JSON config the
 //! install carries, authenticating against the server it names, and installing the resulting
 //! client for the stores to find. The config is searched in this order, first hit wins:
 //!
@@ -87,9 +87,9 @@ enum ConfigFile {
 
 /// The boot gate's question, as one function: is there a Jellyfin server to go to, and did it
 /// let us in? `true` means the client is INSTALLED and the app should boot to Home. `false`
-/// covers every other outcome — no config (the common case on a Plex build, and the reason this
+/// covers every other outcome: no config (the common case on a fresh install, and the reason this
 /// fn is cheap: the first read misses and nothing else runs), a config that will not parse, an
-/// unreachable server, and wrong credentials — each logged on its own terms.
+/// unreachable server, and wrong credentials, each logged on its own terms.
 ///
 /// Runs BEFORE the main loop on the boot thread: a blocking round-trip here delays the first
 /// frame by one LAN request, which is the honest price of knowing whether Home can fill.
@@ -388,7 +388,7 @@ pub(crate) fn device_id_persistent() -> String {
     minted
 }
 
-/// 16 bytes of `/dev/urandom` as hex — the same mint the Plex session applies to its client id.
+/// 16 bytes of `/dev/urandom` as hex, the same mint the retired session applied to its client id.
 fn mint_device_id() -> String {
     let mut b = [0u8; 16];
     let filled = std::fs::File::open("/dev/urandom")

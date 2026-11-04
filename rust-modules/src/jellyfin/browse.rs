@@ -2,15 +2,15 @@
 //!
 //! Everything here is the Jellyfin half of a `browse.rs` idiom, shaped so the store side stays
 //! backend-blind: sections arrive as the same `(key, title, SecKind)` rows `project_sections`
-//! builds off a PMS, a page lands as the same `(Vec<PmsMovie>, total)` the Plex page worker
-//! lands, and the sort menu is a `Vec<SortEntry>` like any other. What could not be shared is
-//! the CLIENT (Plex's lifecycle validation reads registry state a Jellyfin client has no
-//! counterpart of), so `browse.rs` carries a narrow jellyfin lane beside each mailbox — the
+//! builds off a server, a page lands as the same `(Vec<PmsMovie>, total)` shape the store already
+//! takes, and the sort menu is a `Vec<SortEntry>` like any other. What could not be shared is
+//! the CLIENT (the retired client's lifecycle validation read registry state a Jellyfin client
+//! has no counterpart of), so `browse.rs` carries a narrow jellyfin lane beside each mailbox, the
 //! same split `posters.rs` and `pms.rs` already made.
 //!
 //! ## The key side-table
 //!
-//! `BrowseSection.key` is an `i64`, because PMS section keys are integers. A Jellyfin view id is
+//! `BrowseSection.key` is an `i64`, because the old wire's section keys were integers. A view id is
 //! a GUID, so this module mints a synthetic key per view and remembers the pairing
 //! ([`key_for_view`] / [`view_for_key`]): the table, the toolbar and every page landing speak the
 //! integer, and only the two fetch boundaries here ever see the GUID again. Keys are 1-based and
@@ -53,9 +53,8 @@ pub(crate) fn view_for_key(key: i64) -> Option<String> {
         .cloned()
 }
 
-/// The sort menu of a Jellyfin section. Plex's is server-driven (`Meta.Type[].Sort` rides the
-/// first page); Jellyfin's `SortBy` vocabulary is FIXED, so the menu is a constant — handed to
-/// the section state with the first landed page, which is the moment Plex's menus arrive too.
+/// The sort menu of a Jellyfin section. Its `SortBy` vocabulary is FIXED, so the menu is a
+/// constant, handed to the section state with the first landed page.
 /// Each `key` IS the `SortBy` token, so `browse.rs`'s menu state feeds the query unchanged.
 pub(crate) fn sorts() -> Vec<SortEntry> {
     vec![
@@ -84,7 +83,7 @@ pub(crate) fn sorts() -> Vec<SortEntry> {
 
 /// The Collections type's sort menu: a box set sorts by name alone. The full [`sorts`] vocabulary
 /// (release date, rating, date added) has no meaning for a box set, so the type lands this
-/// one-entry menu the same moment Plex's server-driven menu would name its one sort.
+/// one-entry menu the same moment a server-driven menu would name its one sort.
 pub(crate) fn collection_sorts() -> Vec<SortEntry> {
     vec![SortEntry {
         key: "SortName".into(),
@@ -141,8 +140,8 @@ pub(crate) fn fetch_counts(c: &JfClient, keys: &[(i64, SecKind)]) -> Vec<(i64, i
 }
 
 /// One page of one section's current query → the rows + the listing's total, in exactly the
-/// shape the Plex page worker's landing carries. `None` is the FAILURE sentinel — the store
-/// side leaves a populated grid untouched on it, the same rule the Plex lane keeps.
+/// shape the page store's landing carries. `None` is the FAILURE sentinel, the store
+/// side leaves a populated grid untouched on it, the same rule the retired lane kept.
 ///
 /// `sort_key` is a [`sorts`] key or "" (menus not landed yet); "" means the Title default, sent
 /// EXPLICITLY — Jellyfin's server default is an implementation detail, and the toolbar's first
@@ -222,7 +221,7 @@ pub(crate) fn fetch_genres(c: &JfClient, key: i64) -> Option<Vec<GenreEntry>> {
     Some(out)
 }
 
-/// The A-Z rail's letter table of one section — the Jellyfin counterpart of Plex's
+/// The A-Z rail's letter table of one section, the counterpart of the retired
 /// `firstCharacter` directory (see [`JfClient::letter_counts`]). The counts MUST describe
 /// exactly the section's listing or `letter_start`'s prefix sums would index the wrong rows,
 /// hence the same `include_types` filter `fetch_page` uses. `None` is the failure sentinel.
@@ -239,8 +238,8 @@ pub(crate) fn fetch_letters(
 
 /// The `IncludeItemTypes` spelling of a section kind under a library type. Both kinds list their
 /// LEAF-playable parent type: a movies view lists Movies, a tvshows view lists Series (episodes
-/// are reached through the detail page, as on Plex). The Collections type lists BoxSets instead —
-/// its rows are the section's collections, not its playable leaves.
+/// are reached through the detail page). The Collections type lists BoxSets instead, so its rows
+/// are the section's collections, not its playable leaves.
 fn include_types(kind: SecKind, library_type: LibraryType) -> &'static str {
     if library_type == LibraryType::Collections {
         "BoxSet"

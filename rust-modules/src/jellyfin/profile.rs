@@ -1,6 +1,6 @@
 //! profile — the DeviceProfile this television hands to Jellyfin's Media Decision Engine
-//! (`POST /Items/{id}/PlaybackInfo`), the Jellyfin counterpart of the Plex profile
-//! `transcoder.rs::profile_for` builds.
+//! (`POST /Items/{id}/PlaybackInfo`), the Jellyfin counterpart of the profile the retired
+//! wire's transcoder built.
 //!
 //! ## One source of truth, read twice
 //!
@@ -9,7 +9,7 @@
 //! is the over-claim bug class in both directions: the server would direct-offer what the
 //! pipeline cannot decode, or transcode down what it can. Building the profile from the table
 //! (rather than hand-keeping a second list) is what makes "the two cannot drift apart" literal
-//! (`Caps::audio`'s own doc makes the same promise for the Plex profile).
+//! (`Caps::audio`'s own doc makes the same promise for the retired profile).
 //!
 //! ## What the profile deliberately does not say
 //!
@@ -27,7 +27,7 @@
 
 /// The DeviceProfile as a JSON body, ready to POST. `ceiling` is the user's quality rung when
 /// one is set (`route::Quality::ceiling()`): it becomes `MaxStreamingBitrate`, so a picked rung
-/// binds the transcode the same way `maxVideoBitrate` binds a Plex one.
+/// binds the transcode the same way the retired `maxVideoBitrate` bound its own.
 pub(crate) fn device_profile(ceiling: Option<crate::playback::Ceiling>) -> serde_json::Value {
     let caps = crate::devcaps::caps();
     let max_bps = ceiling

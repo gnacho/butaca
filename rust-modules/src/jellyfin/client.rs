@@ -3,15 +3,15 @@
 //! One `JfClient` is one server: an [`Origin`], the access token [`authenticate_by_name`] won,
 //! and the user id that token acts as. It mirrors the shape of `server::Client` on purpose — same
 //! "built path carries the token, and the built path is also the cache key" discipline — so the
-//! stores that were written against the Plex client (the poster LRU above all) read this one
-//! without new concepts.
+//! stores that were written against the retired vendor client (the poster LRU above all) read
+//! this one without new concepts.
 //!
 //! ## Where the token rides
 //!
 //! Control requests carry it inside the `Authorization: MediaBrowser Token=...` HEADER (the
 //! legacy `X-Emby-Token` line no longer authenticates on Jellyfin 12); built media/image paths carry it as
 //! the `api_key` query parameter, because those paths double as byte-identical cache keys and
-//! fetch paths, exactly as Plex's `X-Plex-Token`-suffixed paths do. Both spellings are on
+//! fetch paths, exactly as the retired wire's token-suffixed paths did. Both spellings are on
 //! `crate::http`'s credential gate (`http::credential_carried`): plaintext is allowed only to a
 //! LAN address. **The token is never logged** — parse failures name the endpoint, which is the
 //! part of the path before the query string.
@@ -74,8 +74,8 @@ pub(crate) struct BrowseQuery<'a> {
     pub(crate) sort_by: &'a str,
     pub(crate) sort_desc: bool,
     /// `IsPlayed=false`. For a Series the server rolls the flag up from its episodes (played iff
-    /// ALL are played), which makes this read as Plex's `unwatchedLeaves` — "has anything
-    /// unwatched" — rather than as "never started".
+    /// ALL are played), which makes this read as the old server's `unwatchedLeaves` ("has anything
+    /// unwatched") rather than as "never started".
     pub(crate) unwatched: bool,
     /// Genre GUIDs, comma-joined already; "" = unfiltered.
     pub(crate) genre_ids: &'a str,
@@ -84,9 +84,9 @@ pub(crate) struct BrowseQuery<'a> {
 pub(crate) struct JfClient {
     origin: Origin,
     /// Per-install stable id, minted once by the boot flow — Jellyfin's authorized-devices list
-    /// keys on it the way plex.tv's keys on `X-Plex-Client-Identifier`.
+    /// keys on it the way the retired account service keyed on its client identifier.
     device_id: String,
-    /// Set exactly once, at login. A `RwLock` rather than the Plex client's token-generation
+    /// Set exactly once, at login. A `RwLock` rather than the retired client's token-generation
     /// machinery because nothing here rotates: Jellyfin has no token refresh, only re-login.
     token: RwLock<Option<TokenState>>,
     /// The PlaySessionIds this client has opened with `/Sessions/Playing` and not yet closed —
@@ -151,8 +151,8 @@ impl JfClient {
     /// The `MediaBrowser` identity, as the standard `Authorization` header the login wants, and
     /// also the value Jellyfin shows in its own device list. The Client is the DISPLAY name (the
     /// fork's own build says Butaca there — issue #35), while Device/DeviceId/Version keep the
-    /// one wire identity the Plex backend reports (`server::identity`), so an install never
-    /// describes its device two ways to two servers.
+    /// one wire identity the shared identity module reports (`server::identity`), so an install
+    /// never describes its device two ways to two servers.
     ///
     /// Jellyfin 12 removed the legacy `X-Emby-Authorization` line this client used to send:
     /// the login POST answers a blanket 400 to it, identity or no identity (verified against
@@ -411,7 +411,7 @@ impl JfClient {
     }
 
     /// The signed-in user's display name, once the login landed (None before it). The account
-    /// chip reads it: a Jellyfin install has no Plex session to name itself from.
+    /// chip reads it: the Jellyfin token names the user, there is no session record to ask.
     pub(crate) fn user_name(&self) -> Option<String> {
         self.token.read().unwrap_or_else(|e| e.into_inner()).as_ref().map(|t| t.user_name.clone())
     }
@@ -445,7 +445,7 @@ impl JfClient {
     }
 
     /// One authed GET, parsed. `None` covers transport failure, non-2xx and unparseable JSON
-    /// alike — the failure granularity the Plex stores were written against (`Option` from
+    /// alike: the failure granularity the earlier stores were written against (`Option` from
     /// `fetch_built`), so the adapters land without new error plumbing. The log line names the
     /// ENDPOINT ONLY: `path` carries no token here (it rides in the header) but does carry the
     /// query a user typed when the endpoint is search.
@@ -558,7 +558,7 @@ impl JfClient {
     /// One page of a library listing with the Library screen's whole query shape — the Jellyfin
     /// counterpart of `server::Client::section_items_query`, and the ONLY listing method so no two
     /// callers can drift into requesting different row shapes. The caller (the browse adapter)
-    /// owns the Plex-menu → Jellyfin-parameter translation; everything here rides the query
+    /// owns the toolbar-menu → Jellyfin-parameter translation, and everything here rides the query
     /// string, which is Jellyfin's own convention for this endpoint.
     pub(crate) fn browse_page(&self, q: &BrowseQuery) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
@@ -571,9 +571,9 @@ impl JfClient {
             q.start,
             q.limit
         );
-        // SortBy/SortOrder ALWAYS go out (unlike Plex's "empty until the menus land"): Jellyfin's
-        // server default is an implementation detail, while the toolbar's first chip says
-        // "Title" — the listing must already be what the chip claims.
+        // SortBy/SortOrder ALWAYS go out (unlike the retired wire's "empty until the menus land"):
+        // Jellyfin's server default is an implementation detail, while the toolbar's first chip
+        // says "Title", so the listing must already be what the chip claims.
         path.push_str(&format!(
             "&SortBy={}&SortOrder={}",
             q.sort_by,
@@ -623,12 +623,12 @@ impl JfClient {
     }
 
     /// Per-letter item counts of one library for the A-Z rail — the Jellyfin counterpart of
-    /// Plex's `firstCharacter` directory. Jellyfin has no per-letter counts endpoint, but
+    /// the retired wire's `firstCharacter` directory. Jellyfin has no per-letter counts call, but
     /// `NameStartsWith` (verified to filter on `SortName`, the field the listing's
     /// `SortBy=SortName` order rides) with `Limit=0` yields `TotalRecordCount` without
-    /// transferring a single item, so 27 lightweight queries replace the one Plex call. The
+    /// transferring a single item, so 27 lightweight queries replace the one call. The
     /// non-alphabetic bucket is the unfiltered total minus the A-Z sum: digits and punctuation
-    /// sort before letters, so it leads the rail, exactly like Plex's "#".
+    /// sort before letters, so it leads the rail, exactly like the retired wire's "#".
     pub(crate) fn letter_counts(
         &self,
         view_id: &str,
@@ -718,8 +718,8 @@ impl JfClient {
     }
 
     /// The server naming ITSELF (`GET /System/Info/Public`) — the Sources list's group header,
-    /// Plex's `friendlyName` counterpart. The endpoint is public by design; this wrapper still
-    /// rides the authed path like every call here, and discovery only ever asks post-login.
+    /// the counterpart of the retired `friendlyName`. The endpoint is public by design, and this
+    /// wrapper still rides the authed path like every call here, asked only post-login.
     pub(crate) fn server_name(&self) -> Option<String> {
         let info: super::dto::PublicInfo = self.get_json("/System/Info/Public")?;
         (!info.server_name.is_empty()).then_some(info.server_name)
@@ -727,7 +727,7 @@ impl JfClient {
 
     /// GET raw bytes (the poster/artwork pipeline's fetch — the Jellyfin counterpart of
     /// `server::Client::get_bytes`). The built image path carries its `api_key`, so no header is
-    /// needed and none is sent: the path IS the credential, same as the Plex shape.
+    /// needed and none is sent: the path IS the credential, same as the retired shape.
     pub(crate) fn get_bytes(&self, built_path: &str) -> Option<Vec<u8>> {
         let reply = http::request(&self.origin, built_path, http::Method::Get, &[], None)?;
         reply.ok().then_some(reply.body)
@@ -881,11 +881,11 @@ impl JfClient {
     /// `server::Client::image_transcode_path`, and like it BOTH the poster store's LRU key and the
     /// bytes it fetches. `src_path` is the stored image path (`/Items/{id}/Images/Primary?tag=…`,
     /// see [`super::convert`]); the server scales, so the size the tile wants rides as
-    /// `fillWidth`/`fillHeight`, the direct analogue of Plex's `/photo/:/transcode` box.
+    /// `fillWidth`/`fillHeight`, the direct analogue of the retired `/photo/:/transcode` box.
     ///
     /// `png` is accepted for signature parity and deliberately ignored: Jellyfin's Primary
     /// images are JPEG and its Logo/Art types keep their own transparency — the PNG flag exists
-    /// on the Plex side for clearLogos, which this backend reads through their own image types.
+    /// on the retired side for clearLogos, which this backend reads through their own image types.
     pub(crate) fn image_path(&self, src_path: &str, w: i64, h: i64, png: bool) -> Option<String> {
         if png {
             // Not a failure — a Logo/Art request must be built from its own path by the caller.
@@ -905,7 +905,7 @@ impl JfClient {
 
     /// The direct-play URL for an item: the file itself, unaltered, with the auth riding as
     /// `api_key` like every other built path. `static=true` is Jellyfin's "no remux, no
-    /// transcode" switch — the byte-exact counterpart of Plex's direct-play `part` URL.
+    /// transcode" switch, the byte-exact counterpart of the retired direct-play `part` URL.
     /// `media_source_id` pins the VERSION (Jellyfin's `part`): empty means the server's default
     /// source, which is also the right answer when the detail fetch found exactly one.
     pub(crate) fn direct_stream_url(&self, item_id: &str, media_source_id: &str) -> Option<String> {
@@ -986,7 +986,7 @@ impl JfClient {
 
     // ---- playback session reporting ---------------------------------------------------------
     //
-    // Jellyfin's progress protocol is three JSON POSTs where Plex's is one query-stringed POST:
+    // Jellyfin's progress protocol is three JSON POSTs where the retired wire's was a single POST:
     // `/Sessions/Playing` opens the session, `/Sessions/Playing/Progress` carries every later
     // tick (a pause included, as `IsPaused`), and `/Sessions/Playing/Stopped` closes it — and
     // the STOP is what commits the resume point (and, past the server's own threshold, the
@@ -1080,8 +1080,8 @@ impl JfClient {
     }
 
     /// Kill a server-side transcode: `DELETE /Videos/ActiveEncodings?playSessionId=…`, what
-    /// jellyfin-web calls when HLS playback ends. Best-effort for the same reason Plex's
-    /// transcode stop is: the server reaps the encoder on its own once the playlist goes quiet,
+    /// jellyfin-web calls when HLS playback ends. Best-effort for the same reason the retired
+    /// transcode stop was: the server reaps the encoder on its own once the playlist goes quiet,
     /// so a false here costs one log line and nothing else.
     pub(crate) fn stop_active_encodings(&self, play_session_id: &str) -> bool {
         self.request_status(
@@ -1101,7 +1101,7 @@ impl JfClient {
     // Deck removal has NO exact counterpart: Jellyfin's Continue Watching is not a list an item
     // can be hidden from, it is the set of items holding a resume point — so the honest mapping
     // discards the point (a UserData merge with `PlaybackPositionTicks: 0`, Played untouched,
-    // verified against 10.11), where Plex's removeFromContinueWatching keeps it. The deck row
+    // verified against 10.11), where the retired removeFromContinueWatching kept it. The deck row
     // disappears the same; what differs is that coming back later restarts the film.
 
     /// Mark played: `POST /Users/{uid}/PlayedItems/{id}` (bodyless — the endpoint takes no
@@ -1143,7 +1143,7 @@ impl JfClient {
 
     /// Remove from Continue Watching: `POST /Users/{uid}/Items/{id}/UserData` as a MERGE — only
     /// `PlaybackPositionTicks` is sent, and the server keeps Played/PlayCount as they are. See
-    /// the section header for what this costs versus Plex's hide-but-keep-resume.
+    /// the section header for what this costs versus the retired hide-but-keep-resume.
     pub(crate) fn clear_resume(&self, item_id: &str) -> bool {
         let Some(user_id) = self.user_id() else {
             return false;
