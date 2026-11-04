@@ -55,11 +55,12 @@ COVERED (route — used by):
   POST/DELETE /Users/{uid}/PlayedItems/{id}       — watched/unwatched writes (in-memory state)
   POST/DELETE /Users/{uid}/FavoriteItems/{id}     — favorite writes (in-memory state)
   POST  /Users/{uid}/Items/{id}/UserData          — the deck-removal MERGE (position only)
+  GET   /Videos/{id}/stream                       - the static file (`?static=true`), Range honoured
   DELETE/Videos/ActiveEncodings                   — the transcode kill (204)
   GET/DELETE /_mock/requests                      — every routed request, token-redacted
 
-NOT covered (the client folds their absence honestly): `/Videos/{id}/stream` and the HLS
-transcode playlist (playback itself — the sim has no video path for it; both answer 404),
+NOT covered (the client folds their absence honestly): the HLS transcode playlist (playback
+itself - the sim has no video path for it; it answers 404),
 `/Videos/{id}/Trickplay/{w}/{i}.jpg` sheets (the manifest is served, the sheets 404),
 `/Sessions/Capabilities/Full`, display-preferences, and admin routes. MediaSegments answers
 empty rather than modelling an intro plugin, and `/Genres` answers the world's whole genre table
@@ -150,6 +151,31 @@ def demo_cache_dir():
     """The derived-artwork cache `tools/demo_library.py` writes (`$BUTACA_DEMO_CACHE` overrides)."""
     env = os.environ.get("BUTACA_DEMO_CACHE")
     return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "butaca-demo"
+
+
+_STREAM_BYTES = None
+
+
+def stream_bytes():
+    """The bytes `/Videos/{id}/stream` serves, read once.
+
+    The demo cache ships a short stand-in clip for the capture scenes; a machine that has not
+    run `tools/demo_library.py derive` falls back to the source film. Returns b"" when neither
+    exists, so the handler can answer 404 the way a server without the file would.
+    """
+    global _STREAM_BYTES
+    if _STREAM_BYTES is None:
+        cache = demo_cache_dir()
+        for candidate in (cache / "derived" / "caminandes_1_2" / "stand-in.mp4",
+                          cache / "src" / "sintel-film.mp4"):
+            try:
+                _STREAM_BYTES = candidate.read_bytes()
+                break
+            except OSError:
+                continue
+        else:
+            _STREAM_BYTES = b""
+    return _STREAM_BYTES
 
 
 def date_at(rng, start_year, span_years):
@@ -1188,10 +1214,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/Videos/ActiveEncodings" and method == "DELETE":
             return self._send_json(204, None)
 
-        if len(segs) == 3 and segs[0] == "Videos" and segs[2] == "stream":
-            print("mock_jf: playback stream not served (see module doc): %s" % segs[1],
-                  file=sys.stderr, flush=True)
-            return self._send_json(404, {})
+        if len(segs) == 3 and segs[0] == "Videos" and segs[2] in ("stream", "stream.mp4"):
+            return self.video_stream()
 
         with self.server.lock:
             self.server.unknown.append("%s %s" % (method, path))
@@ -1284,6 +1308,42 @@ class Handler(BaseHTTPRequestHandler):
                 "Width": 320, "Height": 180, "TileWidth": 10, "TileHeight": 10,
                 "ThumbnailCount": 100, "Interval": 10000, "Bandwidth": 123456}}}
         return self._send_json(200, row)
+
+    def video_stream(self):
+        """The static file the client plays (`?static=true`). Range is honoured because the
+        player seeks: a server that ignored the header answers the whole file and the player
+        looks like it stalled."""
+        data = stream_bytes()
+        if not data:
+            return self._send_json(404, {})
+        total = len(data)
+        start, end = 0, total - 1
+        status = 200
+        match = re.match(r"bytes=(\d*)-(\d*)$", (self.headers.get("Range") or "").strip())
+        if match:
+            first, last = match.group(1), match.group(2)
+            if first:
+                start = int(first)
+                end = min(int(last), total - 1) if last else total - 1
+            elif last:
+                start = max(total - int(last), 0)
+            if start > end or start >= total:
+                self.send_response(416)
+                self.send_header("Content-Range", "bytes */%d" % total)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return 416
+            status = 206
+        chunk = data[start:end + 1]
+        self.send_response(status)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(len(chunk)))
+        if status == 206:
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, total))
+        self.end_headers()
+        self.wfile.write(chunk)
+        return status
 
     def item_image(self, lib, item_id, kind_path, query):
         # The built path carries api_key=… as its only credential (client.rs' rule). Accepted,
@@ -1535,6 +1595,22 @@ def selftest(catalog=None):
     request("DELETE", "/Videos/ActiveEncodings?playSessionId=ps-1&deviceId=dev", token=token,
             want_status=204)
     request("GET", "/MediaSegments/%s" % movie["Id"], token=token)
+
+    # The static stream the player opens: the whole body, then one Range slice. Skipped by
+    # name on a machine that has not run the demo library, which is the same machine that has
+    # no clip to serve.
+    if stream_bytes():
+        stream_path = "/Videos/%s/stream?static=true&api_key=%s" % (movie["Id"], token)
+        with urllib.request.urlopen(base + stream_path, timeout=10) as reply:
+            assert reply.status == 200 and reply.headers["Accept-Ranges"] == "bytes"
+            whole = reply.read()
+        assert whole[:4] == b"\x00\x00\x00\x20" or whole[4:8] == b"ftyp", whole[:8]
+        ranged = urllib.request.Request(base + stream_path, headers={"Range": "bytes=0-99"})
+        with urllib.request.urlopen(ranged, timeout=10) as reply:
+            assert reply.status == 206 and len(reply.read()) == 100, reply.status
+            assert reply.headers["Content-Range"] == "bytes 0-99/%d" % len(whole)
+    else:
+        print("selftest: no stand-in clip on disk, the stream route was not exercised")
 
     # Quick Connect: initiate, poll twice (authorized on the 2nd), trade the secret.
     qc = request("POST", "/QuickConnect/Initiate", body=b"{}")
