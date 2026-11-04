@@ -118,8 +118,7 @@ pub struct EncodeContract {
     /// **None of those axes can express Dolby Vision**, so a Profile 5 file refused by
     /// `route::video_direct_plays` came back `Part.decision=transcode` with the VIDEO stream's own
     /// decision `copy`: the identical IPT-PQ bitstream, one container down, the identical wrong
-    /// colours (measured against the dev PMS 2026-08-21 — `docs/pms-api.md` §"What the server
-    /// actually does with a Dolby Vision source").
+    /// colours (measured against a real server on 2026-08-21).
     ///
     /// Setting it makes the ask honest, and the answer honest with it: a server that CAN convert
     /// the file does, and a server that cannot says so (this PMS answers

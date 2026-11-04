@@ -17,7 +17,7 @@ use crate::playback::LinkPolicy;
 /// the two fast paths this client is built around become the wrong answer, and both have to go:
 ///
 /// * **No direct play.** Direct play streams the file's own bytes, and a library's own bytes are
-///   tens of Mbit/s (the share measured on 2026-08-11: 31 Mbit/s — `docs/shared-servers.md` §2)
+///   tens of Mbit/s (the share measured on 2026-08-11: 31 Mbit/s)
 ///   down a 2 Mbit/s pipe. The server cannot rescue it, because nothing is being transcoded and
 ///   so there is nothing for it to fit; the cap arrives as a stall two minutes into the film,
 ///   with the AU queue draining and no error on any surface. Forcing the transcode branch turns
@@ -44,7 +44,7 @@ use crate::playback::LinkPolicy;
 /// **No relay connection has been observed on a device by this codebase.** Before discovery racing,
 /// the old chooser discarded every relay. Relay is now a second-phase candidate, but the 2 Mbit/s
 /// figure and port-8443 convention remain Plex documentation rather than our measurement, and this
-/// policy is **unverified against a real relay** — `docs/shared-servers.md` §7 question 5. What is
+/// policy is **unverified against a real relay**. What is
 /// asserted is the shape, not the number: whatever the ceiling turns out to be, only the server can
 /// apply it, and only if an encoder runs.
 pub fn link_policy(link: Option<Location>) -> LinkPolicy {

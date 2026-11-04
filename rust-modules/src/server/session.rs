@@ -12,7 +12,7 @@
 //! [`Session::sources`] records **every**
 //! server discovery reached, ours and every share, each with its own address and its own
 //! per-(user, server) token, because a shared server is a separate authority that answers 401 to
-//! anybody else's credential (`docs/shared-servers.md` §2b). A single-server account writes one
+//! anybody else's credential. A single-server account writes one
 //! entry there and behaves exactly as it always has.
 //!
 //! **Nothing here carries a timestamp**, deliberately: this TV's wall clock runs ~3 h skewed
@@ -387,7 +387,7 @@ pub struct Session {
     pub sources: Vec<SourceRef>,
     /// Which libraries each PROFILE chose to see **on Home**. Browsing is governed by the grant,
     /// not by this: pinning is the only *setting* of the three states a source has (granted /
-    /// pinned / reachable — `docs/shared-servers.md` §6).
+    /// pinned / reachable).
     ///
     /// **Keyed by profile, and that is the whole point of the shape** — the same lesson
     /// [`Session::recent_searches`] beside it records, learned the same way. It was a bare
@@ -566,7 +566,7 @@ pub struct Session {
     /// This is a CHOICE, never a transport grant: nothing here says which address was used or
     /// lets a plaintext origin be reactivated from disk. A credential goes to a plaintext origin
     /// only under a live `grant::PlaintextGrant`, minted in-process from a FRESH eligible
-    /// probe and this answer together (`docs/shared-servers.md`). An absent entry is "never
+    /// probe and this answer together. An absent entry is "never
     /// asked".
     ///
     /// Soft-parsed for the reason every list in this struct is: a hand-edited entry costs that
@@ -1402,8 +1402,7 @@ impl SourceRef {
 
 /// One library the user answered about, named the only way a library CAN be named across two
 /// servers: the server's machine id plus that server's own section key. Section keys are
-/// server-local integers starting at 1 — both servers in the measured pair have a section `1`
-/// (`docs/shared-servers.md` §2), so a bare key identifies nothing.
+/// server-local integers starting at 1, so a bare key identifies nothing.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct PinnedLib {

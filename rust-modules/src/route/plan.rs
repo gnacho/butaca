@@ -1207,8 +1207,9 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::
 /// decision `copy` — the same bitstream, the same wrong colours, one container down. `build_stream`
 /// therefore also sets [`crate::playback::EncodeContract::no_video_copy`], off `base_layer_unusable` and
 /// never off this gate: a COPY carries no declaration, so it stays wrong even for a profile we are
-/// happy to direct-play. The measurement is in `docs/pms-api.md` §"What the server actually does
-/// with a Dolby Vision source". A server that cannot encode the result is then allowed to say so —
+/// happy to direct-play. That was measured against a real server rather than read from a spec: it
+/// answered with a copy decision and the bitstream unchanged. A server that cannot encode the
+/// result is then allowed to say so —
 /// this PMS answers general code 2000, *"File is unplayable. DoVi (Profile 5) color space is not
 /// supported."*, which [`DvPresentation::Refuse`] turns into the player's read-out. A read-out that
 /// names the reason is the honest end of that road; a picture in the wrong colours is not.

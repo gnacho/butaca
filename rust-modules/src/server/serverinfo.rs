@@ -3,8 +3,7 @@
 //!
 //! Exists because of issue #22: a free server cannot encode HEVC, dropped the video track, and
 //! the app "had no idea such a thing existed" — the reviewer derived the cause from the server's
-//! own transcoder logs. The Plex Pass audit (`docs/plex-pass-audit.md`) names the bug class this
-//! kills: a claim true on the development environment (a Pass'd server) asserted as universal.
+//! own transcoder logs. This is the bug class it kills: a claim true on the development environment (a Pass'd server) asserted as universal.
 //! This module is the app finally *knowing*, so `app::diagnostics` can print it and
 //! `player::error_shape` can name the cause in words.
 //!

@@ -37,7 +37,7 @@
 //! a page behind the row and there is none.
 //!
 //! A flat popover with a header per section, deliberately, rather than a Quality row that drills
-//! into a second page: `docs/parity-gaps.md`'s standing decision is that this app has **no
+//! into a second page: the standing decision is that this app has **no
 //! full-screen menu sheets** — the reference clients put playback quality in one and we do not —
 //! and a drill-in inside a popover would need a BACK that means "up one page" where every other
 //! panel's BACK means "dismiss". Six rungs and a switch fit; when they stop fitting, the

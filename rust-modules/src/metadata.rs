@@ -990,7 +990,7 @@ impl Season {
 ///
 /// Carrying `sid` is the second thing this buys, and it is a correctness property rather than a
 /// convenience: a related item is a key on the server THIS PAGE is mounted on, and both servers
-/// number their ratingKeys from 1 (`docs/shared-servers.md` §2). The fetch that fills the shelf
+/// number their ratingKeys from 1. The fetch that fills the shelf
 /// stamps each row with the sid it fetched from, so every downstream use — the art request, the
 /// context menu's `SID`, the scrobble — addresses the right machine BY CONSTRUCTION rather than by
 /// a comment asking the next caller to remember `server::current_server()` is the wrong answer here.
@@ -1166,7 +1166,7 @@ pub(crate) struct Rating {
 pub(crate) struct Detail {
     /// WHICH SERVER this item was fetched from — the other half of its identity. `rk` on its own
     /// names an item on no machine in particular the moment a shared server is registered (both
-    /// number from 1; docs/shared-servers.md §2), and every equality test that reads this struct
+    /// number from 1), and every equality test that reads this struct
     /// therefore compares the pair through [`crate::registry::same_item`]: `cached_playing`'s cache
     /// hit, `pump_season`'s ownership test, `detail::reselect`, and the BACK trail's node.
     #[serde(with = "record::server_id")]
@@ -1256,7 +1256,7 @@ pub(crate) struct Detail {
     /// the item facing a real RE-ENCODE (`route::Preview::Converts`, **not** merely "not
     /// direct-playable": a container-only remux copies the picture and keeps HDR10 intact) AND the
     /// server known Pass-less, the facts row warns that the transcode will be HDR→SDR without
-    /// tone-mapping (a Plex Pass server feature; see docs/plex-pass-audit.md). Any weaker
+    /// tone-mapping (a server feature that may be absent). Any weaker
     /// combination shows nothing.
     pub(crate) hdr: bool,
     /// The video stream's Dolby Vision layering. [`Self::hdr`] answers "should the facts row warn
@@ -1753,7 +1753,7 @@ pub(crate) struct PlayingItem {
     /// gate tests it against the device table's bound before MDE (`!video_dp` → `skip_mde`). An
     /// unreachable MDE still remuxes through `transcode_decision`; the client checks
     /// width/height here so a 4K source on a 1080p-bounded SoC does not wait on a missing
-    /// `/decision` (issue #22's over-claim class — docs/plex-pass-audit.md, closing section).
+    /// `/decision` (issue #22's over-claim class).
     pub(crate) width: i64,
     pub(crate) height: i64,
     /// Whole-file bitrate in kbps (`Media[0].bitrate`). Auto uses this—not merely the video
@@ -2647,8 +2647,8 @@ struct AltResult {
     gen: u32,
     roster_gen: u32,
     /// The SERVER the resolve was asked for — the other half of `rk`, and carried for exactly the
-    /// reason [`SeasonResult::sid`] is. A `ratingKey` is a server-local integer dense from 1
-    /// (docs/shared-servers.md §1), so leaving OUR film 4 and opening the SHARE's film 4 while a
+    /// reason [`SeasonResult::sid`] is. A `ratingKey` is a server-local integer dense from 1,
+    /// so leaving OUR film 4 and opening the SHARE's film 4 while a
     /// resolve is out passes an rk-only test — and the generation guard cannot see that hop either,
     /// since it only moves when a DETAIL lands and the new page's is still in flight. The panel
     /// would then list the other machine's copies, and OK on one would open a different film.
@@ -2684,9 +2684,8 @@ pub(crate) struct AltCopy {
     ///
     /// `None` is the ABSENCE of an owner, not an empty one: it is what the row spells
     /// "This account", and it is the ordering's own-before-a-friend's tiebreak. That read-out is
-    /// exactly right for the first two cases and a slight over-claim for the third — see
-    /// `docs/shared-servers.md` §13, which records why an unnamed external share is not
-    /// distinguishable here today.
+    /// exactly right for the first two cases and a slight over-claim for the third, because an
+    /// unnamed external share is not distinguishable here today.
     ///
     /// Stamped when the resolve lands and RE-stamped by [`alt_restamp_owners`] whenever the
     /// registry re-describes a source, because this is a copy of a fact that can be corrected under
@@ -2722,8 +2721,8 @@ pub(crate) struct AltCopy {
 /// themselves, so both halves of the evidence agreed with a broken product. An addressed store
 /// cannot fail that way: there is no stamp to forget, and the guard the mailbox existed for — a
 /// resolve outliving the page that asked for it, which matters because a `ratingKey` is a
-/// server-local integer dense from 1 and both servers in a household have a film 4
-/// (`docs/shared-servers.md` §1) — is enforced by the READER, which always knows which page it is.
+/// server-local integer dense from 1 and both servers in a household have a film 4 — is
+/// enforced by the READER, which always knows which page it is.
 #[derive(Default)]
 struct AltStore {
     sid: crate::registry::ServerId,

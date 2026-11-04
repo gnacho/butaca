@@ -2335,13 +2335,13 @@ impl SecKind {
 /// Point the app's CURRENT server at the source of section `i`, and drop the per-server state that
 /// belonged to the old one.
 ///
-/// **This is the seam that per-item `ServerId` retires** (`docs/shared-servers.md` §5 steps 2–3),
+/// **This is the seam that per-item `ServerId` retires**,
 /// and it is here because without it the Sources list is a trap rather than a feature. The grid
 /// itself is fetched through `client_for(sid)`, but a `PmsMovie` carries no server: `posters` fetch
 /// from `client()`, and OK on a card resolves its ratingKey through `client()` too — and ratingKeys
 /// are server-local, so a friend's card would quietly open, and play, a DIFFERENT title of yours
 /// with the same number. Moving `current` with the browsed library makes every one of those agree
-/// again, which is `docs/shared-servers.md` §5's named "cheap variant": one active server at a time.
+/// again, which is the named "cheap variant": one active server at a time.
 ///
 /// What it costs is stated rather than hidden: Home's catalog belongs to the server it was fetched
 /// from, so it is dropped and re-armed (`pms::reset` — `pms::pump` refetches on the next frames,

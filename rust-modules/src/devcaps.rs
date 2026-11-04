@@ -5,9 +5,9 @@
 //! The capability profile used to be a set of constants describing the author's television: HEVC
 //! yes, 4K yes, AAC/AC3/EAC3 yes. Every one of those claims is true on the 49SM9000PLA and was
 //! asserted to every server as if it were true of webOS. That is the bug class issue #22 named
-//! and `docs/plex-pass-audit.md` enumerates — **a claim true on the development environment,
+//! and a retired audit enumerated — **a claim true on the development environment,
 //! asserted as universal** — and the decode-capability assertion was its last standing member
-//! (the audit's closing section): a webOS set whose SoC lacks HEVC would be offered, and would
+//! : a webOS set whose SoC lacks HEVC would be offered, and would
 //! direct-play, streams it cannot decode, and nothing here could catch it because the only
 //! device this project owns decodes everything the constants claimed.
 //!

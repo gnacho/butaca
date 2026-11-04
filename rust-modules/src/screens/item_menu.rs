@@ -10,7 +10,7 @@
 //! It exists because OK on a Continue Watching tile **resumes immediately, by design** — the amber
 //! play badge on the card is the affordance that says so. The hold is the *other* half of that
 //! interaction, and until it existed Go-to-Show, per-item Mark-as-Watched and Play-from-Start had
-//! nowhere to live (`docs/parity-gaps.md` §1.2/§1.3, §5a).
+//! nowhere to live.
 //!
 //! **Every card surface opens it** — a home shelf, the Library browse grid, a Search result shelf,
 //! a person's filmography and the detail page's Related shelf present [`ItemMenuKind::Card`]; the

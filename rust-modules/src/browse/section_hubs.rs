@@ -1,6 +1,6 @@
 //! **One library's own shelves** — the `Library Recommended` rows a server's owner arranged,
-//! quoted rather than composed. The endpoint that fed them (`GET /hubs/sections/{id}`,
-//! `docs/pms-api.md` §3a) and its client method went with the PMS browse arm (#166 pass 3);
+//! quoted rather than composed. The endpoint that fed them and its client method went with the
+//! server browse arm (#166 pass 3);
 //! what stays is the publication machine the Library screen renders above its A–Z grid.
 //!
 //! ## Why this is a FIELD on `SecState` and not a store of its own

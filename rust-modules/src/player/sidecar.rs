@@ -1,8 +1,7 @@
 //! **External (sidecar) subtitles on the direct-play path** — the `.srt` beside the film.
 //!
 //! The demuxer only ever sees the streams INSIDE the container it opened, so a sidecar was
-//! unreachable on direct play and the track menu hid it (`docs/parity-gaps.md`, "Sidecar
-//! (external) subtitle streams are unreachable on the direct-play path"). This is the missing
+//! unreachable on direct play and the track menu hid it. This is the missing
 //! producer: fetch the whole file from PMS once. Plain captions answer [`active`]; ASS/SSA
 //! keeps its complete script for [`ass_source`] and the native styled renderer. Styles,
 //! overlapping events, drawings and embedded fonts must never pass through plain-text parsing.

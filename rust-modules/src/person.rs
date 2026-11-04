@@ -179,8 +179,8 @@ impl Src {
 /// MERGED Movies / Shows shelves every source contributed to.
 pub(crate) struct Person {
     /// The ORIGIN server — the one whose credit row opened this page, and the only one
-    /// [`Person::key`] means anything on. A personId is server-local exactly like a ratingKey
-    /// (docs/shared-servers.md §1), so `key` alone names a person on no machine in particular once
+    /// [`Person::key`] means anything on. A personId is server-local exactly like a ratingKey,
+    /// so `key` alone names a person on no machine in particular once
     /// a share is registered; the pair is the identity, compared through
     /// [`crate::registry::same_item`]. `guid` needs no such scoping: it is plex.tv's, and global.
     ///
@@ -664,7 +664,7 @@ fn sources(origin: ServerId, key: &str) -> Vec<Src> {
 /// **Nothing is deduplicated, deliberately.** Two servers that both hold a film contribute two
 /// cards. The only identity that could join them is the portable `Metadata::guid`, which a
 /// `PmsMovie` does not carry — and a title+year join would merge two different films *and* miss the
-/// case docs/shared-servers.md measured on this very pair of servers, where the share's copy is
+/// case measured on this very pair of servers, where the share's copy is
 /// titled in another language. A visible duplicate is honest; a wrong merge hides a film.
 /// (With the Plex read layer gone only the origin lands rows today, but the merge stays the one
 /// place that shapes what the screen draws.)
@@ -1750,7 +1750,7 @@ pub(crate) fn filmography_total(p: &Person) -> usize {
 /// the join agree on.** PMS states an item's identity as `plex://movie/5d7768295af944001f1f7477`;
 /// the Discover credits endpoint states the SAME identity as a bare `ratingKey` of
 /// `5d7768295af944001f1f7477`, and carries no `guid` field at all (measured 2026-09-06 against a
-/// real response — `docs/pms-api.md`). Comparing the two whole strings therefore never matches,
+/// real response). Comparing the two whole strings therefore never matches,
 /// which is exactly the bug this exists to end: the page reported `joinable=5`, drew 544 credit
 /// rows, and marked none of them.
 ///

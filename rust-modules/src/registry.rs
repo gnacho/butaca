@@ -83,7 +83,7 @@ impl Default for ServerId {
 /// Every `ratingKey`, `librarySectionID`, `Part.key`, `Stream.id` and `personId` Plex issues is a
 /// server-local integer dense from 1, so with two servers registered a bare key names an item on
 /// *neither* of them in particular. Two servers colliding is therefore the NORMAL case, not an edge
-/// one — it is measured (docs/shared-servers.md §2): the share's only section key is `1`, exactly
+/// one — it was measured on a household with a shared server: that share's only key is `1`, exactly
 /// like our own `Movies`, and its ratingKeys start at 1 alongside ours. Anything that stores an
 /// item and later looks it up again — the home catalog, the loaded detail, the playing-item store,
 /// the BACK trail, a play queue — has to compare the PAIR, and they all compare it here so the
