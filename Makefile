@@ -1194,7 +1194,7 @@ check-unlocked: lint check-localization
 	python3 tests/test_harness.py
 	python3 tests/player_pointer.py --selftest
 	python3 tests/test_replay_fixtures.py
-	python3 tests/test_mock_pms_library.py
+	python3 tests/test_mock_server_library.py
 	@# The demo library and the screenshot scene manifest (make screenshots). Offline: the cases
 	@# that serve the catalog skip, and say so, where the derived artwork cache is absent.
 	python3 tests/test_demo_library.py
@@ -1217,13 +1217,13 @@ check-unlocked: lint check-localization
 	python3 .claude/hooks/outbound-guard-test.py
 	python3 .claude/hooks/release-config-check-test.py
 	python3 .claude/hooks/tv-lock-guard-test.py
-	@# The PMS probe's own offline suite (~3ms). It talks to the maintainer's real server with a
+	@# The server probe's own offline suite (~3ms). It talks to the maintainer's real server with a
 	@# real token, so its redaction and its session CLEANUP are the two things that must not
 	@# regress -- and both are only covered here. It sat outside this target until 2026-08-27,
 	@# which is the same shape as the hook gap above: a suite that exists, passes, and is never
-	@# run. `pms-rung-sweep.py` drives that probe once per rung, so its pairing rules ride along.
-	python3 tools/test_pms_hls_probe.py
-	python3 tools/test_pms_rung_sweep.py
+	@# run. `rung-sweep.py` drives that probe once per rung, so its pairing rules ride along.
+	python3 tools/test_hls_probe.py
+	python3 tools/test_rung_sweep.py
 	@# The Cloud Lab diagnostics/control receiver, against a real TLS listener on loopback with a freshly
 	@# generated certificate: an accepted upload, a wrong secret, an oversized body, a foreign
 	@# path, a bare GET and the rate limit — the six refusals that are the whole of its exposure to
@@ -1502,7 +1502,7 @@ mali-irq-sample: tools/mali-irq-sample.c
 # `tests/run.py` jobs kill each other's app. Several simulators run at once, each with its own
 # instance root, so UI and data-layer work can proceed in parallel. It has NO video (the 29-symbol
 # Starfish/ACB seam does not exist off-device) and its frame rates describe the host, not the panel.
-# The instance root is `BUTACA_RUNTIME_DIR`; the PMS host and port come from `src/config.local.h`,
+# The instance root is `BUTACA_RUNTIME_DIR`; the server host and port come from `src/config.local.h`,
 # and `tools/sim.ps1` (Windows/WSLg) and `tools/sim-smoke.py` (CI) set the same values the Makefile
 # once spelled out.
 #
@@ -1632,7 +1632,7 @@ sim-wsl: sim-linux
 # never be committed).
 #
 # What it is for: `./tests/run.py --server` grades the player against nine symbolic item SHAPES, and
-# tests/manifest.local.json maps each to a ratingKey on whatever PMS you own. That mapping is the
+# tests/manifest.local.json maps each to a ratingKey on whatever server you own. That mapping is the
 # entire barrier to entry — the shapes include a TrueHD default with an AC-3 sibling, a Dolby
 # Vision 8.1 base layer, a PGS bitmap subtitle track and an eight-track audio file with English DTS
 # at ordinal 6, and two of those have no freely-licensed example anywhere. This builds all of them
@@ -1656,7 +1656,7 @@ fixtures-quick:
 
 # ...and the PIPELINE tier's pack, which is a different thing for a different suite. `fixtures`
 # above builds media for the INTEGRATION suite: full-length, laid out in two server-scannable trees,
-# because those cases go through a PMS and every duration in them is a server constant (the ~90%
+# because those cases go through a server and every duration in them is a server constant (the ~90%
 # watched threshold that drops a seeded resume point, the marker windows, the Up Next tail).
 # `./tests/run.py` (the DEFAULT tier since 2026-08-22) needs none of that — it serves these files
 # off this machine over HTTP

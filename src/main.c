@@ -139,5 +139,5 @@ int main(int argc, char **argv) {
     setenv("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true", 1);
     /* webOS hands a native app its launch params as a JSON string in argv[1]
      * (SAM "params" object; absent on a plain launch). Forwarded, not parsed here. */
-    return butaca_run(PMS_HOST, PMS_PORT, argc > 1 ? argv[1] : NULL);
+    return butaca_run(SERVER_HOST, SERVER_PORT, argc > 1 ? argv[1] : NULL);
 }

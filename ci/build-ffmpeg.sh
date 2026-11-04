@@ -144,7 +144,7 @@ fi
 
 # Components: exactly what the app uses, and nothing else — the size is almost entirely a
 # function of this list. Each line maps to real code:
-#   demuxers   matroska/mov/mpegts are the containers PMS direct-plays or transcodes to;
+#   demuxers   matroska/mov/mpegts are the containers server direct-plays or transcodes to;
 #              h264/hevc are the raw Annex-B paths (/tmp/sample.h264 and the dev triggers).
 #   parsers    needed by avformat_find_stream_info to fill AVCodecParameters.
 #   bsf        AVCC -> Annex-B for mp4-family video, which the Starfish pipeline requires.

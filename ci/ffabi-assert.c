@@ -70,7 +70,7 @@ SAME64(offsetof(AVStream, codecpar), 16, "OFF_STREAM_CODECPAR != 12 [host]");
 SAME32(offsetof(AVStream, time_base), 20, "OFF_STREAM_TIME_BASE != 20");
 SAME64(offsetof(AVStream, time_base), 32, "OFF_STREAM_TIME_BASE != 20 [host]");
 /* The container's per-track tags — where a track's NAME is, and the only place it is for an MP4
-   (PMS sends Stream.title for Matroska and nothing at all for MP4; see ff.rs's stream_name). The
+   (server sends Stream.title for Matroska and nothing at all for MP4; see ff.rs's stream_name). The
    int64 start_time/duration/nb_frames ahead of it are 8-ALIGNED on ARM EABI, so there is a 4-byte
    pad after time_base that a 64-bit reading of the struct does not show — the same trap
    AVFrame.pts carries below. */

@@ -63,7 +63,7 @@ supported. These three overrides are absolute Linux paths inside WSL, keeping Ca
 files off the Windows-mounted checkout. `-StageToken` copies the token from gitignored
 `src/config.local.h` without printing it.
 The staged token persists in that runtime directory, so use a fresh `-RuntimeDir` for QR sign-in
-after staging one. `-PmsHost` overrides the header's PMS host.
+after staging one. `-PmsHost` overrides the header's server host.
 
 This path deliberately calls `make sim-wsl`, the Windows-facing compatibility alias for the native
 Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, server browsing,
@@ -122,7 +122,7 @@ by `BUTACA_RUNTIME_DIR` alone and takes no `FLAVOR`. Translate a device recipe b
 `$D` for whatever runtime root it names — the trigger and log FILE names are identical either way,
 which is what makes the recipes transfer at all.
 
-The PMS host and port default to `src/config.local.h`. The host must be a **numeric IP**:
+The server host and port default to `src/config.local.h`. The host must be a **numeric IP**:
 `stream.rs` has no DNS resolver here either.
 
 **A checkout on a mounted volume needs `SIM_TDIR`.** Network shares, SMB mounts and some external
@@ -153,8 +153,8 @@ Three things on Linux, and notably no webOS NDK and no nightly for the simulator
 2. **rustup + stable.** Not nightly. `rust-modules/.cargo/config.toml` carries `[unstable]
    build-std`, which looks like it forces nightly, but that table is gated and stable cargo ignores
    it — it only applies to the ARM cross-build, which passes `cargo +nightly` explicitly.
-3. `src/config.local.h` for the PMS host and token. Gitignored, so a fresh clone has none: pass
-   the PMS host on the command line and write the token into `$D/butaca-token` by hand.
+3. `src/config.local.h` for the server host and token. Gitignored, so a fresh clone has none: pass
+   the server host on the command line and write the token into `$D/butaca-token` by hand.
 
 ## Boot into a specific screen
 
@@ -179,7 +179,7 @@ Run it in the background, write tokens to the FIFO, ask for a shot:
 
 ```sh
 BUTACA_RUNTIME_DIR=$D BUTACA_APP_DIR=$PWD/pkg \
-  rust-modules/target-sim/debug/butaca-sim "$PMS_IP" 32400 >/dev/null 2>&1 &   # numeric IP
+  rust-modules/target-sim/debug/butaca-sim "$SERVER_IP" 32400 >/dev/null 2>&1 &   # numeric IP
 sleep 7                                     # let Home land and posters arrive
 
 exec 3<> $D/butaca-remote                # SEE THE WARNING BELOW — `<>`, never `>`
@@ -295,7 +295,7 @@ make screenshots SHOT_HERO_VARIANTS=1 # also home-hero-<film>.jpg for each hero 
 
 Layout and spacing · focus and navigation · route transitions and the page cross-fade · every
 screen (home, library grid, detail, person, menus, popovers, the failure read-out) · the entire
-server data layer against a real PMS — browse, metadata, seasons, cast, images, sort/filter · idle
+server data layer against a real server — browse, metadata, seasons, cast, images, sort/filter · idle
 and repaint behaviour · anything reachable by keys or clicks. **Modals are drawn with the frame cache
 OFF** (`frame cache: CopyTexSubImage error=0x500 — cache off`), so a sim capture cannot show a
 fault in the cached host path a modal card is served from; only the TV can.

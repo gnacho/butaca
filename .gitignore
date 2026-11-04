@@ -27,7 +27,7 @@ ipkroot/data/usr/
 # (the build links against the stub .so files generated from stub/*.c)
 sysroot/
 
-# local dev overrides (real PMS host + access token)
+# local dev overrides (real server host + access token)
 local.env
 src/config.local.h
 # ...and every agent worktree carries its OWN copy of that file, with the real token in it.
@@ -36,7 +36,7 @@ src/config.local.h
 # about to go public that is the difference between "ignored" and "one `git add -A` from a live
 # credential in history". Belongs here, in the tracked file, where anyone can see it.
 .claude/worktrees/
-# the on-device suite's installation-specific half: which PMS, which TV, which ratingKeys, which
+# the on-device suite's installation-specific half: which server, which TV, which ratingKeys, which
 # account user. tests/manifest.json keeps the case DEFINITIONS (public); this keeps the private
 # library inventory that used to be committed alongside them. See tests/manifest.local.json.example.
 tests/manifest.local.json
@@ -136,7 +136,7 @@ pkg/host-ffmpeg/
 pkg/.ffabi-ok
 
 # Session file the app writes next to its payload. The desktop simulator is pointed at
-# pkg/ via BUTACA_APP_DIR, so it lands here on a host run; it can hold account-service and PMS
+# pkg/ via BUTACA_APP_DIR, so it lands here on a host run; it can hold account-service and server
 # tokens, and this repository is public.
 pkg/auth.json
 

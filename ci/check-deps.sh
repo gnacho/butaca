@@ -469,18 +469,18 @@ fi
 # allowlist: any free process-wide selector or module-level dispatcher reconnects those owners and
 # lets an unaddressed reset or landing cross the Bridge boundary — exactly the pre-port shape
 # `crate::stores::hubs::apply`/`apply_with_directory`/`controlled`/`controlled_with_directory` had,
-# each a free function reading/writing process-wide `pms.rs` statics instead of one owner's
+# each a free function reading/writing process-wide `catalog.rs` statics instead of one owner's
 # `PmsState`/`Arc<PmsAdapter>` pair. `hubs_snapshot`/`run`/`run_with_directory`/
 # `land_with_directory`/`tick_with_directory`/`controlled_work`/`controlled_work_with_directory`
-# are deliberately NOT listed: `pms.rs` keeps the current explicit-parameter architecture, taking
+# are deliberately NOT listed: `catalog.rs` keeps the current explicit-parameter architecture, taking
 # `state`/`adapter` in, exactly like search's own `reset(state, adapter)`.
 hubs_facades='apply|apply_with_directory|controlled|controlled_with_directory'
 hubs_selectors='RESULTS|NEXT_REQUEST|HUB_GEN|CATALOG_GEN|LAST_SECTIONS_GEN|ACTIVE|OWNER|LEGACY_ADAPTER'
 hubs_owner_matches=$({
   owner_declarations "$hubs_facades" "$hubs_selectors" \
     'PmsState|PmsAdapter|HubsStore|Landing|Src|SourceBuild' \
-    "$SRC/pms.rs" "$SRC/pms/initial.rs" "$SRC/stores/hubs.rs"
-  grep_code "(crate::pms|crate::stores::hubs|stores::hubs)::($hubs_facades)\(" "$SRC"
+    "$SRC/catalog.rs" "$SRC/catalog/initial.rs" "$SRC/stores/hubs.rs"
+  grep_code "(crate::catalog|crate::stores::hubs|stores::hubs)::($hubs_facades)\(" "$SRC"
 } | sort -u)
 if [ -z "$hubs_owner_matches" ]; then
   ok "hubs-owner: zero global storage, transport, selectors, and free facades"
@@ -569,7 +569,7 @@ if [ -n "$(grep_code '\bEffect::' "$SRC")" ]; then fail "effect: \`Effect::\` is
 # outright — and added every real mutator the census found missing entirely: `alt_install`,
 # `alt_restamp_owners`, `alt_prune_inactive`, `alt_stand_in`, `record_pins`, `retry_source`,
 # `apply_landing`, `take_detail_refresh`.
-MUTATORS='\b(browse|pms|metadata|search|person|viewstate)::(set_cur|note_library_choice|kick_letters|kick_genres|want|save_cursor|set_sort_by_key|set_sort|set_unwatched|set_genre_by_id|set_genre|retry_cur_source|retry_source|recheck_shares|apply_pins|toggle_pin|record_pins|retry_discovery|reset|discover_pump|pump|pump_detail|pump_season|pump_alt_sources|request|open|close|set_query|request_detail|clear|load_season|load_season_now|set_now_playing|set_watched_local|install_playing|mark_skipped|retire_playing|retire_playing_item|alt_install|alt_restamp_owners|alt_prune_inactive|alt_stand_in|request_refetch_hubs|request_retry|edit_item|apply_landing|take_detail_refresh)\(|\bsection_hubs::(kick|commit_staged|invalidate_all|invalidate|set_watched_local|left_the_deck)\('
+MUTATORS='\b(browse|catalog|metadata|search|person|viewstate)::(set_cur|note_library_choice|kick_letters|kick_genres|want|save_cursor|set_sort_by_key|set_sort|set_unwatched|set_genre_by_id|set_genre|retry_cur_source|retry_source|recheck_shares|apply_pins|toggle_pin|record_pins|retry_discovery|reset|discover_pump|pump|pump_detail|pump_season|pump_alt_sources|request|open|close|set_query|request_detail|clear|load_season|load_season_now|set_now_playing|set_watched_local|install_playing|mark_skipped|retire_playing|retire_playing_item|alt_install|alt_restamp_owners|alt_prune_inactive|alt_stand_in|request_refetch_hubs|request_retry|edit_item|apply_landing|take_detail_refresh)\(|\bsection_hubs::(kick|commit_staged|invalidate_all|invalidate|set_watched_local|left_the_deck)\('
 # The spelling is matched WITHOUT a `crate::` prefix (a `use crate::metadata;` makes it
 # `metadata::load_season(`), and every `#[cfg(test)] mod … { … }` block is skipped by brace depth
 # wherever it sits in the file — the first version cut at the FIRST such block and let ~700
@@ -608,10 +608,10 @@ if [ "$mut_bad" -eq 0 ]; then ok "mutators"; else fail "mutators: $mut_bad line(
 #   - `metadata::alt_stand_in` — the census flagged it as "MUTATOR-adjacent" by name alone; it
 #     touches no crate-global state at all, a pure `Vec<AltCopy>` builder
 #     `screens/alt_sources_tests.rs` calls directly to grade its own shape.
-# No other exceptions: `pms::reset` (once tracked as an open item — `app/bridge.rs` and
+# No other exceptions: `catalog::reset` (once tracked as an open item — `app/bridge.rs` and
 # `app/recorder.rs` still called it directly from their own `#[cfg(test)] mod`s) is closed, routed
-# through `HubsStore::run`/`run_with_directory` (the variant and `pms::run`'s arm both already
-# existed) and narrowed to private like every other `pms.rs` mutator.
+# through `HubsStore::run`/`run_with_directory` (the variant and `catalog::run`'s arm both already
+# existed) and narrowed to private like every other `catalog.rs` mutator.
 # One "<file>|<space-separated fn list>" entry per store — a plain array, not `declare -A`: the
 # script's own shebang is `env bash` and the dev Mac's `/bin/bash` is 3.2 (Apple ships nothing
 # newer over the GPLv3 boundary), which has no associative arrays at all.
@@ -619,7 +619,7 @@ MUT_FNS_TABLE=(
   "browse/mod.rs|set_cur note_library_choice kick_letters kick_genres want save_cursor set_sort_by_key set_sort set_unwatched set_genre_by_id set_genre retry_cur_source retry_source recheck_shares apply_pins toggle_pin record_pins retry_discovery reset set_watched_local"
   "browse/section_hubs.rs|kick commit_staged invalidate_all invalidate set_watched_local left_the_deck"
   "metadata.rs|request_detail clear load_season load_season_now set_now_playing set_watched_local install_playing mark_skipped retire_playing retire_playing_item alt_install alt_restamp_owners alt_prune_inactive"
-  "pms.rs|request_refetch_hubs request_retry edit_item apply_landing reset"
+  "catalog.rs|request_refetch_hubs request_retry edit_item apply_landing reset"
   "search.rs|set_query reset set_watched_local"
   "person.rs|open close reset set_watched_local"
   "viewstate.rs|request reset"

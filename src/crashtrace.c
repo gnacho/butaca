@@ -327,8 +327,8 @@ void butaca_crash_install(int ev_fd, int cr_fd) {
 
     /* Ignore SIGPIPE for the whole process. A Rust program gets this from std::rt::init, but
        our main() is C and calls butaca_run() directly, so that never runs — leaving the DEFAULT
-       disposition (terminate). stream.rs sends the PMS request with flags 0, so a server that
-       closes between connect and write (PMS restart, transcoder session reaped, keep-alive
+       disposition (terminate). stream.rs sends the server request with flags 0, so a server that
+       closes between connect and write (server restart, transcoder session reaped, keep-alive
        race) would kill the app outright, with no crash-log line: the tracer above handles only
        SEGV/ABRT/BUS/FPE/ILL/SYS/TRAP. capture.rs already dodges this per-call with MSG_NOSIGNAL
        ("SIGPIPE would kill the app", capture.rs); this covers every other socket in one line. */
