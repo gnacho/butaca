@@ -1,6 +1,6 @@
 //! **Also available** — the same film held by more than one source, as a list you can walk into.
 //!
-//! Deliverable E of the Shared Sources design (`docs/shared-servers.md` §6): when a second pinned
+//! Deliverable E of the Shared Sources design: when a second pinned
 //! source also holds the item on screen, the detail page's actions row grows an *Also available*
 //! pill with a trailing chevron, and it opens this panel — a `TableView` on the panel ground
 //! (`widgets::panel_ground`), the same object the Library's Sort and Filter chips open one page over.
@@ -65,7 +65,7 @@
 //!
 //! **The identity is the `guid` (`plex://movie/…`), never the `ratingKey`.** Every item-shaped
 //! integer in Plex is server-local and starts at 1, so both servers in this household have a
-//! `ratingKey` 4 and a section 1 (`docs/shared-servers.md` §1). Matching on one would confidently
+//! `ratingKey` 4 and a section 1. Matching on one would confidently
 //! offer a different film — which is why the STORE is ADDRESSED on the `(server, ratingKey)` PAIR:
 //! a resolve outliving the page that asked for it is the normal case, not the exotic one. The
 //! store, the cross-source resolve that fills it and the headless `/tmp/butaca-shared` stand-in

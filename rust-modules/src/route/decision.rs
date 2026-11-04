@@ -4213,7 +4213,7 @@ pub(crate) fn drain_scrobble() {
 }
 
 /// Seek within a LIVE TRANSCODE by restarting it at a time offset — a transcode has no byte-Cues,
-/// so a byte-Range seek can't work (docs/plex-api.md). Registers a fresh physical encoder, swaps
+/// so a byte-Range seek can't work. Registers a fresh physical encoder, swaps
 /// the route to its delivery-matched start endpoint with `offset={secs}`, then retires the old
 /// exact key. Returns the new URL (the demux re-opens it from byte 0), or `None` if this playback
 /// is not a transcode or PMS refuses the replacement. The old stream stays live until the new

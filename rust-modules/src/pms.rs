@@ -68,8 +68,8 @@ const HUB_FETCH_COUNT: i64 = 12;
 #[serde(deny_unknown_fields)]
 pub struct PmsMovie {
     /// WHICH SERVER this row came from. Every other identity on it — `rk`, `show_rk`, `part` — is a
-    /// server-local key that a second server reuses from 1 (docs/shared-servers.md §2 measured the
-    /// collision), so the row is only addressable as the PAIR `(sid, rk)`; see
+    /// server-local key that a second server reuses from 1 (measured on a household with a shared
+    /// server), so the row is only addressable as the PAIR `(sid, rk)`; see
     /// [`crate::registry::same_item`]. Stamped by the parser that produced the row from a value the
     /// SPAWNING thread captured, never from `server::current_server()` inside the worker — the row
     /// is parsed on a worker thread, and by the time it parses, "the current server" may already
@@ -952,7 +952,7 @@ struct Src {
     ///
     /// [`roster`] groups the uncredited ones first, so an empty string also orders Home. That is
     /// the right answer for the first two cases and the wrong one for the third; it was wrong for
-    /// the third before this field held a credit too (see `docs/shared-servers.md` §13).
+    /// the third before this field held a credit too.
     handle: String,
     state: HubState,
     /// Single flight, PER SOURCE. Cleared only where a landing is taken, where the spawn was

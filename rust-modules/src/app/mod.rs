@@ -445,7 +445,7 @@ fn pre_boot_diagnostics() {
     // while after.)
     // And what it DECODES, from the device's own codec table — the capability profile and the
     // direct-play gate derive from this instead of asserting the dev TV's abilities as universal
-    // (issue #22's bug class; docs/plex-pass-audit.md's closing section). Same contract as
+    // (issue #22's bug class). Same contract as
     // above: one file read, cannot fail the boot, falls back to the profile that always shipped.
     crate::devcaps::probe();
     // …and, in a LAB build only, the diagnostics bridge: read `lab.json` out of the app directory

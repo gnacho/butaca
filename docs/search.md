@@ -4,9 +4,8 @@ The Search screen: what it is, the decisions behind it, and — the part that wo
 lost — the **research into the television's on-screen keyboard**, which is where the expensive days
 went. If you read one section of this file before touching text entry, make it §3.
 
-**Scope: the user's own servers, and nothing else.** Every result comes from a PMS the account can
-reach. Plex Discover / Watchlist / the "Movies & Shows on Plex" catalog are deliberately absent —
-see §6.
+**Scope: the user's own server, and nothing else.** Every result comes from a server the account can
+reach. External catalogs and watchlists are deliberately absent — see §6.
 
 ---
 
@@ -155,7 +154,7 @@ Pending saves coalesce per profile, so switching profiles cannot replace another
 accepted history. Returning before the worker drains reads that pending history. The worker
 checks the captured installation and account credentials against the session under its IO lock;
 an old account's pending history cannot be written into a replacement account. The queue admits
-64 distinct profiles at once (a resource ceiling, not a Plex limit); when full it refuses a new
+64 distinct profiles at once (a resource ceiling, not a server limit); when full it refuses a new
 profile's edit without evicting accepted saves and retries the background drain.
 The renderer in `screens/search/render.rs` keeps only geometry and a glyph cache keyed on that
 publication. `SearchSnapshot` includes recents beside query/results and is retained at the bridge's
@@ -217,28 +216,29 @@ document continues painting underneath its glass.
 
 ## 2. The data layer
 
-`GET /hubs/search?query=…&limit=…` — `plex::Client::search` in `rust-modules/src/plex/hubs.rs`,
-written long before this screen and dead until now. Four facts were **measured against PMS 1.43.3**
-rather than taken from the spec, and each one decides something:
+`GET /Items?searchTerm=…` plus a people lookup — `jellyfin::search` in
+`rust-modules/src/jellyfin/search.rs` shelves the flat item page into this store's fixed rows. The
+store was first built for a hub-shaped wire, and two facts **measured against that wire** still
+decide how it behaves:
 
 | measured | consequence |
 |---|---|
-| A one-character query returns every hub empty | `search::MIN_QUERY` is 2 — the first keystroke of every search costs no round trip |
-| Hub ORDER moves per query (`sta` ranks people first, `star` ranks films first) | the shelf order here is FIXED (`search::KINDS`) and ranking is honoured only *inside* a shelf; reordering rows per keystroke would move the row under a typing user's focus |
-| Items arrive in **two** containers — `Metadata[]` for `movie`/`show`/`episode`, `Directory[]` for `actor`/`director`/`collection` | `search::Item` is an enum (`Media`/`Tag`/`Collection`) instead of one struct. The request sends `includeCollections=1`, which turns the `collection` hub into full `Metadata[]` rows (`Item::Collection`: ratingKey, thumb, childCount; OK opens the collection page); a server that ignores it still sends tag rows (`Item::Tag`, opened by section + tag id). `plex-openapi.json`'s own worked example disagrees with the server, which is why this was probed live; see the table in `Hub::directory`'s doc in `plex/models.rs` |
-| A search response carries **every** hub type the server knows, most with `size: 0` | `Hub::size` is the field that says which shelves are worth drawing |
+| A one-character query came back with every shelf empty | `search::MIN_QUERY` is 2 — the first keystroke of every search costs no round trip |
+| Shelf ORDER moved per query on that wire, ranking people in one mode and films in another | the shelf order here is FIXED (`search::KINDS`) and ranking is honoured only *inside* a shelf; reordering rows per keystroke would move the row under a typing user's focus |
 
-The `actor` and `director` hubs are merged into one **Cast & Crew** shelf. Merging in the data layer
-rather than in the UI keeps "what is a shelf" a data question.
+`search::Item` is an enum rather than one struct because an answer carries more than one shape:
+media rows open a detail page (`Item::Media`), and people and collections are tag rows
+(`Item::Tag`) that open their own arms. The Jellyfin side sorts the rows by item kind (Movie,
+Series, Episode, BoxSet) and adds a separate people lookup, whose failure empties only that shelf.
 
 `State` distinguishes `Ready`-with-nothing from `Failed`, a lesson `browse.rs` learned the hard way:
 an empty result set is an ANSWER and reads as "No results"; a fault is a fault and reads as one. An
 empty store alone cannot tell them apart, and dressing an answer as an error tells the user something
 untrue about their library.
 
-**Multi-source.** `/hubs/search` answers for the one machine you asked; nothing aggregates
-server-side (`docs/shared-servers.md`). So the store fans out one query per `plex::server_ids` and
-merges into the shelves, which is why every `Item` carries its own `ServerId` and why a shelf heading
+**Multi-source.** One query answers for the one machine you asked; nothing aggregates server-side.
+So the store fans out one query per live source slot and merges into the shelves, which is why every
+`Item` carries its own `ServerId` and why a shelf heading
 can never claim an owner — the owner annotation follows FOCUS and rides the focused tile's caption,
 exactly as Continue Watching's does on Home.
 
@@ -423,13 +423,10 @@ refuses outright to grade a log carrying the simulator's `sim=1` tag against dev
 
 ## 6. Out of scope: Discover, Watchlist, and the catalog
 
-The official client's search returns Plex's own catalog and Discover results alongside server ones.
-**Ours does not, by decision.** Those live on `discover.provider.plex.tv` /
-`metadata.provider.plex.tv`, which need DNS and TLS and therefore `net.rs` (libcurl) rather than
-`stream.rs`; they are an *adjacent catalog*, not the user's library, and `docs/parity-gaps.md` has
-tracked them as their own gap from the start. Adding a catalog row to this screen is a separate
-feature with its own client, its own store and its own failure modes — not a wider `limit=` on
-`/hubs/search`.
+The official clients return a vendor catalogue and streaming-service results alongside server ones.
+**Ours does not, by decision.** Those live on the vendor's own hosts, which need DNS and TLS rather
+than `stream.rs`; they are an *adjacent catalog*, not the user's library, and they are not a gap this
+app tries to close. Adding a catalog row to this screen is a separate feature with its own client,
+its own store and its own failure modes — not a wider `limit=` on the search query.
 
-What this screen closes, and what it does not, is written up in `docs/parity-gaps.md` under the
-search entries.
+What this screen closes, and what it does not, is visible in the store's own tests.

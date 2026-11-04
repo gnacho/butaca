@@ -16,7 +16,7 @@ use crate::ui::machine::Measure as _;
 /// the OLD shape could not have told a wired composition from an ignored parameter; a
 /// process-wide static is either at rest (1.0, indistinguishable from the identity) or being
 /// driven by a second test racing this one (`testlock::serial()`'s whole reason for existing
-/// — see `docs/../test-suite-global-pollution.md`), never a controlled non-1.0 value a test
+/// — see limit (3) of the host-suite notes in `docs/agent-reference.md`), never a controlled non-1.0 value a test
 /// can set.
 #[test]
 fn settings_scrim_and_entrance_alpha_compose_local_and_nav_page_alpha() {
