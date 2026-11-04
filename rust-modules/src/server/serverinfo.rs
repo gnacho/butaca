@@ -1,5 +1,5 @@
 //! What the connected server says about ITSELF — its version and whether its owner holds a
-//! **Plex Pass** — held as process state for the diagnostics surfaces.
+//! **paid tier**, held as process state for the diagnostics surfaces.
 //!
 //! Exists because of issue #22: a free server cannot encode HEVC, dropped the video track, and
 //! the app "had no idea such a thing existed" — the reviewer derived the cause from the server's
@@ -9,14 +9,15 @@
 //!
 //! **Visibility only, never behavior.** Nothing here may feed a routing or profile decision —
 //! see [`subscription`]'s doc for why that is a rule and not a gap. "Visibility" includes whether
-//! a Plex Pass feature is OFFERED at all (issue #266's audio enhancement, `route::enhancements_offered`):
-//! the subscription decides that a toggle exists, and never which flavour or profile a stream gets.
+//! a paid-tier feature is OFFERED at all (issue #266's audio enhancement,
+//! `route::enhancements_offered`): the subscription decides that a toggle exists, and never which
+//! flavour or profile a stream gets.
 //!
 //! **PER SERVER, keyed the way the registry is.** This was one process-global answer, justified
 //! by "host/port fix at the first install (a later install is only a token swap)" — a premise
 //! [`super::servers`] retired: the table re-targets the current server, and a household can hold
 //! its own server and a friend's share at once. A single global would mean the stats panel and
-//! `player::error_shape` describing SERVER A's build and Plex Pass while the user is looking at
+//! `player::error_shape` describing SERVER A's build and tier while the user is looking at
 //! (or failing to play) something from server B — issue #22's bug with the polarity flipped, a
 //! claim true of the development environment asserted as universal. So state is an array indexed
 //! by [`ServerId::raw`], the registry's own slot number, and every accessor comes in two forms:
@@ -34,8 +35,8 @@ use super::servers::{ServerId, MAX_SERVERS};
 use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 use std::sync::Mutex;
 
-/// Does the server's owner hold a Plex Pass? A TRISTATE, not a bool with a default: `Unknown`
-/// (never fetched, fetch failed, or a PMS old enough not to say) must stay distinguishable from
+/// Does the server's owner hold a paid tier? A TRISTATE, not a bool with a default: `Unknown`
+/// (never fetched, fetch failed, or a server old enough not to say) must stay distinguishable from
 /// a real "no" — the error wording in `player::error_shape` blames a missing Pass only on a
 /// known-free server, never on one we merely haven't heard from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -118,7 +119,7 @@ pub(crate) fn version() -> String {
 ///
 /// **This is an async LANDING, so it owes the present gate a poke.** It runs on a worker, seconds
 /// after boot or after a share is registered, and it changes what a SETTLED screen says: the stats
-/// panel's Server row, the detail hero's "hardware conversion needs \[PLEX PASS\]" note, and the
+/// panel's Server row, the detail hero's hardware-conversion note, and the
 /// failure read-out's capsule all read it. Without the [`crate::ui::idle::invalidate`] call the new
 /// fact arrives invisibly and the screen keeps stating the old one until the next keypress — bounded
 /// only by the 2 s keepalive, which is insurance and not pacing (that module's rule: *a new async
@@ -139,7 +140,7 @@ fn store(id: ServerId, sub: Subscription, version: &str) {
 ///
 /// [`store`] is this module's private seam, and the suites that need it are the ones grading its
 /// READERS — `route`'s Pass-gated audio-enhancement offering and `app::diagnostics`' stats Server
-/// row, neither of which can reach a real PMS on the host. Callers must
+/// row, neither of which can reach a real server on the host. Callers must
 /// hold `crate::testlock::serial()`: the slot arrays are crate globals, and they deliberately
 /// outlive `servers::reset_for_test` (they are keyed on the SLOT, not on the client), so a test
 /// must seed every slot it reads rather than assume a boot state.
@@ -168,7 +169,7 @@ mod tests {
     }
 
 
-    /// **The reason this module stopped being one global.** A Plex Pass claim is about ONE
+    /// **The reason this module stopped being one global.** A paid-tier claim is about ONE
     /// server's owner: with our own server and a friend's share both filed, an answer stored
     /// under A must be invisible to a reader asking about B.
     ///
@@ -225,7 +226,7 @@ mod tests {
     /// **This is an async LANDING, so it owes the frame gate a poke.** The answer arrives on a
     /// worker seconds after boot — later still for a share registered while the user is reading a
     /// page — by which time the screen that reads it has settled and stopped presenting: the stats
-    /// panel's Server row, the detail hero's "hardware conversion needs [PLEX PASS]" note, and the
+    /// panel's Server row, the detail hero's hardware-conversion note, and the
     /// failure read-out's capsule. Without the `ui::idle::invalidate` inside [`store`] the new fact
     /// reaches the panel only on the next keypress (bounded by the 2 s keepalive, which is
     /// insurance and not pacing) — the "arrives invisibly" failure `ui::idle::invalidate`'s

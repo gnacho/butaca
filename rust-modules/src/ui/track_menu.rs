@@ -103,7 +103,7 @@ pub(crate) struct TrackMenuState {
     /// `metadata::lang_key`, never by literal string equality). Owned rather than borrowed, so
     /// a rebuild (tab switch) needs nothing from the caller beyond `ps`/`meta`.
     yours: Vec<String>,
-    /// The Audio tab's Plex Pass DSP toggle rows (issue #266) — `None` when they are not offered
+    /// The Audio tab's audio-DSP toggle rows (issue #266): `None` when they are not offered
     /// (I1/I2: absent, never greyed), else what they currently read out: "desired while pending,
     /// applied otherwise" (`route::displayed_audio_enhancements`), same reasoning as
     /// [`Self::offset_ms`]/[`Self::tone`] — a run of toggle presses inside one open counts from
@@ -237,7 +237,7 @@ impl TrackMenuState {
     pub(crate) fn active_sub(&self) -> c_int {
         self.active_sub
     }
-    /// Plex stream id of the chosen audio track (for &audioStreamID), or 0
+    /// Stream id of the chosen audio track (for &audioStreamID), or 0
     pub(crate) fn audio_stream_id(&self, meta: metadata::MetadataView<'_>) -> i64 {
         let i = self.active_audio();
         tracks(meta)
@@ -245,7 +245,7 @@ impl TrackMenuState {
             .map(|s| s.id)
             .unwrap_or(0)
     }
-    /// Plex stream id of the chosen subtitle track (for &subtitleStreamID), or 0 if Off
+    /// Stream id of the chosen subtitle track (for &subtitleStreamID), or 0 if Off
     pub(crate) fn sub_stream_id(&self, meta: metadata::MetadataView<'_>) -> i64 {
         let i = self.active_sub();
         if i < 0 {
@@ -334,7 +334,7 @@ impl TrackMenuState {
         let tab = self.tab;
         let sel = self.table.sel;
         if tab == 0 {
-            // The two Plex Pass DSP rows (issue #266), appended after the audio tracks — see
+            // The two DSP toggle rows (issue #266), appended after the audio tracks, see
             // `Self::build_audio`, which builds `self.audio_targets` alongside them, so a track
             // pick below is never mistaken for one of these by position arithmetic.
             return match self.audio_targets.get(sel.max(0) as usize).copied() {
@@ -428,7 +428,7 @@ impl TrackMenuState {
 
     /// The Audio tab's sections and row map: the track list, plus — only when
     /// [`Self::enhance_shown`] is `Some` (I1/I2: the row set itself is the gate, never a greyed
-    /// row) — a second, headerless section carrying the two Plex Pass DSP toggles, the same "own
+    /// row) plus a second, headerless section carrying the two DSP toggles, the same "own
     /// section, no header" idiom the Subtitles tab's Timing/Color pair uses. The returned
     /// `Vec<AudioRowTarget>` names each row in the same order the sections draw them, mirroring
     /// [`Self::layout`]'s `(Vec<Section>, Vec<RowTarget>)` for the Subtitles tab.
@@ -501,7 +501,7 @@ impl TrackMenuState {
     fn rebuild(&mut self, ps: &crate::route::PlaybackSession, meta: metadata::MetadataView<'_>, tab: c_int, slide: bool) {
         if tab == 0 {
             // I1/I2: the offer is read from the live route on every (re)build, so the rows are
-            // simply ABSENT without Plex Pass (or an unknown subscription) — never drawn dim.
+            // simply ABSENT when the offer is not there (or its state is unknown), never drawn dim.
             self.rebuild_audio(crate::route::menu_enhancements(ps), meta, slide);
         } else {
             let (sections, targets) = self.layout(ps, meta);
@@ -819,7 +819,7 @@ fn audio_descriptor(s: &metadata::Stream) -> String {
     }
 }
 
-/// map a Plex audioChannelLayout ("5.1(side)", "7.1") to a short "5.1"/"7.1"/"Stereo"
+/// map an audioChannelLayout ("5.1(side)", "7.1") to a short "5.1"/"7.1"/"Stereo"
 fn channel_short(layout: &str) -> String {
     let base = layout.split('(').next().unwrap_or(layout).trim();
     match base {
@@ -2003,7 +2003,7 @@ mod enhancement_menu_tests {
 
     // ---- locale + width gates ------------------------------------------------------------------
 
-    /// **No row label ever leaks a "Plex Pass" mention**, in any shipped locale — the rows are
+    /// **No row label ever names the paid tier**, in any shipped locale, the rows are
     /// ordinary audio settings; the gate that hid them from everyone else is never named in
     /// prose the viewer who HAS them ever reads.
     #[test]
