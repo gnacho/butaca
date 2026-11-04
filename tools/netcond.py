@@ -2,21 +2,21 @@
 """netcond — a network-conditioning TCP proxy, for the failures you cannot otherwise reach.
 
 Most of what is left to harden in the async model is FAULT-CONDITIONAL: the main thread parks in
-`teardown` only when a PMS round trip stalls, and `stream.rs`'s deadlines (2 s connect, 15 s
+`teardown` only when a server round trip stalls, and `stream.rs`'s deadlines (2 s connect, 15 s
 `SO_RCVTIMEO`, 10 s `SO_SNDTIMEO`) only bite against a server that stops answering. On a healthy
 LAN none of it happens — the measured teardown-join baseline is `demux 0ms media 0ms timeline 0ms`
 (see `task::join`) — so every one of those findings was reasoned about rather than measured, which
 is exactly the habit that has been wrong three times on this target already.
 
-This sits between the TV and the PMS and makes the server misbehave on demand.
+This sits between the TV and the server and makes the server misbehave on demand.
 
     ┌────────┐        ┌──────────────┐        ┌─────────┐
-    │  TV    │──────▶ │ netcond.py   │──────▶ │  PMS    │
+    │  TV    │──────▶ │ netcond.py   │──────▶ │ server  │
     │  app   │  :32401│ (this Mac)   │  :32400│         │
     └────────┘        └──────────────┘        └─────────┘
 
-The PMS runs on this same Mac, so the proxy only needs a second port; point the app at it by
-editing `PMS_PORT` in the gitignored `src/config.local.h`, then `make deploy` (the host/port are
+The server runs on this same Mac, so the proxy only needs a second port; point the app at it by
+editing `SERVER_PORT` in the gitignored `src/config.local.h`, then `make deploy` (the host/port are
 compiled into `main.c`'s `butaca_run` call — there is no runtime override).
 
 ## Modes
@@ -30,7 +30,7 @@ bug is a POST that was in flight when the server went quiet.
                         "accepted but silent" server: the app's recv blocks to SO_RCVTIMEO. THE
                         important one — it is what turns a join into a 15 s parked frame loop.
     blackhole           accept, never connect upstream, never answer. Same shape as `stall` for a
-                        NEW connection; distinct because it never touches the real PMS.
+                        NEW connection; distinct because it never touches the real server.
     reject              close immediately (RST) — the fast-failure path
     delay:<ms>          forward, but add <ms> of latency to every chunk in both directions
     rate:<kbps>         forward, but SHAPE the link to <kbps> kilobits per second (see below)
@@ -102,7 +102,7 @@ human at the keyboard before going headless, and read "netcond logs nothing" as 
 as a quiet television. `tests/serve_fixtures.py` carries the same warning for the same reason.
 
 Nothing here is deployed to the TV and nothing is secret: it forwards bytes it does not inspect
-beyond the first line, and it never logs the query string — a PMS URL carries the access token.
+beyond the first line, and it never logs the query string — a server URL carries the access token.
 """
 import argparse
 import ipaddress
@@ -145,7 +145,7 @@ def say(msg):
 
 
 def _redact(s: str) -> str:
-    """A PMS request line carries the access token in the query string. Never print it."""
+    """A server request line carries the access token in the query string. Never print it."""
     return re.sub(r"([?&](?:X-Plex-Token|token)=)[^&\s]*", r"\1<redacted>", s)
 
 
@@ -426,7 +426,7 @@ def start_proxy(listen, target, mode, bind="0.0.0.0", allow_clients=None):
     `serve_conn`/`relay` the television goes through — a test against a private mini-proxy would
     grade a function nothing in the field calls.
 
-    A listener reachable beyond loopback MUST name the clients allowed to use it. PMS requests
+    A listener reachable beyond loopback MUST name the clients allowed to use it. The server's requests
     carry an authentication token in the URL, so an open forwarding proxy on the LAN is not a
     harmless test fixture: another client could ask it for private server responses. The check is
     made before the request line is read and before an upstream connection is opened.
@@ -461,7 +461,7 @@ def start_proxy(listen, target, mode, bind="0.0.0.0", allow_clients=None):
 
 
 def start_origin(nbytes, bind="127.0.0.1"):
-    """A stand-in PMS: answers every connection with `nbytes` of body, then closes. (listener, port)
+    """A stand-in server: answers every connection with `nbytes` of body, then closes. (listener, port)
 
     Deliberately not HTTP. Nothing in this proxy parses a response — it forwards bytes — so the
     only property a shaping test needs from the far end is "produces data as fast as it is asked
@@ -599,7 +599,7 @@ def main():
     # are this machine. Since 2026-08-28 `make sim` streams and demuxes, so conditioning a host
     # playback is an ordinary thing to want — and the alternative spelling
     # (`--allow-client 127.0.0.1` against the 0.0.0.0 default) puts a forwarding proxy for a
-    # token-carrying PMS on the LAN for an experiment that never leaves loopback. The television
+    # token-carrying server on the LAN for an experiment that never leaves loopback. The television
     # still needs the default bind and a real allowlist; this is the other case, named.
     ap.add_argument("--bind", default="0.0.0.0",
                     help="listener address (default 0.0.0.0; use 127.0.0.1 for a simulator run, "

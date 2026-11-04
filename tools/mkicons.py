@@ -2,6 +2,7 @@
 """Cut the shipped app icons from a single square logo master.
 
     python3 tools/mkicons.py assets/logo-master.png [--band=N] [--splash=assets/splash-master.png]
+    python3 tools/mkicons.py assets/logo-master.png --full-bleed [--panel=#060606]
     python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
     python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/nightly --sizes=80,130 \
         --badge=NIGHTLY --badge-fill=#cdd3dd
@@ -37,6 +38,12 @@ grey-on-grey.
 
 The bar is rasterized NATIVELY at each output size (never scaled from one master), because a 3-px
 stroke scaled 4x down is a smear where a 3-px stroke drawn at 80 is a stroke.
+
+**`--full-bleed` is for a master that is already a tile** — rounded corners, its own glow, drawn
+edge to edge. Without it the corner pixel of a transparent master reads as black, so the set is cut
+on #000000 against a hole, and the script now refuses that case by name. With it, transparency is
+flattened onto `--panel` (default `#060606`, the descriptor's own `iconColor`) and every size is a
+centre cover-crop, so the artwork is never scaled down inside its own frame.
 
 Why a script and not four exports: the target is not "the logo, scaled". LG's icon guide
 (webostv.developer.lge.com/develop/guides/icon) specifies a **126x126 background panel** with the
@@ -240,7 +247,8 @@ def write_splash(src: Path, out: Path, lift=None) -> None:
 #: `pkg/icon160.png` — the last of which release.yml publishes as a raw.githubusercontent URL for
 #: the webosbrew channel listing. One mistyped letter, and the artwork thousands of people see
 #: before installing carries a DEV bar.
-OPTIONS = ("--band=", "--splash=", "--splash-lift=", "--out-dir=", "--sizes=", "--badge=", "--badge-fill=", "--appinfo=")
+OPTIONS = ("--band=", "--splash=", "--splash-lift=", "--out-dir=", "--sizes=", "--badge=", "--badge-fill=",
+           "--appinfo=", "--full-bleed", "--panel=")
 
 
 def opt(name: str, default=None):
@@ -287,27 +295,52 @@ def main() -> int:
                 "copy would never be packaged. Run --splash on its own."
             )
         write_splash(Path(splash), out_dir / "splash.png", opt("--splash-lift="))
-    src = Image.open(args[0]).convert("RGB")
-    a = np.asarray(src).astype(int)
-    bg = a[2, 2].copy()                      # the master's own corner is the panel colour
-
-    bands = row_bands(a, bg)
-    if band_arg is not None:
-        top, bot = bands[int(band_arg)]
+    full_bleed = "--full-bleed" in sys.argv[1:]
+    raw = Image.open(args[0])
+    if full_bleed:
+        # A MASTER THAT IS ALREADY A TILE. The launcher icon above is a mark on a panel, so it is
+        # measured and re-centred here. Some artwork (the current one included) is drawn as the
+        # finished tile: rounded corners, its own vignette, full canvas. Measuring its ink would
+        # scale the whole tile down inside an already-dark square and leave a visible frame around
+        # the rounded edge, which is exactly the hard-edged rectangle the panel colour exists to
+        # avoid. In this mode the master IS the tile: transparency is flattened onto `--panel` and
+        # the square is covered edge to edge at every size.
+        panel_hex = opt("--panel=", "#060606")
+        panel = tuple(_rgb(panel_hex))
+        rgba = raw.convert("RGBA")
+        src = Image.alpha_composite(Image.new("RGBA", rgba.size, panel + (255,)), rgba).convert("RGB")
+        bg = list(panel)
+        hexcolor = panel_hex
+        ink_w, ink_h = src.size
+        print(f"  master {src.size[0]}x{src.size[1]}  panel {hexcolor}  full bleed (no ink measurement)")
     else:
-        top, bot = bands[0][0], bands[-1][1]
-    x0, _, x1, _ = ink_bbox(a[top:bot], bg)
-    ink_w, ink_h = x1 - x0, bot - top
-    cx, cy = (x0 + x1) / 2, (top + bot) / 2   # centre the TILE on the ink, not on the canvas
-    hexcolor = "#%02x%02x%02x" % tuple(bg)
-    print(f"  master {src.size[0]}x{src.size[1]}  panel {hexcolor}  bands {len(bands)}"
-          f"{'' if band_arg is None else f' (using band {band_arg})'}  "
-          f"-> ink {ink_w}x{ink_h} (aspect {ink_w / ink_h:.2f})")
-    if len(bands) > 1 and band_arg is None:
-        for i, (t, b) in enumerate(bands):
-            at130 = (b - t) / ink_h * round(130 * INK_FRACTION) * ink_h / ink_w
-            note = "   ** unreadable; consider --band **" if at130 < 8 else ""
-            print(f"    band {i}: {b - t}px of {ink_h}  -> ~{at130:.1f}px tall at 130{note}")
+        if raw.mode in ("RGBA", "LA") and raw.getchannel("A").getpixel((2, 2)) < 255:
+            # A TRANSPARENT CORNER MEANS THE MASTER IS ALREADY A TILE. Read as a mark, its corner
+            # pixel is black, so every tile would be built on #000000 and the ink would be measured
+            # against a hole: the finished launcher icon ends up dark-ringed and undersized.
+            raise SystemExit("master has a transparent corner: it is a finished tile, not a mark. "
+                             "Pass --full-bleed (optionally --panel=#rrggbb).")
+        src = raw.convert("RGB")
+        a = np.asarray(src).astype(int)
+        bg = a[2, 2].copy()                      # the master's own corner is the panel colour
+
+        bands = row_bands(a, bg)
+        if band_arg is not None:
+            top, bot = bands[int(band_arg)]
+        else:
+            top, bot = bands[0][0], bands[-1][1]
+        x0, _, x1, _ = ink_bbox(a[top:bot], bg)
+        ink_w, ink_h = x1 - x0, bot - top
+        cx, cy = (x0 + x1) / 2, (top + bot) / 2   # centre the TILE on the ink, not on the canvas
+        hexcolor = "#%02x%02x%02x" % tuple(bg)
+        print(f"  master {src.size[0]}x{src.size[1]}  panel {hexcolor}  bands {len(bands)}"
+              f"{'' if band_arg is None else f' (using band {band_arg})'}  "
+              f"-> ink {ink_w}x{ink_h} (aspect {ink_w / ink_h:.2f})")
+        if len(bands) > 1 and band_arg is None:
+            for i, (t, b) in enumerate(bands):
+                at130 = (b - t) / ink_h * round(130 * INK_FRACTION) * ink_h / ink_w
+                note = "   ** unreadable; consider --band **" if at130 < 8 else ""
+                print(f"    band {i}: {b - t}px of {ink_h}  -> ~{at130:.1f}px tall at 130{note}")
 
     # The descriptor to keep in step, if there is one beside the output. SKIPPED WITH A LINE rather
     # than falling back to `pkg/appinfo.json`: `sync_icon_color` writes unconditionally, so a
@@ -328,22 +361,31 @@ def main() -> int:
               f"  (bar {BADGE_BAR:.0%} of the tile, cap {BADGE_CAP:.0%} of the bar)")
 
     for name, n in targets:
-        target_w = n * INK_FRACTION
-        scale = target_w / ink_w
-        if ink_h * scale > target_w:          # a tall mark is bounded by height instead
-            scale = target_w / ink_h
-        # Scale the WHOLE master, then take an n x n window centred on the ink — so whatever the
-        # master's background does (vignette, glow, gradient) stays continuous across the tile.
-        sw, sh = max(1, round(src.size[0] * scale)), max(1, round(src.size[1] * scale))
-        # LANCZOS: these are downsamples of 4-13x, where a box filter visibly thins the strokes.
-        scaled = src.resize((sw, sh), Image.LANCZOS)
-        left, upper = round(cx * scale) - n / 2, round(cy * scale) - n / 2
-        # A badge takes the bottom of the tile, so the wordmark is lifted by HALF the bar to stay
-        # optically centred in what is left. Half, not the whole bar: the mark then sits centred in
-        # the visible field above the bar, which is what the eye reads as centred.
         bar = max(1, round(n * BADGE_BAR)) if badge else 0
-        tile = Image.new("RGB", (n, n), tuple(bg))
-        tile.paste(scaled, (round(-left), round(-upper) - bar // 2))
+        if full_bleed:
+            # COVER, not contain: scale so the shorter side fills the tile, then take the centre.
+            # The rounded corners of the master survive because they are inside the square, and the
+            # panel colour behind them is the descriptor's own `iconColor`.
+            scale = max(n / src.width, n / src.height)
+            sw, sh = max(1, round(src.width * scale)), max(1, round(src.height * scale))
+            scaled = src.resize((sw, sh), Image.LANCZOS)
+            tile = scaled.crop(((sw - n) // 2, (sh - n) // 2, (sw - n) // 2 + n, (sh - n) // 2 + n))
+        else:
+            target_w = n * INK_FRACTION
+            scale = target_w / ink_w
+            if ink_h * scale > target_w:          # a tall mark is bounded by height instead
+                scale = target_w / ink_h
+            # Scale the WHOLE master, then take an n x n window centred on the ink — so whatever the
+            # master's background does (vignette, glow, gradient) stays continuous across the tile.
+            sw, sh = max(1, round(src.size[0] * scale)), max(1, round(src.size[1] * scale))
+            # LANCZOS: these are downsamples of 4-13x, where a box filter visibly thins the strokes.
+            scaled = src.resize((sw, sh), Image.LANCZOS)
+            left, upper = round(cx * scale) - n / 2, round(cy * scale) - n / 2
+            # A badge takes the bottom of the tile, so the wordmark is lifted by HALF the bar to stay
+            # optically centred in what is left. Half, not the whole bar: the mark then sits centred in
+            # the visible field above the bar, which is what the eye reads as centred.
+            tile = Image.new("RGB", (n, n), tuple(bg))
+            tile.paste(scaled, (round(-left), round(-upper) - bar // 2))
         if badge:
             # `bar` is already solved above for the wordmark lift; pass it rather than
             # letting `draw_badge` re-derive it, or the drawn bar and the lift can move
@@ -351,6 +393,11 @@ def main() -> int:
             draw_badge(tile, badge, badge_fill, repo, bar)
         out = out_dir / name
         tile.save(out, optimize=True)
+        shown = out.relative_to(repo) if out.is_relative_to(repo) else out
+        if full_bleed:
+            print(f"  {shown!s:24s} {n}x{n}  full bleed"
+                  f"{f'  bar {bar}px' if badge else ''}")
+            continue
         w, h = round(ink_w * scale), round(ink_h * scale)
         # Padding is graded against whatever actually bounds the mark. With a badge that is the gap
         # to the BAR, not to the tile edge — the old expression would have reported LG's >=5px rule
@@ -361,7 +408,7 @@ def main() -> int:
         else:
             pad = min((n - w) // 2, (n - h) // 2)
         flag = "" if pad >= 5 else "   ** under LG's 5px minimum padding **"
-        print(f"  {out.relative_to(repo)!s:24s} {n}x{n}  logo {w}x{h}"
+        print(f"  {shown!s:24s} {n}x{n}  logo {w}x{h}"
               f"{f'  bar {bar}px' if badge else ''}  padding {pad}px{flag}")
     return 0
 

@@ -34,7 +34,7 @@ rather than solved.
 Note the asymmetry, because it decides how much of the ladder needs a size prediction at all: a
 DOWNSHIFT bound needs no `b_j`. Acquisition cannot rise when the byte count falls, so `A_j <= A_i`
 holds whatever the candidate's size turns out to be. Only upshifts need `docs/measurements/
-p2h-pms-ladder.md` section 2a's per-rung `sigma`, and the three rungs where `sigma` has no usable
+p2h-server-ladder.md` section 2a's per-rung `sigma`, and the three rungs where `sigma` has no usable
 ceiling (320, 720, 2000) are downshift targets.
 
 THREE GRADES, and the first one FAILS on purpose.

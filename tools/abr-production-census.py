@@ -4,7 +4,7 @@
 `HlsActuatorCatalog::measured()` carries a `production_load_pm` for each of its thirteen points,
 and eleven of the thirteen are not measurements. `ladder.rs` says so at the table: two points are
 empirical and the rest are "an ordering assumption". That table is one half of the two-constraint
-admission rule — the half that refuses 4K on a fast link in front of a loaded PMS — so eleven
+admission rule — the half that refuses 4K on a fast link in front of a loaded server — so eleven
 unmeasured numbers decide a real behaviour, and `docs/adaptive-playback-plan.md` blocks increment
 I9 on this measurement for exactly that reason.
 
@@ -41,14 +41,14 @@ closed. Any mid-ladder load off by more than 25% means the argmax is a re-parame
 fresh numbers and has to be argued on those. This tool prints the verdict rather than leaving it
 to be eyeballed.
 
-**Privacy.** Nothing here talks to the PMS itself. Every request goes through
-`tools/pms-hls-probe.py`, which registers and stops its own session and refuses to write an
+**Privacy.** Nothing here talks to the server itself. Every request goes through
+`tools/hls-probe.py`, which registers and stops its own session and refuses to write an
 artifact containing a token, a server address, a session id, a rating key or a title. This tool
 reads only that tool's already-redacted `report.json`, and its own output carries rung numbers and
 timings — never the item it measured, only the overlay KEY the operator passed, which is a shape
 name (`movie_h264_ac3_1080p`) and not an identifier on anybody's server.
 
-Runs on the dev Mac against the configured PMS. No television, no lock, no `make`.
+Runs on the dev Mac against the configured server. No television, no lock, no `make`.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 LADDER_RS = REPO / "rust-modules" / "src" / "abr" / "ladder.rs"
-PROBE = REPO / "tools" / "pms-hls-probe.py"
+PROBE = REPO / "tools" / "hls-probe.py"
 
 
 def read_ladder():
@@ -168,18 +168,18 @@ def rhos(report):
 
 
 def output_shape(report):
-    """What PMS ACTUALLY produced at this ceiling: median output raster and wire rate.
+    """What server ACTUALLY produced at this ceiling: median output raster and wire rate.
 
     **This is the discriminator the first census lacked, and without it the headline finding is
     ambiguous.** M3 read a 1080p source's ordering as INVERTING — the low rungs costing more wall
     clock than the high ones — and concluded the table is indexed by the wrong variable. There is a
     second explanation that the same numbers also fit and that nothing recorded could separate:
-    **at a ceiling above what the source needs, PMS may stop transcoding and copy the video**, so
+    **at a ceiling above what the source needs, the server may stop transcoding and copy the video**, so
     the cheapest column would not be a cheap transcode at all but a REMUX, and a remux does not
     belong on a curve of encoder cost.
 
     The 4K row is what makes it worth checking rather than assuming. Against a 1080p source the
-    `Uhd` request measured 58 pm where `P1080High` measured 105 — the same output raster (PMS never
+    `Uhd` request measured 58 pm where `P1080High` measured 105 — the same output raster (the server never
     upscales), the same source, half the work. Two requests that differ only in a bitrate ceiling
     neither of which binds should not differ by 2x, and "one of them stopped re-encoding" is the
     obvious reason they might.
@@ -236,7 +236,7 @@ def residuals(rows, key, field="warm_pm"):
     **Computed for COLD as well as warm, because the signal is not in the same place as the
     table assumes.** A warm segment is one the encoder produced before it was asked for, so its
     fetch measures TRANSFER; the production term only shows on a segment the encoder has not run
-    ahead of, which on an idle PMS is the first one. Reporting a residual over a flat warm profile
+    ahead of, which on an idle server is the first one. Reporting a residual over a flat warm profile
     divides noise by noise, which is how a 2 pm spread became a "2187% deviation".
 
     A zero or negative span is recorded as such rather than as `None` per rung: it means every

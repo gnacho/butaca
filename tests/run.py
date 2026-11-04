@@ -4,7 +4,7 @@ On-device regression harness for the native webOS media client.
 
 The matrix is split in two: manifest.json holds the installation-independent case definitions,
 and the gitignored manifest.local.json (see manifest.local.json.example) maps each case's
-symbolic `item` key to a ratingKey on this server and supplies the PMS host, TV address and
+symbolic `item` key to a ratingKey on this server and supplies the server host, TV address and
 test user. load_manifest merges them and fails with the missing key if the overlay is absent.
 
 The matrix is a SUPERSET of what any one library can exercise, so an `item` key the overlay
@@ -41,7 +41,7 @@ exactly ONE of them: the flavour comes from --flavor, else the overlay's `flavou
 Makefile's own default, and every path that follows is ASKED FOR rather than restated
 (`make -s print-rundir` / `print-eventlog`). See resolve_flavour.
 
-Security: the PMS access token is read from src/config.local.h at runtime and is NEVER
+Security: the server access token is read from src/config.local.h at runtime and is NEVER
 printed, logged, or written to any file. The TV ssh creds already live in the committed
 Makefile, so we shell out to `make` / sshpass for device I/O. A run that also needs a SECOND
 server (a friend's shared one) resolves that server's own access token from the account service
@@ -179,7 +179,7 @@ TYPE43_SPAM = re.compile(r"smp_cb type=43 num=0 str=\s*$")
 def _die_no_overlay(extra=""):
     sys.exit(f"missing test configuration: {MANIFEST_LOCAL}\n"
              f"  This file is gitignored — it maps the manifest's symbolic item keys to the\n"
-             f"  ratingKeys on YOUR server, and carries the PMS host, TV address and test user.\n"
+             f"  ratingKeys on YOUR server, and carries the server host, TV address and test user.\n"
              f"  Create it with:  cp {MANIFEST_LOCAL_EXAMPLE} {MANIFEST_LOCAL}\n"
              f"  then replace every <placeholder> in it.{extra}")
 
@@ -225,7 +225,7 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
     """Merge the tracked matrix with the gitignored overlay.
 
     `pipeline_only` is what makes requirement-1 true — that a stranger can run the pipeline tier
-    with nothing configured. That tier talks to no PMS, holds no token and names no ratingKey, so
+    with nothing configured. That tier talks to no server, holds no token and names no ratingKey, so
     every server-shaped key here stops being required: the overlay may be absent ENTIRELY, in which
     case the TV address is read from the repo's own gitignored `.tv-host` (the same file the
     Makefile and `tools/` fall back to). A TV address is the one thing that still cannot be
@@ -357,16 +357,16 @@ def partition_skips(entries):
 
 
 def read_token():
-    """Extract PMS_TOKEN "..." from the gitignored src/config.local.h."""
+    """Extract SERVER_TOKEN "..." from the gitignored src/config.local.h."""
     try:
         with open(CONFIG_LOCAL_H, "r") as f:
             txt = f.read()
     except OSError as e:
         sys.exit(f"cannot read {CONFIG_LOCAL_H}: {e}\n"
-                 f"(this file is gitignored and holds the PMS token; create it locally)")
-    m = re.search(r'#define\s+PMS_TOKEN\s+"([^"]+)"', txt)
+                 f"(this file is gitignored and holds the server token; create it locally)")
+    m = re.search(r'#define\s+SERVER_TOKEN\s+"([^"]+)"', txt)
     if not m:
-        sys.exit(f"no PMS_TOKEN macro found in {CONFIG_LOCAL_H}")
+        sys.exit(f"no SERVER_TOKEN macro found in {CONFIG_LOCAL_H}")
     return m.group(1)
 
 
@@ -499,7 +499,7 @@ def primary_ipv6_server(admin_token, machine_id=""):
                     "host": host, "port": int(c.get("port") or 32400), "scheme": "https",
                     "tier": "local", "token": hit.get("accessToken") or admin_token, "pin": addr}
     sys.exit("primary_ipv6: the account service advertises no local IPv6 pinned connection for an owned "
-             "server (is the server's host on a v6 LAN, and does PMS see it?)")
+             "server (is the server's host on a v6 LAN, and does server see it?)")
 
 
 def resolve_shared_server(admin_token, spec):
@@ -872,7 +872,7 @@ def pms_unscrobble(host, port, rk, token):
     """Clear an item's resume point (and watched flag) via /:/unscrobble. Token never printed.
 
     This is the ONLY thing that actually resets a viewOffset. `PUT /:/progress?time=0` looks like
-    it should and returns 200, but PMS ignores it and the old offset survives -- verified against
+    it should and returns 200, but server ignores it and the old offset survives -- verified against
     the live server (so does time=1). Do not "simplify" this back into a progress PUT.
     """
     q = urllib.parse.urlencode({
@@ -922,7 +922,7 @@ def triggers_for_case(case, url_base=None):
 
     `url_base` selects the TIER, and it selects only the entry trigger: a pipeline case names a
     generated file served over HTTP from this machine and declares its own Load payload
-    (`butaca-playurl`), an integration case names a ratingKey on the PMS
+    (`butaca-playurl`), an integration case names a ratingKey on the server
     (`butaca-play`). Everything after that — the seek scripts especially — is the same
     machinery driving the same engine, which is why this is one function with two heads rather
     than two functions that would drift apart at the first new operation.
@@ -979,7 +979,7 @@ def triggers_for_case(case, url_base=None):
             files.append(("butaca-replay", str(n)))
     else:
         # Pin the routing contract instead of inheriting whatever the person last selected on the
-        # television. The established PMS matrix grades direct-play/remux/progressive transcode,
+        # television. The established server matrix grades direct-play/remux/progressive transcode,
         # so its default is Original; a future adaptive case opts in with `"quality": "auto"`.
         # This trigger is an in-memory override and never changes the persisted user preference.
         files = [
@@ -1107,7 +1107,7 @@ def apply_triggers(tv, files, extra=None):
     and silently suppress the other install's who's-watching picker).
 
     `extra` is a raw shell command — or a list of them — appended to the same round-trip, for a
-    trigger whose VALUE must not reach stdout (a PMS token) and so cannot go through the printed
+    trigger whose VALUE must not reach stdout (a server token) and so cannot go through the printed
     `files` list. Both credential triggers ride it: butaca-token and butaca-servers.
     """
     # The root has to EXIST and be world-writable before anything is written into it. Two uids
@@ -1180,7 +1180,7 @@ RE_STREAM_PATH = re.compile(r"stream:.*?path=(\S+)")
 #   load: v=H264 a="AC3" fps=24.000 dv=present:0 P0/0 el:0 atmos:0
 # This is the only place an event log says what the app told the television the stream WAS, as
 # opposed to what the demuxer found in it. The two are independent, and the pipeline tier's whole
-# reason for existing is that the first one can now be set without a PMS.
+# reason for existing is that the first one can now be set without a server.
 RE_LOAD = re.compile(r'load: v=(\S+) a="([^"]*)" fps=([\d.]+) '
                      r'dv=present:(\d) P(-?\d+)/(-?\d+) el:(\d) atmos:(\d)'
                      r'(?: max=(\d+)x(\d+)@(\d+))?')
@@ -1212,7 +1212,7 @@ RE_TOKEN = re.compile(r"(X-Plex-Token=)[^&\s]+")
 
 
 def redact(s):
-    """Never let the PMS token reach stdout: replace any token argument's value with <token>."""
+    """Never let the server token reach stdout: replace any token argument's value with <token>."""
     return RE_TOKEN.sub(r"\1<token>", s)
 
 
@@ -1519,7 +1519,7 @@ def a_play_rate(lines, floor_pm):
 
 
 def a_timeline_post(lines):
-    """At least one /:/timeline progress report reached PMS.
+    """At least one /:/timeline progress report reached server.
 
     a_timeline_climb reads the 1Hz heartbeat now, so this is what keeps the SERVER-side
     reporting path (threads::timeline_thread -> route::report_timeline -> viewOffset and
@@ -1528,8 +1528,8 @@ def a_timeline_post(lines):
     """
     ts = timeline_secs(lines)
     if not ts:
-        return False, "no `timeline playing t=` line — progress never reported to PMS"
-    return True, f"{len(ts)} timeline report(s) to PMS, last t={ts[-1][0]}s"
+        return False, "no `timeline playing t=` line — progress never reported to the server"
+    return True, f"{len(ts)} timeline report(s) to the server, last t={ts[-1][0]}s"
 
 
 # ---- pipeline-tier assertions ----
@@ -1658,7 +1658,7 @@ def a_audio_lane(lines, want_idx):
     unconfigured and, with audioSync, wedges the video forever. That selection is a pure function
     of the declaration and the file, which is exactly what this tier can vary one at a time: one
     fixture with three audio codecs, two cases declaring different ones, two different lanes.
-    Nothing in the integration tier isolates it — there the declaration comes from the same PMS
+    Nothing in the integration tier isolates it — there the declaration comes from the same server
     metadata the file was scanned into, so the two can only ever agree.
     """
     hit = next((m for ln in lines for m in [RE_ALANE.search(ln)] if m), None)
@@ -1690,7 +1690,7 @@ def a_auto_network_recovery(lines, max_fallback_kbps, min_recovered_kbps):
 
     `min_recovered_kbps` grades the SOURCE PROBE that justified the return, not a rung the HLS
     ladder had to reach first. Requiring the top rung was the old gate's shape and it measured the
-    wrong resource: PMS producing 20 Mbit/s of H.264 says the server can encode, and says nothing
+    wrong resource: server producing 20 Mbit/s of H.264 says the server can encode, and says nothing
     about whether the link can carry the remux. An upshift is still reported when one happened,
     because it is useful context — but the probe can legitimately fire from a middle rung, and on
     this fixture it usually does (the ladder needs five segments to climb, the probe gate three).
@@ -1865,14 +1865,14 @@ def _parsed(pattern, fields, lines, numeric=True):
 # The LINK CONDITIONER — a real server over a link this harness controls.
 #
 # The synthetic tier shapes its own fixture server, which is why it can grade a rung. The server
-# tier could not: it plays a real item off a real PMS over whatever the LAN happens to be doing,
+# tier could not: it plays a real item off a real server over whatever the LAN happens to be doing,
 # so an Auto assertion there would grade the afternoon. `tools/netcond.py` closes that — one
 # shared token bucket, live-switchable under an open transfer — and this is its lifecycle.
 #
 # **The binary decides whether any of this is reachable, and the harness can only read that.**
-# The app's primary server is `butaca_run(PMS_HOST, PMS_PORT)` (`src/main.c`) plus the injected
+# The app's primary server is `butaca_run(SERVER_HOST, SERVER_PORT)` (`src/main.c`) plus the injected
 # `butaca-token`; `butaca-servers` is strictly ADDITIVE and cannot move the primary. So the
-# link is conditioned only if the DEPLOYED BINARY was built with `PMS_PORT` pointing at the proxy
+# link is conditioned only if the DEPLOYED BINARY was built with `SERVER_PORT` pointing at the proxy
 # rather than at the server. When it was not, a case that declares `link_profile` SKIPS with that
 # reason spelled out — it must never run unconditioned and report a pass, because "Auto held a
 # rung it could afford" and "Auto was never squeezed" produce the same green.
@@ -1891,8 +1891,8 @@ def compiled_pms_endpoint():
             text = fh.read()
     except OSError:
         return None, None
-    host = re.search(r'#define\s+PMS_HOST\s+"([^"]*)"', text)
-    port = re.search(r"#define\s+PMS_PORT\s+(\d+)", text)
+    host = re.search(r'#define\s+SERVER_HOST\s+"([^"]*)"', text)
+    port = re.search(r"#define\s+SERVER_PORT\s+(\d+)", text)
     return (host.group(1) if host else None, int(port.group(1)) if port else None)
 
 
@@ -1900,7 +1900,7 @@ class LinkConditioner:
     """Owns one `tools/netcond.py` for the run, and steers it per case.
 
     Started ONCE for the whole server tier rather than per case, because the binary points at its
-    port unconditionally: an unconditioned case still has to reach the PMS through it. It runs in
+    port unconditionally: an unconditioned case still has to reach the server through it. It runs in
     `pass` until a case names a profile, and is returned to `pass` when that case ends — a mode
     left armed would silently shape every case after it, which is the same class of bug as a dev
     trigger left behind.
@@ -1923,17 +1923,17 @@ class LinkConditioner:
 
     def start(self):
         if self.listen is None:
-            self.why = ("the deployed binary names no PMS port — src/config.local.h is missing "
-                        "or has no PMS_PORT")
+            self.why = ("the deployed binary names no server port — src/config.local.h is missing "
+                        "or has no SERVER_PORT")
             return
         # netcond binds 0.0.0.0, so "direct" is decided by the PORT alone: the compiled host IS
-        # the PMS host by construction (`self.target[0]` is where both come from). The second
+        # the server host by construction (`self.target[0]` is where both come from). The second
         # conjunct used to be `self.target[0] == self.host_of_listen()`, and `host_of_listen`
         # returned `self.target[0]` — `x == x`, a named method and a clause that read as a real
         # guard and expressed nothing.
         if self.listen == self.target[1]:
             self.why = (f"the binary talks to the server DIRECTLY on :{self.listen}; rebuild with "
-                        f"PMS_PORT set to a proxy port to condition the link")
+                        f"SERVER_PORT set to a proxy port to condition the link")
             return
         with open(self.control, "w") as fh:
             fh.write("pass")
@@ -1946,7 +1946,7 @@ class LinkConditioner:
         self.proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                      text=True, start_new_session=True)
         # A bind failure is immediate and is the ONE outcome that must not be read as success:
-        # the app still reaches the PMS through whoever holds the port, so every case passes and
+        # the app still reaches the server through whoever holds the port, so every case passes and
         # every conditioned case grades an unshaped link.
         time.sleep(1.0)
         if self.proc.poll() is not None:
@@ -2397,7 +2397,7 @@ def abr_raster_changes(lines):
 
     **Counts the DECODED raster when the log carries one** (`out=`, appended 2026-08-28), and the
     catalog raster otherwise. That is not a formatting preference — the two disagree, measured:
-    against a 4K source PMS produces 1280x720 for BOTH `P720` and `P1080M6`, and against a 1080p
+    against a 4K source server produces 1280x720 for BOTH `P720` and `P1080M6`, and against a 1080p
     source it produces 1918x802 for every rung from `P1080M6` up
     (`docs/measurements/m3-production-census.md`). So on the catalog reading a `P720 -> P1080M6`
     commit is a raster change and a viewer sees nothing, while `P1080High -> Uhd` on a 1080p item
@@ -2436,7 +2436,7 @@ def report_and_record(cfg, name, passed, results, lines, elapsed, run_secs, earl
     increments are expected to change what they say. Asserting them would pin today's behaviour as
     desirable, which is exactly what I0 must not do.
 
-    The server tier needs it MORE, not less: an `abr: sample` there came from a real PMS ladder
+    The server tier needs it MORE, not less: an `abr: sample` there came from a real server ladder
     over a real link, and the app truncates its event log every launch. `--save-logs` was a silent
     no-op on that tier until 2026-08-27, so every server-tier ABR observation ever taken was read
     once off a terminal and then destroyed by the next case. The fix was copied into the second
@@ -2744,7 +2744,7 @@ def a_abr_shape(lines, spec, dip_windows=()):
       oscillation, because each one is a visible quality change to the person watching.
     * ``decoded_width_floor`` -- some completed candidate actually decoded at least this wide.
       This is deliberately separate from ``floor_kbps``: the latter is the request actuator, and
-      PMS may answer a 22 Mbps / 4K request with a 720p rendition.
+      server may answer a 22 Mbps / 4K request with a 720p rendition.
     * ``settle_min_kbps`` / ``settle_max_kbps`` -- where it ENDED. Bounds rather than a value,
       because the ladder has 13 points and a link between two of them may legitimately settle on
       either; a profile that wants an exact rung sets both to it.
@@ -3364,7 +3364,7 @@ def op_seek_refused(lines, target_s):
     """A seek the app CANNOT serve must be refused cleanly, and playback must survive the refusal.
 
     Reaching this path is structural rather than incidental, and only this tier can. A transcode
-    seek restarts the encode at a new `&offset`, which `route::transcode_seek` builds from a PMS
+    seek restarts the encode at a new `&offset`, which `route::transcode_seek` builds from a server
     ratingKey and client — and a `butaca-playurl` playback has neither, so every seek during
     Auto on the pipeline tier is refused. That makes it the one place the REFUSAL path is
     observable at all; on the server tier the seek succeeds and this branch never runs.
@@ -3408,7 +3408,7 @@ def op_seek_rapid(lines, final_s):
     resumed (the historical rapid-back-tap bug was 10+ s of post-burst silence).
 
     DO NOT go back to counting `seek(in-place)` lines. That is what this assertion used to do
-    (">= 2 fired, so coalescing was exercised") and it measured PMS latency, not merging:
+    (">= 2 fired, so coalescing was exercised") and it measured server latency, not merging:
 
       * a tap that arrives mid-seek is applied by the next pump tick after the in-flight seek
         anchors — which logs `seek(in-place)`;
@@ -3588,9 +3588,9 @@ def op_audio_transcode(lines):
     return True, f"transcode switch OK (video copied, {cs[-1][0] if cs else '?'}) :: {rl_t.strip()}"
 
 
-# LG's buffer-feed audio vocabulary (`player::engine::audio_payload_codec`) back to the PMS codec
+# LG's buffer-feed audio vocabulary (`player::engine::audio_payload_codec`) back to the server codec
 # names a `decision output:` line uses, so the two can be compared.
-LOAD_AUDIO_TO_PMS = {"ac3": "ac3", "ac3 plus": "eac3", "aac": "aac", "dts": "dts"}
+LOAD_AUDIO_TO_SERVER = {"ac3": "ac3", "ac3 plus": "eac3", "aac": "aac", "dts": "dts"}
 # The Load vocabulary's video names back to the demuxer's (`ff: v=#0 codec=..`).
 LOAD_VIDEO_TO_FF = {"h264": "h264", "h265": "hevc", "hevc": "hevc"}
 
@@ -3638,13 +3638,13 @@ def op_audio_enhancement(lines):
     2. The Load was declared with the audio the server actually negotiated: the `decision output:`
        audio codec at/before the applied line (`retranscode_as` logs its own codecs first) equals
        the post-toggle `load: .. a=".."` codec. Invariant I4: the payload follows /decision's
-       OUTPUT, never the source or a literal — PMS 1.43.4 answers a DSP param over an AAC source
+       OUTPUT, never the source or a literal — server 1.43.4 answers a DSP param over an AAC source
        with `a=aac`, over AC-3 with `ac3`.
     3. The route is a REMUX, not a re-encode: the video codec after the toggle (`ff: v=`, else the
        post-toggle `load: v=`) equals the codec before it (the last `ff: v=`/`load: v=` before the
        applied line — a direct-play start may be torn down before it ever logged `ff: v=`).
     4. The post-toggle stream is `start.mkv` (`TranscodeDelivery::ProgressiveMkv`), the one
-       delivery PMS answers a DSP param with; an HLS re-encode under a fixed rung would be
+       delivery server answers a DSP param with; an HLS re-encode under a fixed rung would be
        `start.m3u8`, a different, non-enhanced contract by design.
     5. No `ff: open_input failed` after the applied line. The demuxer the reload tears down logs
        `ff: aborted during open_input` instead (`ff::open_input_failure_note`), so this line is
@@ -3671,7 +3671,7 @@ def op_audio_enhancement(lines):
     if load is None:
         return False, f"no post-toggle `load: v=.. a=\"..\"` line :: {hit.strip()}"
     declared_raw = RE_LOAD.search(load).group(2).lower()
-    declared = LOAD_AUDIO_TO_PMS.get(declared_raw, declared_raw)
+    declared = LOAD_AUDIO_TO_SERVER.get(declared_raw, declared_raw)
     if declared != negotiated:
         return False, (f"Load declared audio {declared_raw!r} but the server negotiated "
                        f"{negotiated!r} :: {dec.strip()} / {load.strip()}")
@@ -3965,13 +3965,13 @@ def teardown(tv):
     Three things outlive the harness otherwise, and none of them are cosmetic:
 
     * THE APP KEEPS RUNNING. Nothing closes it at the end — `make kill` only runs at the START
-      of the next case, so the last case's playback just carries on. It keeps a PMS session
+      of the next case, so the last case's playback just carries on. It keeps a server session
       open, and its timeline reporter keeps posting progress every 10s, so the next run
       inherits a resume point on that rk — the exact contamination ee07506 removed between
       cases, reintroduced at the seam between runs. It is also what "I see FPS tests running"
       looks like from the outside, long after the suite printed its summary.
     * THE INJECTED TOKENS STAY in the runtime root's butaca-token and butaca-servers: real
-      per-(user,server) PMS access tokens -- and the second file carries someone ELSE'S server's
+      per-(user,server) server access tokens -- and the second file carries someone ELSE'S server's
       too -- world-readable, on a device with a rooted sshd and a committed password. The normal
       path did clear them; every abnormal one left them. Both are covered because the wipe is a
       GLOB over <runtime root>/butaca-*, which is exactly why a new credential trigger needs
@@ -4081,7 +4081,7 @@ def arm_teardown(tv):
     That wrapper only runs when this file is the program; anything that does `import run;
     run.main()` -- a wrapper script, tests/test_harness.py, an agent probing one exit path -- got
     no cleanup at all, and the failure is invisible: the run prints its summary, exits 0, and
-    leaves the app playing with a live per-(user,server) PMS token sitting world-readable in the
+    leaves the app playing with a live per-(user,server) server token sitting world-readable in the
     runtime root of a device with a rooted sshd and a published password. That is the one outcome
     teardown() exists to prevent, and it happened here on 2026-08-22.
 
@@ -4112,7 +4112,7 @@ def check_install(lines, cfg):
 
     The un-caught failure is what makes this worth an abort. A RELEASE build reads no triggers at
     all — `devtriggers` is compiled out, so `dev::read` is None at COMPILE time — which means the
-    injected PMS token is ignored, the app has no session, and it parks on the who's-watching
+    injected server token is ignored, the app has no session, and it parks on the who's-watching
     picker having played nothing. Every assertion then fails as "the line has not appeared YET",
     which `failed_for_good` deliberately never settles, so every case burns its full run_secs and
     the summary reads like a catastrophic regression — for a build that is working perfectly.
@@ -4135,7 +4135,7 @@ def check_install(lines, cfg):
             raise SystemExit(
                 f"RELEASE BUILD on {got}: its boot line says features={feats}, so the whole "
                 f"`devtriggers` surface was compiled out and it reads NOTHING under {RUNDIR} — not "
-                f"the injected PMS token, not one trigger this harness wrote. It boots to the "
+                f"the injected server token, not one trigger this harness wrote. It boots to the "
                 f"who's-watching picker and plays nothing, and every case would burn its full cap "
                 f"failing as if the player were broken. Ship a dev build to this install: "
                 f"`make FLAVOR={FLAVOUR} deploy` without RELEASE=1.\n"
@@ -4168,7 +4168,7 @@ def stream_case(case, cfg, cap_s, early=True, inject=None, evaluator=None, on_st
     because the early-exit poll below runs the SAME grading the verdict uses — a poll that graded
     something else would either stop a case that had not passed or run one that had. (This was a
     hardcoded `evaluate` at first, and a pipeline case died in it with `KeyError: 'decision'` on
-    the first poll: there is no PMS decision here to be.)
+    the first poll: there is no server decision here to be.)
     """
     # Snapshot BEFORE launching so the teardown can kill exactly the clients this case started.
     # killpg is not sufficient on its own: sshpass forks ssh into its OWN process group (measured:
@@ -4522,15 +4522,15 @@ def run_case(case, cfg, token, verbose, cond=None):
     for rk in setup.get("also_reset", []):
         pms_unscrobble(cfg["pms"]["host"], cfg["pms"]["port"], rk, token)
 
-    # 3. clear + set triggers, and inject the effective PMS token in the SAME round-trip.
+    # 3. clear + set triggers, and inject the effective server token in the SAME round-trip.
     # The token rides `extra=` rather than `files` so its value never reaches stdout — the only
     # reason it used to need a round-trip of its own. Ordering is what matters and is preserved:
     # butaca-token is cleared by the glob wipe that opens the command, and rewritten after it.
     # Always required — the binary carries no baked token, so butaca-token in the runtime root
-    # is the only way an automated run gets PMS access.
+    # is the only way an automated run gets server access.
     files = triggers_for_case(case)
     # `session: stored` — boot from the install's own signed-in session instead of the injected
-    # identity. The injected token installs the compiled PMS_HOST as a PLAINTEXT origin, which
+    # identity. The injected token installs the compiled SERVER_HOST as a PLAINTEXT origin, which
     # never touches the pinned name a real sign-in persists, so an offline case graded
     # through it would be a false pass by construction. The install must therefore hold a sign-in
     # already (refused with the reason otherwise), and that sign-in's profile is who plays — the
@@ -4612,7 +4612,7 @@ def run_case(case, cfg, token, verbose, cond=None):
 # The PIPELINE tier — the player, with no server behind it at all.
 #
 # The 21 cases above drive `butaca-play=<ratingKey>`, i.e. the whole chain: account-service auth, the
-# PMS `/decision`, library metadata, the PlayQueue, markers, resume, the timeline reporter. That
+# server `/decision`, library metadata, the PlayQueue, markers, resume, the timeline reporter. That
 # is the right shape for what they grade — SELECTION — and it is also why they need somebody's
 # library and cannot run for anyone else.
 #
@@ -4867,7 +4867,7 @@ def save_case_log(cfg, name, lines):
 
 
 def run_pipeline_case(case, cfg, srv, url_base, verbose):
-    """One pipeline case. A sibling of `run_case` with every PMS step removed.
+    """One pipeline case. A sibling of `run_case` with every server step removed.
 
     Kept from it: the `make kill` that opens (the app is a singleton on the television, and the
     previous case's is still up), `apply_triggers`' single round-trip that recreates the runtime
@@ -4894,7 +4894,7 @@ def run_pipeline_case(case, cfg, srv, url_base, verbose):
     # reset per case (each setter clears when given None), and they COMPOSE — the
     # request-indexed one wins where it applies.
     srv.set_segment_profile(case.get("segment_profile"))
-    # A fresh PMS session may map the same request actuator to a different completed rendition.
+    # A fresh server session may map the same request actuator to a different completed rendition.
     # The fixture generation rides in the child playlist URI so the old live session and the
     # candidate refresh remain distinct even though both paths say /__abr/22000.
     srv.set_abr_response_profile(case.get("abr_response_profile"))
@@ -6060,7 +6060,7 @@ def main():
                     help="run the SERVER tier instead of the default synthetic one: the 21 "
                          "library-backed cases driven through the whole server chain (account-service auth, "
                          "/decision, direct-play vs transcode, markers, resume, timeline). Needs a "
-                         "PMS, a token and a filled-in manifest.local.json")
+                         "server, a token and a filled-in manifest.local.json")
     ap.add_argument("--pipeline", action="store_true",
                     help="run the synthetic pipeline tier — the DEFAULT, so this flag is a no-op "
                          "kept for the recipes that name it")
@@ -6106,7 +6106,7 @@ def main():
     # should mean: the default has to be the thing that runs for everybody, needs no credentials,
     # touches nobody's watch history, and answers "is the PLAYER broken" — which is the question
     # asked far more often than "is my library's metadata right". The server tier costs ten to
-    # twenty minutes, a PMS, a token and an overlay; making that the price of typing the obvious
+    # twenty minutes, a server, a token and an overlay; making that the price of typing the obvious
     # command meant most people could not type it at all.
     #
     # The FPS scenes are on the server side of the line whatever else is asked: they navigate a
@@ -6128,7 +6128,7 @@ def main():
         # may be no address at all. Nothing on a listing path dials it — and a RUN cannot reach
         # here without one, because `load_manifest` still exits for that case.
         "tv": args.tv or manifest.get("tv", ""),
-        # server-tier only: the synthetic tier talks to no PMS and `load_manifest` does not
+        # server-tier only: the synthetic tier talks to no server and `load_manifest` does not
         # synthesize the key for it.
         "pms": manifest.get("pms", {}),
         "no_early": args.no_early,
@@ -6175,7 +6175,7 @@ def main():
             print(f"{c['name']:30s} {decl:22s} {size:11s} {ops:8s} {c.get('fixture','?')}{mark}")
         print(f"\nfixtures: {root}")
         print(f"install:  {APPID} [{FLAVOUR}] — triggers and log under {RUNDIR}")
-        print("\nThe pipeline tier needs no PMS, no token and no manifest.local.json — only a TV "
+        print("\nThe pipeline tier needs no server, no token and no manifest.local.json — only a TV "
               "address and\na pack built by `make fixtures-pipeline`.")
         return 0
 
@@ -6233,7 +6233,7 @@ def main():
             sys.exit("--suite selects among the SERVER tier's cases; pass --server with it. "
                      "(The synthetic tier is the default and has no logic/codec split.)")
         if args.owner or args.shared_server:
-            sys.exit("--owner / --shared-server are identities on a PMS; the default tier talks to "
+            sys.exit("--owner / --shared-server are identities on a server; the default tier talks to "
                      "no server. Pass --server if you meant the library-backed cases.")
         root, pcases = fixtures_root, pipeline_cases
         if args.filter:
@@ -6272,7 +6272,7 @@ def main():
         return run_pipeline_suite(pcases, cfg, srv, url_base, args.verbose, pskipped)
 
     # FPS regression suite — a separate path from the playback cases. UI-tier scenes need no video
-    # (and no PMS token); --fps-player adds the info/menu scenes, which decode video as the test user.
+    # (and no server token); --fps-player adds the info/menu scenes, which decode video as the test user.
     if args.fps or args.fps_player:
         if args.suite:
             sys.exit("--suite selects playback cases; the FPS scenes use --fps / --fps-player")
@@ -6391,7 +6391,7 @@ def main():
     shaped, link_skipped = [c for c in cases if c.get("link_profile")], []
     if shaped:
         if cond.usable:
-            print(f"link conditioner: :{listen} -> PMS, {len(shaped)} shaped case(s)")
+            print(f"link conditioner: :{listen} -> server, {len(shaped)} shaped case(s)")
         else:
             print(f"link conditioner UNAVAILABLE — {cond.why}")
             for c in shaped:

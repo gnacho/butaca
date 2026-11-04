@@ -28,7 +28,7 @@ import argparse, importlib.util, os, re, shutil, sys
 # private ranges are excluded here only because the pass above has already replaced them with a
 # stable `<lan-ip-N>` label; anything left is routable and belongs to somebody.
 # The two trailing guards are not defensive padding, they are the difference between this pass
-# and a pass that mangles every log it touches. PMS reports `version=1.43.3.10896-cb3ebc72d`,
+# and a pass that mangles every log it touches. The server reports `version=1.43.3.10896-cb3ebc72d`,
 # whose leading run is four dot-separated numbers -- so a build suffix (`-abc`) and a `version=`
 # prefix both have to be excluded, or every server version in every log becomes `<peer-ip-1>`.
 # Caught by `tools/test_scrub_logs.py` before this shipped, which is the only reason it is here.
@@ -82,7 +82,7 @@ def load_guard(root):
 
 
 def slug(label):
-    """`PMS_HOST (src/config.local.h)` -> `pms-host`; `.tv-host` -> `tv-host`."""
+    """`SERVER_HOST (src/config.local.h)` -> `pms-host`; `.tv-host` -> `tv-host`."""
     base = label.split("(")[0].strip().lstrip(".")
     return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "private"
 

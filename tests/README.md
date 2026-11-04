@@ -14,9 +14,9 @@ how a green run means nothing.
 
 | | **synthetic** — the DEFAULT | **server** (`--server`) |
 |---|---|---|
-| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from PMS metadata, markers, resume, the `/:/timeline` reporter |
+| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from the server's metadata, markers, resume, the `/:/timeline` reporter |
 | what it needs | a TV address and `make fixtures-pipeline` | a media server, a token, a `manifest.local.json`, and a library holding the shapes the matrix names |
-| media | generated clips, served off your Mac | real items on your PMS |
+| media | generated clips, served off your Mac | real items on your server |
 | who can run it | **anyone** | whoever owns that library |
 | cost | ~0.9 GB, a few minutes to build; seconds per case | ~3 GB, ~20 minutes to build; ten to twenty minutes to run |
 
@@ -28,7 +28,7 @@ how a green run means nothing.
 **The synthetic tier is the default**, and that inversion (2026-08-22) is about what a bare
 `./tests/run.py` should mean. The default has to be the thing that runs for everybody, needs no
 credentials, touches nobody's watch history, and answers *"is the player broken"* — which is asked
-far more often than *"is my library's metadata right"*. Charging a PMS, a token and a filled-in
+far more often than *"is my library's metadata right"*. Charging a server, a token and a filled-in
 overlay for the obvious command meant most people could not type it at all. `--server` is the
 explicit opt-in; `--fps` / `--fps-player` imply it, because those scenes navigate a real signed-in
 Home and would otherwise grade a QR screen. `--pipeline` still parses — it names the default — but
@@ -42,12 +42,12 @@ half is bypassed and a regression there passes it green. Nor does it reach resum
 timeline reporting, subtitle or audio-track *selection*, or any transcode. **Never ship on the
 default alone.**
 
-## The synthetic PMS and the focus-fingerprint flows (host, no television)
+## The synthetic server and the focus-fingerprint flows (host, no television)
 
 Two more host-side pieces landed with phase 0 of the UI restructure (2026-09-06), and both exist
 so that a recording of the UI can be COMMITTED to this public repository:
 
-- **`tests/mock_pms.py`** is a synthetic media server - the endpoints the data layer actually
+- **`tests/mock_server.py`** is a synthetic media server - the endpoints the data layer actually
   requests, answered with the fields its own types read, from a library GENERATED from `--seed`
   in which every title, name, summary and tag is one word of a closed alphabet (`s` + eight hex
   digits). No household byte can enter a fixture recorded against it, so no scrub pass is needed
@@ -96,7 +96,7 @@ one below — a Play control on a detail page is server-tier by construction), a
 **transcode input space** — three server cases on one AV1 item stand in for 17 video codecs. One of
 those is an app gap rather than a test gap: `devcaps` now reads `maxFrameRate` into per-codec rows,
 but only the Starfish Load's `adaptiveStreaming` ceiling clamps against it (`engine::sink_envelope`,
-since 2026-09-03) — the profile sent to PMS still carries no frame-rate limitation at all.
+since 2026-09-03) — the profile sent to the server still carries no frame-rate limitation at all.
 
 - `manifest.json` — the test matrix, and **installation-independent**: the triggers each case
   needs, the expected log signals, and the *shape* of the item it needs (`item`, a symbolic key
@@ -194,8 +194,8 @@ two pids, in an order busybox does not promise. Use `fuser <appdir>/butaca`, or 
 
 ## Security
 
-The PMS **access token is secret and is never committed**. `run.py` reads it from the
-gitignored `src/config.local.h` (`#define PMS_TOKEN "..."`) at runtime and never prints,
+The server **access token is secret and is never committed**. `run.py` reads it from the
+gitignored `src/config.local.h` (`#define SERVER_TOKEN "..."`) at runtime and never prints,
 logs, or writes it — progress URLs are redacted to `<token>` in output. The TV ssh
 credentials are already in the committed `Makefile`, so the runner shells out to `make` /
 `sshpass` for device I/O (no new secret is introduced).
@@ -219,7 +219,7 @@ account stays clean. It works without storing any new secret:
   shared with it.
 - That token is used for the `/:/progress` resume seed **and** written to `butaca-token` in the
   TV's runtime root. The binary carries **no** token, so this file is the only way an automated run
-  gets PMS access at all (see `butaca_run`); the **app itself** then plays and scrobbles as the
+  gets server access at all (see `butaca_run`); the **app itself** then plays and scrobbles as the
   managed user, not just the seed. The token value is never printed (redacted to
   `<…, redacted>`), and `butaca-token` is cleared between cases like every other trigger.
 - Pass **`--owner`** to run as the `config.local.h` owner token instead (history *will* be
@@ -342,7 +342,7 @@ library you care about — which is what `test_user` is for.
 - The same toolchain the main dev loop needs: the webOS NDK (`make setup-env`), `sshpass`,
   and (for `--build`) the Rust nightly + `rust-src` (see the repo `Makefile` / `docs/agent-reference.md`).
 - `tests/manifest.local.json` present — `cp tests/manifest.local.json.example` and fill in the
-  PMS host/port, the TV address, `test_user`, and **as many `item` ratingKeys as your library can
+  server host/port, the TV address, `test_user`, and **as many `item` ratingKeys as your library can
   actually supply**; leave the rest bracketed and the cases that need them are skipped (below).
   If your library cannot supply them, **generate them**: `make fixtures` builds every shape from
   ffmpeg and writes a `fixtures.json` keyed by the same symbolic names — see
@@ -354,8 +354,8 @@ library you care about — which is what `test_user` is for.
   directory SAM already knows about; a flavour is registered once with
   `make FLAVOR=<f> install`, which builds its .ipk, installs it and then deploys into it.
 - The TV powered on and reachable (`root@<tv>`, the overlay's `tv`).
-- The PMS reachable at `http://<pms-host>:32400` (the overlay's `pms` block).
-- `src/config.local.h` present with `PMS_TOKEN`.
+- The server reachable at `http://<pms-host>:32400` (the overlay's `pms` block).
+- `src/config.local.h` present with `SERVER_TOKEN`.
 
 ## Running
 
@@ -557,7 +557,7 @@ works for **any** rk) and drives the same field-based play path the detail Play 
 bypassing the catalog lookup entirely. It honors the server `viewOffset` for resume and logs
 `butaca-play: rk=<rk> server=<slot> start` so the harness can confirm both halves of the item
 identity that fired. A bare `butaca-play` keeps the historical current-server behaviour;
-`butaca-server=<slot>` makes a by-hand/direct-screen run target a registered secondary PMS and
+`butaca-server=<slot>` makes a by-hand/direct-screen run target a registered secondary server and
 fails closed when that slot does not exist. `tools/tv-session.sh up --screen player=<rk> --server
 <slot>` writes the pair without navigating the UI, boots from the signed-in stored roster (rather
 than the singular injected-token server), and exits nonzero unless the log confirms the exact
@@ -710,7 +710,7 @@ make fixtures-pipeline          # ~0.9 GB into $FIXTURES_OUT/pipeline; ~4 min, o
 ./tests/run.py --list           # offline: what would run, at what resolution, what is missing
 ```
 
-Nothing else is required — no `manifest.local.json`, no PMS, no token, no ratingKey, no library, no
+Nothing else is required — no `manifest.local.json`, no server, no token, no ratingKey, no library, no
 sharing. The TV address comes from the overlay's `tv` if you have one, else from the gitignored
 `.tv-host`, else `--tv`. That is the whole configuration.
 
@@ -730,7 +730,7 @@ byte for byte; only the *choosing* is bypassed.
 **Why the declaration is carried separately, and why it is the interesting half.** The Starfish
 `Load` payload takes its codecs from `route::stream_vcodec`/`stream_acodec` and its Dolby nodes from
 `stream_dovi`/`stream_immersive` — five fields normally installed together by `route::apply_plan`
-from a PMS decision and replaced together by later route transitions. The older `butaca-url`
+from a server decision and replaced together by later route transitions. The older `butaca-url`
 trigger hands over a URL and nothing else, so a URL-fed 4K HEVC file was declared to the television
 as whatever the route happened to hold. An absent or unsupported audio declaration now fails
 before Load instead of silently declaring AC3.
@@ -766,9 +766,9 @@ committed all fail.
 
 The probe gives connection/header setup and body measurement separate bounded windows. That keeps
 one-off DNS/TLS/header latency from shortening the interval which measures the uncapped Original
-body. On PMS, the bounded raw Part GET exact-reuses the active HLS resource identity without a
+body. On server, the bounded raw Part GET exact-reuses the active HLS resource identity without a
 client-side stop, close or replacement of the working encoder. This prevents the known second
-AdHoc admission path, but does not prove that PMS preserves the prior HLS cursor while serving the
+AdHoc admission path, but does not prove that server preserves the prior HLS cursor while serving the
 raw Part. A successful recovery therefore publishes its handoff on the same completed media
 boundary and performs no subsequent HLS GET. The reserve gate still funds the two separately
 bounded probe phases plus HLS continuity when the result retains HLS:
@@ -777,7 +777,7 @@ bounded probe phases plus HLS continuity when the result retains HLS:
 B >= 2P + max(R, D)
 ```
 
-The synthetic fixture has no PMS resources, so it exercises the source setup/body and controller
+The synthetic fixture has no server resources, so it exercises the source setup/body and controller
 half; the exact-identity lifecycle is pinned by the loopback protocol test and the server/device
 tier.
 
@@ -794,7 +794,7 @@ committed.
 
 **What it deliberately does not grade is the rung the ladder happened to be on when the probe
 fired.** It used to require the 20 Mbit/s top rung plus two spaced probes, and that measured the
-wrong resource: PMS producing 20 Mbit/s of H.264 says the SERVER can encode and says nothing about
+wrong resource: server producing 20 Mbit/s of H.264 says the SERVER can encode and says nothing about
 whether the link can carry the remux (`docs/adaptive-playback.md` §7). The current gate has no
 spacing timer or fixed upshift dwell: HLS frontier exhaustion, a non-draining reserve and exact
 serial affordability can become true in either order. Requiring a particular current rung first
@@ -803,9 +803,9 @@ segments" and "ladder's five" counts are historical; neither number exists now.
 
 The HLS master/media playlists are generated by `serve_fixtures.py`, and their independent
 two-second H.264/AAC MPEG-TS segments come from **one rate-targeted clip per rung, each cut into
-six real segments**. What a rung asks PMS for is a bitrate CEILING and the raster is the
+six real segments**. What a rung asks server for is a bitrate CEILING and the raster is the
 consequence, so two rungs may share a raster — 2000 and 4000 are both 1280×720 — but never a
-clip. No PMS decision, real token, library item, transcoder, or Internet path participates.
+clip. No server decision, real token, library item, transcoder, or Internet path participates.
 
 **Both halves of that arrangement were wrong until 2026-08-26 and the fix is what makes this tier
 able to identify anything.** The server advertised 90 segments per rung and *discarded the sequence
@@ -930,7 +930,7 @@ secondary to the real item shapes, and still to be labelled synthetic:
   `pipe_hevc_aac_mp4` carries no `hdr` key, so it is Main / `yuv420p`, and has been since that
   fixture landed; the matrix widened the raster spread rather than closing the gap. Both caveats
   are the same one: these are generated clips, so what neither reaches is the half the entries were
-  really about — a **PMS decision** on such an item. That still needs a real one.
+  really about — a **server decision** on such an item. That still needs a real one.
 - **Audio:** FLAC, PCM/LPCM, MP3; a TrueHD-only file to force an audio-only transcode without
   depending on the many-audio movie's track ordering.
 - **Subtitles:** ASS/SSA, VobSub/dvd_subtitle; mov_text/tx3g soft-render.
@@ -945,11 +945,11 @@ secondary to the real item shapes, and still to be labelled synthetic:
   shapes (P5, and dual-layer P7) — see `metadata::Dovi::base_layer_unusable` — and `ff.rs` logs what
   the demuxer actually found (`ff: … dovi=P5 level=6 bl_compat=0 rpu=1 el=0 bl=1 …`) at every open.
   **A case here must grade the OUTPUT, not the decision**, and that is the trap this gap now
-  carries in writing: measured against the dev PMS the same day, refusing direct play produced
+  carries in writing: measured against the dev server the same day, refusing direct play produced
   `Part.decision=transcode` while the VIDEO stream's own decision was **`copy`** — the identical
   IPT-PQ bitstream one container down, with `DOVIProfile: 5` still on it. A case asserting
   `decision: transcode` would have passed over a completely unfixed bug. The route now also
-  withdraws the copy permission (`TranscodeSpec::no_video_copy`), and this PMS answers **general
+  withdraws the copy permission (`TranscodeSpec::no_video_copy`), and this server answers **general
   code 2000 — "File is unplayable. DoVi (Profile 5) color space is not supported."** — so the P5
   item's honest on-device expectation is the **failure read-out quoting that sentence**, not a
   playing stream. The P7 does transcode for real (an enhancement layer is not copyable), which is

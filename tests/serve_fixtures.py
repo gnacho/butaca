@@ -75,7 +75,7 @@ RE_ABR_PLAYLIST = re.compile(rf"^/__abr/({ABR_RUNGS})/(master|media)\.m3u8$")
 RE_ABR_SEGMENT = re.compile(rf"^/__abr/({ABR_RUNGS})/segment\.ts$")
 RE_SEQUENCE = re.compile(r"(?:^|&)sequence=(\d+)")
 RE_ABR_GENERATION = re.compile(r"(?:^|&)fixtureGeneration=(\d+)")
-# What a rung asks PMS for is a BITRATE CEILING and the raster is the consequence; the controller's
+# What a rung asks server for is a BITRATE CEILING and the raster is the consequence; the controller's
 # acceptance test is `hls_raster_within` — the decoded picture must FIT the rung's raster, not equal
 # it — so several rungs legitimately share a raster.
 #
@@ -89,9 +89,9 @@ RE_ABR_GENERATION = re.compile(r"(?:^|&)fixtureGeneration=(\d+)")
 #
 # WHAT IS SYNTHETIC HERE, precisely: the MEDIA is real — really encoded at that bitrate, really
 # demuxed, really fed through the same path as any other segment. What is synthetic is that a
-# rung's clip is generated rather than produced by a PMS transcoder, so it carries no JIT
+# rung's clip is generated rather than produced by a server transcoder, so it carries no JIT
 # production latency; `network_profile` shapes the transport and nothing here models an encoder
-# falling behind. Production cadence is measurement step M3's job, against a real PMS.
+# falling behind. Production cadence is measurement step M3's job, against a real server.
 ABR_FIXTURE = {
     "320": "pipe_abr_240p.ts", "720": "pipe_abr_480p.ts",
     "2000": "pipe_abr_720p.ts", "4000": "pipe_abr_720p_4m.ts",
@@ -272,7 +272,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     "#EXT-X-MEDIA-SEQUENCE:0"]
             for sequence in range(90):
                 # Each backing file is an independent MPEG-TS program with an IDR and in-band
-                # SPS/PPS at its head, matching the measured PMS segment contract.
+                # SPS/PPS at its head, matching the measured server segment contract.
                 rows.extend(("#EXTINF:2.0,", f"segment.ts?sequence={sequence}{suffix}"))
             rows.append("#EXT-X-ENDLIST")
             text = "\n".join(rows) + "\n"
@@ -362,7 +362,7 @@ class FixtureServer(socketserver.ThreadingTCPServer):
         # The REQUEST-indexed schedule, and the count it is indexed by. See `set_segment_profile`.
         self.segment_profile = []
         self.n_segments = 0
-        # Per-case PMS response mapping. The request path remains the actuator the app sent;
+        # Per-case server response mapping. The request path remains the actuator the app sent;
         # each fresh master gets a generation whose media/segments remain pinned to the rendition
         # that master declared. This is what lets an old underfilled session keep playing while a
         # same-actuator refresh independently returns a better picture.

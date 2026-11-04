@@ -4,7 +4,7 @@
 Every figure is a named target STATE in `tests/screenshots/scenes.json`. For each scene this
 driver:
 
-  1. starts `tests/mock_pms.py` in catalog mode (the demo library, `tests/demo_library/`) on a
+  1. starts `tests/mock_server.py` in catalog mode (the demo library, `tests/demo_library/`) on a
      free loopback port, in this process;
   2. makes a fresh instance root and arms the scene's triggers in it, plus three the driver owns:
      `token` (a placeholder the mock accepts), `plextv` (the account service replaced by
@@ -61,7 +61,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
-import mock_pms  # noqa: E402
+import mock_server  # noqa: E402
 
 # tools/demo_library.py shares its name with the tests/demo_library package, so it is loaded by
 # path under another name rather than through sys.path.
@@ -175,7 +175,7 @@ def clean_env(rt, shot, scene, defaults):
 
 def capture(binary, scene, defaults, hero, keep):
     """Boot one scene and return (png bytes, log text). Raises RuntimeError on any failure."""
-    srv, pms = mock_pms.serve(0, catalog=CATALOG, hero=hero)
+    srv, pms = mock_server.serve(0, catalog=CATALOG, hero=hero)
     port = srv.server_address[1]
     rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-shot-{scene['name']}-"))
     try:
@@ -335,7 +335,7 @@ def main():
     defaults = dict(manifest["defaults"], canvas=manifest["canvas"])
     catalog = json.loads(CATALOG.read_text())
     try:
-        mock_pms.CatalogLibrary(CATALOG)
+        mock_server.CatalogLibrary(CATALOG)
     except ValueError as e:
         die(f"{e} — run `make demo-library`")
     canvas = size_of(manifest["canvas"])

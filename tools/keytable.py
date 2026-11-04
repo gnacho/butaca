@@ -32,7 +32,7 @@ invariant is graded twice: here for "moves nothing on any screen", and in `app.r
 **A fingerprint carries RATING KEYS, so part of this table is a fact about one library and one
 moment, not about the ladder.** Two rows drift on their own: `home` samples whichever hero the 8 s
 auto-flip has landed on, and any row is keyed to whatever the server's hubs held when it was
-recorded. A re-record on another day, or against another PMS, therefore diffs on `rk=` while every
+recorded. A re-record on another day, or against another server, therefore diffs on `rk=` while every
 structural field (`route`, `hf`, `row`, `col`, `zone`, `card`, `sec`) is identical — read that as
 noise, and read a change in a STRUCTURAL field as the regression. Diffing the two by eye is the
 job; nothing here is asserted by `make check`.
@@ -108,16 +108,16 @@ SCREENS = {
 FOCUS_RE = re.compile(r"^focus .*$", re.M)
 
 
-def pms_from_config():
+def server_from_config():
     """Host and port out of the gitignored src/config.local.h, the same source `make sim` reads."""
     p = os.path.join(REPO, "src", "config.local.h")
     host, port = None, "32400"
     if os.path.exists(p):
         for line in open(p):
-            m = re.match(r'\s*#define\s+PMS_HOST\s+"([^"]+)"', line)
+            m = re.match(r'\s*#define\s+SERVER_HOST\s+"([^"]+)"', line)
             if m:
                 host = m.group(1)
-            m = re.match(r"\s*#define\s+PMS_PORT\s+(\d+)", line)
+            m = re.match(r"\s*#define\s+SERVER_PORT\s+(\d+)", line)
             if m:
                 port = m.group(1)
     return host, port
@@ -131,7 +131,7 @@ def boot(root, screen, host, port, settle):
     tok = os.path.join(REPO, "src", "config.local.h")
     if os.path.exists(tok):
         for line in open(tok):
-            m = re.match(r'\s*#define\s+PMS_TOKEN\s+"([^"]+)"', line)
+            m = re.match(r'\s*#define\s+SERVER_TOKEN\s+"([^"]+)"', line)
             if m:
                 open(os.path.join(root, "butaca-token"), "w").write(m.group(1))
     open(os.path.join(root, "butaca-focus"), "w").close()
@@ -149,7 +149,7 @@ def boot(root, screen, host, port, settle):
             time.sleep(settle / 2)  # let posters and hub data land before the first sample
             return proc, log
     proc.terminate()
-    raise SystemExit(f"{screen}: no `focus` line after {settle}s — is the probe armed and the PMS up?")
+    raise SystemExit(f"{screen}: no `focus` line after {settle}s — is the probe armed and the server up?")
 
 
 def last_focus(log):
@@ -196,11 +196,11 @@ def run_screen(screen, host, port, settle, pause):
 
 
 def record(args):
-    host, port = pms_from_config()
-    if args.pms:
-        host = args.pms
+    host, port = server_from_config()
+    if args.server:
+        host = args.server
     if not host:
-        raise SystemExit("no PMS host: pass --pms <numeric ip> (stream.rs has no DNS resolver)")
+        raise SystemExit("no server host: pass --server <numeric ip> (stream.rs has no DNS resolver)")
     table = {}
     for screen in args.screens:
         print(f"  {screen} …", flush=True)
@@ -227,7 +227,7 @@ def main():
     ap.add_argument("--out", help="write the table here")
     ap.add_argument("--check", help="re-record and diff against this table; non-zero exit on any change")
     ap.add_argument("--screens", nargs="+", default=list(SCREENS), choices=list(SCREENS))
-    ap.add_argument("--pms", help="PMS host (numeric IP); defaults to src/config.local.h")
+    ap.add_argument("--server", help="server host (numeric IP); defaults to src/config.local.h")
     ap.add_argument("--settle", type=float, default=8.0, help="seconds to let a boot land")
     ap.add_argument("--pause", type=float, default=0.7, help="seconds between a key and its sample")
     args = ap.parse_args()

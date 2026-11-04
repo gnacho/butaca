@@ -1,7 +1,7 @@
 # Replay fixtures
 
 A directory here is one RECORDING (restructure spec §5.3): `manifest.json` (the header) and
-`rec-NNNN.jsonl` segments, taken on the simulator against `tests/mock_pms.py` by arming
+`rec-NNNN.jsonl` segments, taken on the simulator against `tests/mock_server.py` by arming
 `butaca-rec`. They are regression assertions pinned to the build lineage that recorded them
 (§5.5): `tools/butaca-rec diff` compares two, `tools/butaca-rec check` verifies one against
 `ALPHABET.json`, and `tests/test_harness.py` checks their schema and closed vocabulary on every

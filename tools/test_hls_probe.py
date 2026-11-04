@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for pms-hls-probe.py. No PMS, plex.tv, or device I/O."""
+"""Offline tests for hls-probe.py. No server, plex.tv, or device I/O."""
 
 import importlib.util
 import json
@@ -14,8 +14,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 
-TOOL = Path(__file__).with_name("pms-hls-probe.py")
-SPEC = importlib.util.spec_from_file_location("pms_hls_probe", TOOL)
+TOOL = Path(__file__).with_name("hls-probe.py")
+SPEC = importlib.util.spec_from_file_location("hls_probe", TOOL)
 probe = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = probe
 SPEC.loader.exec_module(probe)
