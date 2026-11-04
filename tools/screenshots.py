@@ -7,7 +7,8 @@ driver:
   1. starts `tests/mock_pms.py` in catalog mode (the demo library, `tests/demo_library/`) on a
      free loopback port, in this process;
   2. makes a fresh instance root and arms the scene's triggers in it, plus three the driver owns:
-     `token` (a placeholder the mock accepts), `plextv` (plex.tv replaced by the mock, so nothing
+     `token` (a placeholder the mock accepts), `plextv` (the account service replaced by
+     the mock, so nothing
      leaves the machine) and `stillclock` (free-running animation held still);
   3. runs the simulator with `BUTACA_SHOT_SETTLE`: the app itself writes one PNG once its
      screen has been at rest for the scene's settle time, and exits. The driver waits on that
@@ -44,7 +45,8 @@ which must carry a `tolerance_reason`.
 `hero_alternatives` as `home-hero-<film>.jpg`, for choosing the hero; `--hero` swaps the film the
 home scenes pin for this run. Both write to the output directory like every other image.
 
-Nothing here reads a gitignored file, and nothing touches a Plex account or a television.
+Nothing here reads a gitignored file, and nothing touches an account on the account service
+or a television.
 """
 import argparse
 import importlib.util

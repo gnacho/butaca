@@ -69,7 +69,7 @@ starts at the paragraph underneath it.
 
 **A security disclosure, a migration step, or anything else the reader must do goes in its own `##` section immediately after the lede, above every feature.** Never inside `Fixed`: the test is mechanical — *if installing the release does not complete the item, it does not belong in a list of things installing completes.* Leave one cross-reference line in `Fixed` so a changelog reader is routed rather than told twice.
 
-Title it with **the reader's action**, not our defect: `## If you ran v0.1.0 or v0.2.0: rotate your Plex token`, not `## The event log printed credentials`.
+Title it with **the reader's action**, not our defect: `## If you ran v0.1.0 or v0.2.0: rotate your access token`, not `## The event log printed credentials`.
 
 **Breaking changes are equally prominent**, under a heading that says what stops working and for whom.
 
@@ -150,7 +150,7 @@ Optimise for GitHub's renderer and for someone reading on a television or a phon
 - **No auto-generated PR-title dump as the body.** It cannot express a compatibility claim, a defect boundary or an ask, which are three of the six things a note is for. GitHub's generated list is appended after the note, where it is a free second record.
 - **No measurable number a human typed.** Sizes, hashes, firmware counts, test counts. This project has published a wrong size, a wrong hash instruction and a firmware that does not exist; all three were typed.
 - **No pasted log excerpt, sample URL or screenshot** containing a server name, LAN address, `machineIdentifier`, media title, profile name or token.
-- **No comparative claims about the official Plex app.** Fine as positioning in the README; in a release note it is an unverifiable assertion about a third party that a channel reviewer would have to defend or strip.
+- **No comparative claims about the vendor's official app.** Fine as positioning in the README; in a release note it is an unverifiable assertion about a third party that a channel reviewer would have to defend or strip.
 - **No prerelease, no draft, no `-rc`, no four-component versions.** All four fail silently rather than loudly: a draft or prerelease drops out of `releases/latest`, which is the URL the Homebrew Channel resolves the manifest through, and LG will not install a version that is not three integers.
 - **No `CHANGELOG.md`.** This directory published as the release body is the same record with one copy.
 
@@ -204,7 +204,7 @@ Neither can be a gate, because both end in a judgement.
 
 ```sh
 git diff "vA.B.C".."vX.Y.Z" -- rust-modules/src src ci \
-  | grep -nE '^\+.*(token|X-Plex-Token|mkfifo|bind\(|listen\(|O_CREAT|fopen|0o?6[0-9]{2}|/tmp/|/media/)'
+  | grep -nE '^\+.*(token|mkfifo|bind\(|listen\(|O_CREAT|fopen|0o?6[0-9]{2}|/tmp/|/media/)'
 ```
 
 **Is anything claimed more widely than the evidence?** These phrases are not banned outright — "not reproducible across machines" is the honest sentence, and it contains two of them — but each one is a place where a note has overclaimed before, so read every hit:

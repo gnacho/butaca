@@ -2,7 +2,7 @@
 
 ## Project
 
-Butaca is a production-quality native Plex client for rooted LG webOS 4.5 TVs. Most of the
+Butaca is a production-quality native Jellyfin client for rooted LG webOS 4.5 TVs. Most of the
 application is Rust under `rust-modules/src/`; `src/main.c` is the boot/crash shim,
 `src/starfish.c` is the StarfishMediaAPIs/ACB seam, and `src/svg.c` rasterizes SVGs. Keep changes
 properly factored and finished; "only a demo" is never a reason to leave a shortcut behind.
@@ -16,7 +16,7 @@ the desktop simulator are valuable, but they cannot prove every device behavior.
   reference. Read the relevant section before changing a subsystem; do not load the whole file
   when a narrower section is enough.
 - Before playback work, read `rust-modules/src/player/CLAUDE.md`.
-- Before Plex data-layer work, read `rust-modules/src/plex/CLAUDE.md` and `docs/pms-api.md`.
+- Before server data-layer work, read `rust-modules/src/server/CLAUDE.md`.
 - Before UI work, read `rust-modules/src/ui/CLAUDE.md` and use the shared theme, layout, and widget
   systems instead of adding screen-local visual primitives. Before touching a screen, also read
   `rust-modules/src/screens/CLAUDE.md`; the restructure's design record is
@@ -113,7 +113,7 @@ the desktop simulator are valuable, but they cannot prove every device behavior.
 - There is one physical television. Before any command that deploys, runs, drives, captures, or
   tests it, use the `tv-lock` skill and acquire the repository TV lock. Prefer `ui-sim` when the
   device is unnecessary or busy. Read-only status/log collection is the documented exception.
-- **Never write to a real person's Plex account.** Boot with `--guest` and verify the identity
+- **Never write to a real person's account.** Boot with `--guest` and verify the identity
   line in the log before sending any key; never press `ok` on a card whose `ratingKey` you have not
   read from the log; reopen a screen by relaunching with `--screen` rather than walking Home. A
   Continue Watching tile RESUMES PLAYBACK on OK, which is how two separate sessions started real

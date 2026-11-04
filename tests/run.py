@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-On-device regression harness for the webOS Plex player (plex-native-poc).
+On-device regression harness for the native webOS media client.
 
 The matrix is split in two: manifest.json holds the installation-independent case definitions,
 and the gitignored manifest.local.json (see manifest.local.json.example) maps each case's
@@ -41,11 +41,11 @@ exactly ONE of them: the flavour comes from --flavor, else the overlay's `flavou
 Makefile's own default, and every path that follows is ASKED FOR rather than restated
 (`make -s print-rundir` / `print-eventlog`). See resolve_flavour.
 
-Security: the PMS X-Plex-Token is read from src/config.local.h at runtime and is NEVER
+Security: the PMS access token is read from src/config.local.h at runtime and is NEVER
 printed, logged, or written to any file. The TV ssh creds already live in the committed
 Makefile, so we shell out to `make` / sshpass for device I/O. A run that also needs a SECOND
-server (a friend's shared one) resolves that server's own access token from plex.tv with the
-same owner token -- again storing nothing; see resolve_shared_server.
+server (a friend's shared one) resolves that server's own access token from the account service
+with the same owner token -- again storing nothing; see resolve_shared_server.
 
 Usage:
   ./tests/run.py --list                 # list cases and what they cover
@@ -226,7 +226,7 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
 
     `pipeline_only` is what makes requirement-1 true — that a stranger can run the pipeline tier
     with nothing configured. That tier talks to no PMS, holds no token and names no ratingKey, so
-    every Plex-shaped key here stops being required: the overlay may be absent ENTIRELY, in which
+    every server-shaped key here stops being required: the overlay may be absent ENTIRELY, in which
     case the TV address is read from the repo's own gitignored `.tv-host` (the same file the
     Makefile and `tools/` fall back to). A TV address is the one thing that still cannot be
     guessed, and is the only thing this path can die for.
@@ -288,13 +288,13 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
         manifest["test_user"] = local["test_user"]
     # shared_server is optional the same way: an installation with no second server simply omits it,
     # and any case that needs one is SKIPPED (not failed) with the reason printed. What is NOT
-    # optional is naming the server well enough to look up on plex.tv -- a block with neither
+    # optional is naming the server well enough to look it up -- a block with neither
     # machine_id nor name resolves to nothing, and would otherwise fail later as a mystery.
     if "shared_server" in local:
         ss = local["shared_server"]
         if not (ss.get("machine_id") or ss.get("name")):
             _die_no_overlay("\n  (`shared_server` needs a `machine_id` (preferred) or a `name` to "
-                            "match against your plex.tv resources)")
+                            "match against your account's resources)")
         manifest["shared_server"] = ss
 
     items = local.get("items", {})
@@ -321,7 +321,7 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
                 else:
                     op["expect_up_next"] = rk
 
-    # A copied-but-unedited template fails LOUDLY here rather than as a 404 from plex.tv or as a
+    # A copied-but-unedited template fails LOUDLY here rather than as a 404 from the server or as a
     # case that never plays: every value in the example is bracketed, and none is ever legitimate.
     # `items.*` is deliberately NOT in this list any more: a bracketed ratingKey is the honest
     # answer of somebody whose library has nothing of that shape, and it now skips the cases that
@@ -370,11 +370,11 @@ def read_token():
     return m.group(1)
 
 
-CID = "butaca-test-harness"  # stable X-Plex-Client-Identifier for the plex.tv calls below
+CID = "butaca-test-harness"  # stable X-Plex-Client-Identifier for the account calls below
 
 
 def _pms_machine_id(host, port, admin_token):
-    """The server's machineIdentifier (needed to look up its shared_servers on plex.tv)."""
+    """The server's machineIdentifier (needed to look up its shared_servers remotely)."""
     url = f"http://{host}:{port}/?X-Plex-Token={admin_token}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -382,7 +382,7 @@ def _pms_machine_id(host, port, admin_token):
 
 
 def fetch_managed_user_token(admin_token, host, port, user_id):
-    """Resolve a Plex Home managed user's PER-SERVER access token from the owner's
+    """Resolve a household-roster managed user's PER-SERVER access token from the owner's
     shared_servers list (keyed by userID), so test playback runs as that user and its watch
     history never touches the owner's real account. Uses only the admin token already on hand --
     no new secret is stored. Returns the token string (never printed) or exits on failure."""
@@ -411,12 +411,12 @@ def fetch_managed_user_token(admin_token, host, port, user_id):
 # needs two credentials, which one butaca-token file cannot carry -- that is what
 # butaca-servers (app: dev::servers) exists for.
 #
-# The overlay NAMES the server; it never holds its token. plex.tv's resource list is keyed by the
+# The overlay NAMES the server; it never holds its token. The account service's list is keyed by the
 # owner's account token, which the harness already reads from src/config.local.h for everything
 # else, and each entry carries that account's accessToken for that server. Same bargain as
 # fetch_managed_user_token: one secret in one gitignored place, everything else derived at runtime.
 def _plextv_resources(admin_token):
-    """Every server this account can reach — owned AND shared with it — from plex.tv."""
+    """Every server this account can reach — owned AND shared with it — from the account service."""
     url = "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1&includeIPv6=1"
     req = urllib.request.Request(url, headers={
         "Accept": "application/json",
@@ -436,7 +436,7 @@ def _is_ipv4(addr):
 
 
 def pick_connection(hit):
-    """Best (address, port, how) plex.tv offers for this server, or None.
+    """Best (address, port, how) the account service offers for this server, or None.
 
     `local` does NOT mean "on the TV's network" for a server someone SHARED with you -- it means
     on the OWNER's. A real shared server in this account advertises `10.9.9.5:32400 local=true`
@@ -470,7 +470,8 @@ def pick_connection(hit):
 
 def stored_primary_machine_id(tv):
     """The `machine_id` of the install's stored primary, read off its session file on the set —
-    so the IPv6 re-point names THAT server and not merely the first owned one plex.tv lists."""
+    so the IPv6 re-point names THAT server and not merely the first owned one the account
+    service lists."""
     r = ssh(tv, f"cat /media/developer/{APPID}-auth.json 2>/dev/null || cat /media/internal/.{APPID}-auth.json")
     try:
         return json.loads(r.stdout).get("server", {}).get("machine_id", "")
@@ -481,8 +482,8 @@ def stored_primary_machine_id(tv):
 def primary_ipv6_server(admin_token, machine_id=""):
     """The owned server's LOCAL IPv6 connection as a butaca-servers entry — same machine id as
     the stored primary (so the registry re-points slot 0 rather than adding a source), the
-    `plex.direct` uri as the https host, and the advertised address as the `pin` the app dials it
-    at with no resolver. Refuses with the reason when plex.tv advertises no such connection: an
+    pinned uri as the https host, and the advertised address as the `pin` the app dials it
+    at with no resolver. Refuses with the reason when the account service advertises no such connection: an
     IPv6 case that quietly ran over v4 would grade nothing about v6."""
     owned = [r for r in _server_resources(_plextv_resources(admin_token)) if r.get("owned")]
     if machine_id:
@@ -497,23 +498,24 @@ def primary_ipv6_server(admin_token, machine_id=""):
             return {"name": hit.get("name") or "", "machine_id": hit["clientIdentifier"],
                     "host": host, "port": int(c.get("port") or 32400), "scheme": "https",
                     "tier": "local", "token": hit.get("accessToken") or admin_token, "pin": addr}
-    sys.exit("primary_ipv6: plex.tv advertises no local IPv6 plex.direct connection for an owned "
+    sys.exit("primary_ipv6: the account service advertises no local IPv6 pinned connection for an owned "
              "server (is the server's host on a v6 LAN, and does PMS see it?)")
 
 
 def resolve_shared_server(admin_token, spec):
     """Turn the overlay's `shared_server` block into the credentials the TV needs.
 
-    Returns {name, machine_id, host, port, token}; the token is resolved from plex.tv and is NEVER
+    Returns {name, machine_id, host, port, token}; the token is resolved remotely and is NEVER
     printed. Exits, naming what it could not resolve, on anything unresolvable -- an unreachable
-    plex.tv, a server no longer shared with this account, or a server with no address the TV could
+    the account service, a server no longer shared with this account, or a server with no
+    address the TV could
     use. A silent fallback here would run the case against ONE server and pass it.
     """
     want_mid, want_name = spec.get("machine_id"), spec.get("name")
     try:
         res = _server_resources(_plextv_resources(admin_token))
     except Exception as e:
-        sys.exit(f"cannot resolve the second server: plex.tv /resources failed ({e})\n"
+        sys.exit(f"cannot resolve the second server: the account service's /resources failed ({e})\n"
                  f"  (this call needs internet; the rest of the harness is LAN-only)")
 
     def matches(r):
@@ -529,7 +531,7 @@ def resolve_shared_server(admin_token, spec):
         # it is still pasteable, so it says so.
         known = "\n".join(f"    {r.get('name')!r}  machine_id={r.get('clientIdentifier')}  "
                           f"{'owned' if r.get('owned') else 'shared with you'}" for r in res)
-        sys.exit(f"shared_server {want_mid or want_name!r} is not in this account's plex.tv "
+        sys.exit(f"shared_server {want_mid or want_name!r} is not in this account's "
                  f"resources (is it still shared with you?). Servers this account can reach:\n"
                  f"{known or '    (none)'}\n"
                  f"  (a 'shared with you' row names somebody else's machine — copy what you need "
@@ -537,14 +539,14 @@ def resolve_shared_server(admin_token, spec):
 
     token = hit.get("accessToken")
     if not token:
-        sys.exit(f"shared_server {hit.get('name')!r} has no accessToken on plex.tv — the share was "
+        sys.exit(f"shared_server {hit.get('name')!r} has no accessToken — the share was "
                  f"probably revoked; re-accept it, or drop the block from {MANIFEST_LOCAL}")
 
     host, port = spec.get("host"), spec.get("port")
     if not host:
         best = pick_connection(hit)
         if best is None:
-            sys.exit(f"shared_server {hit.get('name')!r} advertises no connection at all on plex.tv."
+            sys.exit(f"shared_server {hit.get('name')!r} advertises no connection at all."
                      f"\n  Set `shared_server.host` (and `port`) in {MANIFEST_LOCAL} to an address "
                      f"the TV can route to.")
         host, port, how = best
@@ -552,14 +554,14 @@ def resolve_shared_server(admin_token, spec):
         # TLS), so anything but a LAN address may resolve, be picked, and still be unreachable from
         # the TV — which would read as "the second server's credentials did not work".
         if how.split(",")[0] != "LAN":
-            print(f"    NOTE: plex.tv offers no LAN address for {hit.get('name')!r} — using "
+            print(f"    NOTE: the account service offers no LAN address for {hit.get('name')!r} — using "
                   f"{host}:{port} ({how}). The TV's transport is plain HTTP to a numeric IP; set "
                   f"`shared_server.host`/`port` in {os.path.basename(MANIFEST_LOCAL)} if it cannot "
                   f"reach that.")
     return {
         "name": spec.get("name") or hit.get("name") or "shared",
         "machine_id": hit.get("clientIdentifier") or want_mid or "",
-        # The OWNER's plex.tv handle, straight off the resource. It is what every browsing surface
+        # The OWNER's account handle, straight off the resource. It is what every browsing surface
         # says out loud (the Sources list, the Library chip), and it is also what tells the app this
         # is somebody else's server at all: empty means owned. Public, unlike the token below.
         "handle": hit.get("sourceTitle") or "",
@@ -1205,12 +1207,12 @@ RE_SMP_SOURCE_INFO = re.compile(r"smp_cb type=4 num=-?\d+ str=(\{.*\})")
 # readiness fact available and exactly what the badly interleaved first fixture never reached.
 RE_AUDIO_FEED = re.compile(r"\bfeed a#(\d+)\s+sz=(\d+)\s+fed=(-?\d+)\s+reply=(.)\s+qbytes=(\d+)")
 RE_VIDEO_FEED = re.compile(r"\bfeed v#(\d+)\s+sz=(\d+)\s+fed=(-?\d+)\s+reply=(.)\s+qbytes=(\d+)")
-# the media URL carries the secret X-Plex-Token; strip it from anything we print/log.
+# the media URL carries the secret access token; strip it from anything we print/log.
 RE_TOKEN = re.compile(r"(X-Plex-Token=)[^&\s]+")
 
 
 def redact(s):
-    """Never let the PMS token reach stdout: replace any X-Plex-Token=<v> with <token>."""
+    """Never let the PMS token reach stdout: replace any token argument's value with <token>."""
     return RE_TOKEN.sub(r"\1<token>", s)
 
 
@@ -1243,7 +1245,7 @@ def server_ref(machine_id):
 def describe_server(s):
     """One RESOLVED server, for stdout. Redacted iff it is somebody else's (see above).
 
-    `handle` is the owner's plex.tv handle (`sourceTitle`), and empty means owned -- the same field,
+    `handle` is the owner's account handle (`sourceTitle`), and empty means owned -- the same field,
     with the same meaning, that `DevServer::describe` branches on.
     """
     if s.get("handle"):
@@ -1365,13 +1367,13 @@ def a_no_error(lines):
 
 
 def a_resolve_pin(lines, want="any"):
-    """The registry dialled the primary's `plex.direct` name at the address plex.tv advertised
+    """The registry dialled the primary's pinned name at the address the account service advertised
     beside it, with no resolver: `plex: server slot N registered at … (pinned: v4 name resolved
     locally)`. The line is written once per pin, when it is NEW, so it is the boot's own statement
     that offline mode had something to stand on. Its absence means the stored session's address
     does not match its name (or the file predates the field) — DNS as before, which is exactly
     what an offline case must not pass on. The line names the FAMILY and nothing else: the
-    app's scrubber rewrites every host to `<host>`, and a dashed `plex.direct` label is a LAN
+    app's scrubber rewrites every host to `<host>`, and a dashed pinned label is a LAN
     address spelled sideways, so neither the name nor the address is ever in a log.
 
     `want` narrows the family: `"v6"` demands a v6 pin (the `primary_ipv6` case would otherwise
@@ -1415,22 +1417,22 @@ def primary_slot(lines):
 
 def a_offline_roster(lines):
     """Three halves of "the internet was really down and it did not matter": the boot's roster
-    refresh reached for plex.tv and was refused (the negative control — a cut that did not cut
+    refresh reached for the account service and was refused (the negative control — a cut that did not cut
     would refresh silently); the PRIMARY's source landed its hubs (`hubs: source N ok`, the
     positive half, N being the slot the play was dispatched on); and that same source never
     FAILED a hub fetch, which is what a DNS-dependent origin does within seconds of the refusal."""
     # The SERVER roster refresh runs only for the owner's profile; with a managed profile
     # active it is skipped, and the negative control is then the picker's HOME-USER refresh
-    # failing, or a pick seated from the cache — which only happens when plex.tv did not answer.
-    # …and when the boot makes NO plex.tv call at all (a managed profile active, picker
+    # failing, or a pick seated from the cache — which only happens when the account service did not answer.
+    # …and when the boot makes NO account-service call at all (a managed profile active, picker
     # suppressed), the tool's own probe from the set is the control — `tv_wan` records it.
     roster = (find(lines, "plex.tv unreachable, keeping the stored roster")
               or find(lines, "roster refresh failed — keeping cached roster")
               or find(lines, "-> ok (offline, cached credentials)"))
     if roster is None and _WAN_CUT_VERIFIED:
-        roster = "(the app made no plex.tv call this boot; the cut was verified from the set: resolve plex.tv -> FAIL)"
+        roster = "(the app made no account-service call this boot; the cut was verified from the set: resolve plex.tv -> FAIL)"
     if roster is None:
-        return False, "no `plex.tv unreachable` / `roster refresh failed` / offline-seat line, and the tool did not verify the cut: plex.tv was reachable"
+        return False, "no `plex.tv unreachable` / `roster refresh failed` / offline-seat line, and the tool did not verify the cut: the account service was reachable"
     slot = primary_slot(lines)
     if slot is None:
         return False, "no `butaca-play: … server=N start` line: which slot was the primary?"
@@ -1445,7 +1447,7 @@ def a_offline_roster(lines):
 
 def a_offline_pick(lines):
     """The who's-watching pick was seated from this television's cached credentials — the line
-    `auth::seat_offline` writes — and not through plex.tv, which the `offline` assertion beside
+    `auth::seat_offline` writes — and not through the account service, which the `offline` assertion beside
     this proves was unreachable. A `-> failed` on the same profile is the 2026-09-06 outage."""
     ok = find(lines, "-> ok (offline, cached credentials)")
     if ok is not None:
@@ -4420,7 +4422,7 @@ def report_case(passed, results, elapsed, run_secs, stopped_early, settled, verb
     This was copied from `run_case` into the synthetic runner and the copy dropped the
     redaction — harmless for a tier that injects no token, but the point of having ONE printer
     is that the property cannot be lost by a copy. The evidence strings are arbitrary log lines
-    and opened URLs; `redact()` is a no-op on anything that carries no `X-Plex-Token=`.
+    and opened URLs; `redact()` is a no-op on anything that carries no token argument.
     """
     for label, ok, evidence in results:
         mark = "PASS" if ok else "FAIL"
@@ -4452,7 +4454,7 @@ def prime_online(case, cfg, files):
     if tiles is True:
         tiles = [int((case.get("triggers") or {}).get("pickuser", 0))]
     def seated(_case, lines):
-        # Either road seats the profile online: the plex.tv switch, or the same-user shortcut
+        # Either road seats the profile online: the account-service switch, or the same-user shortcut
         # when the tile was already the active profile (which also writes the record).
         ok = (find(lines, "-> ok (per-user server token)") is not None
               or find(lines, "already active — no switch needed") is not None)
@@ -4529,7 +4531,7 @@ def run_case(case, cfg, token, verbose, cond=None):
     files = triggers_for_case(case)
     # `session: stored` — boot from the install's own signed-in session instead of the injected
     # identity. The injected token installs the compiled PMS_HOST as a PLAINTEXT origin, which
-    # never touches the `plex.direct` name a real sign-in persists, so an offline case graded
+    # never touches the pinned name a real sign-in persists, so an offline case graded
     # through it would be a false pass by construction. The install must therefore hold a sign-in
     # already (refused with the reason otherwise), and that sign-in's profile is who plays — the
     # one case family where the owner's history can move.
@@ -4544,10 +4546,10 @@ def run_case(case, cfg, token, verbose, cond=None):
     # value never on stdout, cleared by the glob wipe above and again by teardown().
     srv_json = shared_servers_json(cfg, case)
     if case.get("primary_ipv6"):
-        # The same server re-registered at its IPv6 `plex.direct` origin with its pin: the
+        # The same server re-registered at its IPv6 pinned origin with its pin: the
         # registry keys on machineIdentifier, so this RE-POINTS slot 0 rather than adding a
-        # source, and the case plays over v6 with no resolver. Built from plex.tv's own answer.
-        # The OWNER's token: plex.tv answers about the identity that asks, and a managed test
+        # source, and the case plays over v6 with no resolver. Built from the account service's own answer.
+        # The OWNER's token: the account service answers about the identity that asks, and a managed test
         # user gets a 401 from `/api/v2/resources`. The stored session plays as the owner anyway.
         srv_json = json.dumps([primary_ipv6_server(read_token(), stored_primary_machine_id(tv))],
                               separators=(",", ":"))
@@ -4561,7 +4563,7 @@ def run_case(case, cfg, token, verbose, cond=None):
     elif stored:
         print(f"    session: the install's own stored sign-in (no token injected)")
     if case.get("primary_ipv6"):
-        print("    butaca-servers: <the primary's IPv6 plex.direct origin + pin, token redacted>")
+        print("    butaca-servers: <the primary's IPv6 pinned origin + pin, token redacted>")
     if srv_json and not case.get("primary_ipv6"):
         # said the way the APP says it (`describe_server`): a share is a `ref=` tag and nothing
         # else. The token was never printed here and still is not.
@@ -4607,9 +4609,9 @@ def run_case(case, cfg, token, verbose, cond=None):
 
 
 # ---------------------------------------------------------------------------
-# The PIPELINE tier — the player, with no Plex behind it at all.
+# The PIPELINE tier — the player, with no server behind it at all.
 #
-# The 21 cases above drive `butaca-play=<ratingKey>`, i.e. the whole chain: plex.tv auth, the
+# The 21 cases above drive `butaca-play=<ratingKey>`, i.e. the whole chain: account-service auth, the
 # PMS `/decision`, library metadata, the PlayQueue, markers, resume, the timeline reporter. That
 # is the right shape for what they grade — SELECTION — and it is also why they need somebody's
 # library and cannot run for anyone else.
@@ -4956,7 +4958,7 @@ def run_pipeline_suite(cases, cfg, srv, url_base, verbose, skipped=()):
         summary.append((c["name"], passed, [l for l, ok, _ in results if not ok]))
 
     print("\n" + "=" * 72)
-    print("SUMMARY  (pipeline tier — no Plex)")
+    print("SUMMARY  (pipeline tier - no server)")
     print("=" * 72)
     npass = nfail = 0
     for nm, passed, fails in summary:
@@ -5747,7 +5749,7 @@ def run_fps_scene(scene, cfg, token, *, extra_triggers=(), capture=None,
 def fps_for_tiers(scenes, include_player, name_filter=None):
     """The scenes this run will actually execute. One definition, because main() has to know it too
     — it decides from the SELECTED scenes whether a second server is needed, and resolving one for a
-    player-tier scene that `--fps` was never going to run is a plex.tv round-trip for nothing."""
+    player-tier scene that `--fps` was never going to run is an account-service round-trip for nothing."""
     tiers = {"ui"} | ({"player"} if include_player else set())
     return [s for s in scenes
             if s.get("tier", "ui") in tiers
@@ -5933,7 +5935,7 @@ def run_graphics_profile(scene, cfg, token, phase, output=None):
 # field drifts the moment someone adds a case; `operations` cannot):
 #   codec — operations is just [play]. Asserts the DECISION (direct-play vs remux vs transcode)
 #           and the Load payload's codecs. Never drives the transport, so it cannot see a seek,
-#           teardown or threading regression. Run it when route.rs or plex/ changes.
+#           teardown or threading regression. Run it when route.rs or the server module changes.
 #   logic — also seeks / resumes / switches audio / renders subtitles: the engine, pump and
 #           demuxer. Spans the codec matrix on its own (movie_h264_ac3_1080p = H264 direct-play,
 #           episode_hevc_4k_hdr10_eac3 + movie_hevc_4k_pgs_subs = 4K HEVC, movie_av1_no_dp_audio
@@ -5950,7 +5952,7 @@ def setup_shared(manifest, cfg, args, entries, what):
     """Resolve the second server if this run needs it. Returns (entries_to_run, skipped_names).
 
     Three states, and they are deliberately different:
-      * nothing wants a second server  -> no plex.tv call at all (the common case stays LAN-only);
+      * nothing wants a second server  -> no account-service call at all (the common case stays LAN-only);
       * something wants one and the overlay describes it -> resolve now, loudly, before the TV is
         touched, so a revoked share fails as itself instead of as an empty screen mid-suite;
       * something wants one and the overlay has no `shared_server` -> SKIP those entries with the
@@ -5965,7 +5967,7 @@ def setup_shared(manifest, cfg, args, entries, what):
     spec = manifest.get("shared_server")
     if not spec:
         msg = (f"no `shared_server` block in {MANIFEST_LOCAL} — see manifest.local.json.example "
-               f"(it names a server shared with your account; the token is resolved from plex.tv)")
+               f"(it names a server shared with your account; the token is resolved remotely)")
         if args.shared_server:
             sys.exit(f"--shared-server: {msg}")
         print(f"NOTE: {msg}\n      skipping {len(named)} {what}(s) that need a second server: "
@@ -5975,7 +5977,7 @@ def setup_shared(manifest, cfg, args, entries, what):
     # The header line of the whole run, and the one most likely to be pasted somewhere. `handle`
     # decides: a share is a `ref=` tag (`describe_server`), your own second machine is unchanged.
     print(f"second server: {describe_server(cfg['shared_server'])} "
-          f"— access token resolved from plex.tv, never printed")
+          f"— access token resolved remotely, never printed")
     return entries, []
 
 
@@ -5990,7 +5992,7 @@ def main():
         sys.stderr.reconfigure(line_buffering=True)
     except AttributeError:  # pragma: no cover — pre-3.7
         pass
-    ap = argparse.ArgumentParser(description="webOS Plex player on-device regression harness")
+    ap = argparse.ArgumentParser(description="webOS media client on-device regression harness")
     ap.add_argument("--build", action="store_true", help="cargo + make + make deploy before running")
     ap.add_argument("--filter", "--only", dest="filter", default=None,
                     help="run only cases or FPS scenes whose name contains this substring")
@@ -6027,11 +6029,11 @@ def main():
                     help="run as the config.local.h OWNER token (default: run as the overlay's "
                          "test_user, so watch history stays off your real account)")
     ap.add_argument("--print-test-token", action="store_true",
-                    help="resolve manifest.local.json's test_user to its per-server Plex token, "
+                    help="resolve manifest.local.json's test_user to its per-server access token, "
                          "print it to stdout and exit -- no cases, no television, no TV lock. "
                          "This is the identity-resolution half of the --owner/test_user split "
                          "above, exposed standalone so tools/tv-session.sh's `up --guest` can "
-                         "reuse it instead of re-deriving the plex.tv shared_servers call: a "
+                         "reuse it instead of re-deriving the shared_servers call: a "
                          "guest boot must resolve the REAL managed-user token or refuse, never "
                          "fall through to the owner's (see the 2026-09-10 postmortem in that "
                          "script's header — a silent fallback wrote real progress into the "
@@ -6056,7 +6058,7 @@ def main():
     # inversion says, and because naming the default explicitly is never wrong.
     ap.add_argument("--server", "--integration", dest="server", action="store_true",
                     help="run the SERVER tier instead of the default synthetic one: the 21 "
-                         "library-backed cases driven through the whole Plex chain (plex.tv auth, "
+                         "library-backed cases driven through the whole server chain (account-service auth, "
                          "/decision, direct-play vs transcode, markers, resume, timeline). Needs a "
                          "PMS, a token and a filled-in manifest.local.json")
     ap.add_argument("--pipeline", action="store_true",
@@ -6209,7 +6211,7 @@ def main():
             mark += f"  [SKIP: {s['skip']}]" if s.get("skip") else ""
             print(f"fps:{s['name']:28s} tier={s.get('tier','ui'):6s} {tag:16s} {gates}{mark}")
         print(f"\ninstall: {APPID} [{FLAVOUR}] — runtime root {RUNDIR}")
-        # Offline, so this reports what the OVERLAY says — nothing is resolved and plex.tv is not
+        # Offline, so this reports what the OVERLAY says — nothing is resolved and the account service is not
         # called. It is still the answer to "will the [+2nd server] entries above actually run".
         # `describe_spec` rather than `describe_server` for exactly that reason: with no resolved
         # `sourceTitle` there is no way to tell a share from your own second machine here, and the
@@ -6217,13 +6219,13 @@ def main():
         ss = manifest.get("shared_server")
         if ss:
             print(f"\nsecond server: {describe_spec(ss)} — configured; its access token "
-                  f"is resolved from plex.tv at run time")
+                  f"is resolved at run time")
         else:
             print(f"\nsecond server: not configured in {os.path.basename(MANIFEST_LOCAL)} — any "
                   f"[+2nd server] entry above is SKIPPED (and --shared-server exits)")
         return 0
 
-    # PIPELINE tier — the player with no Plex behind it. Placed here, after --list and before
+    # PIPELINE tier — the player with no server behind it. Placed here, after --list and before
     # everything that reads a token, because none of what follows applies: no identity to resolve,
     # no second server, no ratingKey to reset.
     if not server_tier:

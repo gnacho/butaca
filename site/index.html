@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Butaca is an independent, native Plex client for LG webOS TVs (4.0+): a fast, fluid interface for your Plex Media Server. Open source, no root required."
+      content="Butaca is an independent, native Jellyfin client for LG webOS TVs (4.0+): a fast, fluid interface for your own Jellyfin server. Open source, no root required."
     />
     <meta name="robots" content="index,follow,max-image-preview:large" />
-    <title>Butaca — Native Plex Client for LG webOS TVs</title>
+    <title>Butaca — Native Jellyfin Client for LG webOS TVs</title>
     <link rel="canonical" href="https://gnacho.github.io/butaca/" />
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png" />
@@ -20,25 +20,25 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Butaca" />
     <meta property="og:url" content="https://gnacho.github.io/butaca/" />
-    <meta property="og:title" content="Butaca — Native Plex Client for LG webOS TVs" />
+    <meta property="og:title" content="Butaca — Native Jellyfin Client for LG webOS TVs" />
     <meta
       property="og:description"
-      content="Butaca is an independent, native Plex client for LG webOS TVs (4.0+): a fast, fluid interface for your Plex Media Server. Open source, no root required."
+      content="Butaca is an independent, native Jellyfin client for LG webOS TVs (4.0+): a fast, fluid interface for your own Jellyfin server. Open source, no root required."
     />
     <meta property="og:image" content="https://gnacho.github.io/butaca/media/og-card.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Butaca home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
+    <meta property="og:image:alt" content="Butaca home screen on an LG TV, next to the headline: Jellyfin that feels fast on LG TVs." />
     <meta property="og:locale" content="en_US" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Butaca — Native Plex Client for LG webOS TVs" />
+    <meta name="twitter:title" content="Butaca — Native Jellyfin Client for LG webOS TVs" />
     <meta
       name="twitter:description"
-      content="Butaca is an independent, native Plex client for LG webOS TVs (4.0+): a fast, fluid interface for your Plex Media Server. Open source, no root required."
+      content="Butaca is an independent, native Jellyfin client for LG webOS TVs (4.0+): a fast, fluid interface for your own Jellyfin server. Open source, no root required."
     />
     <meta name="twitter:image" content="https://gnacho.github.io/butaca/media/og-card.jpg" />
-    <meta name="twitter:image:alt" content="Butaca home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
+    <meta name="twitter:image:alt" content="Butaca home screen on an LG TV, next to the headline: Jellyfin that feels fast on LG TVs." />
     <link rel="stylesheet" href="styles.css" />
     <!-- The one custom font the app UI mirrors on the site (see @font-face in styles.css);
          preloading the regular weight avoids a flash of fallback text on first paint. -->
@@ -54,7 +54,7 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Butaca",
-        "description": "Butaca is an independent, native Plex client for LG webOS TVs (4.0+): a fast, fluid interface for your Plex Media Server. Open source, no root required.",
+        "description": "Butaca is an independent, native Jellyfin client for LG webOS TVs (4.0+): a fast, fluid interface for your own Jellyfin server. Open source, no root required.",
         "operatingSystem": "LG webOS 4.0 or later",
         "applicationCategory": "MultimediaApplication",
         "offers": {
@@ -159,13 +159,13 @@
 
         <section class="hero" id="top" aria-labelledby="hero-title">
           <h1 id="hero-title">
-            <span class="hero-kicker" data-intro>Native Plex client for LG webOS TVs</span>
-            <span class="hero-line hero-line--lead" data-intro>Your Plex library.</span>
+            <span class="hero-kicker" data-intro>Native Jellyfin client for LG webOS TVs</span>
+            <span class="hero-line hero-line--lead" data-intro>Your Jellyfin library.</span>
             <span class="hero-line hero-line--sub" data-intro><span class="hero-shine">A pleasure to explore.</span></span>
           </h1>
           <div class="hero-copy">
             <p class="hero-lede" data-intro>
-              Butaca is an independent client for Plex Media Server. Explore your library through
+              Butaca is an independent client for Jellyfin. Explore your library through
               a fast, fluid interface designed for LG webOS TVs.
             </p>
             <div class="hero-actions" data-intro>
@@ -236,7 +236,7 @@
         <section class="why-section" id="why" aria-labelledby="why-title">
           <h2 id="why-title" data-reveal>Why I built Butaca</h2>
           <p class="why-lead" data-words>
-            Browsing my Plex library on my 2019 LG TV felt slower than it needed to, even though the picture still looked great.
+            Browsing my library on my 2019 LG TV felt slower than it needed to, even though the picture still looked great.
           </p>
           <p class="why-copy" data-reveal>
             I wanted an interface that felt quick under the remote and enjoyable to spend time in. Butaca grew from that idea.
@@ -329,7 +329,7 @@
           <div class="built-card built-card--offline" data-reveal="card" data-spot>
             <h3 class="built-title">No internet? Keep watching.</h3>
             <p>
-              After the initial online sign-in, Butaca connects directly to your local Plex server, so your
+              After the initial online sign-in, Butaca connects directly to your local Jellyfin server, so your
               library stays available over your home network, even when the internet is down.
             </p>
           </div>
@@ -430,15 +430,15 @@
               <p>Built for webOS 4.0 and newer. Compatibility can vary by TV model.</p>
             </div>
             <div data-reveal>
-              <h3>Plex</h3>
+              <h3>Jellyfin</h3>
               <p>
-                Requires a Plex account and Plex Media Server. Internet access is needed for initial
+                Requires a Jellyfin server and an account on it. Internet access is needed for initial
                 sign-in; local playback works without it.
               </p>
             </div>
             <div data-reveal>
               <h3>Playback</h3>
-              <p>Butaca uses the codecs available on your television and falls back to Plex transcoding when needed.</p>
+              <p>Butaca uses the codecs available on your television and falls back to the server's transcoding when needed.</p>
             </div>
             <div data-reveal>
               <h3>Privacy</h3>
@@ -451,8 +451,8 @@
           <div class="footer-grid">
             <div class="footer-about">
               <p class="footer-disclaimer">
-                Butaca is an independent, unofficial client for Plex Media Server. It is not affiliated with or
-                endorsed by Plex GmbH or LG Electronics.
+                Butaca is an independent, unofficial client for Jellyfin. It is not affiliated with or
+                endorsed by the Jellyfin project or LG Electronics.
               </p>
               <p class="footer-credit">
                 Demo artwork: open movies by Blender Studio and others, CC&nbsp;BY &mdash;

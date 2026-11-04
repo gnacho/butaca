@@ -1,6 +1,6 @@
 # The ABR path against a REAL PMS — the tier every other measurement here lacked
 
-**Device + real Plex Media Server, 2026-08-28. `./tests/run.py --server`: 27 passed, 0 failed.**
+**Device + real media server, 2026-08-28. `./tests/run.py --server`: 27 passed, 0 failed.**
 
 Every other ABR measurement in this repository — including all of this session's — was taken
 against `tests/serve_fixtures.py`, a static file server. The board's meta-finding lists that as a

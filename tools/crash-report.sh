@@ -262,8 +262,8 @@ else
       # address addr2line wants; the mapping base is 0x10000 and subtracting it shifts every
       # lookup by 64 KiB into an unrelated function. Measured: the real faulting PC 0x18df2c
       # resolves to `dev::crash_on_purpose` — the function that crashed — while `pc - base`
-      # resolves to `plex::serverinfo::version`. That is the failure this tool warns about twice
-      # in its own comments: not an error, a confident wrong answer.
+      # resolves to a function in the retired client's server-info module. That is the failure
+      # this tool warns about twice in its own comments: not an error, a confident wrong answer.
       #
       # The subtraction is kept for the ET_DYN case rather than deleted, because it becomes right
       # the day this binary is built as a PIE — and then a hardcoded "use the absolute address"

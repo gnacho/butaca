@@ -18,7 +18,7 @@ unknown: cancelling the LS2 wait cannot promise that the root command stopped.
 Success requires the exact result marker and a fresh readability check from this app's jail.
 Close Butaca completely and reopen it before playing. The cached preflight is deliberately
 not cleared by success. The repair does not root a TV, install a service, download a file, or
-send Plex credentials to Homebrew Channel.
+send server credentials to Homebrew Channel.
 
 Source evidence: v0.6.6 (`48866094e73493eb57a045723cdb6e195d9f4361`),
 #74, and

@@ -16,7 +16,7 @@ The source limitations for specialist terms are recorded below.
 | Catalog key | Change and reason | Evidence |
 | --- | --- | --- |
 | `settings.consent.share_reports`, `settings.consent.share_analytics` | Use **Дасылаць** for both affirmative actions and **Не дасылаць** for the negative action, following the language review supplied on September 28. Each visible question already names the reports or analytics, so the actions need not repeat that object. | Skarnik confirms [дасылаць](https://www.skarnik.by/belrus/26647). The verb preference and contextual shortening are editorial choices; the former **адпраўляць** was not a dictionary error. |
-| `browse.detail.direct_stream` | Use **Прамы паток**, matching `widgets.playback.direct_stream` for the same Plex playback mode. The former **Прамая трансляцыя** could suggest a live broadcast. | [поток → паток](https://www.skarnik.by/rusbel/69587); distinguishing this Plex mode from broadcasting is an application-context judgment. |
+| `browse.detail.direct_stream` | Use **Прамы паток**, matching `widgets.playback.direct_stream` for the same playback mode. The former **Прамая трансляцыя** could suggest a live broadcast. | [поток → паток](https://www.skarnik.by/rusbel/69587); distinguishing direct play from broadcasting is an application-context judgment. |
 | `settings.legal.privacy.local_body` | Remove the comma before the final **і** in the list of locally stored settings. | Sentence-level punctuation correction; not a dictionary claim. |
 | `settings.legal.trademarks.body`, `settings.about.body` | Give the creation/endorsement verbs their own explicit subject, the named companies, and put non-affiliation in a separate sentence. The former coordination attached **з** to predicates that need different complements. The same correction is applied in both repeated passages. | [создать → стварыць](https://www.skarnik.by/rusbel/88806), [одобрить → ухваліць](https://www.skarnik.by/rusbel/52410); the sentence construction is an editorial grammar correction. |
 
@@ -88,11 +88,11 @@ verification are separate from this language review.
 
 ## Follow-up corrections — 2026-09-28
 
-User review identified English `Plex Media Servers` inside Belarusian sentences,
+User review identified the English product name inside Belarusian sentences,
 which the initial pass had missed. Five deletion/privacy entries now use the
-existing interface term **сервер Plex** with Belarusian case agreement, including
-**на вашы серверы Plex** and **з абранымі вамі серверамі Plex**. The exact product
-name **Plex Media Server** remains in the trademark notice. These are contextual
+existing interface term for "server" with Belarusian case agreement, including
+**на вашы серверы** and **з абранымі вамі серверамі**. The exact product
+name no longer appears there, because the trademark notice stopped naming the vendor in #208. These are contextual
 localization corrections, not additional dictionary findings.
 
 The contribution action now uses the user-requested **Дапамажыце з перакладам**,

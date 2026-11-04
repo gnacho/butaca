@@ -591,7 +591,7 @@ rung is chosen, because the master playlist is fetched only after `control.prime
 encoder session (`ff.rs:3466`). §8 posed the remedy as a choice — "memoise per rung, or probe
 `/decision` per candidate" — and both are worse than the answer.
 
-**The parameter the app sends is `maxVideoBitrate` (`plex/transcoder.rs:268`), which is a CAP.** A
+**The parameter the app sends is `maxVideoBitrate` (the retired `transcoder.rs:268`), which is a CAP.** A
 server cannot answer a rate-capped request with a higher declared rate and still be answering it,
 so
 

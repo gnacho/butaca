@@ -34,7 +34,7 @@ that half, and this document makes no claim about it.
 film differ by 4.3x in median segment rate (below), so no single window characterises an item.
 
 **One server, one client profile.** The probe sends the same HLS transcode target the app does,
-byte for byte (`plex/transcoder.rs:182-183`). It does **not** send the app's three
+byte for byte (the retired `transcoder.rs:182-183`). It does **not** send the app's three
 `add-limitation` clauses or its direct-play profile. For a transcode decision at 1920x1080 and
 below those should not bind, but "should not" is an argument, not a measurement.
 

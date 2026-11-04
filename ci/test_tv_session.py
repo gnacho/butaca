@@ -296,14 +296,14 @@ class EnsureBinary(unittest.TestCase):
 class GuestIdentity(unittest.TestCase):
     """Regression for the 2026-09-10 TV session 5 defect: `up --guest` printed a warning and
     then silently pushed the OWNER's token anyway, so a real playback wrote progress into the
-    household Plex account (clearing it needed /:/unscrobble, which also reset that item's
+    household account (clearing it needed /:/unscrobble, which also reset that item's
     viewCount -- real data loss, not a test artifact).
 
     `resolve_identity` is the single place that decision is made now, and it is host-only and
     pure enough to unit-test directly: it never calls ssh/tv, and its one subprocess
     (`tests/run.py --print-test-token`, tv-session.sh's re-use of run.py's own managed-user
     resolution) is replaced here with a fake `python3` on PATH so these cases never touch
-    plex.tv, src/config.local.h or a television.
+    the account service, src/config.local.h or a television.
     """
 
     def _run(self, script_body, *, guest_ok):

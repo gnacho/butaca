@@ -157,12 +157,12 @@ test loop, and says which hardware is most useful to hear about. Security issues
 
 [GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik and contributors.
 
-The playback engine underneath comes from the earlier native webOS Plex client written by Gleb
-Linnik, and this project continues that code; everything above the engine, from the Jellyfin side
-to the interface as it is now, is built here. The GPL notices and copyright holders are kept as the
-licence requires. The Plex wire layer is still in the tree while the migration finishes: the crate compiles with the
-`jellyfin` feature off, but the Plex account flows are gone, and every package published from this
-repository is built with it on.
+The playback engine underneath comes from the earlier native webOS client for the retired wire,
+written by Gleb Linnik, and this project continues that code; everything above the engine, from
+the Jellyfin side to the interface as it is now, is built here. The GPL notices and copyright
+holders are kept as the licence requires. The retired account flows are gone, and there is no
+`jellyfin` cargo feature to toggle any more: the Jellyfin wiring is what every package published
+from this repository is built from.
 
 The Butaca name and its brand artwork are not covered by that licence, see
 [`TRADEMARKS.md`](TRADEMARKS.md), which also carries the non-affiliation statements for Jellyfin,

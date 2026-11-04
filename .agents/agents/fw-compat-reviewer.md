@@ -54,7 +54,7 @@ In scope if the diff touches any of:
 | `ci/expected-dt-needed.txt` | somebody is *recording* drift; the question is whether it is safe drift |
 | `ci/build-ffmpeg.sh`, `ci/check-elf.sh`, the CI compat steps | they define what "supported" means |
 
-Out of scope and worth saying so in one line rather than reviewing anyway: UI, the Plex data
+Out of scope and worth saying so in one line rather than reviewing anyway: UI, the server data
 layer, the test harness, docs. If the diff is only those, return "not in scope" and stop.
 
 ## THE THREE UNLINKED FAMILIES, AND THEY ARE UNLINKED FOR TWO DIFFERENT REASONS
@@ -313,8 +313,8 @@ library, with nothing in the app's own log.
 correctly on the television — and no amount of device testing could ever have found it. It was the
 shape the macro emitted until **2026-08-16**, latent for exactly as long as the desktop build could
 not open a libcurl at all, and it surfaced on the first network call a fresh desktop session makes
-(the plex.tv sign-in back then; the Jellyfin sign-in today). The account of what had to change for it to work is
-in `docs/agent-reference.md` — grep it for `variadic`.
+(the account-service sign-in back then, the Jellyfin sign-in today). The account of what had to
+change for it to work is in `docs/agent-reference.md` — grep it for `variadic`.
 
 Two things follow for you. First: **check the ellipsis position in every variadic declaration in
 the diff.** `dynlib_wrapper!` has exactly two arms, and the variadic one (the pattern containing

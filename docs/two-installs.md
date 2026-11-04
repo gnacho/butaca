@@ -43,7 +43,7 @@ So: two ids, two installs, two tiles.
 | session file | `/media/developer/com.butaca-auth.json` | `/media/developer/com.butaca.debug-auth.json` |
 | launcher title | `Butaca` | `Butaca debug` |
 | launcher artwork | `pkg/icon.png` | `pkg/dev/icon.png` (amber DEV bar; nightly: `pkg/nightly/`, grey NIGHTLY bar) |
-| plex.tv device name | `Butaca (LG TV)` | `Butaca debug (LG TV)` |
+| account-service device name | `Butaca (LG TV)` | `Butaca debug (LG TV)` |
 
 **`FLAVOR ?= debug`, in the tracked Makefile.** The asymmetry is deliberate and it is the whole
 safety argument: every command in this repo's muscle memory is spelled `make deploy` / `make run` /
@@ -196,21 +196,21 @@ inside a bullet already claiming to be separate. It is written out in full below
   meant for the other, and one trigger namespace boots both to somebody else's screen.
 - **The session file.** `/media/developer/<id>-auth.json` (and the `/media/internal/.<id>-auth.json`
   fallback for the Homebrew-Channel jail, which mounts the opposite pair rw/ro). Two installs, two
-  sign-ins, two rosters, two `X-Plex-Client-Identifier`s.
+  sign-ins, two rosters, two client identifiers.
 
   **Naming the file by id was not enough, and the gap is worth the paragraph.**
   `paths::session_candidates` offers a fourth, legacy entry — the in-app-dir `auth.json` under
   `LEGACY_APP_DIR`, a MIGRATION source spelled as a literal that names the **shipped** install's
   directory. `session::load` takes the first candidate that EXISTS, and a freshly installed debug
   build has none of its own; so that one ungated entry would have handed a developer build the
-  other install's account token, every per-(user, server) PMS token and the whole Plex Home roster
+  other install's account token, every per-(user, server) access token and the whole household roster
   — which it would then write back under its own name. Exactly the sharing the id-keyed candidates
   exist to prevent, arriving through the one line that was not made flavour-aware with them. It is
   now gated on `flavour().is_none()`, so only the shipped install may offer it, and the host test
   grades the **whole** candidate list rather than its first two entries (asserting only those is
   what could not see this).
-- **The plex.tv identity.** The client identifier is minted per session file, so each install is its
-  own authorized device; and `plex::identity::device_name()` appends the flavour, so the account's
+- **The account-service identity.** The client identifier is minted per session file, so each install is its
+  own authorized device; and `server::identity::device_name()` appends the flavour, so the account's
   device list reads `Butaca (LG TV)` and `Butaca debug (LG TV)` rather than two entries
   spelled identically — where revoking "the one on the TV" is a coin flip. The shipped name is
   unchanged, deliberately: it is already in every existing user's device list, and a rename there

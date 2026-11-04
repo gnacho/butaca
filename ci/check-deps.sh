@@ -76,7 +76,7 @@
 #              ci/allow/sibling-migration.txt, one per FILE, and that list is empty when the
 #              criterion is met. The own-module name is not a violation, and `mod.rs`/a submodule
 #              of `screens/<a>/` counts as `<a>`.
-#   sessionwrite — a screen (screens/, ui/) never calls `plex::session::load(`. `load` is the
+#   sessionwrite — a screen (screens/, ui/) never calls `server::session::load(`. `load` is the
 #              BOOT/auth door: it mints a `client_id` when there is none and re-persists a
 #              plaintext session, so a read turns into `write_atomic` — a temp file, `sync_all`,
 #              a rename and a second `sync_all` on the directory. The read-only door is `peek`.
@@ -649,7 +649,7 @@ if [ "$vis_bad" -eq 0 ]; then ok "mutators-visibility"; else fail "mutators-visi
 gate nav 'crate::ui::nav::' "$SRC/screens"
 
 # layer: a SCREEN never names the application. §2.1's table says `screens/` may name `ui/`,
-# `stores/`, `plex/` and `player/` and never `app/`, and until phase 10 that half of the rule was
+# `stores/`, `server/` and `player/` and never `app/`, and until phase 10 that half of the rule was
 # prose alone — which is exactly how `screens/registry.rs` came to record, in its own module doc,
 # that it could not hold the concrete `ScreenArg` because the argument carried an `app`-private
 # `Route`. The type moved and the rule is now a grep, because the criterion that depends on it (§0
@@ -844,9 +844,9 @@ fn_body_lines() {
 run_len=$(fn_body_lines "$SRC/app/run.rs" 'run')
 if [ -n "$run_len" ] && [ "$run_len" -le 200 ]; then ok "fnlen: app/run.rs::run ($run_len lines)"
 else fail "fnlen: app/run.rs::run is ${run_len:-unknown} lines, budget 200 — a phase of the frame belongs in its own function (see run.rs's own doc)"; fi
-plexrun_len=$(fn_body_lines "$SRC/app/mod.rs" 'butaca_run')
-if [ -n "$plexrun_len" ] && [ "$plexrun_len" -le 10 ]; then ok "fnlen: butaca_run ($plexrun_len lines)"
-else fail "fnlen: butaca_run is ${plexrun_len:-unknown} lines, budget 10"; fi
+run_body_len=$(fn_body_lines "$SRC/app/mod.rs" 'butaca_run')
+if [ -n "$run_body_len" ] && [ "$run_body_len" -le 10 ]; then ok "fnlen: butaca_run ($run_body_len lines)"
+else fail "fnlen: butaca_run is ${run_body_len:-unknown} lines, budget 10"; fi
 
 # testmod: `#[cfg(test)] mod` count in app/mod.rs = 0 (D4/D8) — every test module named in D8's
 # table is meant to have moved to its subject's own file by the time this gate is added.

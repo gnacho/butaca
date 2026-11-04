@@ -74,7 +74,7 @@ the name traps.
 
 The platform entry points are deliberately separate:
 
-- Linux: `make sim-linux` builds the optimized UI/Plex simulator without host FFmpeg. Run the
+- Linux: `make sim-linux` builds the optimized UI/server simulator without host FFmpeg. Run the
   resulting `rust-modules/target-sim/release/butaca-sim` under X11 or Wayland with
   `BUTACA_APP_DIR=pkg` (or use the matching path below a custom `SIM_TDIR`).
 - Windows/WSLg: `tools/sim.ps1 build|run|shot|send`, backed by the `make sim-wsl` compatibility
@@ -154,7 +154,7 @@ while a bare `cargo test` picks up your default toolchain, and the two have disa
 
 **`./tests/run.py`** — the synthetic device tier. Generated clips served off the host and played
 through a dev trigger; it needs a television address and `make fixtures-pipeline`, and nothing else.
-No Plex Media Server, no token, no manifest. This is the tier that separates "the player is broken" from "the library layer
+No media server, no token, no manifest. This is the tier that separates "the player is broken" from "the library layer
 is broken", and it is the only one a stranger can run.
 
 ```sh
@@ -165,7 +165,7 @@ make fixtures-pipeline   # generate the clips once
 **`./tests/run.py --server`** — the library-backed suite: `/decision`, direct play vs transcode,
 track menus, markers, resume, and progress reporting. It needs two gitignored files —
 `tests/manifest.local.json`, mapping named media shapes to items in *your* library (copy the
-`.example` beside it and drop the ones you don't have), and `src/config.local.h` with your Plex
+`.example` beside it and drop the ones you don't have), and `src/config.local.h` with your server's
 token, which the harness reads on the host and injects. The token is never compiled into the binary.
 A media shape your library lacks is skipped, not failed, so read the skip count beside the pass
 count.

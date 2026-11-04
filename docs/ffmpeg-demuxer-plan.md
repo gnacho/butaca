@@ -53,7 +53,7 @@ demux direct-play soft subs they go straight to `crate::player::push_subtitle_te
 `extradata`-derived parameter sets ahead of every IDR/IRAP — precisely what `mkv_handle_block`
 hand-rolls (`mkv.rs:557-581`). Two harmless, non-semantic deltas: the BSF writes a 3-byte
 `00 00 01` for interior NALs (4-byte for the first NAL + param-set blob), and it suppresses a
-param-set prepend only when the AU already carries them in-band (never the case for Plex
+param-set prepend only when the AU already carries them in-band (never the case for the retired backend's
 CodecPrivate MKVs). The Starfish decoder scans for `00 00 01` and accepts both; duplicate param
 sets are harmless. **Audio needs no BSF** — matroska's `av_read_frame` returns de-laced raw frames
 already; do **not** apply `aac_adtstoasc`.
@@ -327,7 +327,7 @@ unchanged — it only requires **monotonic content-time-ns PTS + an accurate `ke
 
 ### 2.2 audio-stream selection
 `av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0)` is correct for the common single-
-track case. For a Plex direct-play file with multiple audio tracks where the user selected a
+track case. For a direct-play file with multiple audio tracks where the user selected a
 specific one, prefer routing: match `(*streams[i]).codecpar.codec_id` (and, if needed, the track's
 metadata language) against `route::stream_acodec()` / the selected `audioStreamID`. For a transcode
 stream there is exactly one audio track, so `av_find_best_stream` suffices. Start with
@@ -457,7 +457,7 @@ guessing, no missing param sets. The `feed_stream` rebase (first `es==1 && key!=
 - `drain_aq`, `Engine`/`Source`, `stop_bufferfeed`: unchanged except dropping the `hs2`/`cues_th`
   fields and their join (338-339) — `cues_th` join goes away with the thread.
 
-**Load payload — no change required.** `start_bufferfeed` builds the payload from **Plex metadata**
+**Load payload — no change required.** `start_bufferfeed` builds the payload from **server metadata**
 (`route::stream_vcodec()`/`stream_acodec()`, `engine.rs:189-207`) *before* demux starts, and the
 payload dims are only the **sink envelope** — the pipeline reads true decode dims from the in-band
 SPS/VPS (`engine.rs:113-114`). So the demuxer feeds nothing to the payload. **Optional

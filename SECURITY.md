@@ -28,14 +28,14 @@ looking at:
   on the shipped bytes rather than asserting it. A release binary that still carries any of it is a
   valid report, and a serious one.
 - **The event log.** `butaca-events.log` is created 0600 and every line goes through
-  `diag::scrub::scrub_local` before the write. A line that reaches it carrying a credential, a Plex
-  token, a `plex.direct` hostname, a household name or anything about what is being watched is a
-  valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant to hold.
+  `diag::scrub::scrub_local` before the write. A line that reaches it carrying a credential, an
+  access token, a `plex.direct` hostname, a household name or anything about what is being
+  watched is a valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant to hold.
 - **TLS.** Certificate verification is on for every HTTPS request (`net.rs`). Stable builds refuse
-  any PMS control or media URL that would carry a Plex token over plaintext HTTP, with one
+  any PMS control or media URL that would carry an access token over plaintext HTTP, with one
   consented exception: a server that answers only unencrypted at a numeric private address on the
   television's own network, where the person answered "Connect without encryption?" for that
-  server (`plex::grant`). The grant names that server and that exact origin, is never persisted,
+  server (`grant.rs`). The grant names that server and that exact origin, is never persisted,
   and is revoked on sign-in, sign-out and return to the foreground, at a profile switch whose
   roster does not install that server at that origin, whenever a fresh probe no longer reaches it,
   and at once when the person says no (a refusal is written again until it reaches the disk). A
@@ -61,15 +61,15 @@ looking at:
 - Post-compromise access by an attacker who already has root on the television. Root is not an app
   prerequisite; a report whose only precondition is an already-rooted OS describes a platform
   compromise rather than an app sandbox escape.
-- The webosbrew Homebrew Channel, webOS itself, LG's own libraries, or Plex Media Server. Report
-  those to their maintainers.
+- The webosbrew Homebrew Channel, webOS itself, LG's own libraries, or the media server you point
+  Butaca at. Report those to their maintainers.
 - Missing hardening that costs nothing to an attacker who is already executing code in the app's
   jail, unless you can show a concrete consequence.
 
 ## What this app does not have
 
 No account of its own, no server, no payment path, and no user-generated content. It signs in to
-**your** Plex account and talks to **your** servers.
+**your** account and talks to **your** servers.
 
 **It does have telemetry, and that hedge used to say it did not.** A release binary carries a Sentry
 DSN and a PostHog project key — both **write-only ingest credentials**, publishable by design, which

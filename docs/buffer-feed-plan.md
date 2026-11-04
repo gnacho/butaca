@@ -26,7 +26,7 @@ std::string (read char* at offset 0 for the `"Ok"`/`"BufferFull"` reply).
 `{args:[{mediaTransportType:"BUFFERSTREAM", option:{appId, externalStreamingInfo:{contents:{
 codec:{video:"H264"|"H265", audio:"AC3"|"AAC"}, esInfo:{ptsToDecode:0, seperatedPTS:true},
 format:"RAW", provider:"..."}, bufferingCtrInfo:{...}}, needAudio:true, ...}}]}`
-Codec info comes from the Plex `/library/metadata` Media/Part/Stream fields.
+Codec info comes from the server's `/library/metadata` Media/Part/Stream fields.
 
 ### 3. Feed loop
 `Feed('{"bufferAddr":"%p","bufferSize":%u,"pts":%llu,"esData":1|2}')` — esData 1=video, 2=audio;
@@ -35,8 +35,8 @@ pointer is in-process. Check reply for `"Ok"` / `"BufferFull"` (backpressure →
 ### 4. Demuxer — needs raw ES (no container-ingest transport; only BUFFERSTREAM/dual_stream)
 Plan: have PMS **remux to MPEG-TS** (H264+AC3 direct-stream copy, cheap), then a minimal
 in-app TS demuxer (188-byte packets → PID filter → PES → ES + PTS). ~300–500 lines C.
-Plex endpoint: `/video/:/transcode/universal/start.m3u8?protocol=hls...` (HLS, TS segments)
-— exact params still TBD (400s so far; needs full X-Plex-* client headers + session).
+Server endpoint: `/video/:/transcode/universal/start.m3u8?protocol=hls...` (HLS, TS segments)
+— exact params still TBD (400s so far, and it needs the full client-header set + session).
 Fallback: cross-compile libavformat (heavier).
 
 ### 5. ACB bind (unchanged, already coded)
@@ -50,5 +50,5 @@ on videoInfo: setMediaVideoData (should now succeed — in-process pipeline). se
 3. Add HTTP fetch from PMS, full pipeline.
 
 ## Open questions
-- Exact Plex params for a plain MPEG-TS/HLS stream (current requests 400).
+- Exact server params for a plain MPEG-TS/HLS stream (current requests 400).
 - ES sample for step-1 validation (no ffmpeg locally or on TV yet — check TV for gst-launch).

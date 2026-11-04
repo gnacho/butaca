@@ -24,12 +24,13 @@
 # `up` options:
 #   --screen <name>   home (default) | profiles | library[=N] | detail=<rk> | collection=<rk> | person=<movie rk>
 #                     | player=<rk> | login | account | itemmenu
-#   --server <slot>   open detail=/player= on this registered Plex server slot instead of the
+#   --server <slot>   open detail=/player= on this registered server slot instead of the
 #                     current one; boots through the signed-in stored roster so secondary slots
 #                     exist (an already-armed butaca-servers also survives with --keep)
 #   --guest           boot as tests/manifest.local.json's managed TEST USER, never the owner.
 #                     Reuses run.py's own identity resolution (fetch_managed_user_token, the
-#                     plex.tv shared_servers lookup) rather than re-deriving it, so the two
+#                     account-service shared_servers lookup) rather than re-deriving it, so
+#                     the two
 #                     never disagree about what "guest" means. REFUSES (exit 1) rather than
 #                     falling through to the owner when no manifest.local.json/test_user is
 #                     configured — see the 2026-09-10 postmortem below `cmd_up`'s definition:
@@ -39,9 +40,11 @@
 #                     also what a bare `up` does with neither flag — spelling it out is for a
 #                     script that wants the choice to be visible in its own command line.
 #   --mock            with --guest, use only tests/mock_pms.py at the configured PMS endpoint.
-#                     Verifies its synthetic identity; never uses an account token or contacts plex.tv.
+#                     Verifies its synthetic identity; never uses an account token or contacts
+#                     the account service.
 #   --dry-run         resolve and print the identity `up` would use (including a real --guest
-#                     token lookup, which touches plex.tv but never the TV) and the shape of the
+#                     token lookup, which touches the account service but never the TV) and
+#                     the shape of the
 #                     commands it would run, then exit 0 without contacting the television at all.
 #   --stream[=PORT]   also start tools/stream-screen.py for a live browser view (default 8909)
 #                     STREAM_RES=480x270 makes mpeg encode ~4x cheaper (see the skill)
@@ -393,7 +396,7 @@ push_token() {
   ok "token injected (value not printed)"
 }
 
-# guest identity: reuse tests/run.py's OWN resolution instead of re-deriving the plex.tv call.
+# guest identity: reuse tests/run.py's OWN resolution instead of re-deriving the account-service call.
 # `--print-test-token` is that path exposed standalone (tests/manifest.local.json's `test_user`
 # -> fetch_managed_user_token, the same owner-token + shared_servers lookup run.py already makes
 # for the identical reason -- keeping test playback off the real account's watch history).
@@ -426,7 +429,7 @@ resolve_guest_token() {
   GUEST_TOKEN="$tok"
 }
 
-# Decide the Plex identity this boot will use, and do it BEFORE a single trigger is armed or the
+# Decide the server identity this boot will use, and do it BEFORE a single trigger is armed or the
 # television is touched — so --dry-run can print exactly the decision a real `up` would make, and
 # so an unresolvable --guest fails before the TV lock is even taken instead of after. Reads the
 # CALLER's (cmd_up's, or cmd_selftest's) locals guest/owner/no_token/server_set/server_slot by
@@ -450,7 +453,7 @@ resolve_identity() {
     if resolve_guest_token; then
       push_guest=1
       if [ "${mock:-0}" = 1 ]; then
-        identity_desc="guest — synthetic mock PMS (no Plex account or account token)"
+        identity_desc="guest — synthetic mock PMS (no account or account token)"
       else
       identity_desc="guest — the manifest's managed test user (token via tests/run.py, value not printed)"
       fi
@@ -762,7 +765,7 @@ cmd_up() {
   # television is even woken — so it can be said out loud before booting into it, and so
   # --dry-run never has to touch the set to answer "what would this do". See the 2026-09-10
   # postmortem on resolve_guest_token above: --guest used to print a warning and then push the
-  # OWNER's token anyway, and a real playback wrote progress into the household Plex account.
+  # OWNER's token anyway, and a real playback wrote progress into the household account.
   resolve_identity || exit 1
   info "identity: $identity_desc"
 
@@ -965,10 +968,11 @@ cmd_selftest() {
 
   # ---- identity: `--guest` must resolve the real managed-user token or REFUSE, and must never
   # fall through to the owner's — the 2026-09-10 TV session 5 defect (a warning printed, then the
-  # owner's token pushed anyway; a real playback wrote progress into the household Plex account,
+  # owner's token pushed anyway; a real playback wrote progress into the household account,
   # and clearing it needed /:/unscrobble, which also reset that item's viewCount).
   #
-  # Stubs resolve_guest_token so this never shells out to python3/plex.tv. A Bash function
+  # Stubs resolve_guest_token so this never shells out to python3 or the account service.
+  # A Bash function
   # definition is GLOBAL, not scoped to this one — cmd_selftest itself runs as a side effect of
   # simply `source`ing this script with "selftest" as $1 (see the dispatch `case` at the bottom of
   # the file), which is exactly what ci/test_tv_session.py's own harness does to reach OTHER
@@ -1222,7 +1226,8 @@ cmd_sound() {
 # itself, in two halves because the firmware only has one of the two tools (probed 2026-09-05):
 #   * v4: a netfilter chain on OUTPUT (iptables 1.6, filter table loaded) REJECTS every packet
 #     not bound for the LAN, plus every DNS query anywhere — the router would otherwise still
-#     resolve `plex.direct` through its own uplink, which is the half of "offline" that matters;
+#     resolve a pinned server name through its own uplink, the half of "offline" that
+#     matters;
 #   * v6: there is NO ip6tables filter table (`ip6_tables` is not in the kernel's modules), so
 #     the cut is an `unreachable 2000::/3` route — more specific than either default route, so
 #     no metric contest with connman's or the RA's, and less specific than the on-link /64s, so

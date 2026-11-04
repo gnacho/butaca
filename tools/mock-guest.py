@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve a synthetic guest for tests/mock_pms.py without using a Plex account token."""
+"""Resolve a synthetic guest for tests/mock_pms.py without using an account token."""
 import argparse
 import json
 from pathlib import Path

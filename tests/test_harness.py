@@ -1594,7 +1594,7 @@ class AudioSwitchAssertion(unittest.TestCase):
 
 
 class PipelineTier(unittest.TestCase):
-    """The Plex-free tier. Every assertion here is about a path the maintainer's own machine takes
+    """The server-free tier. Every assertion here is about a path the maintainer's own machine takes
     only when it runs --pipeline, and about the two ways this tier can silently do the wrong thing:
     drive the television with nothing to grade, or forge a shell command through the trigger."""
 
@@ -1936,7 +1936,7 @@ class DefaultTier(unittest.TestCase):
 
     def test_the_direct_play_payload_matrix_is_fully_covered(self):
         """The player direct-plays exactly {H264,H265} x {AC3,AC3 PLUS,AAC} — route.rs's codec gate
-        and plex::DP_AUDIO_CODECS. Six payload combinations, and this suite is the only tier that
+        and devcaps::DP_AUDIO_CODECS. Six payload combinations, and this suite is the only tier that
         can reach all six without owning media of every shape."""
         combos = {(c["expect"].get("load_video"), c["expect"].get("load_audio"))
                   for c in _manifest()["pipeline_cases"]}
@@ -2196,7 +2196,7 @@ class CompletionCase(unittest.TestCase):
 
 
 class AutoNetworkProfile(unittest.TestCase):
-    """The no-Plex TV case drives one live fast→slow→fast response schedule."""
+    """The server-free TV case drives one live fast→slow→fast response schedule."""
 
     def _case(self):
         return next(c for c in _manifest()["pipeline_cases"]

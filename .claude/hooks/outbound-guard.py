@@ -83,11 +83,11 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
 
 (a) LITERAL VALUES, read at the moment the hook runs out of the gitignored files that hold them —
     `.tv-host` (the dev television's address), `.tv-mac` (its Wake-on-LAN MAC), `src/config.local.h`
-    (`PMS_HOST`/`PMS_TOKEN`, the real Plex owner token), `tests/manifest.local.json` (PMS host, the
-    test user's plex.tv id, this library's ratingKeys, and the shared_server block when there is
+    (`PMS_HOST`/`PMS_TOKEN`, the real owner token), `tests/manifest.local.json` (server host, the
+    test user's account id, this library's ratingKeys, and the shared_server block when there is
     one), `pkg/auth.json` (the persisted session: `account_token` and each source's per-server
     token), plus three more that `.gitignore` names and its comments explain — `local.env` ("real
-    PMS host + X-Plex-Token"), `.tv-dpad-pass` (a generated password; "NEVER commit a password")
+    PMS host + access token"), `.tv-dpad-pass` (a generated password; "NEVER commit a password")
     and `.tv-remote-url` ("never commit a URL that is live while it is live"). Missing files are
     skipped, so a checkout with none of them simply has less to match. An exact substring hit on a
     real secret is never a false positive, which makes this the precise half.
@@ -107,7 +107,7 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
 
 (b) SHAPE PATTERNS, for values a checkout might not hold but that still must not go out:
     `X-Plex-Token=`/`plexToken=` with a real-looking value, a 20-character mixed-case-and-digit
-    alnum run inside a URL (the shape of a Plex token), a 40-hex id in a machineIdentifier context,
+    alnum run inside a URL (the shape of an access token), a 40-hex id in a machineIdentifier context,
     and a private-range IPv4 (10/8, 172.16/12, 192.168/16). This half is the imprecise one, so its
     three sharpest edges are filed down deliberately:
 
@@ -121,10 +121,10 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
       literal half covers the token that actually exists here) for not refusing ordinary links.
     * A PRIVATE QUAD THAT A TRACKED FILE ALREADY CONTAINS IS NOT A LEAK, so shape hits on the
       IPv4 and 40-hex rules are dropped when `git grep -F` finds the value in a tracked file. This
-      is not a loophole, it is the whole point: `docs/shared-servers.md`'s stand-in table nominates
-      `10.9.9.7` as the LAN-address placeholder — RFC1918 on purpose, "as the real one is", and it
-      is now in five tracked files including `plex/account.rs` and `plex/probe.rs` — and
-      `docs/plex-openapi.json` carries `10.0.0.42` eight times as upstream Plex's own example.
+      is not a loophole, it is the whole point: `docs/agent-reference.md`'s stand-in table nominates
+      `10.9.9.7` as the LAN-address placeholder - RFC1918 on purpose, "as the real one is" - and
+      that literal is in this hook, its test and that document. A since-deleted upstream API
+      reference carried `10.0.0.42` eight times as its own example.
       Without this rule the guard refuses the very placeholder the docs tell you to use. It is
       applied to those two shape rules and NOT to the literal half or the token rules: a real
       credential sitting in a tracked file is an incident to clean up, never a licence to republish.
@@ -133,8 +133,8 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
     X-Plex-Token=<real token>"` is the single most common debugging command in this repo, and it
     contains two real secrets by necessity — but it sends them to the machine they belong to. So a
     curl or wget whose URLs are all loopback, RFC1918, a dotless host, one under `.local`/`.lan`/
-    `.home`/`.internal`, or one under `plex.tv` (where a Plex token legitimately goes — that is how
-    `tests/run.py` resolves the test user's per-server token) is not outbound at all.
+    `.home`/`.internal`, or one under `plex.tv` (where an account token legitimately goes, which is
+    how `tests/run.py` resolves the test user's per-server token) is not outbound at all.
     Anything aimed off the LAN is.
 
 WHAT IT DELIBERATELY DOES NOT MATCH, beyond the floor: RFC 5737 documentation addresses
@@ -195,10 +195,10 @@ import sys
 BYPASS = re.compile(r"\bBUTACA_PUBLISH_BYPASS=1\b")
 
 # The gitignored files that hold private values. All eight are named in `.gitignore`, and seven of
-# them carry their own reason in its comments — `src/config.local.h` and `local.env` under "local
-# dev overrides (real PMS host + X-Plex-Token)", `.tv-host` as "the maintainer's home network, not
+# them carry their own reason in its comments - `src/config.local.h` and `local.env` under "local
+# dev overrides (real PMS host + access token)", `.tv-host` as "the maintainer's home network, not
 # a project fact", `tests/manifest.local.json` as "the private library inventory", `pkg/auth.json`
-# as holding "plex.tv and PMS tokens, and this repository is public", and `.tv-dpad-pass` /
+# as holding "account-service and PMS tokens, and this repository is public", and `.tv-dpad-pass` /
 # `.tv-remote-url` under "NEVER commit a password, and never commit a URL that is live while it is
 # live". `.tv-mac` is the one bare line. (An earlier draft of this comment split the list five/three
 # by whether a reason was attached; checked against the file, that split does not exist.)
@@ -370,7 +370,7 @@ def variable_reference(text, match):
 
     `{"X-Plex-Token": auth_token}` in source is a reference; `X-Plex-Token=<a-real-20-char-token>`
     is a leak. Both match TOKEN_KV, and "looks like an identifier" cannot separate them -- a real
-    Plex token is twenty alphanumerics and matches that too.
+    access token is twenty alphanumerics and matches that too.
 
     Two conditions, and BOTH are required. The value must be UNQUOTED, because a quoted string
     after the key is a literal whatever it spells. And the same text must assign that exact name
@@ -389,7 +389,7 @@ def variable_reference(text, match):
 
 
 def mixed_run(v):
-    """A Plex-token-shaped run: 20 alnum with a digit, a lowercase AND an uppercase in it."""
+    """An access-token-shaped run: 20 alnum with a digit, a lowercase AND an uppercase in it."""
     return (any(c.isdigit() for c in v) and any(c.islower() for c in v)
             and any(c.isupper() for c in v))
 
@@ -419,7 +419,7 @@ def findings(text, secrets, published=None):
             break
     for m in URL_TOKEN.finditer(text):
         if mixed_run(m.group(1)) and plausible_secret(m.group(1)):
-            note("a 20-character Plex-token-shaped run inside a URL", "shape rule")
+            note("a 20-character access-token-shaped run inside a URL", "shape rule")
             break
     for m in MACHINE_ID.finditer(text):
         if not pub(m.group(2)):
@@ -787,7 +787,7 @@ def outbound(seg):
         if not (body or query):
             return None
         if urls and all(local_url(u) for u in urls):
-            return None                 # sending a Plex token to the Plex server is not a leak
+            return None                 # sending a token to the server it belongs to is not a leak
         return "%s sends a body or query string to a host off this LAN" % base
     return None
 
@@ -1125,7 +1125,7 @@ def main():
                  "leak by a shorter route)")
     sys.stderr.write("\n".join(lines) + "\n\n" + (
         "github.com/gnacho/butaca is PUBLIC. On 2026-08-14 four PR bodies (#28-31) carried a\n"
-        "third party's Plex server address, port, machineIdentifier and handle. All four were\n"
+        "third party's server address, port, machineIdentifier and handle. All four were\n"
         "redacted, but GitHub keeps PR-body edit history, so those values are permanently public —\n"
         "and they were the FRIEND's, not this project's to publish.\n"
         "\n"

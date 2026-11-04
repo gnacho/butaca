@@ -10,7 +10,8 @@ signed-in account can see, so a friend's shared server lands in EVERY captured d
 
 Neither existing pass could see it. The declared-secret pass only knows values read out of
 `PRIVATE_FILES`, and a shared server's address is in none of them -- it arrives at runtime from
-plex.tv. The address pass only matched RFC1918. So 42 occurrences across 21 committed logs survived
+the account service. The address pass only matched RFC1918. So 42 occurrences across 21
+committed logs survived
 a commit whose message was "scrub third-party and device identifiers from the captured logs", and
 `tools/scrub-gate.py` -- written in response to that very incident -- inherits `load_secrets` and
 cannot catch it either.
@@ -79,18 +80,19 @@ class PublicAddresses(unittest.TestCase):
 
 
 class TheSameAddressInOtherShapes(unittest.TestCase):
-    """Plex reaches a server through `https://<dashed-ip>.<hash>.plex.direct`, so the address
-    appears a SECOND time with dashes for dots -- invisible to any dotted-quad pattern -- beside a
-    machineIdentifier-derived hash that identifies it just as uniquely, and `(shared by <user>)`
-    names the owner outright. The first fix of this leak redacted the dotted form and the handle
-    and left all three of these in the tree, which is why they have tests."""
+    """The retired client reached a server through a dashed-address name under the service's own
+    DNS suffix, so the address appears a SECOND time with dashes for dots -- invisible to any
+    dotted-quad pattern -- beside a machineIdentifier-derived hash that identifies it just as
+    uniquely, and `(shared by <user>)` names the owner outright. The first fix of this leak
+    redacted the dotted form and the handle and left all three of these in the tree, which
+    is why they have tests."""
 
     def test_the_dashed_form_of_the_address_is_redacted(self):
         out, _ = scrub("via https://203-0-113-7.abc123def4567890abcd.plex.direct:32400")
         self.assertNotIn("203-0-113-7", out)
         self.assertIn("<peer-host-1>", out)
 
-    def test_the_plex_direct_hash_is_redacted(self):
+    def test_the_direct_host_hash_is_redacted(self):
         out, _ = scrub("via https://203-0-113-7.abc123def4567890abcd.plex.direct:32400")
         self.assertNotIn("abc123def4567890abcd", out)
         self.assertIn("<plex-direct-hash-1>", out)
@@ -105,8 +107,8 @@ class TheSameAddressInOtherShapes(unittest.TestCase):
         text = 'auth: reached "srv" 10.0.0.2:32400 (ours) via x'
         self.assertIn("(ours)", scrub(text)[0])
 
-    def test_a_dashed_run_that_is_not_a_plex_direct_host_survives(self):
-        # Only dashes IMMEDIATELY followed by a hash + plex.direct are an address.
+    def test_a_dashed_run_that_is_not_a_direct_host_survives(self):
+        # Only dashes IMMEDIATELY followed by a hash + the service's DNS suffix are an address.
         text = "case pipe-1-2-3-4 finished"
         self.assertEqual(scrub(text)[0], text)
 
@@ -132,9 +134,9 @@ class VersionStringsAreNotAddresses(unittest.TestCase):
 
 class DeclaredSecrets(unittest.TestCase):
     def test_a_declared_value_is_replaced_by_its_label(self):
-        out, n = scrub("token=abcdefgh12345678", [("plex token", "abcdefgh12345678")])
+        out, n = scrub("token=abcdefgh12345678", [("server token", "abcdefgh12345678")])
         self.assertNotIn("abcdefgh12345678", out)
-        self.assertIn("<plex-token>", out)
+        self.assertIn("<server-token>", out)
         self.assertEqual(n, 1)
 
     def test_longest_value_first_so_a_substring_cannot_mask_it(self):
@@ -148,11 +150,11 @@ class Counting(unittest.TestCase):
     def test_the_count_includes_every_class(self):
         out, n = scrub(
             'auth: reached "peer" 203.0.113.7:32400 tv 192.168.0.4 tok=zzzzzzzzzzzzzzzz',
-            [("plex token", "zzzzzzzzzzzzzzzz")],
+            [("server token", "zzzzzzzzzzzzzzzz")],
         )
         # one declared secret + one LAN host + one peer address + one peer handle
         self.assertEqual(n, 4)
-        for expected in ("<plex-token>", "<lan-ip-1>", "<peer-ip-1>", "<peer-name-1>"):
+        for expected in ("<server-token>", "<lan-ip-1>", "<peer-ip-1>", "<peer-name-1>"):
             self.assertIn(expected, out)
 
 
@@ -192,7 +194,7 @@ class TheCommittedLogsAreClean(unittest.TestCase):
                 offenders.append(f"{path.relative_to(ROOT)} ({hits})")
         self.assertFalse(
             offenders,
-            "captured logs carry a dashed address, a plex.direct hash or an owner name: "
+            "captured logs carry a dashed address, a generated DNS hash or an owner name: "
             + ", ".join(offenders))
 
     def test_no_peer_handle_survives_in_any_captured_log(self):

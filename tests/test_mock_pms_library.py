@@ -400,14 +400,14 @@ class PlaintextOnlyLan(unittest.TestCase):
 
 
 class Enhancement266(unittest.TestCase):
-    """#266 (Boost Dialog / Normalize Loudness) mock support: the plex-pass/loudness-capability
+    """#266 (Boost Dialog / Normalize Loudness) mock support: the paid-tier/loudness-capability
     flags, the /decision enhancement shapes, the runtime /_mock/config toggle, the request log,
     and --transcode-fixture."""
 
     def _audio(self, item):
         return next(s for s in item["Media"][0]["Part"][0]["Stream"] if s["streamType"] == 2)
 
-    def test_no_plex_pass_flag(self):
+    def test_no_paid_tier_flag(self):
         pms = MockPms(Library())
         self.assertIs(get(pms, "/identity")["myPlexSubscription"], True)
         self.assertEqual(get(pms, "/identity")["version"], "1.41.0.0000-synthetic")

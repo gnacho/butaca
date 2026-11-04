@@ -1,5 +1,14 @@
 # Architecture & code review — 2026-07-26
 
+> **Note added 2026-11-04:** this audit read the tree as it stood on 2026-07-26, when the app
+> still carried the retired vendor's wire. Paths and symbol prefixes written as `server/...`
+> or `server::...` name that wire module at the time: what survives there kept its name, and
+> `client.rs`, `library.rs`, `hubs.rs`, `params.rs`, `timeline.rs`, `models.rs` and
+> `transcoder.rs` went with the wire, as did the `install`, `init` and `Client` entry points.
+> The client today is `rust-modules/src/jellyfin/`, the module's own notes are
+> `rust-modules/src/server/CLAUDE.md`, and the retired plans named below were deleted in #220.
+
+
 Method: 12 parallel subsystem readers produced an architecture map; 18 cross-cutting auditors
 worked from it; every finding was then attacked by two independent adversarial lenses (*is this
 factually true of the code right now?* and *is it worth doing for this project?*). 179 raw findings
@@ -11,7 +20,7 @@ Every claim below carries a `file:line` I or a verifier re-opened. Coverage cave
 ## 1. Verdict
 
 This is a genuinely well-built codebase, and the review should be read against that. The parts
-that were *designed* — `plex/` as a typed client, `ui/` as a token+component design system,
+that were *designed* — `server/` as a typed client, `ui/` as a token+component design system,
 `player/shared.rs` as a declared single point of cross-thread state, `posters.rs`/`browse.rs`/
 `metadata.rs` as generation-guarded mailbox workers — are all cleaner than the platform deserves.
 The device knowledge encoded in the four `CLAUDE.md` files is the project's most valuable asset,
@@ -54,8 +63,8 @@ URL, a token revoked between `/decision` and the GET, or a PMS restart therefore
 a black Player screen forever, with the video plane bound and nothing decoded, recoverable only by
 BACK.
 
-The same shape repeats upward. `plex::Client::get_json` (`client.rs:98-102`) collapses transport
-failure and parse failure into `None`, and **the entire `plex/` + `stream.rs` layer emits zero log
+The same shape repeats upward. `server::Client::get_json` (`client.rs:98-102`) collapses transport
+failure and parse failure into `None`, and **the entire `server/` + `stream.rs` layer emits zero log
 lines** — the app's documented primary debugging surface records nothing for the single most
 common class of user-visible failure. `pms_fetch_hubs` then *commits an empty catalog* on failure
 (`pms.rs:226-229`, `:328-333`), so one failed request after playback blanks Home. And
@@ -112,7 +121,7 @@ Verifiers narrowed the scope (`SESS`/`PQ_ID`/`PQ_ITEM_ID` are only written on th
 those three are not races) and argued *high* rather than *critical* because the write windows are
 narrow. The mechanism is not in dispute.
 
-**Fix.** Move the payload, not the pointer: build `plex::TimelineReport` on the main thread and move
+**Fix.** Move the payload, not the pointer: build `server::TimelineReport` on the main thread and move
 it into `timeline_thread` at spawn — `engine.rs:310-316` already does this for `rk`. Promote the two
 mutable ids to `AtomicI64` in `SHARED`. For the demuxer, publish the wanted codec as
 `SHARED.wanted_acodec: Mutex<String>` (`shared.rs` already holds five `Mutex`es and is the
@@ -209,7 +218,7 @@ Severities reflect the adversarial panel's corrections, not the original auditor
 | high | `ui/home.rs:445`, `:577` | `Grid` holds `shelves: [CardRow; MAX_HUBS]` (16, `home.rs:412`) but `draw` iterates `0..hub_count()` and `hit_at` iterates `0..hub_count()`, both indexing `self.shelves[r]`. `hub_count()` is `hubs().len()` (`pms.rs:188`) with **no cap** — `home_hubs(12)` caps items *per hub*, not hub count. 17+ non-empty hubs (ordinary with 3-4 libraries) → index-out-of-bounds panic every frame. `layout` (`:437`) and `env` (`:638`) clamp correctly, so the cap exists in two of four places. |
 | high | `browse.rs:171` | `reset()` drops all three result mailboxes but never clears `FETCHING`/`GENRE_FETCHING`/`LETTERS_FETCHING` (`:125-127`), which are cleared *only* inside a successful mailbox take (`:466`, `land_directory`). Deterministic wedge: scroll Library → BACK to Home (pump stops) → worker lands → switch profile → `app.rs:320 browse::reset()` nulls the mailbox → the flag is now permanently true. Library is a spinner forever, with no log line (`browse.rs` emits none). |
 | high | `route.rs:376` | The direct-play gate is defensive about video (`:364-368`, explicitly) but credulous about audio: when `pick_dp_audio` returns `None` — meaning *no* track is direct-playable — it still defers to `server_decision`, then `route.rs:383` falls back to `acodec` and publishes it. `engine.rs`'s `_ => "AC3"` fallback then mislabels it. A TrueHD-only item the server calls `directplay` gets an AC3 Load payload against a TrueHD lane: audio ES never configures, playback wedges at BufferFull. Make the audio gate symmetric with the video gate. |
-| high | `plex/client.rs:146` | `install` is a `OnceLock`, so host/port freeze for the process life and the `Some(c) => c.set_token(token)` branch silently discards a new address. `sign_out` (`auth.rs:227-232`) clears everything *except* the client. When the PMS box takes a new DHCP lease, re-login installs the new token against the old IP with no recovery short of a kill. |
+| high | `server/client.rs:146` | `install` is a `OnceLock`, so host/port freeze for the process life and the `Some(c) => c.set_token(token)` branch silently discards a new address. `sign_out` (`auth.rs:227-232`) clears everything *except* the client. When the PMS box takes a new DHCP lease, re-login installs the new token against the old IP with no recovery short of a kill. |
 | medium | `ff.rs:1149`, `:1176` | `while i + nls <= size { … nl = …; if nl == 0 \|\| i + nl > size { break } }` — `usize` is **32-bit** here and `[profile.release]` sets no `overflow-checks`, so `i + nl` wraps and defeats the only bounds guard, panicking the demux thread before it can `aq_set_eof` → permanent hang, not a clean stop. `nls == 4` is the value `parse_extradata` *defaults to* on any parse failure (`ff.rs:1014/1021/1055`). Use `checked_add`, and wrap `ff::demux` in `catch_unwind` with the EOFs on the unwind path (the crate already does this at `mod.rs:281`, `browse.rs:354`, `metadata.rs:552`). |
 | medium | `ff.rs:944` | `read_cb` maps *both* `http_read` return codes to `AVERROR_EOF`, discarding the distinction `stream.rs:281` vs `:283` carefully preserves. `seek_cb` never verifies the Range reopen returned `206` — a Range-ignoring proxy yields total demux corruption with libavformat parsing from byte 0 while believing it is at `target`. |
 | high | `src/starfish.c:74` | `static int g_smp_ready` publishes a 64 KB in-place-constructed C++ object across threads with no `_Atomic`, no barrier, not even `volatile`. Written on the load thread (`:87`, right after `SMP_ctor`), read on the main thread every frame (`pump.rs:16`). `sf_feed` (`:148`) has **no guard at all** and relies entirely on the caller. Two lines: `_Atomic int` + release/acquire. |
@@ -247,8 +256,8 @@ Severities reflect the adversarial panel's corrections, not the original auditor
 
 | Sev | Site | Finding |
 |---|---|---|
-| high | `plex/models.rs:178` | `Media` carries only `video_codec`/`audio_codec`/`part`; `container`, `width`, `height`, `bitrate`, `videoResolution`, `audioChannels` are all absent even though `docs/pms-api.md:290-302` lists them as required for the direct-play decision, and `:219-221` warns **in bold** that the picker must iterate `Media[]` rather than take `[0]`. Every consumer takes `[0]` — `pms.rs:134`, `metadata.rs:207/229/298/346/423/434`, `route.rs`. So on a 4K-HDR + 1080p item the client always drives the 4K copy, and an `.mp4`-first item gets remuxed while a directly-playable `.mkv` sibling sits unused. |
-| medium | `plex/client.rs:110` | `get_void`/`post_void` discard everything, and the callers log success unconditionally — so `timeline`, `scrobble`, `unscrobble` and `transcode_stop` print a success line whether or not they worked. **`tests/run.py`'s `timeline_climb` case greps exactly those lines**, so the harness assertion is vacuous: a real timeline regression cannot fail it. |
+| high | `server/models.rs:178` | `Media` carries only `video_codec`/`audio_codec`/`part`; `container`, `width`, `height`, `bitrate`, `videoResolution`, `audioChannels` are all absent even though `docs/pms-api.md:290-302` lists them as required for the direct-play decision, and `:219-221` warns **in bold** that the picker must iterate `Media[]` rather than take `[0]`. Every consumer takes `[0]` — `pms.rs:134`, `metadata.rs:207/229/298/346/423/434`, `route.rs`. So on a 4K-HDR + 1080p item the client always drives the 4K copy, and an `.mp4`-first item gets remuxed while a directly-playable `.mkv` sibling sits unused. |
+| medium | `server/client.rs:110` | `get_void`/`post_void` discard everything, and the callers log success unconditionally — so `timeline`, `scrobble`, `unscrobble` and `transcode_stop` print a success line whether or not they worked. **`tests/run.py`'s `timeline_climb` case greps exactly those lines**, so the harness assertion is vacuous: a real timeline regression cannot fail it. |
 | medium | `stream.rs:316` | (§2.4) A truncated body is returned as a successful response — half a `/hubs` JSON becomes a serde error becomes `None` becomes a blanked Home. |
 
 ---
@@ -319,7 +328,7 @@ Do this first: every later wave's on-device verification is worthless until the 
     (`avformat`/`avcodec`/`avutil`/`swscale`). Both are `#[cfg]`-gateable, so the real cost is ~5
     edits — but host coverage is the **pure half only**: anything touching GL fails at link
     (`gfx::frame_clear` → `_glClear`). That unlocks unit tests for: `route`'s URL
-    building and direct-play decision, `plex/` model deserialization against captured fixtures,
+    building and direct-play decision, `server/` model deserialization against captured fixtures,
     `aq.rs`, `cbuf.rs`, text wrap/elide, `detail.rs`'s `child_top` stacking, the seek-script parser,
     the A-Z rail prefix sums, `fmt.rs`. Given the git history — the `hero_pill_index` sentinel
     regression, the season-mailbox monotone bug, the `put_selection` ordering bug — this is the
@@ -432,11 +441,11 @@ Severities here are the verifiers' corrections, not the original auditors'.
 'avformat' not found`. They are redundant on device — `Makefile:54` already supplies all four on
 the C link line and a `staticlib` is never linked by rustc; `net.rs:20` is the existing precedent
 (a bare `extern "C"` for curl with no `#[link]`). With those five lines changed I built the test
-binary and ran two real tests — `plex::models::de_i64` over int/string/bool/null/absent, and
+binary and ran two real tests — `server::models::de_i64` over int/string/bool/null/absent, and
 `ff::adts_header` — both pass in 0.00 s.
 I also measured the boundary the report does not state: a test reaching `gfx::frame_clear` fails
 with `Undefined symbols … _glClear, _glClearColor`, so host testing covers the **pure half only**
-(`plex/` builders + deserializers, `route`'s URL/decision logic, `ff.rs`'s byte transforms, `aq`,
+(`server/` builders + deserializers, `route`'s URL/decision logic, `ff.rs`'s byte transforms, `aq`,
 `cbuf`, text wrap/elide, `fmt`); anything touching SDL/GLES/TTF/curl/ACB/Starfish stays
 device-only. And the host is 64-bit aarch64, so it cannot validate the FFmpeg 3.3 struct offsets
 (32-bit armv7 layout) — strike `ff.rs`'s *ABI* from item 17's target list, keep its transforms.
@@ -588,7 +597,7 @@ the last whitespace ASCII — so only a hand-typed `printf 'ok\xc2\xa0'` with no
 whole block to `""`, `hs.status` stays 0, and `stream.rs:208-211` closes the socket and reports a
 good 200 as a transport failure. `stream.rs:193` then byte-indexes `hdr[9..]`, which panics if a
 multi-byte char spans index 9. Both lenses agree the code is as described; both also refuted the
-Content-Disposition trigger (`docs/plex-openapi.json` documents it as download-only and this client
+Content-Disposition trigger (the upstream OpenAPI spec documents it as download-only and this client
 issues no download requests), so this is hardening, not a live defect. *Fix:* `from_utf8_lossy` +
 a byte-oriented digit scan — closer to RFC 7230's "opaque octets" and it removes both at once.
 → **Wave 1**, folded into item 6 (which already surfaces the status)
@@ -627,7 +636,7 @@ build the reader explicitly and set `max_image_width/height = Some(4096)`,
 so a struct literal will not compile). Drop the finding's `stream::http_get` `max_bytes` and
 `poster_worker` `catch_unwind` halves — neither is reachable. → **Wave 2**
 
-**A16/A17 — two host-testable surfaces to name explicitly under item 17.** `plex/transcoder.rs:68`'s
+**A16/A17 — two host-testable surfaces to name explicitly under item 17.** `server/transcoder.rs:68`'s
 `transcode_query` and the other three URL builders, plus `client.rs:176`'s `QueryBuilder`/`enc` and
 `models.rs:334`'s lenient `de_i64`/`de_f64`, are pure and unasserted — though the *session*
 invariant at `transcoder.rs:66-68` is enforced by construction (one private producer feeding both
@@ -822,7 +831,7 @@ source) alongside the 206 check. **medium** → **Wave 2**, item 15
 missing glyph. I parsed both bundled faces' `cmap`: 154 segments, max mapped codepoint `0xFFFC`;
 Latin, Latin-ext, Cyrillic, Greek, Arabic and Hebrew are covered, and **U+4E2D, U+65E5, U+3042 and
 U+D55C are not** — in `appfont.ttf` and `appfont-bold.ttf` alike. Every anime / HK / K-drama title,
-cast name and synopsis in an ordinary Plex library therefore paints as .notdef, and the
+cast name and synopsis in an ordinary library on the retired server therefore paints as .notdef, and the
 server-driven A-Z rail will offer letters whose titles cannot be drawn. *Fix:* a per-glyph
 coverage test feeding a second face; the device's own `/usr/share/fonts` is the obvious source, but
 which files exist there is **unverified** (not checked on-device for this review). Note this widens
@@ -897,13 +906,13 @@ The 42 orphaned findings are closed: 20 confirmed, 22 refuted.
 list named six items, only one of which (`src/gpdebug.c`, 69 lines, unreferenced) is shipped
 Rust/C. Measured: of **21,415 lines of shipped Rust + C**, the original report cited **25 files /
 4,223 lines** not at all. This addendum adds first citations for `src/main.c`, `img.rs`,
-`remote.rs`, `ui/consts.rs`, `plex/transcoder.rs`, `ui/profiles.rs` and `ui/info_panel.rs`, leaving
+`remote.rs`, `ui/consts.rs`, `server/transcoder.rs`, `ui/profiles.rs` and `ui/info_panel.rs`, leaving
 **~2,340 lines across 15 files with zero citations in either pass**:
 
 `ui/library.rs` (994) · `ui/press.rs` (213) · `ui/theme.rs` (206) · `net.rs` (146) ·
-`ui/account_menu.rs` (135) · `plex/library.rs` (117) · `plex/params.rs` (88) · `ui/profile.rs` (85) ·
-`system.rs` (81) · `ui/label.rs` (80) · `plex/timeline.rs` (58) · `src/svg.c` (54) ·
-`plex/hubs.rs` (30) · `player/ffi.rs` (29) · `svg.rs` (25)
+`ui/account_menu.rs` (135) · `server/library.rs` (117) · `server/params.rs` (88) · `ui/profile.rs` (85) ·
+`system.rs` (81) · `ui/label.rs` (80) · `server/timeline.rs` (58) · `src/svg.c` (54) ·
+`server/hubs.rs` (30) · `player/ffi.rs` (29) · `svg.rs` (25)
 
 `ui/library.rs` is the material gap: 994 lines, the largest single screen, landed recently, and the
 only screen with its own paged store, A-Z rail and server-driven menus. `net.rs` (the only TLS path

@@ -5,7 +5,8 @@
 # Distribution: what it takes to ship this publicly
 
 Researched 2026-08-01 against live primary sources (webosbrew apps-repo + schemas, LG developer
-docs, Plex ToS/trademark pages, LGPL-2.1 text, FFmpeg legal.html, TMDB/Fandango terms) and against
+docs, the retired vendor's ToS/trademark pages, LGPL-2.1 text, FFmpeg legal.html, TMDB/Fandango
+terms) and against
 this repo's own files. Every non-obvious claim below carries either a URL or a `file:line`.
 
 Three claims were independently re-researched by an adversarial pass whose job was to refute them;
@@ -27,14 +28,15 @@ answers what a QA pass would find.
 | Is **private data** in the repo? | Git history is clean of credentials. Release CI has no `config.local.h`, remaps host paths, compiles out the trigger/FIFO/capture surfaces, and verifies the shipped bytes. Runtime logs are mode 0600 and scrub tokens, server addresses, household names and media text before writing; §4 records the remaining diagnostic surface. |
 | Needs a **rooted** TV? | **No** — the unprivileged Dev Mode jail is device-proven in §3.5. Homebrew and retail layouts now use probed writable paths; Key Manager permission is capability-tested and denial keeps the mode-0600 fallback. A real LG Content Store entitlement/install is still an acceptance test, not something the rooted development set can prove. |
 | **Licensing** clear? | Font blocker **CLEARED 2026-08-01** — Inter (OFL 1.1) replaced Monotype Arial. FFmpeg/LGPL is fine. The repo still has **no LICENSE file at all**. |
-| **Trademarks**? | Plex itself is fine (their guidelines have an explicit permitted formula). **Rotten Tomatoes marks have no licensing route that exists**, and the TMDB logo ships without its mandatory attribution. |
+| **Trademarks**? | The retired vendor's marks were fine for that client (their guidelines had an explicit permitted formula), and nothing in the tree uses them now. **Rotten Tomatoes marks have no licensing route that exists**, and the TMDB logo ships without its mandatory attribution. |
 
 **Blockers, in the order they'd bite:** *(1 — the Arial font — was cleared 2026-08-01, see §5.3)*
 
 2. No `LICENSE` file → all-rights-reserved → ineligible for webosbrew `pool: main`, and no licence for anyone who clones the repo.
 3. ~~10 icons reproduce Rotten Tomatoes / TMDB / IMDb marks, tinted in those brands' exact hex.~~
    **CLEARED 2026-08-02** — see §11.
-4. `X-Plex-Product: Plex for webOS` — Plex's own first-party naming pattern, on a platform that has an official Plex app.
+4. The product header carried the vendor's own first-party naming pattern, on a platform that has
+   an official app from the same vendor.
 5. ~~Release builds bake in the developer's LAN IP and home-directory paths.~~ **CLEARED:** release
    CI has no local config and the artifact gates inspect the compiled bytes.
 6. ~~The release opens the squattable `/tmp/butaca-remote`.~~ **CLEARED:** the whole developer
@@ -49,7 +51,8 @@ answers what a QA pass would find.
 
 Live and healthy: `github.com/webosbrew/apps-repo` had commits on 2026-07-31; 45 packages in `main`.
 Native is first-class — Moonlight (SDL2/C), Kodi, RetroArch and IHSplay all ship as
-`type: "native"` ARM ipks. **There is no Plex client of any kind in the repository today.**
+`type: "native"` ARM ipks. **There is no client for the retired vendor's service of any kind in
+that repository today.**
 
 ### 1.1 The submission is one file
 
@@ -59,7 +62,7 @@ equal the manifest `id` (`repogen/lintpkg.py` hard-errors otherwise). Schema is
 
 ```yaml
 title: Butaca                       # required, <=30 chars
-shortDescription: Native client for Plex Media Server   # optional, <=80 chars
+shortDescription: Native client for a Jellyfin server   # optional, <=80 chars
 iconUri: https://…/icon160.png         # required; https: or data:, must return 200
 detailIconUri: https://…/icon320.png   # optional, 320px convention
 manifestUrl: https://github.com/<you>/<repo>/releases/latest/download/com.butaca.manifest.json
@@ -246,8 +249,8 @@ failures and a column of untested items — and the transport-control question i
 **`docs/ux-scenario.md`**, which is the document LG's checklist item 45 defers to by name.
 
 **Content policy is not an obstacle either** — Jellyfin and Emby both ship on the LG Content Store,
-so "client for a self-hosted media server" is an accepted category, and Plex ships an official webOS
-app covering webOS 3/4/5.
+so "client for a self-hosted media server" is an accepted category, and the retired vendor shipped an
+official webOS app covering webOS 3/4/5.
 
 **What a submission would still cost is real, and it is engineering rather than permission**: the
 four failing checklist items (adaptive bitrate, IPv6, TLS/DNS transport so a QA bench can reach a
@@ -460,7 +463,7 @@ So a **Homebrew-Channel install breaks two things**:
 2. **Login** — `session.rs:35` writes under `/media/developer`, which **does not exist inside the
    production jail**. `open` returns ENOENT and `save()` discards it with no `else` and no log
    (`session.rs:150-158`) → the user re-does the QR sign-in every single boot, with a fresh
-   `X-Plex-Client-Identifier` minted each launch. There is **no persistent writable directory common
+   client identifier minted each launch. There is **no persistent writable directory common
    to both layouts**, so the path has to become a probed search order, not a constant.
 
 **FIXED 2026-08-01** — `rust-modules/src/paths.rs`. The app directory is resolved from
@@ -508,8 +511,8 @@ line, real fonts rendering, and the session file rewritten `0600` under the app'
 `src/config.local.h`, + an entropy sweep). The real `PMS_TOKEN` and `DEMO_STREAM_URL` have **never**
 been committed; `src/config.local.h`, `local.env` and any `auth.json` have **never** been tracked.
 The only historical binaries are the two icons and one short-lived `pkg/threadprobe`. The
-`accessToken: transient-…` and `10.0.0.x` strings in `docs/plex-openapi.json` are from the upstream
-published spec, not this user.
+`accessToken: transient-…` and `10.0.0.x` strings in the upstream published spec that used to be
+vendored under `docs/` are from that spec, not this user.
 
 *Caveat on method:* a needle search finds the **current** token. A previously-rotated token would not
 be found this way. Rotate the token regardless — it has been on disk in many places and injected into
@@ -596,7 +599,7 @@ world-readable `/tmp` on the TV across many runs.
 - ~~**STILL OPEN — the one unfixed item on this list.**~~ **CLOSED 2026-08-29**, in two halves that
   landed a fortnight apart, and the entry is kept because both halves were mis-stated while open.
 
-  The item read: the event log prints the server name + LAN address, Plex Home profile names and
+  The item read: the event log prints the server name + LAN address, household profile names and
   episode titles, it is written by EVERY build (the four log sinks are deliberately outside the
   `devtriggers` gate — `dev.rs`'s module doc says why), and `/tmp` is mode 1777 in the production
   jail, so on a shipped install that file is world-readable. The proposed fix was "a mode-0600 open
@@ -614,7 +617,7 @@ world-readable `/tmp` on the TV across many runs.
   exits, and they differ in exactly one respect:
 
   * `crate::log` now applies **`diag::scrub::scrub_local`** to every line before the write —
-    credentials, hosts, bare addresses, Plex GUIDs, `q='…'` search queries and the household names
+    credentials, hosts, bare addresses, catalog ids, `q='…'` search queries and the household names
     the session layer publishes. It **rewrites only and never drops**: a line vanishing from the
     primary debugging surface is worse than a leaky one.
   * Anything crossing the network takes `diag::scrub::scrub`, which may refuse a line outright.
@@ -628,8 +631,8 @@ world-readable `/tmp` on the TV across many runs.
   `diag::scrub`'s `no_log_call_site_interpolates_viewing_content` greps the tree to keep it that
   way, and is itself proven to fail on a reintroduced leak.
 
-**Verified clean, no action:** the only outbound hosts are the user's PMS, plex.tv and
-`discover.provider.plex.tv` — plus, since the telemetry work, Sentry and PostHog in the EU, and
+**Verified clean, no action:** the only outbound hosts were the user's media server, the account
+service and its discovery host, plus, since the telemetry work, Sentry and PostHog in the EU, and
 those two only after an explicit first-run Share choice or a later Done in Account → Settings →
 Privacy & data. First run asks about the two purposes separately and offers the exact payload
 preview before either answer: the first choice remains a draft, the second records both, and BACK
@@ -649,11 +652,11 @@ audited build rather than a promise, so it is updated rather than qualified. TLS
 own mode argument rather than create-then-chmod (`session.rs:154`).
 
 **Personal-library disclosure:** `tests/manifest.json` is a 21-title inventory of a private media
-collection with real `ratingKey`s, plus a real Plex Home managed-user id. Much of `docs/` quotes the
+collection with real `ratingKey`s, plus a real household managed-user id. Much of `docs/` quotes the
 same. Sanitize or synthesize before publishing.
 
 **Local hygiene (none of this is committed, all of it is on disk):** `main.o` at the repo root
-contains the **real Plex token** in `.rodata`; `.claude/worktrees/` holds 17 copies of
+contains the **real access token** in `.rodata`; `.claude/worktrees/` holds 17 copies of
 `config.local.h` with the real token; `.tv-dpad.log` holds a live Basic-auth password. Also: 15
 local-only + 4 pushed `worktree-agent-*` branches — never `git push --all`/`--mirror`, and check
 `git remote -v` before flipping repo visibility.
@@ -805,36 +808,38 @@ Inter if you're willing to re-tune the size ladder.
 
 ### 5.5 Trademarks — the part with real teeth
 
-**Plex: fine, and there's an explicit permitted formula.** Their ToS (rev. 2025-10-30) defines
-*"Interfacing Software"* to expressly include *"client applications that communicate directly or
-indirectly with the Plex Solution."* A third-party client is a **named, anticipated category**, not
-unauthorized access. Plex published official OpenAPI docs at developer.plex.tv in Sept 2025 naming
-*"third-party clients that want to play content from a PMS"* as an intended audience; the PIN/JWT
-device-auth flow we use is documented, with no API key or registration gate.
+**The retired vendor was fine with it, and there was an explicit permitted formula.** Its ToS
+(rev. 2025-10-30) defined *"Interfacing Software"* to expressly include client applications that
+communicate, directly or indirectly, with its own server product. A third-party client was a **named, anticipated
+category**, not unauthorized access. The vendor published official OpenAPI docs on its developer
+portal in Sept 2025 naming third-party clients that want to play content from its server as an
+intended audience, and the PIN/JWT device-auth flow such a client used was documented, with no API
+key or registration gate. Nothing here exercises that route today.
 
-Four obligations attach that we don't currently meet:
+Four obligations attached to that route, and the tree did not meet them:
 1. A copyright notice **in the source code**, form `Copyright © <year> <holders>`.
-2. A privacy notice (or link to one) summarizing practices consistent with Plex's policy.
-3. Publishing grants Plex a worldwide royalty-free right to use, copy, display, market and
+2. A privacy notice (or link to one) summarizing practices consistent with the vendor's policy.
+3. Publishing granted the vendor a worldwide royalty-free right to use, copy, display, market and
    **distribute** the app *and its name*, plus authority to sublicense it MIT-style to recipients.
-   There is a 30-day opt-out. **This is a decision to make deliberately, not a footnote.**
-4. "Your Interfacing Software" is an explicit indemnification trigger.
+   There was a 30-day opt-out. **That was a decision to make deliberately, not a footnote.**
+4. Interfacing software of that kind was an explicit indemnification trigger.
 
-Naming: their guidelines list *"Use `for Plex` following the name of your application, provided that
-the name of your application is unique"* under **You may**, and *"Use Plex or derivatives thereof in
-the name of your application"* under **You may not**. `Butaca` is a vowel-dropped "Plex" and sits
-near the "derivatives / misspellings" line — grey, low risk, cheap to eliminate. Precedent is
-reassuring: PlexKodiConnect (1.3k stars, "Plex" literally in the name) and Plezy (3k stars, four app
-stores, listed as *"Plezy for Plex"*) both run unmolested. The one Plex DMCA found (2024-03-11,
-`plex-reshare`) targeted a library-**resharing** tool, not a client.
+Naming: their guidelines listed *"Use `for <mark>` following the name of your application, provided
+that the name of your application is unique"* under **You may**, and *"Use <mark> or derivatives
+thereof in the name of your application"* under **You may not**. `Butaca` is a vowel-dropped form
+of that mark and sat near the "derivatives / misspellings" line, grey, low risk, and cheap to
+eliminate. Precedent was reassuring: two third-party clients that carry the mark in their own name
+(1.3k and 3k stars, the larger one listed in four app stores) both ran unmolested. The one DMCA
+notice found (2024-03-11) targeted a library-**resharing** tool, not a client.
 
-**BLOCKING — `X-Plex-Product: Plex for webOS`** (`account.rs:42/46`, with
-`X-Plex-Device-Name: Plex (LG webOS)`). That is exactly Plex's own first-party pattern (their
-documented sample value is `"Plex for Roku"`), it surfaces in the account's authorized-devices list,
-and LG **has** an official Plex app — so a server owner has no way to tell it isn't Plex's. Also
-note `client.rs` uses a *different* product string (`Butaca`): the plex.tv-facing and PMS-facing
-identities disagree. *(Small caution: PMS transcode/direct-play decisions can key off client
-identity, so re-run the player suite after renaming.)*
+**BLOCKING: the product header named the vendor's own app** (`account.rs:42/46`, with the
+device-name header set to the vendor's name plus `(LG webOS)`). That is exactly the vendor's own
+first-party pattern (their documented sample value named their set-top client), it surfaces in the
+account's authorized-devices list, and LG **has** an official app from the same vendor, so a server
+owner has no way to tell it isn't theirs. Also note `client.rs` uses a *different* product string
+(`Butaca`): the account-service-facing and server-facing identities disagree. *(Small caution:
+transcode/direct-play decisions can key off client identity, so re-run the player suite after
+renaming.)*
 
 > **RESOLVED 2026-08-02 — this subsection is the ANALYSIS THAT LED TO THE FIX, not a description
 > of what ships.** Everything below was true when written and is not true now: all ten Rotten
@@ -854,11 +859,12 @@ application path. We ship 10 such icons (`tomato*.svg`, `popcorn*.svg`), and one
 **Redrawing them does not fix it.** Copyright covers Fandango's artwork files; **trademark** covers
 the mark as a source identifier — and the entire function of the tomato, the green splat and the
 Certified Fresh wreath is to signal "this is a Rotten Tomatoes rating." Fandango's terms bar
-"derivative works based upon Fandango Property"; Plex's own guidelines make the same point
+"derivative works based upon Fandango Property"; the vendor's own guidelines made the same point
 explicitly by prohibiting "any altered, distorted or interpreted representation." Rights holders in
 this space target redraws.
 **Fix (cheap):** render the score as text naming the source in words — "Rotten Tomatoes 91%" — which
-is referential use, or use a neutral house glyph. The scores come from PMS either way, so dropping
+is referential use, or use a neutral house glyph. The scores came from the server either way, so
+dropping
 the icons costs no data.
 
 **BLOCKING but trivial — TMDB.** Terms (rev. 2023-10-20) §3 require the **unmodified** official logo
@@ -873,7 +879,8 @@ Two more, minor: `assets/icons/user.svg` is character-for-character Google Mater
 (Apache-2.0, needs attribution) and `backspace.svg` is Feather Icons `delete` (MIT, needs the
 notice). The other 29 are genuinely hand-authored. And `theme.rs` tints these marks in the brands'
 **exact** hex — `#01B4E4` (TMDB), `#F5C518` (IMDb), RT red — which is what turns generic geometry
-into a brand reproduction. `pkg/icon.png` is a solid `#E5A00D` tile — Plex's exact brand gold; not
+into a brand reproduction. `pkg/icon.png` is a solid `#E5A00D` tile, the vendor's exact brand gold,
+and not
 protectable alone, but trade-dress-adjacent and a reviewer would notice.
 
 ---
@@ -907,14 +914,15 @@ Listed because each could change a decision above.
    author's to make.
 6. **Audience size.** ACB gone at 5.0 → webOS 4.x only → 2018–2019 models → whose owners must either
    enable Dev Mode (session-limited, apps uninstalled on expiry) or root. Nobody multiplied those
-   out. Related: **Plex ships an official webOS app covering webOS 3/4/5** — the same hardware. The
+   out. Related: **the retired vendor shipped an official webOS app covering webOS 3/4/5**, on the
+   same hardware. The
    value proposition against the incumbent is the thing the compliance work has to justify.
 7. ~~**Multi-server users.**~~ **IMPLEMENTED 2026-08-23; device acceptance remains.** Discovery
    evaluates every granted server and its ranked connection URLs. The plaintext arm resolves
-   hostnames and IPv4/IPv6; HTTPS PMS control uses `net.rs`, and HTTPS media uses `curlio.rs`, so
+   hostnames and IPv4/IPv6; HTTPS server control uses `net.rs`, and HTTPS media uses `curlio.rs`, so
    remote, relay and *Require secure connections* origins no longer dead-end structurally. There
    is still **no Settings screen or manual server entry**, by owner decision: servers are
-   configured on a phone/PC and the television chooses per profile from the plex.tv grant. The
+   configured on a phone/PC and the television chooses per profile from the account service's grant. The
    unresolved part is an end-to-end run against a remote/shared server on real TV firmware.
 8. **What should the app do on unsupported firmware?** `requirements.webosRelease` does **not** hide
    the app from a webOS 6 user browsing the channel (§1.4). It needs a graceful failure.
@@ -940,7 +948,8 @@ Listed because each could change a decision above.
    for a short window after the repo went public a licensed Monotype font was downloadable from it.
    Deleted. **37 LOCAL refs still carry the blobs** — every agent branch plus that tag — so from
    this clone, never `git push --all` or `git push --tags`.
-2. Add `LICENSE` (MIT), and a `Copyright © 2026 <holder>` header — the Plex ToS requires the notice
+2. Add `LICENSE` (MIT), and a `Copyright © 2026 <holder>` header: the retired vendor's ToS required
+   the notice
    *in the source*.
 3. Add `THIRD-PARTY-NOTICES.md` + `licenses/` (LGPL-2.1, MIT, Apache-2.0, Zlib, BSD-3-Clause,
    OFL-1.1, Apache-2.0-WITH-LLVM-exception). **Ship them inside the `.ipk`** — LGPL §6's "prominent
@@ -949,32 +958,35 @@ Listed because each could change a decision above.
 4. ~~Fix the RT icons~~ **DONE 2026-08-02** (§11): providers named in text, verdict-only glyphs, and
    the IMDb/TMDB brand-colour chips — which this list never mentioned — gone with them.
    ~~Attribute `user.svg` / `backspace.svg`~~ **DONE** (`THIRD-PARTY-NOTICES.md` §3).
-5. ~~Rename `X-Plex-Product` / `X-Plex-Device-Name`~~ **DONE 2026-08-02** — and the scope was wider
+5. ~~Rename the product and device-name headers~~ **DONE 2026-08-02**, and the scope was wider
    than these two fields. `account.rs` and `client.rs` had drifted on **five of seven**; both now
-   read one `plex/identity.rs`. Three findings this item did not anticipate:
-   - **`net.rs` set the libcurl `User-Agent` to `PlexForWebOS/1.0 (LG webOS)`** on every plex.tv and
-     `discover.provider.plex.tv` request. Same impersonation as the product string and arguably
-     worse — it is what lands in Plex's own server logs — and it named a version that never existed.
-   - **`X-Plex-Model` was `49SM9000PLA`**, the author's television, reported as fact by every
+   read one `server/identity.rs`. Three findings this item did not anticipate:
+   - **`net.rs` set the libcurl `User-Agent` to `<Vendor>ForWebOS/1.0 (LG webOS)`** on every
+     account-service and discovery request. Same impersonation as the product string and arguably
+     worse, because it is what lands in the vendor's own server logs, and it named a version that
+     never existed.
+   - **The model header was `49SM9000PLA`**, the author's television, reported as fact by every
      install. Now a generic `LG webOS TV`.
-   - **`X-Plex-Version` was two literals** (`1.0` to plex.tv, `0.1.0` to the PMS), already stale in
-     opposite directions before release. Now one derived constant — `plex::identity::VERSION`,
-     which `rust-modules/build.rs` publishes from `Cargo.toml` (exactly for a `RELEASE=1` build,
+   - **The version header was two literals** (`1.0` to the account service, `0.1.0` to the server),
+     already stale in opposite directions before release. Now one derived constant,
+     `server::identity::VERSION`, which `rust-modules/build.rs` publishes from `Cargo.toml` (exactly
+     for a `RELEASE=1` build,
      as the next minor plus `-dev` for anything else) — with `ci/check-package.py` asserting that
      `Cargo.toml` and `appinfo.json` agree, and that the packaged binary's reported version matches
      the configuration that produced it: exact for the stable id and for any `RELEASE=1` build,
      `-dev` for a developer one. Graded in both directions, because a witness that cannot fail is
      not a gate.
 
-   **Still open from this item:** the PMS-side `X-Plex-Client-Identifier` is a hardcoded UUID, so
-   every install on earth is one device to a server — sessions merge, and the transcode-stop call
-   keyed on it can reach across installs. The plex.tv half is already correct (`session.rs` mints
-   and persists a v4 UUID); the fix is threading that id into `plex::install`, ~10 lines, and it
-   touches the boot path so it wants a player-suite run.
+   **Still open from this item:** the server-side client identifier is a hardcoded UUID, so every
+   install on earth is one device to a server: sessions merge, and the transcode-stop call keyed on
+   it can reach across installs. The account-service half is already correct (`session.rs` mints
+   and persists a v4 UUID). The fix is threading that id into `jellyfin::install`, ~10 lines, and
+   it touches the boot path so it wants a player-suite run.
 6. ~~Restore the jsmpeg MIT banner; fix `src/svg.c:1`~~ **DONE** (commit 2df3d90).
-7. Decide on the Plex ToS licence grant (§5.5 item 3) and write the privacy notice.
+7. Decide on the retired vendor's ToS licence grant (§5.5 item 3) and write the privacy notice.
 8. **NEW:** no source file carries a `Copyright © 2026` header. `LICENSE` landed but §5.5 records
-   the Plex ToS obligation as a notice *in the source code*, and that half was never done. One
+   the retired vendor's ToS obligation as a notice *in the source code*, and that half was never
+   done. One
    banner in `src/main.c` and `rust-modules/src/lib.rs`.
 
 **Privacy/security — all but two DONE 2026-08-02:**
@@ -983,7 +995,8 @@ Listed because each could change a decision above.
    hard release blocker: `ci/check-elf.sh` already *gated* on host paths while nothing set the flag,
    so the first tagged release would have failed its own check. The gate had two bugs of its own —
    its hint named `-C --remap-path-prefix` (it is a top-level rustc flag) and its `/home/[a-z]`
-   pattern matched plex.tv's `/api/v2/home/users` endpoint, which would have failed **every** build
+   pattern matched the account service's `/api/v2/home/users` endpoint, which would have failed
+   **every** build
    regardless. Both fixed, and the host-path assertion was split out of the config-dependent ones so
    it runs on a dev machine too — it had never once executed against a real build.
    ~~Replace the control-file Maintainer~~ **DONE**, plus `Homepage`/`License`, all three asserted.
@@ -1008,7 +1021,7 @@ Listed because each could change a decision above.
     it reads: `docs/` is ~12 lines across 5 files. The concentration is `tests/` — the inventory
     appears twice, in `manifest.json` and `README.md` — plus, unlisted here, real titles in
     `rust-modules/src` comments, most of which are the RATIONALE for the code and should stay.)*
-13. Rotate the Plex token. Clean `main.o`, `.claude/worktrees/`, `.tv-*.log`, and the stale 200 MB
+13. Rotate the access token. Clean `main.o`, `.claude/worktrees/`, `.tv-*.log`, and the stale 200 MB
     `core` sitting in the app dir on the dev TV.
     **The worktree half was structural, not housekeeping:** 16 copies of `config.local.h` with the
     live token were held out of the index by `.git/info/exclude` alone — local-only, not reviewable,
@@ -1404,14 +1417,14 @@ under 8 px, and `--band=N` keeps just one. The **v2 master (shipped) is single-l
 2.68**, so the question no longer arises.
 
 **`iconColor` must match the icon's own background, and for months it didn't.** It was `#e5a00d`,
-so the launcher painted the tile Plex gold and drew our black icon on top — a black rectangle
+so the launcher painted the tile vendor gold and drew our black icon on top — a black rectangle
 floating in a gold tile, with a hard seam neither HBO Max nor Twitch has, because *their* icon
 background equals *their* `iconColor`. Nothing in any file was wrong; the defect existed only once
 the system composited the two, which is why a device screenshot found it and no amount of file
 inspection would have. Now `mkicons.py` writes `iconColor` from the master's own corner pixel
 (`#060606` for v2) and `ci/check-package.py` asserts the two agree within 2 levels — verified to
 fail when deliberately reverted to the gold. This also retires the trademark note above: `#E5A00D`
-was Plex's exact brand gold, and nothing in the shipped package carries it now.
+was the vendor's exact brand gold, and nothing in the shipped package carries it now.
 
 ### 10.1 The icon is NOT off-centre — LG puts every icon there (settled 2026-08-02)
 
@@ -1539,8 +1552,8 @@ Other native webOS apps: `xbmc/xbmc` `docs/README.webOS.md`, `mariotaku/moonligh
 `webosbrew/retroarch-cores`, `throwaway96/faultmanager-autoroot`.
 Licences: `gnu.org` LGPL-2.1 + GPL FAQ, `ffmpeg.org/legal.html`, `learn.microsoft.com` font-redistribution FAQ,
 `libsdl.org`, `freetype.org`, `libjpeg-turbo.org`, `crates.io`, `rust-lang/rust` COPYRIGHT.
-Plex: `plex.tv/about/privacy-legal/plex-terms-of-service/`,
-`plex.tv/about/privacy-legal/plex-trademarks-and-guidelines/`, `developer.plex.tv`, forum announcement 2025-09-15.
+The retired vendor: its terms-of-service page, its trademark-and-guidelines page, its developer
+portal, forum announcement 2025-09-15.
 Third-party marks: Rotten Tomatoes Developer Network (archive 2025-02-19), Fandango Data Feed Terms
 (archive 2024-11-05), `themoviedb.org/api-terms-of-use` (rev. 2023-10-20).
 On-device evidence: `.abi-cache/libavcodec.so.57.89.100` build-config string; NDK `readelf -d pkg/butaca`;
@@ -1641,7 +1654,7 @@ each carrying exactly two properties, UTF-8 without BOM:
 ```json
 {
   "title": "Butaca",
-  "appDescription": "비공식 네이티브 Plex 클라이언트 - Plex와 제휴 관계가 없습니다"
+  "appDescription": "비공식 네이티브 Jellyfin 클라이언트 - Jellyfin과 제휴하지 않음"
 }
 ```
 
@@ -1654,9 +1667,10 @@ Three decisions in that file are deliberate and each has a gate behind it in `ci
   `ci/check-package.py` have never heard of. This is `ci/flavor.py`'s "PATCH, DO NOT DUPLICATE"
   arrived at from the other direction, and it is also what LG asks for.
 * **The description is a near-literal translation, not marketing copy per market.** The English
-  sentence is a **trademark disclaimer** (*"not affiliated with Plex"*), so it is graded against
-  the English rather than rewritten — and the mark itself stays Latin `Plex` in every locale, which
-  is asserted, because a transliteration would both weaken the disclaimer and misuse the mark.
+  sentence is a **trademark disclaimer** (*"not affiliated with Jellyfin"*), so it is graded
+  against the English rather than rewritten, and the mark itself stays Latin `Jellyfin` in every
+  locale, which is asserted, because a transliteration would both weaken the disclaimer and misuse
+  the mark.
   Chinese is absent for a related reason: `zh` alone does not say Hans or Hant, and guessing a
   script for a legal sentence is worse than shipping English.
 
@@ -1741,11 +1755,12 @@ section closed anything at all.
 
 **Superseded: the UI is localized now.** When this section was written the UI was English-only,
 with ~203 display literals across 45 files and no string ownership story, and the native UI was
-locale-blind apart from a best-effort `X-Plex-Language` read from the POSIX locale environment.
+locale-blind apart from a best-effort language-header read from the POSIX locale environment.
 Both are gone. The app's own text comes from bundled catalogs (English, Spanish, Belarusian), the
 UI language resolves from a saved Settings → Language override, then the TV UI language reported
 by the native Settings Service, then the process locale, then English, and
-`plex::identity::language` now sends that resolved language as `X-Plex-Language`.
+the retired client's identity module sent that resolved language in a language header, and nothing
+sends one today.
 [`docs/localization.md`](localization.md) is the current account of runtime behaviour and of its
 verification on the television.
 

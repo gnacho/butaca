@@ -602,7 +602,8 @@ framebuffer 0 before the bar draws — a readback stalls a tiler, which is exact
 low: a hero holds for eight seconds and a scrim density has no business changing faster than the
 picture does. Measured on the panel with `homeosc` running, the frame rate is unchanged.
 
-**The cheap sources are the wrong colour, and this cost an iteration.** Plex's `UltraBlurColors` are
+**The cheap sources are the wrong colour, and this cost an iteration.** The retired vendor's
+`UltraBlurColors` were
 a derived muted palette for an ambient wash: for the hero whose top edge measures (0.00, 0.68, 0.91)
 on the panel they report **(0.30, 0.23, 0.18)**, so the bar stayed at its floor and nothing changed.
 The wash's own corners lean only 26% toward the art and have the same problem.

@@ -37,16 +37,16 @@ This distinguishes the three protocol shapes as follows:
   session is created, while the long Auto session did not change its output after opposite
   bandwidth signals.
 
-This is not a claim about every PMS version, client profile, or media shape. In particular, Plex's
-[Automatically Adjust Quality](https://support.plex.tv/articles/115007570148-automatically-adjust-quality-when-streaming/)
-documentation describes an app-controlled feature; the `autoAdjustQuality` flag by itself is not
+This is not a claim about every server version, client profile, or media shape. In particular, the
+vendor's "Automatically Adjust Quality" article (115007570148) described an app-controlled
+feature; the `autoAdjustQuality` flag by itself is not
 evidence that a server autonomously switches the wire rendition.
 
 ## Session identifiers
 
-A follow-up mismatch probe measured the three wire fields with distinct redacted sentinels. PMS
-used the legacy `session=` query value as the physical encoder identity and the documented
-`X-Plex-Session-Identifier` header as the playback/timeline identity. The canonical
+A follow-up mismatch probe measured the three wire fields with distinct redacted sentinels. The
+server used the legacy `session=` query value as the physical encoder identity and the documented
+session-identifier header as the playback/timeline identity. The canonical
 `transcodeSessionId=` query value was not adopted by this PMS/profile.
 
 After a timeline signal, the allowlisted `/status/sessions` entry reported the header sentinel as
@@ -56,11 +56,11 @@ canonical-query and header candidates each returned 404. The same encoder preced
 in a fixed leg without a timeline signal.
 
 A subsequent simultaneous-encoder TV spike established the stronger lifecycle rule. A candidate
-with a new legacy `session=` but the old playback's `X-Plex-Session-Identifier` could return its
+with a new legacy `session=` but the old playback's session identifier could return its
 master and media playlists, but its segment zero remained 404; after the candidate was abandoned,
-the old encoder's next segment also remained 404. Sharing the X-Plex identity therefore replaces
+the old encoder's next segment also remained 404. Sharing the session identifier therefore replaces
 or invalidates the old session before prime completes on this PMS. Butaca keeps a stable
-playback generation internally, but couples `session=` and `X-Plex-Session-Identifier` to one new
+playback generation internally, but couples `session=` and the session-identifier header to one new
 value for each physical encoder. Timeline, seek, and teardown follow the currently published
 encoder wire identity. A transcode seek is itself a new encoder registration: it first gets a
 fresh coupled value, atomically publishes the replacement URL/identity after `/decision` succeeds,
@@ -70,7 +70,7 @@ server archive showed the same key starting twice and retaining stale resource s
 The tool now constructs that experiment without putting raw IDs into its report:
 
 - `baseline` preserves the measured equal legacy/query-X layout;
-- `legacy` and `canonical` pair the named query field with the X-Plex header;
+- `legacy` and `canonical` pair the named query field with the session-identifier header;
 - `matched` puts one alias on legacy, canonical, and header wires;
 - `mismatch` generates three distinct values; and
 - `explicit` accepts selected legacy, canonical, and header values.
@@ -88,7 +88,7 @@ failures remain visibly pending.
 The measured `FixedSession` result determines the production architecture. Auto does not ask PMS
 to mutate one encoder and does not select among variants. It keeps one internal playback
 generation, but gives each physical encoder the same fresh value on the legacy `session=` and
-`X-Plex-Session-Identifier` wires. A move is proposed from the current segment measurements, a new
+the session-identifier wires. A move is proposed from the current segment measurements, a new
 encoder is registered at the current content offset, and its first segment is downloaded and fully
 demuxed off-screen. Only a candidate with an in-bounds decoded raster, a complete decodable H.264
 IDR, valid AAC framing/timestamps, and a passing direction-specific acquisition/reserve transaction
@@ -150,8 +150,8 @@ calibrated server work**. That difference remains a recurring cost in Original/H
 HLS admission does not turn the total acquisition ratio into an independent production constraint;
 the candidate's complete acquisition already includes the same service episode.
 
-As with everything else here, this is one PMS, one client profile and one media shape. It is not a
-claim about a universal Plex maximum, and the client's transaction grades the actual segment rather
+As with everything else here, this is one server, one client profile and one media shape. It is not a
+claim about a universal server maximum, and the client's transaction grades the actual segment rather
 than trusting the table.
 
 > **Corrected 2026-08-27 — the table above is ITEM-specific, and it was read as server-specific.**

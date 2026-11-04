@@ -151,7 +151,8 @@ if grep -qE '(^|[^[:alnum:]/_.-])/(Users|home)/[a-z]' "$AUDIT_TMP/strings"; then
   fail "build-host paths in the binary — the build must set --remap-path-prefix (see the Makefile's RUST_REMAP)"
 fi
 # The pattern is anchored to a path BOUNDARY rather than matching '/home/[a-z]' anywhere, because
-# the plex.tv endpoint '/api/v2/home/users' is a substring match and would fail every build.
+# the account service's endpoint '/api/v2/home/users' is a substring match and would fail
+# every build.
 ok "no build-host paths"
 
 if [ -f src/config.local.h ] && [ "${CI:-}" != "true" ]; then

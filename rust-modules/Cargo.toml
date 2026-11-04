@@ -1,11 +1,11 @@
 [package]
 name = "butaca-modules"
 # THE version, in three places that ci/check-package.py keeps in step: here, pkg/appinfo.json
-# (which the ipk derives its filename and control entry from), and the X-Plex-Version this client
-# reports to both Plex services via src/plex/identity.rs. What the app reports is DERIVED from this
-# rather than equal to it: build.rs publishes `BUTACA_VERSION`, which is this number exactly for a
-# RELEASE build and the next minor plus `-dev` for every other build, so a working tree does not
-# report itself as the last published release.
+# (which the ipk derives its filename and control entry from), and the `X-Plex-Version` this client
+# reports to the server and to the account service via src/server/identity.rs. What the app reports
+# is DERIVED from this rather than equal to it: build.rs publishes `BUTACA_VERSION`, which is this
+# number exactly for a RELEASE build and the next minor plus `-dev` for every other build, so a
+# working tree does not report itself as the last published release.
 version = "0.7.0"
 edition = "2021"
 # The crate is a staticlib and is never published to crates.io, so these are not for a registry —
@@ -13,7 +13,7 @@ edition = "2021"
 # provenance a webosbrew reviewer reads. The manifest asserting nothing while the root said MIT
 # was a contradiction with no upside.
 license = "GPL-3.0-or-later"
-description = "Application core for Butaca — an unofficial native Plex client for LG webOS."
+description = "Application core for Butaca, an unofficial native Jellyfin client for LG webOS"
 repository = "https://github.com/gnacho/butaca"
 
 # Static library linked into the C app (hybrid migration): each ported module
@@ -111,13 +111,13 @@ lab-diagnostics = []
 # What it changes, and nothing else: the media seam (29 symbols that exist only on a television),
 # the GL context request (a desktop core profile, not GLES2), the window flags, the keyboard event decode
 # (LG's SDL fork shifts SDL_KeyboardEvent; stock SDL2 does not), and the wayland/glib calls that
-# have no host equivalent. Everything else — all of `ui/`, the whole Plex data layer, the demux
+# have no host equivalent. Everything else — all of `ui/`, the whole server data layer, the demux
 # orchestration — is compiled identically for both.
-# Jellyfin backend. ADDITIVE in the cargo sense: the `jellyfin/` module compiles either
-# way, and what the feature switches on is the WIRING — the boot-gate arm that reads
-# jellyfin.json, the home-fetch arm in `pms`, the poster arms — each a `#[cfg]` beside the
-# Plex path it parallels, so an ordinary build is byte-for-byte unaffected. `make JELLYFIN=1 …`
-# builds it; the fork ships it as the flavor it installs.
+# Jellyfin backend. The `jellyfin/` module is what talks to the server, and no cargo feature stands
+# in front of it any more: the wiring that used to sit behind one - the boot-gate arm that reads
+# jellyfin.json, the home-fetch arm in `pms`, the poster arms, each a `#[cfg]` beside the path it
+# paralleled - is unconditional now, so an ordinary build has no toggle left to forget, and
+# `make JELLYFIN=1` went with the feature.
 hostsim = []
 
 # Warnings are ERRORS, for this crate, in every cargo invocation — build, check, test, clippy, the
@@ -162,7 +162,7 @@ libc = "0.2"
 # JSON parsing for the pms module (replaces the C's hand-rolled string scrape)
 # std exposes the writer API used to bound manifest encoding before any filesystem write.
 serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
-# derive(Deserialize) for the typed plex API response models (src/plex/models.rs)
+# derive(Deserialize) for the typed API response models (src/jellyfin/dto.rs)
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 icu_locale = "=2.1.1"
 icu_plurals = "=2.1.1"

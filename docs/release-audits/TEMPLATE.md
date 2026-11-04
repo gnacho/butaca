@@ -25,7 +25,7 @@ The evidence behind the vX.Y.Z release note. Written for a webosbrew reviewer, a
 | television | <model, platform release as the set reports it, what LG markets the generation as> |
 | server | <what the suite ran against> |
 | suite | `./tests/run.py --server` — <n> cases, <result>, <date> |
-| suite | `./tests/run.py` (synthetic pipeline tier, no Plex) — <n> cases, <result>, <date> |
+| suite | `./tests/run.py` (synthetic pipeline tier, no server) — <n> cases, <result>, <date> |
 | perf | `./tests/run.py --fps` — <result>, or why it was not run |
 | by hand | <anything watched by a person that the suites do not cover, with what was seen> |
 

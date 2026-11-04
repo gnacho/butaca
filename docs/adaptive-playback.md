@@ -186,7 +186,7 @@ count constant.
 
 PMS encoder lifecycle is an independent physical condition. A successful universal-transcoder
 `/stop` only queues cleanup, and PMS owns the physical `session=` encoder separately from the
-logical `X-Plex-Session-Identifier` Streaming Resource charged by the bandwidth governor. Before
+logical session-identifier Streaming Resource charged by the bandwidth governor. Before
 another upward HLS or Original experiment, the client checks the stopped physical key with the
 matching `/ping`; `200` proves it remains and `404` proves only that physical entry is gone. It
 then synchronously closes the exact logical identity through `POST /status/sessions/close`; `2xx`

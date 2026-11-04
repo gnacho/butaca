@@ -9,10 +9,10 @@ and size, without choosing a caching policy. The sign-in QR code is transient au
 and remains outside the artwork cache; bundled icons and fonts already live in the app package.
 
 Disk entries contain compressed image bytes and a small versioned header with fetch time and
-payload length. A SHA-256 filename identifies the stable Plex machine id (canonical server origin
-until an id is known), source and every requested transform. The outer `X-Plex-Token` is excluded.
-Source version queries, size, cover mode and format remain distinct. Only the recognized Plex
-avatar roster's volatile `c=` stamp is ignored. No request URL or token is stored as metadata.
+payload length. A SHA-256 filename identifies the stable server machine id (canonical server origin
+until an id is known), source and every requested transform. The outer access-token header is excluded.
+Source version queries, size, cover mode and format remain distinct. Only the recognized household
+roster's volatile `c=` stamp is ignored. No request URL or token is stored as metadata.
 Existing avatar files migrate on their first hit while preserving their original refresh time.
 
 The cache chooses a writable persistent directory through `paths::image_cache_candidates`,
@@ -42,7 +42,7 @@ reusable artwork. Filesystem deletion failures remain best effort, like the exis
 
 ## Reproducible television stress test
 
-`tools/image-cache-stress.py` serves a synthetic Plex library with 1,200 movies. Each has its own
+`tools/image-cache-stress.py` serves a synthetic library with 1,200 movies. Each has its own
 rating key, thumbnail path and image-cache key. The approximately 33 KB JPEG fixture shares its
 raster artwork between tiles; an ordinal JPEG comment also makes each response's bytes distinct.
 This tests 1,200 independent cached objects, rather than drawing one cached poster 1,200 times.
@@ -65,7 +65,7 @@ Use a new access-log path for every run; the server refuses to overwrite existin
 `--count` can raise the library size to 10,000. `--port` defaults to 8027. The loopback-only control
 endpoint changes the phase label and enables or refuses image responses without affecting metadata.
 `GET /__stress/stats` reports both phases' request and distinct-key counts. Neither endpoint logs
-Plex query tokens.
+server query tokens.
 
 The device-owning lane follows [tv-lock](../.agents/skills/tv-lock/SKILL.md) and
 [tv-session](../.agents/skills/tv-session/SKILL.md), using the debug installation. Read its runtime

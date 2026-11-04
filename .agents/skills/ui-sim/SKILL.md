@@ -1,7 +1,7 @@
 ---
 name: ui-sim
 description: >
-  Verify UI and Plex data-layer changes in the Linux or Windows/WSLg desktop simulator. Use it for
+  Verify UI and server data-layer changes in the Linux or Windows/WSLg desktop simulator. Use it for
   layout, focus, navigation, screenshots, local app runs, and simulator-based validation when a TV
   is unavailable or unnecessary. It also defines which results still require `tv-session`, including
   TV frame rate, LG decoding, text rasterization, and the video plane.
@@ -18,7 +18,7 @@ description: >
 > Windows/WSLg's UI-only path stops at the existing host no-video seam.
 
 `butaca-sim` is the same application core the television runs, linked against desktop SDL2 and
-desktop GL. It draws the real interface against your real Plex Media Server on Linux or through
+desktop GL. It draws the real interface against your real media server on Linux or through
 WSLg on Windows.
 
 **Why it exists:** the TV serializes the entire dev loop. One set, one app instance, and two
@@ -42,7 +42,7 @@ display over noVNC.
 
 ### Windows 11 through WSLg
 
-The Windows entry point is `tools/sim.ps1`. It builds an optimized UI/Plex simulator inside the
+The Windows entry point is `tools/sim.ps1`. It builds an optimized UI/server simulator inside the
 existing Ubuntu 22.04 WSL distribution, keeps Cargo output and runtime state on WSL's Linux
 filesystem, and opens the SDL/OpenGL window through WSLg:
 
@@ -66,7 +66,7 @@ The staged token persists in that runtime directory, so use a fresh `-RuntimeDir
 after staging one. `-PmsHost` overrides the header's PMS host.
 
 This path deliberately calls `make sim-wsl`, the Windows-facing compatibility alias for the native
-Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, Plex browsing,
+Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, server browsing,
 screenshots and remote commands work; playback reaches the existing host "no video path" result.
 
 ## Watching a headless Linux simulator
@@ -227,7 +227,7 @@ sign-in may legitimately have advanced by the time the app is foregrounded again
 
 `make screenshots` regenerates every image under `docs/screenshots/`, and the website's close-up
 stills and link-preview card under `site/media/`, from a committed scene manifest, against the
-mock server's demo library — no Plex account, no television, no gitignored file:
+mock server's demo library - no account, no television, no gitignored file:
 
 ```sh
 make demo-library                     # fetch (sha256-pinned, ~390 MB once) + derive; screenshots runs it too
@@ -241,9 +241,9 @@ make screenshots SHOT_HERO_VARIANTS=1 # also home-hero-<film>.jpg for each hero 
 
 - **Scenes are target STATES, reached by triggers.** `tests/screenshots/scenes.json` names each
   state, the triggers that reach it, the event-log lines that prove it was reached (`expect`)
-  and the files it becomes. No key is sent. `tools/screenshots.py` arms `token`, `plextv` (plex.tv
-  replaced by the mock) and `stillclock` itself on every scene, and refuses a run whose log shows
-  a `BADTRIGGER`, a trigger that gave up, or a request the mock could not answer.
+  and the files it becomes. No key is sent. `tools/screenshots.py` arms `token`, `plextv` (the
+  account service replaced by the mock) and `stillclock` itself on every scene, and refuses a run
+  whose log shows a `BADTRIGGER`, a trigger that gave up, or a request the mock could not answer.
 - **An output is a file, a crop and a size.** An output's `dest` is `docs` (default,
   `docs/screenshots/`) or `site` (`site/media/`). A scene may render supersampled
   (`render_scale` 1..4); an output may `crop` (`[x, y, w, h]` in 1920x1080 canvas pixels,
@@ -295,7 +295,7 @@ make screenshots SHOT_HERO_VARIANTS=1 # also home-hero-<film>.jpg for each hero 
 
 Layout and spacing · focus and navigation · route transitions and the page cross-fade · every
 screen (home, library grid, detail, person, menus, popovers, the failure read-out) · the entire
-Plex data layer against a real PMS — browse, metadata, seasons, cast, images, sort/filter · idle
+server data layer against a real PMS — browse, metadata, seasons, cast, images, sort/filter · idle
 and repaint behaviour · anything reachable by keys or clicks. **Modals are drawn with the frame cache
 OFF** (`frame cache: CopyTexSubImage error=0x500 — cache off`), so a sim capture cannot show a
 fault in the cached host path a modal card is served from; only the TV can.
@@ -327,7 +327,7 @@ Report these ONLY from the device, via the **`tv-session`** skill (and `wake-tv`
   decodes**, every heartbeat still carries `sim=1`, and no number taken here is a device
   measurement.
 - **The video plane and UI transparency.** The wayland non-opaque trick is webOS-only.
-- ~~**plex.tv sign-in.**~~ **This one is FIXED and is no longer a limitation.** `dynlib!` learned
+- ~~**The account-service sign-in.**~~ **This one is FIXED and is no longer a limitation.** `dynlib!` learned
   to bind a variadic C function correctly, so the old non-variadic `curl_easy_setopt` binding no
   longer SIGSEGVs inside libcurl. The QR flow, discovery and the who's-watching roster all run here
   now. Writing the token into the instance root is still the faster way into a known server.

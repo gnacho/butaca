@@ -55,7 +55,7 @@ SITE_ORIGIN = "https://gnacho.github.io/butaca"
 # Same card every other page reuses for link previews (site/media/og-card.jpg, staged to
 # _site/media/og-card.jpg by pages.yml); these two docs have no screenshot of their own.
 OG_IMAGE = f"{SITE_ORIGIN}/media/og-card.jpg"
-OG_IMAGE_ALT = "Butaca home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs."
+OG_IMAGE_ALT = "Butaca home screen on an LG TV, next to the headline: Jellyfin that feels fast on LG TVs."
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -256,7 +256,7 @@ PAGE_TEMPLATE = """<!doctype html>
 
         <footer class="site-footer credits-footer">
           <p class="footer-meta">
-            <span>Butaca is an independent, unofficial client for Plex Media Server.</span>
+            <span>Butaca is an independent, unofficial client for Jellyfin.</span>
             <span class="sep" aria-hidden="true">&middot;</span>
             <span><a href="{edit_url}">Edit this page on GitHub</a></span>
           </p>

@@ -4,7 +4,7 @@
 the playback/user-data writes — with NOT ONE household byte anywhere in it.
 
 Why it exists: campaign issue #166 (Jellyfin-only client). The committed replay fixtures are
-Plex-flavored because the controlled boot constructs a Plex world and no Jellyfin mock existed.
+Server-flavored because the controlled boot constructs a media-server world and no Jellyfin mock existed.
 This server is the recording target the Jellyfin side was missing: every capture recorded against
 it can be committed to a public repository without a scrub pass, because every content string is
 drawn from one CLOSED ALPHABET — `s` + eight lowercase hex digits (`s3fa90c12`) — plus the

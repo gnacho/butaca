@@ -83,7 +83,7 @@ where a background event IS expected) are still unmeasured.
 | 15 | Keyboard cursor/editing | On the LG VKB, verify cursor movement and editing with `<` and `>` rather than inferring SDL event delivery from the host simulator. |
 | 16 | Keyboard character fidelity | Type the checklist's literal `\` example and verify case transfer on the television. |
 | 17 | Keyboard linked buttons | Exercise Voice Search and the LG VKB's other linked buttons on the television. |
-| 20 / 43 | Remote server reachability | With the LAN route blocked, sign in, browse and play from the account's remote server. Record the winning HTTPS `plex.direct` origin in the event log. HTTPS control, TLS media, relay fallback and persisted per-server state are implemented, but this exact acceptance run is still owed. |
+| 20 / 43 | Remote server reachability | With the LAN route blocked, sign in, browse and play from the account's remote server. Record the winning HTTPS pinned-name origin in the event log. HTTPS control, TLS media, relay fallback and persisted per-server state are implemented, but this exact acceptance run is still owed. |
 | 43 CASE2 | IPv6 | Browse and play over a **v6-only route**. `AF_UNSPEC`, IPv6 URL bracketing and both address families are implemented and host-tested; that is not an on-device IPv6 playback result. |
 | 22 CASE2 | Unsupported-language search | Enter a CJK query and visually verify Han/Kana/Hangul text rather than tofu. The bundled fallback font and per-run fallback renderer are host-gated; RTL remains explicitly outside that claim. |
 | 26 | General IR remote | Capture every physical button on a standard IR remote, slowly and in recorded order, and decode the raw scancode/symbol pairs. The Magic Remote capture is complete; the IR remote is not. |
@@ -117,7 +117,7 @@ The complete debug-device evidence behind those rows is broader than the two che
 
 - synthetic **21/21** proves transport, demux, feed, codec declarations, EOS/replay, seek, frame-rate
   fixtures, and the exact resolution matrix;
-- server **21/21** proves the live Plex selection path, direct play/transcode decisions, PlayQueue,
+- server **21/21** proves the live server selection path, direct play/transcode decisions, PlayQueue,
   track selection, markers, resume and timeline reporting for the configured library;
 - `--fps-player` **16/16** proves every configured UI and player performance scene met its gate on
   this television.
@@ -147,7 +147,7 @@ skips; a partial green count is not equivalent to 21/21.
 **#41 — language setting.** Settings now offers System default, English, Spanish and Belarusian,
 with changes applied at the next app launch. Localized launcher metadata still follows webOS.
 The native Settings Service supplies UI and formatting locales, and the resolved app language
-becomes `X-Plex-Language` for PMS. Native device checks on 2026-09-27 verified detection, persistence across restarts, Cyrillic
+becomes the language header sent to the server. Native device checks on 2026-09-27 verified detection, persistence across restarts, Cyrillic
 text, consent scrolling and the contribution QR. See `docs/localization.md` for the scope.
 
 **#45 — on-screen transport controls.** The product deliberately uses a remote-driven, state-only
@@ -155,7 +155,7 @@ transport HUD rather than a focusable Play/Pause/Stop/FF/RW row. The compliance 
 in `docs/ux-scenario.md`, which is what the checklist tells QA to consult for movement details.
 
 Genuinely N/A: #4 advertisement · #11 BACK UI button · #12 EXIT UI button · #18 terms · #19 sign-up
-(account creation happens on plex.tv) · #23 adult authentication · #24 / #25 payment · #32 colour
+(account creation happens on the account service) · #23 adult authentication · #24 / #25 payment · #32 colour
 keys (unused) · #35 MMRC-only restriction · #42 in-app UI sound control (there is no UI audio) · #44
 full/original screen toggle · #47 live/real-time TV streaming · #48 subtitle appearance settings ·
 #52 DRM.
