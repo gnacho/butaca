@@ -10,7 +10,7 @@ test user. load_manifest merges them and fails with the missing key if the overl
 The matrix is a SUPERSET of what any one library can exercise, so an `item` key the overlay
 cannot resolve -- absent, or left as the example's `<ratingKey>` placeholder -- SKIPS the cases
 and fps scenes that need it and runs the rest, printing what it gave up. Only the values no run
-of any size can proceed without (server.host, tv, test_user.id, a malformed shared_server) are
+of any size can proceed without (server.host, tv, a malformed test_user block) are
 fatal. Before 2026-08-22 a single unmappable shape killed all 21 cases, which meant the suite ran
 for exactly one library in the world -- see tests/README.md, "Running it against your own library".
 
@@ -45,7 +45,7 @@ Security: the server access token is read from src/config.local.h at runtime and
 printed, logged, or written to any file. The TV ssh creds already live in the committed
 Makefile, so we shell out to `make` / sshpass for device I/O. A run that also needs a SECOND
 server (a friend's shared one) resolves that server's own access token from the account service
-with the same owner token -- again storing nothing; see resolve_shared_server.
+with the token the overlay already names.
 
 Usage:
   ./tests/run.py --list                 # list cases and what they cover
@@ -134,7 +134,7 @@ ALL_TRIGGERS = [
     "butaca-libtype",
     "butaca-autoseek", "butaca-menupick", "butaca-menu", "butaca-subtiming", "butaca-noaudio",
     "butaca-grid", "butaca-autoplay", "butaca-h265", "butaca-playidx", "butaca-url",
-    "butaca-play", "butaca-server", "butaca-ffprobe", "butaca-token", "butaca-servers",
+    "butaca-play", "butaca-server", "butaca-ffprobe", "butaca-token",
     # UI/FPS scenes (both profiler triggers MUST be cleared; either invalidates production pacing)
     "butaca-detailosc", "butaca-homeosc", "butaca-heroosc", "butaca-homefoldosc",
     "butaca-info", "butaca-chapters", "butaca-profile",
@@ -286,17 +286,6 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
     # test_user is optional by design: leaving it out runs as the owner (with a warning).
     if "test_user" in local:
         manifest["test_user"] = local["test_user"]
-    # shared_server is optional the same way: an installation with no second server simply omits it,
-    # and any case that needs one is SKIPPED (not failed) with the reason printed. What is NOT
-    # optional is naming the server well enough to look it up -- a block with neither
-    # machine_id nor name resolves to nothing, and would otherwise fail later as a mystery.
-    if "shared_server" in local:
-        ss = local["shared_server"]
-        if not (ss.get("machine_id") or ss.get("name")):
-            _die_no_overlay("\n  (`shared_server` needs a `machine_id` (preferred) or a `name` to "
-                            "match against your account's resources)")
-        manifest["shared_server"] = ss
-
     items = local.get("items", {})
     _resolve_items(manifest["cases"], items)
     _resolve_items(manifest.get("fps_scenes", []), items)
@@ -326,15 +315,14 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
     # `items.*` is deliberately NOT in this list any more: a bracketed ratingKey is the honest
     # answer of somebody whose library has nothing of that shape, and it now skips the cases that
     # need it. The values below stay fatal because no run of any size can proceed without them.
-    ss = manifest.get("shared_server", {})
     # `.get` on both, for `for_listing`'s sake: with no overlay at all neither key was ever
     # installed above, and a listing must still print. A real run cannot reach here without them —
     # the `_die_no_overlay` calls above are what guarantee that, which is why this stays a lookup
     # and not a second requirement check.
     stray = [f"{k}={v}" for k, v in
              [("server.host", manifest.get("server", {}).get("host")), ("tv", manifest.get("tv"))]
-             + ([("test_user.id", manifest["test_user"].get("id"))] if "test_user" in manifest else [])
-             + [(f"shared_server.{k}", ss.get(k)) for k in ("machine_id", "name", "host")]
+             + ([("test_user.user", manifest["test_user"].get("user"))]
+                if "test_user" in manifest else [])
              if isinstance(v, str) and v.startswith("<")]
     if stray:
         sys.exit(f"{MANIFEST_LOCAL} still holds template placeholders: {', '.join(stray)}\n"
@@ -370,220 +358,30 @@ def read_token():
     return m.group(1)
 
 
-CID = "butaca-test-harness"  # stable X-Plex-Client-Identifier for the account calls below
-
-
-def _server_machine_id(host, port, admin_token):
-    """The server's machineIdentifier (needed to look up its shared_servers remotely)."""
-    url = f"http://{host}:{port}/?X-Plex-Token={admin_token}"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.load(resp)["MediaContainer"]["machineIdentifier"]
-
-
-def fetch_managed_user_token(admin_token, host, port, user_id):
-    """Resolve a household-roster managed user's PER-SERVER access token from the owner's
-    shared_servers list (keyed by userID), so test playback runs as that user and its watch
-    history never touches the owner's real account. Uses only the admin token already on hand --
-    no new secret is stored. Returns the token string (never printed) or exits on failure."""
-    import xml.etree.ElementTree as ET
-    mid = _server_machine_id(host, port, admin_token)
-    url = f"https://plex.tv/api/servers/{mid}/shared_servers"
-    req = urllib.request.Request(url, headers={
-        "X-Plex-Token": admin_token, "X-Plex-Client-Identifier": CID})
+def fetch_test_user_token(admin_token, host, port, test_user):
+    """Sign in as the overlay's test user, so a run's watch history never touches the owner's
+    account. Uses only what the overlay already names: a token when it carries one, otherwise the
+    user and password. Returns the token string (never printed) or exits on failure."""
+    tok = (test_user or {}).get("token")
+    if tok:
+        return tok
+    user = (test_user or {}).get("user")
+    password = (test_user or {}).get("password")
+    if not (user and password):
+        sys.exit("manifest.local.json's test_user needs `user` and `password` (or `token`) "
+                 "to run as a guest, or pass --owner to run as the server's owner")
+    body = json.dumps({"Username": user, "Pw": password}).encode()
+    req = urllib.request.Request(
+        f"http://{host}:{port}/Users/AuthenticateByName", data=body,
+        headers={"Content-Type": "application/json", "Authorization":
+                 'MediaBrowser Client="Butaca harness", Device="harness", '
+                 'DeviceId="butaca-test-harness", Version="1"'})
     with urllib.request.urlopen(req, timeout=20) as resp:
-        root = ET.fromstring(resp.read())
-    for s in root.findall("SharedServer"):
-        if s.get("userID") == str(user_id):
-            tok = s.get("accessToken")
-            if tok:
-                return tok
-            sys.exit(f"managed user {user_id} is shared but has no accessToken")
-    sys.exit(f"managed user {user_id} has no shared_servers entry on this server "
-             f"(share the libraries with it first, or run with --owner)")
-
-
-# ---------------------------------------------------------------------------
-# The SECOND server (a friend's shared server) — resolved, never stored
-# ---------------------------------------------------------------------------
-# A shared server is a separate authority: its own machineIdentifier and its own per-(user,server)
-# accessToken, and the account token gets a 401 from it. So a run that has to reach two servers
-# needs two credentials, which one butaca-token file cannot carry -- that is what
-# butaca-servers (app: dev::servers) exists for.
-#
-# The overlay NAMES the server; it never holds its token. The account service's list is keyed by the
-# owner's account token, which the harness already reads from src/config.local.h for everything
-# else, and each entry carries that account's accessToken for that server. Same bargain as
-# fetch_managed_user_token: one secret in one gitignored place, everything else derived at runtime.
-def _account_resources(admin_token):
-    """Every server this account can reach — owned AND shared with it — from the account service."""
-    url = "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1&includeIPv6=1"
-    req = urllib.request.Request(url, headers={
-        "Accept": "application/json",
-        "X-Plex-Token": admin_token,
-        "X-Plex-Client-Identifier": CID})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.load(resp)
-
-
-def _server_resources(res):
-    return [r for r in res if "server" in (r.get("provides") or "")]
-
-
-def _is_ipv4(addr):
-    parts = (addr or "").split(".")
-    return len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
-
-
-def pick_connection(hit):
-    """Best (address, port, how) the account service offers for this server, or None.
-
-    `local` does NOT mean "on the TV's network" for a server someone SHARED with you -- it means
-    on the OWNER's. A real shared server in this account advertises `10.9.9.5:32400 local=true`
-    (the friend's LAN, unroutable from here) alongside its public address, so ranking `local` first
-    the way the app's own sign-in does would hand the TV an address it can never reach and turn a
-    credentials test into a mystery timeout. Hence: for an OWNED server local wins; for a shared one
-    the public address does, and `local` is demoted below it.
-
-    Within a rank, a dotted quad beats a hostname, because the app's media transport (stream.rs)
-    has no DNS at all. Relay last: it is TLS-only. Either way the caller PRINTS what it picked --
-    `shared_server.host` in the overlay is the override, and for most shares it is the right answer.
-    """
-    owned = bool(hit.get("owned"))
-    conns = [c for c in (hit.get("connections") or []) if c.get("address")]
-    if not conns:
-        return None
-
-    def rank(c):
-        if c.get("relay"):
-            tier = 3
-        elif c.get("local"):
-            tier = 0 if owned else 2
-        else:
-            tier = 1
-        return (tier, 0 if _is_ipv4(c["address"]) else 1)
-
-    best = min(conns, key=rank)
-    how = "relay" if best.get("relay") else ("LAN" if best.get("local") else "remote")
-    return best["address"], int(best.get("port") or 32400), f"{how}, {best.get('protocol', '?')}"
-
-
-def stored_primary_machine_id(tv):
-    """The `machine_id` of the install's stored primary, read off its session file on the set —
-    so the IPv6 re-point names THAT server and not merely the first owned one the account
-    service lists."""
-    r = ssh(tv, f"cat /media/developer/{APPID}-auth.json 2>/dev/null || cat /media/internal/.{APPID}-auth.json")
-    try:
-        return json.loads(r.stdout).get("server", {}).get("machine_id", "")
-    except (ValueError, AttributeError):
-        return ""
-
-
-def primary_ipv6_server(admin_token, machine_id=""):
-    """The owned server's LOCAL IPv6 connection as a butaca-servers entry — same machine id as
-    the stored primary (so the registry re-points slot 0 rather than adding a source), the
-    pinned uri as the https host, and the advertised address as the `pin` the app dials it
-    at with no resolver. Refuses with the reason when the account service advertises no such connection: an
-    IPv6 case that quietly ran over v4 would grade nothing about v6."""
-    owned = [r for r in _server_resources(_account_resources(admin_token)) if r.get("owned")]
-    if machine_id:
-        owned = [r for r in owned if r.get("clientIdentifier") == machine_id]
-    for hit in owned:
-        for c in hit.get("connections") or []:
-            uri = c.get("uri") or ""
-            addr = c.get("address") or ""
-            if not c.get("local") or c.get("relay") or ":" not in addr or ".plex.direct" not in uri:
-                continue
-            host = uri.split("://", 1)[1].split("/", 1)[0].rsplit(":", 1)[0]
-            return {"name": hit.get("name") or "", "machine_id": hit["clientIdentifier"],
-                    "host": host, "port": int(c.get("port") or 32400), "scheme": "https",
-                    "tier": "local", "token": hit.get("accessToken") or admin_token, "pin": addr}
-    sys.exit("primary_ipv6: the account service advertises no local IPv6 pinned connection for an owned "
-             "server (is the server's host on a v6 LAN, and does the server see it?)")
-
-
-def resolve_shared_server(admin_token, spec):
-    """Turn the overlay's `shared_server` block into the credentials the TV needs.
-
-    Returns {name, machine_id, host, port, token}; the token is resolved remotely and is NEVER
-    printed. Exits, naming what it could not resolve, on anything unresolvable -- an unreachable
-    the account service, a server no longer shared with this account, or a server with no
-    address the TV could
-    use. A silent fallback here would run the case against ONE server and pass it.
-    """
-    want_mid, want_name = spec.get("machine_id"), spec.get("name")
-    try:
-        res = _server_resources(_account_resources(admin_token))
-    except Exception as e:
-        sys.exit(f"cannot resolve the second server: the account service's /resources failed ({e})\n"
-                 f"  (this call needs internet; the rest of the harness is LAN-only)")
-
-    def matches(r):
-        if want_mid:
-            return r.get("clientIdentifier") == want_mid
-        return (r.get("name") or "").lower() == (want_name or "").lower()
-
-    hit = next((r for r in res if matches(r)), None)
-    if hit is None:
-        # The ONE place a share's name and machineIdentifier still reach stdout, and deliberately:
-        # they are the answer to the question this exit asks, which is "put one of these in your
-        # gitignored overlay". It is a fatal exit before anything runs, not a run transcript — but
-        # it is still pasteable, so it says so.
-        known = "\n".join(f"    {r.get('name')!r}  machine_id={r.get('clientIdentifier')}  "
-                          f"{'owned' if r.get('owned') else 'shared with you'}" for r in res)
-        sys.exit(f"shared_server {want_mid or want_name!r} is not in this account's "
-                 f"resources (is it still shared with you?). Servers this account can reach:\n"
-                 f"{known or '    (none)'}\n"
-                 f"  (a 'shared with you' row names somebody else's machine — copy what you need "
-                 f"into {os.path.basename(MANIFEST_LOCAL)}, don't paste this list into an issue.)")
-
-    token = hit.get("accessToken")
-    if not token:
-        sys.exit(f"shared_server {hit.get('name')!r} has no accessToken — the share was "
-                 f"probably revoked; re-accept it, or drop the block from {MANIFEST_LOCAL}")
-
-    host, port = spec.get("host"), spec.get("port")
-    if not host:
-        best = pick_connection(hit)
-        if best is None:
-            sys.exit(f"shared_server {hit.get('name')!r} advertises no connection at all."
-                     f"\n  Set `shared_server.host` (and `port`) in {MANIFEST_LOCAL} to an address "
-                     f"the TV can route to.")
-        host, port, how = best
-        # Loud on purpose. The app streams over plain HTTP to a numeric IP (stream.rs: no DNS, no
-        # TLS), so anything but a LAN address may resolve, be picked, and still be unreachable from
-        # the TV — which would read as "the second server's credentials did not work".
-        if how.split(",")[0] != "LAN":
-            print(f"    NOTE: the account service offers no LAN address for {hit.get('name')!r} — using "
-                  f"{host}:{port} ({how}). The TV's transport is plain HTTP to a numeric IP; set "
-                  f"`shared_server.host`/`port` in {os.path.basename(MANIFEST_LOCAL)} if it cannot "
-                  f"reach that.")
-    return {
-        "name": spec.get("name") or hit.get("name") or "shared",
-        "machine_id": hit.get("clientIdentifier") or want_mid or "",
-        # The OWNER's account handle, straight off the resource. It is what every browsing surface
-        # says out loud (the Sources list, the Library chip), and it is also what tells the app this
-        # is somebody else's server at all: empty means owned. Public, unlike the token below.
-        "handle": hit.get("sourceTitle") or "",
-        "host": host,
-        "port": int(port or 32400),
-        "token": token,
-    }
-
-
-def shared_servers_json(cfg, entry):
-    """The butaca-servers payload for this case/scene, or None if it wants one server.
-
-    Opt-in, never blanket: a case declares `needs_shared_server` in manifest.json (or the whole run
-    passes --shared-server). Injecting a second server into every case would change what Home shows
-    for cases that say nothing about it.
-    """
-    srv = cfg.get("shared_server")
-    if not srv:
-        return None
-    if not (cfg.get("shared_all") or entry.get("needs_shared_server")):
-        return None
-    return json.dumps([srv], separators=(",", ":"))
+        out = json.load(resp)
+    tok = out.get("AccessToken")
+    if not tok:
+        sys.exit(f"the server returned no AccessToken for {user}")
+    return tok
 
 
 def sh_squote(s):
@@ -594,76 +392,6 @@ def sh_squote(s):
 # ---------------------------------------------------------------------------
 # Device I/O
 # ---------------------------------------------------------------------------
-_WAN_CUT = False
-# Did the tool's own probe from the television confirm the LAST cut (`resolve plex.tv -> FAIL`)?
-# Read by `a_offline_roster` as the negative control when the app's log cannot carry one: with a
-# managed profile active the server-roster refresh is skipped, and an automated boot never raises
-# the picker whose home-user refresh would fail instead. Reset per case, not on `on`, because the
-# verdict is graded after the restore.
-_WAN_CUT_VERIFIED = False
-
-
-def tv_wan(state, ttl_s=None):
-    """Cut or restore the television's uplink through `tools/tv-session.sh wan`, which owns the
-    netfilter recipe and the on-device watchdog. Never raises on `on`: a restore that cannot reach
-    the set must not mask the failure that got us here, and the watchdog covers that case."""
-    global _WAN_CUT, _WAN_CUT_VERIFIED
-    argv = [os.path.join(REPO_ROOT, "tools", "tv-session.sh"), "wan", state]
-    if state == "off":
-        argv.append(str(int(ttl_s or 900)))
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
-    for ln in (r.stdout or "").splitlines():
-        if ln.strip():
-            print(f"    wan {state}: {ln.strip()}")
-    if state == "off":
-        if r.returncode != 0:
-            sys.exit(f"wan off failed (rc={r.returncode}): {(r.stderr or '').strip()}")
-        _WAN_CUT = True
-        _WAN_CUT_VERIFIED = "resolve plex.tv -> FAIL" in (r.stdout or "")
-    else:
-        _WAN_CUT = False
-        if r.returncode != 0:
-            print(f"    WARNING: wan on returned rc={r.returncode}; the on-device watchdog restores it")
-
-
-def stored_session_reason(tv):
-    """Why `session: stored` cases cannot run on this install, or None when a stored sign-in
-    exists in one of the two places `paths::session_candidates` reads for a flavoured install.
-    Returned rather than raised: whether an unmet precondition SKIPS the affected cases or aborts
-    the whole batch is the caller's call, not this probe's — a batch that also has cases which
-    don't need a stored session must not die for want of one that a few of them do."""
-    r = ssh(tv, f"test -s /media/developer/{APPID}-auth.json || test -s /media/internal/.{APPID}-auth.json")
-    if r.returncode != 0:
-        return (f"needs a signed-in session on {APPID} (none at /media/developer/{APPID}-auth.json) "
-                f"— sign in on that install once, with the internet up, and rerun")
-    return None
-
-
-def partition_stored_sessions(cases, reason):
-    """Split `cases` into (still-runnable, skipped-for-stored-session) given `reason` — the
-    string `stored_session_reason()` returned, or None when a stored sign-in is present. Pure and
-    TV-independent, so the skip-vs-run decision is unit-testable without an ssh mock: the bug this
-    guards against (a missing stored session taking the whole batch down via an uncaught
-    `SystemExit`) is a property of what ends up in `cases`, not of any device state."""
-    if not reason:
-        return cases, []
-    stored = [c for c in cases if c.get("session") == "stored"]
-    if not stored:
-        return cases, []
-    return [c for c in cases if c.get("session") != "stored"], stored
-
-
-def require_stored_session(tv, name):
-    """A `session: stored` case needs a sign-in ON THE INSTALL. Refused with the reason rather
-    than silently running as the injected identity, which would be the false pass the attribute
-    exists to prevent. This is the single-case belt to the batch-level suspenders in main(): a
-    case reaching here whose batch-level check already found the session missing is a bug, not a
-    new thing to discover, so it still refuses loudly rather than playing as the wrong identity."""
-    reason = stored_session_reason(tv)
-    if reason:
-        sys.exit(f"{name}: `session: stored` {reason}")
-
-
 def ssh_argv(tv, remote_cmd):
     """The one SSH command shape used by blocking calls and streaming profiler helpers."""
     return [
@@ -868,47 +596,61 @@ def resolve_flavour(args, manifest):
     return FLAVOUR
 
 
-def server_unscrobble(host, port, rk, token):
-    """Clear an item's resume point (and watched flag) via /:/unscrobble. Token never printed.
+_JF_USERS = {}
 
-    This is the ONLY thing that actually resets a viewOffset. `PUT /:/progress?time=0` looks like
-    it should and returns 200, but server ignores it and the old offset survives -- verified against
-    the live server (so does time=1). Do not "simplify" this back into a progress PUT.
+
+def jf_user_id(host, port, token):
+    """The signed-in user's Id, fetched once per (host, port, token). Token never printed."""
+    key = (host, port, token)
+    if key not in _JF_USERS:
+        req = urllib.request.Request(
+            f"http://{host}:{port}/Users/Me",
+            headers={"Authorization": f'MediaBrowser Token="{token}"'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            _JF_USERS[key] = json.load(resp)["Id"]
+    return _JF_USERS[key]
+
+
+def jf_control(host, port, token, path, method, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(
+        f"http://{host}:{port}{path}", data=data, method=method,
+        headers={"Authorization": f'MediaBrowser Token="{token}"',
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.status
+
+
+def server_unscrobble(host, port, item_id, token):
+    """Clear an item's resume point and watched flag. Token never printed.
+
+    `DELETE /Users/{uid}/PlayedItems/{id}` clears PlayCount AND the position, and the UserData
+    merge to zero pins the point even for an item that was never marked played. Do not replace
+    this with a bare position write: the server keeps a stale offset when only the tick count
+    moves.
     """
-    q = urllib.parse.urlencode({
-        "key": rk,
-        "identifier": "com.plexapp.plugins.library",
-        "X-Plex-Token": token,
-    })
-    url = f"http://{host}:{port}/:/unscrobble?{q}"
-    redacted = url.replace(token, "<token>")
     try:
-        with urllib.request.urlopen(urllib.request.Request(url), timeout=15) as resp:
-            print(f"    progress reset: {redacted} -> {resp.status}")
-            return True
+        uid = jf_user_id(host, port, token)
+        jf_control(host, port, token, f"/Users/{uid}/PlayedItems/{item_id}", "DELETE")
+        jf_control(host, port, token, f"/Users/{uid}/Items/{item_id}/UserData", "POST",
+                   {"PlaybackPositionTicks": 0})
+        print(f"    progress reset: item {item_id} -> cleared")
+        return True
     except Exception as e:
-        print(f"    WARN: unscrobble failed ({redacted}): {e}")
+        print(f"    WARN: reset failed ({host}:{port} item {item_id}): {e}")
         return False
 
 
-def server_put_progress(host, port, rk, time_ms, token):
-    """Seed an item's resume point (viewOffset) via PUT /:/progress. Token never printed."""
-    q = urllib.parse.urlencode({
-        "key": rk,
-        "identifier": "com.plexapp.plugins.library",
-        "time": str(time_ms),
-        "state": "stopped",
-        "X-Plex-Token": token,
-    })
-    url = f"http://{host}:{port}/:/progress?{q}"
-    redacted = url.replace(token, "<token>")
-    req = urllib.request.Request(url, method="PUT")
+def server_put_progress(host, port, item_id, time_ms, token):
+    """Seed an item's resume point through the UserData merge. Token never printed."""
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            print(f"    progress set: {redacted} -> {resp.status}")
-            return True
+        uid = jf_user_id(host, port, token)
+        jf_control(host, port, token, f"/Users/{uid}/Items/{item_id}/UserData", "POST",
+                   {"PlaybackPositionTicks": int(time_ms) * 10_000})
+        print(f"    progress set: item {item_id} -> {time_ms} ms")
+        return True
     except Exception as e:
-        print(f"    WARN: progress PUT failed ({redacted}): {e}")
+        print(f"    WARN: progress write failed ({host}:{port} item {item_id}): {e}")
         return False
 
 
@@ -1108,7 +850,7 @@ def apply_triggers(tv, files, extra=None):
 
     `extra` is a raw shell command — or a list of them — appended to the same round-trip, for a
     trigger whose VALUE must not reach stdout (a server token) and so cannot go through the printed
-    `files` list. Both credential triggers ride it: butaca-token and butaca-servers.
+    `files` list. The credential trigger rides it: butaca-token.
     """
     # The root has to EXIST and be world-writable before anything is written into it. Two uids
     # write here and neither can be made to go second: this ssh is ROOT and arms triggers before the
@@ -1208,7 +950,7 @@ RE_SMP_SOURCE_INFO = re.compile(r"smp_cb type=4 num=-?\d+ str=(\{.*\})")
 RE_AUDIO_FEED = re.compile(r"\bfeed a#(\d+)\s+sz=(\d+)\s+fed=(-?\d+)\s+reply=(.)\s+qbytes=(\d+)")
 RE_VIDEO_FEED = re.compile(r"\bfeed v#(\d+)\s+sz=(\d+)\s+fed=(-?\d+)\s+reply=(.)\s+qbytes=(\d+)")
 # the media URL carries the secret access token; strip it from anything we print/log.
-RE_TOKEN = re.compile(r"(X-Plex-Token=)[^&\s]+")
+RE_TOKEN = re.compile(r"((?:api_key|X-Emby-Token)=)[^&\s]+", re.I)
 
 
 def redact(s):
@@ -1230,41 +972,6 @@ def redact(s):
 # after the fact, which a public repository does not really allow. So the two formatters below are
 # the same contract on this side of the wire, deliberately producing the SAME text the event log
 # does, so a transcript line and a device line about one server read as one server.
-def server_ref(machine_id):
-    """`dev.rs`'s `DevServer::reference`, byte for byte: FNV-1a over the machineIdentifier, low 24
-    bits, six hex digits. Not a cryptographic choice -- a legibility one. Matching the app's
-    arithmetic exactly is the point: the harness and the TV then agree on one tag per server, and
-    `dev.rs`'s `the_shared_reference_is_the_same_tag_the_harness_prints` pins the whole line to a
-    literal so the two copies cannot drift."""
-    h = 0xCBF29CE484222325
-    for b in (machine_id or "").encode():
-        h = ((h ^ b) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return f"{h & 0xFFFFFF:06x}"
-
-
-def describe_server(s):
-    """One RESOLVED server, for stdout. Redacted iff it is somebody else's (see above).
-
-    `handle` is the owner's account handle (`sourceTitle`), and empty means owned -- the same field,
-    with the same meaning, that `DevServer::describe` branches on.
-    """
-    if s.get("handle"):
-        port_set = "true" if int(s.get("port") or 0) > 0 else "false"
-        return f"SHARED ref={server_ref(s.get('machine_id'))} port_set={port_set}"
-    return f"{s.get('name')!r} @ {s.get('host')}:{s.get('port')} (machine_id={s.get('machine_id')})"
-
-
-def describe_spec(spec):
-    """The overlay's `shared_server` BLOCK, before anything is resolved (`--list`).
-
-    Offline there is no `sourceTitle` to branch on, so ownership is unknown -- and the stricter rule
-    is the safe one to guess. The `ref=` is the same tag a real run will print when the block names
-    a `machine_id`, so `--list` and the run correlate; matched-by-name has nothing to hash.
-    """
-    mid = spec.get("machine_id")
-    return f"SHARED ref={server_ref(mid)}" if mid else "SHARED ref=? (matched by name)"
-
-
 def codec_ids(lines):
     """All (codec_name, width, height) from `ff: v=#0` lines, in order."""
     out = []
@@ -1364,101 +1071,6 @@ def a_no_error(lines):
         if "smp_cb type=18" in ln or "Playing error" in ln:
             return False, f"error surfaced :: {ln.strip()}"
     return True, "no `smp_cb type=18` / `Playing error`"
-
-
-def a_resolve_pin(lines, want="any"):
-    """The registry dialled the primary's pinned name at the address the account service advertised
-    beside it, with no resolver: `plex: server slot N registered at … (pinned: v4 name resolved
-    locally)`. The line is written once per pin, when it is NEW, so it is the boot's own statement
-    that offline mode had something to stand on. Its absence means the stored session's address
-    does not match its name (or the file predates the field) — DNS as before, which is exactly
-    what an offline case must not pass on. The line names the FAMILY and nothing else: the
-    app's scrubber rewrites every host to `<host>`, and a dashed pinned label is a LAN
-    address spelled sideways, so neither the name nor the address is ever in a log.
-
-    `want` narrows the family: `"v6"` demands a v6 pin (the `primary_ipv6` case would otherwise
-    be satisfied by the v4 pin the stored session registers first, before the re-point), `"v4"`
-    the reverse, anything else either. For `v6` the pin must also be on the CURRENT server
-    before the play starts — the re-point line must precede `butaca-play: … start` — which
-    is the ordering that proves the stream was dispatched on the re-pointed slot (the `stream:`
-    line itself cannot say, its host being scrubbed)."""
-    marker = " name resolved locally)"
-    hits = [(i, ln) for i, ln in enumerate(lines) if "(pinned: " in ln and marker in ln]
-    if want in ("v4", "v6"):
-        hits = [(i, ln) for i, ln in hits if f"(pinned: {want} " in ln]
-    # the PRIMARY's slot, when the play start names it: a share pinned to its own LAN label is
-    # a pin too, and must not stand in for the server the case actually plays from
-    slot = primary_slot(lines)
-    if slot is not None:
-        mine = [(i, ln) for i, ln in hits if f"server slot {slot} " in ln]
-        hits = mine or []
-    if not hits:
-        return False, f"no `(pinned: … name resolved locally)` line{' for ' + want if want in ('v4', 'v6') else ''}: nothing was pinned"
-    i, ln = hits[-1]
-    if want == "v6":
-        start = next((j for j, l in enumerate(lines) if "butaca-play: " in l and " start" in l), None)
-        if start is None or start < i:
-            return False, f"the v6 pin landed AFTER the play started (or no start line): {ln.strip()}"
-        if "re-pointed" not in ln:
-            return False, f"the v6 pin did not re-point the primary's slot: {ln.strip()}"
-    return True, ln.strip()
-
-
-def primary_slot(lines):
-    """The registry slot the boot's PRIMARY landed in — the `server=N` of the direct-play trigger's
-    own start line, which names the slot the play was dispatched on. Slots are never reused after a
-    sign-out, so a hardcoded 0 would be wrong on the second sign-in of a process."""
-    for ln in lines:
-        m = re.search(r"butaca-play: rk=\d+ server=(\d+) start", ln)
-        if m:
-            return int(m.group(1))
-    return None
-
-
-def a_offline_roster(lines):
-    """Three halves of "the internet was really down and it did not matter": the boot's roster
-    refresh reached for the account service and was refused (the negative control — a cut that did not cut
-    would refresh silently); the PRIMARY's source landed its hubs (`hubs: source N ok`, the
-    positive half, N being the slot the play was dispatched on); and that same source never
-    FAILED a hub fetch, which is what a DNS-dependent origin does within seconds of the refusal."""
-    # The SERVER roster refresh runs only for the owner's profile; with a managed profile
-    # active it is skipped, and the negative control is then the picker's HOME-USER refresh
-    # failing, or a pick seated from the cache — which only happens when the account service did not answer.
-    # …and when the boot makes NO account-service call at all (a managed profile active, picker
-    # suppressed), the tool's own probe from the set is the control — `tv_wan` records it.
-    roster = (find(lines, "plex.tv unreachable, keeping the stored roster")
-              or find(lines, "roster refresh failed — keeping cached roster")
-              or find(lines, "-> ok (offline, cached credentials)"))
-    if roster is None and _WAN_CUT_VERIFIED:
-        roster = "(the app made no account-service call this boot; the cut was verified from the set: resolve plex.tv -> FAIL)"
-    if roster is None:
-        return False, "no `plex.tv unreachable` / `roster refresh failed` / offline-seat line, and the tool did not verify the cut: the account service was reachable"
-    slot = primary_slot(lines)
-    if slot is None:
-        return False, "no `butaca-play: … server=N start` line: which slot was the primary?"
-    landed = find(lines, f"hubs: source {slot} ok")
-    if landed is None:
-        return False, f"the primary (slot {slot}) never landed its hubs offline"
-    failed = find(lines, f"hubs: source {slot} FAILED")
-    if failed is not None:
-        return False, f"the primary's hub fetch failed offline :: {failed.strip()}"
-    return True, f"{roster.strip()} ; {landed.strip()}"
-
-
-def a_offline_pick(lines):
-    """The who's-watching pick was seated from this television's cached credentials — the line
-    `auth::seat_offline` writes — and not through the account service, which the `offline` assertion beside
-    this proves was unreachable. A `-> failed` on the same profile is the 2026-09-06 outage."""
-    ok = find(lines, "-> ok (offline, cached credentials)")
-    if ok is not None:
-        return True, ok.strip()
-    failed = find(lines, "auth: switch '")
-    if failed is not None:
-        return False, f"the pick was not seated from the cache :: {failed.strip()}"
-    # Say what the picker DID do: every auth/pick line, so the verdict carries its own evidence.
-    saw = " | ".join(ln.strip() for ln in lines
-                     if any(k in ln for k in ("auth: ", "pickuser", "boot: ")))
-    return False, f"no `auth: switch` line at all: the picker never took the pick :: {saw}"
 
 
 def a_video_bound(lines):
@@ -1870,8 +1482,7 @@ def _parsed(pattern, fields, lines, numeric=True):
 # shared token bucket, live-switchable under an open transfer — and this is its lifecycle.
 #
 # **The binary decides whether any of this is reachable, and the harness can only read that.**
-# The app's primary server is `butaca_run(SERVER_HOST, SERVER_PORT)` (`src/main.c`) plus the injected
-# `butaca-token`; `butaca-servers` is strictly ADDITIVE and cannot move the primary. So the
+# The app's primary server is `butaca_run(SERVER_HOST, SERVER_PORT)` (`src/main.c`). So the
 # link is conditioned only if the DEPLOYED BINARY was built with `SERVER_PORT` pointing at the proxy
 # rather than at the server. When it was not, a case that declares `link_profile` SKIPS with that
 # reason spelled out — it must never run unconditioned and report a pass, because "Auto held a
@@ -3970,12 +3581,11 @@ def teardown(tv):
       inherits a resume point on that rk — the exact contamination ee07506 removed between
       cases, reintroduced at the seam between runs. It is also what "I see FPS tests running"
       looks like from the outside, long after the suite printed its summary.
-    * THE INJECTED TOKENS STAY in the runtime root's butaca-token and butaca-servers: real
-      per-(user,server) server access tokens -- and the second file carries someone ELSE'S server's
-      too -- world-readable, on a device with a rooted sshd and a committed password. The normal
-      path did clear them; every abnormal one left them. Both are covered because the wipe is a
-      GLOB over <runtime root>/butaca-*, which is exactly why a new credential trigger needs
-      no change here; a credential file named anything else would need one.
+    * THE INJECTED TOKEN STAYS in the runtime root's butaca-token: a real per-user server access
+      token, world-readable, on a device with a rooted sshd and a committed password. The normal
+      path did clear it; every abnormal one left it. It is covered because the wipe is a GLOB over
+      <runtime root>/butaca-*, which is exactly why a new credential trigger needs no change here;
+      a credential file named anything else would need one.
     * ssh CLIENTS. Per-case reaping covers a case that ends normally, but not the harness dying
       between cases.
 
@@ -3996,14 +3606,6 @@ def teardown(tv):
     global _TEARDOWN_DONE
     if _TEARDOWN_DONE:
         return
-    # A cut uplink outlives the harness like the app does: put it back before anything else, so
-    # an interrupted offline case never leaves the household's television off the internet for
-    # the watchdog's whole TTL.
-    if _WAN_CUT:
-        try:
-            tv_wan("on")
-        except Exception as e:  # noqa: BLE001 — never mask the real failure
-            print(f"    WARNING: wan restore failed ({e}); the on-device watchdog restores it")
     _TEARDOWN_DONE = True
     try:
         make(["kill", f"TV={tv}"], timeout=40)
@@ -4359,12 +3961,6 @@ def evaluate(case, lines):
     if exp.get("no_playing_error", True):
         results.append(("no_error", *a_no_error(lines)))
     results.append(("presented_rate", *a_presented_rate(lines, exp)))
-    if exp.get("resolve_pin"):
-        results.append(("resolve_pin", *a_resolve_pin(lines, exp["resolve_pin"])))
-    if exp.get("offline"):
-        results.append(("offline", *a_offline_roster(lines)))
-    if exp.get("offline_pick"):
-        results.append(("offline_pick", *a_offline_pick(lines)))
 
     # per-operation assertions
     for op in case["operations"]:
@@ -4438,48 +4034,7 @@ def report_case(passed, results, elapsed, run_secs, stopped_early, settled, verb
         print(f"       stopped early — settled: {redact(settled)}")
 
 
-def prime_online(case, cfg, files):
-    """`prime_online: [tile, ...]` — seat each roster tile ONCE, in order, with the uplink up,
-    and close the app after each. The offline picker seats a profile from the credentials its
-    last ONLINE seating cached (`Session::profiles`), so a case that grades the offline pick has
-    to make the seating happen on this install — otherwise it grades whether somebody happened
-    to use that profile since the last sign-in. Listing a SECOND tile last is what makes the
-    offline pick of the first one go through the cache rather than the same-user shortcut: the
-    active profile needs no network at all, which is a different (older) path.
-
-    Each launch is the case's own trigger set with `pickuser` overridden, so the play trigger
-    rides along exactly as it will offline; runs before `wan: off` cuts the link."""
-    tv = cfg["tv"]
-    tiles = case["prime_online"]
-    if tiles is True:
-        tiles = [int((case.get("triggers") or {}).get("pickuser", 0))]
-    def seated(_case, lines):
-        # Either road seats the profile online: the account-service switch, or the same-user shortcut
-        # when the tile was already the active profile (which also writes the record).
-        ok = (find(lines, "-> ok (per-user server token)") is not None
-              or find(lines, "already active — no switch needed") is not None)
-        return ok, [("primed", ok, "seated online")]
-    for tile in tiles:
-        print(f"    prime: seating roster tile {tile} online once, so the cache holds it ...")
-        primed = [(n, c) for n, c in files if n != "butaca-pickuser"]
-        primed.append(("butaca-pickuser", str(tile)))
-        apply_triggers(tv, primed)
-        lines, _, _, _ = stream_case(case, cfg, 60, early=True, inject=None, evaluator=seated)
-        make(["kill", f"TV={tv}"], timeout=40)
-        ok, _ = seated(case, lines)
-        if not ok:
-            # Say what the launch DID do: the lines that decide this, verbatim (already scrubbed).
-            for ln in lines:
-                if any(k in ln for k in ("auth: ", "pickuser", "boot: ")):
-                    print(f"      prime saw: {ln.strip()}")
-            raise RuntimeError(f"prime_online: roster tile {tile} was not seated online (is the "
-                               "uplink up, and does the stored roster hold that tile?)")
-    print("    prime: done")
-
-
 def run_case(case, cfg, token, verbose, cond=None):
-    global _WAN_CUT_VERIFIED
-    _WAN_CUT_VERIFIED = False
     name = case["name"]
     tv = cfg["tv"]
     run_secs = case.get("run_secs", 60)
@@ -4530,45 +4085,15 @@ def run_case(case, cfg, token, verbose, cond=None):
     # Always required — the binary carries no baked token, so butaca-token in the runtime root
     # is the only way an automated run gets server access.
     files = triggers_for_case(case)
-    # `session: stored` — boot from the install's own signed-in session instead of the injected
-    # identity. The injected token installs the compiled SERVER_HOST as a PLAINTEXT origin, which
-    # never touches the pinned name a real sign-in persists, so an offline case graded
-    # through it would be a false pass by construction. The install must therefore hold a sign-in
-    # already (refused with the reason otherwise), and that sign-in's profile is who plays — the
-    # one case family where the owner's history can move.
-    stored = case.get("session") == "stored"
-    if stored:
-        require_stored_session(tv, name)
-    inject = bool(cfg.get("inject_token")) and not stored
+    inject = bool(cfg.get("inject_token"))
     extras = []
     if inject:
         extras.append(f"printf '%s' '{token}' > {RUNDIR}/butaca-token")
-    # …and, for a case that declares it needs one, the SECOND server's credentials — same rules:
-    # value never on stdout, cleared by the glob wipe above and again by teardown().
-    srv_json = shared_servers_json(cfg, case)
-    if case.get("primary_ipv6"):
-        # The same server re-registered at its IPv6 pinned origin with its pin: the
-        # registry keys on machineIdentifier, so this RE-POINTS slot 0 rather than adding a
-        # source, and the case plays over v6 with no resolver. Built from the account service's own answer.
-        # The OWNER's token: the account service answers about the identity that asks, and a managed test
-        # user gets a 401 from `/api/v2/resources`. The stored session plays as the owner anyway.
-        srv_json = json.dumps([primary_ipv6_server(read_token(), stored_primary_machine_id(tv))],
-                              separators=(",", ":"))
-    if srv_json:
-        extras.append(f"printf '%s' {sh_squote(srv_json)} > {RUNDIR}/butaca-servers")
     apply_triggers(tv, files, extra=extras)
     shown = ", ".join(n + ("=" + c if c is not None else "") for n, c in files)
     print(f"    triggers: {shown}")
     if inject:
         print(f"    butaca-token: <{cfg['user_label']}, redacted>")
-    elif stored:
-        print(f"    session: the install's own stored sign-in (no token injected)")
-    if case.get("primary_ipv6"):
-        print("    butaca-servers: <the primary's IPv6 pinned origin + pin, token redacted>")
-    if srv_json and not case.get("primary_ipv6"):
-        # said the way the APP says it (`describe_server`): a share is a `ref=` tag and nothing
-        # else. The token was never printed here and still is not.
-        print(f"    butaca-servers: <{describe_server(cfg['shared_server'])}, token redacted>")
 
     # 4. run + grade the log as it streams (run_secs is the cap, not the runtime)
     early, why = early_exit_allowed(case, cfg)
@@ -4579,17 +4104,6 @@ def run_case(case, cfg, token, verbose, cond=None):
     on_start = None
     if profile and cond and cond.usable:
         on_start = lambda at: cond.arm(profile, at)
-    # `wan: off` — cut the television's uplink for this case (tools/tv-session.sh wan), after the
-    # triggers are armed and before the launch, so the boot itself runs offline. The set restores
-    # itself after a TTL whatever happens to this process; the explicit `on` below is the prompt
-    # half of that promise, and teardown() repeats it.
-    wan_off = case.get("wan") == "off"
-    if case.get("prime_online"):
-        prime_online(case, cfg, files)
-        # the priming launches wrote their own trigger sets; put the case's back
-        apply_triggers(tv, files, extra=extras)
-    if wan_off:
-        tv_wan("off", ttl_s=run_secs + 120)
     try:
         lines, elapsed, stopped_early, settled = stream_case(
             case, cfg, run_secs, early=early, inject=key_inject_for_case(case),
@@ -4599,8 +4113,6 @@ def run_case(case, cfg, token, verbose, cond=None):
         # this one, and nothing downstream would say so.
         if on_start:
             cond.disarm()
-        if wan_off:
-            tv_wan("on")
 
     # 5. evaluate
     passed, results = evaluate(case, lines)
@@ -5516,32 +5028,19 @@ def grade_poster_gate(scene, lines):
     return ok, " | " + detail
 
 
-def fps_scene_needs_token(scene, has_shared_server=False):
+def fps_scene_needs_token(scene):
     """Whether this scene must cross the signed-in boot gate.
 
     A fresh debug install has no stored session. Every route-specific FPS scene except the login
     spinner therefore needs the same temporary test identity as the player tier; otherwise the app
-    correctly lands on QR sign-in and the harness misreports zero samples for Home/Detail/etc. A
-    shared-server scene also needs the primary credential even if a future one intentionally uses
-    the login route.
+    correctly lands on QR sign-in and the harness misreports zero samples for Home/Detail/etc.
     """
-    return has_shared_server or scene.get("route") != "login"
+    return scene.get("route") != "login"
 
 
-def fps_run_needs_token(scenes, has_shared_server):
-    """Whether an FPS run must resolve the test identity BEFORE its first scene.
-
-    Until 2026-09-02 the run resolved one only for the player tier or a shared-server config, so a
-    plain `./tests/run.py --fps` booted every route scene to QR sign-in and graded "never entered
-    this screen" on 19 of 23 (device-reproduced on an untouched base). The per-scene predicate
-    already said those scenes need one; this is the run-level fold of it, over the scenes that
-    were actually SELECTED -- the player tier is not a separate input, because every player scene
-    is a non-login route and so already answers through the per-scene predicate, while
-    `--fps-player --filter login-spinner` selects nothing that needs one and must not demand a
-    `src/config.local.h` it will never use.
-    """
-    return bool(has_shared_server
-                or any(fps_scene_needs_token(s, has_shared_server) for s in scenes))
+def fps_run_needs_token(scenes):
+    """Whether any selected scene must cross the signed-in boot gate."""
+    return any(fps_scene_needs_token(s) for s in scenes)
 
 
 def fps_trigger_files(scene):
@@ -5599,20 +5098,13 @@ def run_fps_scene(scene, cfg, token, *, extra_triggers=(), capture=None,
     # scenes actually decode video, so they need the test-user token too — appended to the same
     # round-trip via extra= so its value stays off stdout, exactly like the playback cases.
     extras = []
-    srv_json = shared_servers_json(cfg, scene)
     # Route-specific scenes need to cross the signed-in boot gate even on a fresh debug install.
     # The login spinner is the one deliberate exception: its contract is the signed-out route.
-    # A scene about the SECOND server needs the primary credential for the same reason.
-    if fps_scene_needs_token(scene, bool(srv_json)) and cfg.get("inject_token"):
+    if fps_scene_needs_token(scene) and cfg.get("inject_token"):
         extras.append(f"printf '%s' '{token}' > {RUNDIR}/butaca-token")
-    if srv_json:
-        extras.append(f"printf '%s' {sh_squote(srv_json)} > {RUNDIR}/butaca-servers")
     apply_triggers(tv, files, extra=extras)
     shown = ", ".join(n + ("=" + c if c is not None else "") for n, c in files)
     print(f"    triggers: {shown or '(none)'}   run {run_secs}s, skip first {warmup} sample(s)")
-    if srv_json:
-        # same redaction as the playback cases — see `describe_server`.
-        print(f"    butaca-servers: <{describe_server(cfg['shared_server'])}, token redacted>")
 
     if before_run:
         before_run()
@@ -5748,9 +5240,8 @@ def run_fps_scene(scene, cfg, token, *, extra_triggers=(), capture=None,
 
 
 def fps_for_tiers(scenes, include_player, name_filter=None):
-    """The scenes this run will actually execute. One definition, because main() has to know it too
-    — it decides from the SELECTED scenes whether a second server is needed, and resolving one for a
-    player-tier scene that `--fps` was never going to run is an account-service round-trip for nothing."""
+    """The scenes this run will actually execute. One definition, so main() and the runner never
+    disagree about which scenes a `--fps` invocation covers."""
     tiers = {"ui"} | ({"player"} if include_player else set())
     return [s for s in scenes
             if s.get("tier", "ui") in tiers
@@ -5949,39 +5440,6 @@ def case_suite(case):
     return "codec" if ops <= {"play"} else "logic"
 
 
-def setup_shared(manifest, cfg, args, entries, what):
-    """Resolve the second server if this run needs it. Returns (entries_to_run, skipped_names).
-
-    Three states, and they are deliberately different:
-      * nothing wants a second server  -> no account-service call at all (the common case stays LAN-only);
-      * something wants one and the overlay describes it -> resolve now, loudly, before the TV is
-        touched, so a revoked share fails as itself instead of as an empty screen mid-suite;
-      * something wants one and the overlay has no `shared_server` -> SKIP those entries with the
-        reason printed. Not a failure: an installation with no friend's server is a normal
-        installation, and the rest of the matrix is still meaningful there. `--shared-server` is
-        the exception -- it was asked for explicitly, so it exits instead of silently doing nothing.
-    """
-    cfg["shared_all"] = args.shared_server
-    named = [e for e in entries if e.get("needs_shared_server")]
-    if not (args.shared_server or named):
-        return entries, []
-    spec = manifest.get("shared_server")
-    if not spec:
-        msg = (f"no `shared_server` block in {MANIFEST_LOCAL} — see manifest.local.json.example "
-               f"(it names a server shared with your account; the token is resolved remotely)")
-        if args.shared_server:
-            sys.exit(f"--shared-server: {msg}")
-        print(f"NOTE: {msg}\n      skipping {len(named)} {what}(s) that need a second server: "
-              f"{', '.join(e['name'] for e in named)}")
-        return [e for e in entries if not e.get("needs_shared_server")], [e["name"] for e in named]
-    cfg["shared_server"] = resolve_shared_server(read_token(), spec)
-    # The header line of the whole run, and the one most likely to be pasted somewhere. `handle`
-    # decides: a share is a `ref=` tag (`describe_server`), your own second machine is unchanged.
-    print(f"second server: {describe_server(cfg['shared_server'])} "
-          f"— access token resolved remotely, never printed")
-    return entries, []
-
-
 def main():
     # LIVE OUTPUT. This suite drives a television for ten to twenty minutes, and Python
     # block-buffers stdout the moment it is not a tty — so piping it to a file or a log viewer
@@ -6034,15 +5492,11 @@ def main():
                          "print it to stdout and exit -- no cases, no television, no TV lock. "
                          "This is the identity-resolution half of the --owner/test_user split "
                          "above, exposed standalone so tools/tv-session.sh's `up --guest` can "
-                         "reuse it instead of re-deriving the shared_servers call: a "
-                         "guest boot must resolve the REAL managed-user token or refuse, never "
+                         "reuse it instead of signing in again: a "
+                         "guest boot must resolve the REAL guest token or refuse, never "
                          "fall through to the owner's (see the 2026-09-10 postmortem in that "
                          "script's header — a silent fallback wrote real progress into the "
                          "household account and unscrobbling it also reset the item's viewCount).")
-    ap.add_argument("--shared-server", action="store_true",
-                    help="inject the overlay's `shared_server` credentials into EVERY case/scene of "
-                         "this run, not just the ones declaring needs_shared_server. For bringing "
-                         "up a second-server screen by hand; exits if the overlay has no such block")
     ap.add_argument("--fps", action="store_true",
                     help="run the FPS regression suite (UI tier: home/detail, no video needed)")
     ap.add_argument("--fps-player", action="store_true",
@@ -6073,7 +5527,7 @@ def main():
                          "a firewall rule names a port")
     args = ap.parse_args()
     if args.print_test_token:
-        # Standalone: this mode answers one question (what token is the managed test user's?)
+        # Standalone: this mode answers one question (what token does the overlay's guest use?)
         # and touches nothing else -- no case selection, no TV lock, no launch. Reject every flag
         # that implies one of those instead of silently ignoring it, so a copy-pasted command line
         # fails loudly rather than quietly running the wrong thing.
@@ -6087,11 +5541,11 @@ def main():
         manifest = load_manifest(pipeline_only=False, tv_override=args.tv)
         test_user = manifest.get("test_user")
         if not test_user:
-            sys.exit("no test_user in manifest.local.json -- nothing to resolve as a guest "
-                     "identity (add a test_user block, see manifest.local.json.example; or boot "
-                     "as the owner explicitly instead of asking for a guest)")
+            sys.exit("no test_user in manifest.local.json -- nothing to sign in as a guest "
+                     "identity (add a test_user block with user and password, see "
+                     "manifest.local.json.example; or run as the owner instead)")
         srv = manifest["server"]
-        token = fetch_managed_user_token(read_token(), srv["host"], srv["port"], test_user["id"])
+        token = fetch_test_user_token(read_token(), srv["host"], srv["port"], test_user)
         print(token)
         return 0
     if args.graphics_profile and not (args.fps or args.fps_player):
@@ -6183,8 +5637,7 @@ def main():
     if args.list:
         for c in manifest["cases"]:
             ops = "+".join(o["op"] for o in c["operations"])
-            mark = "  [+2nd server]" if c.get("needs_shared_server") else ""
-            mark += f"  [SKIP: {c['skip']}]" if c.get("skip") else ""
+            mark = f"  [SKIP: {c['skip']}]" if c.get("skip") else ""
             print(f"{c['name']:32s} suite={case_suite(c):6s} rk={c.get('rk', 'SKIP'):<5} "
                   f"{ops:20s} {', '.join(c.get('covers', []))}{mark}")
         for s in manifest.get("fps_scenes", []):
@@ -6208,34 +5661,21 @@ def main():
                 gates += f" stall_ceiling_ms={s['stall_ceiling_ms']}"
             if s.get("coldopen_ceiling_ms") is not None:
                 gates += f" coldopen_ceiling_ms={s['coldopen_ceiling_ms']}"
-            mark = "  [+2nd server]" if s.get("needs_shared_server") else ""
-            mark += f"  [SKIP: {s['skip']}]" if s.get("skip") else ""
+            mark = f"  [SKIP: {s['skip']}]" if s.get("skip") else ""
             print(f"fps:{s['name']:28s} tier={s.get('tier','ui'):6s} {tag:16s} {gates}{mark}")
         print(f"\ninstall: {APPID} [{FLAVOUR}] — runtime root {RUNDIR}")
-        # Offline, so this reports what the OVERLAY says — nothing is resolved and the account service is not
-        # called. It is still the answer to "will the [+2nd server] entries above actually run".
-        # `describe_spec` rather than `describe_server` for exactly that reason: with no resolved
-        # `sourceTitle` there is no way to tell a share from your own second machine here, and the
-        # stricter reading is the safe one to guess.
-        ss = manifest.get("shared_server")
-        if ss:
-            print(f"\nsecond server: {describe_spec(ss)} — configured; its access token "
-                  f"is resolved at run time")
-        else:
-            print(f"\nsecond server: not configured in {os.path.basename(MANIFEST_LOCAL)} — any "
-                  f"[+2nd server] entry above is SKIPPED (and --shared-server exits)")
         return 0
 
     # PIPELINE tier — the player with no server behind it. Placed here, after --list and before
     # everything that reads a token, because none of what follows applies: no identity to resolve,
-    # no second server, no ratingKey to reset.
+    # no item id to reset.
     if not server_tier:
         if args.suite:
             sys.exit("--suite selects among the SERVER tier's cases; pass --server with it. "
                      "(The synthetic tier is the default and has no logic/codec split.)")
-        if args.owner or args.shared_server:
-            sys.exit("--owner/--shared-server are identities on a server; the default tier "
-                     "talks to no server. Pass --server if you meant the library-backed cases.")
+        if args.owner:
+            sys.exit("--owner is an identity on a server; the default tier talks to no server. "
+                     "Pass --server if you meant the library-backed cases.")
         root, pcases = fixtures_root, pipeline_cases
         if args.filter:
             pcases = [c for c in pcases if args.filter in c["name"]]
@@ -6283,7 +5723,7 @@ def main():
         # substitution reads scene["rk"] directly, and the KeyError landed in the batch's blanket
         # `except` as `[FAIL] ERROR: 'rk'` -- a false FAILURE, indistinguishable from a regression.
         selected, fps_skipped = partition_skips(selected)
-        scenes, _skipped = setup_shared(manifest, cfg, args, selected, "scene")
+
         # Bail BEFORE read_token() and arm_teardown(): arming commits to driving the television,
         # and its cleanup closes the app on every exit path -- including this one. A run with
         # nothing left to grade must not close an app somebody is watching (the same reason
@@ -6299,14 +5739,14 @@ def main():
         token = None
         # A second-server scene needs the FIRST server's token too, whatever its tier: without it
         # the app boots to QR sign-in and the scene grades a screen it never reached.
-        if fps_run_needs_token(scenes, bool(cfg.get("shared_server"))):
+        if fps_run_needs_token(scenes):
             admin_token = read_token()
             test_user = manifest.get("test_user")
             if args.owner or not test_user:
                 token, cfg["inject_token"] = admin_token, True  # no baked token in the binary
             else:
-                token = fetch_managed_user_token(admin_token, cfg["server"]["host"],
-                                                 cfg["server"]["port"], test_user["id"])
+                token = fetch_test_user_token(admin_token, cfg["server"]["host"],
+                                              cfg["server"]["port"], test_user)
                 cfg["inject_token"] = True
         print(f"install: {APPID} [{FLAVOUR}] — triggers and log under {RUNDIR}")
         acquire_tv_lock(cfg["tv"], f"tests/run.py --fps ({len(scenes)} scenes) [{FLAVOUR}]")
@@ -6342,45 +5782,21 @@ def main():
             print("NOTE: no test_user in manifest.local.json -> running as OWNER "
                   "(history WILL be affected)")
     else:
-        token = fetch_managed_user_token(admin_token, cfg["server"]["host"], cfg["server"]["port"],
-                                         test_user["id"])
-        cfg["user_label"] = f'{test_user.get("title", "managed")} (id={test_user["id"]})'
+        token = fetch_test_user_token(admin_token, cfg["server"]["host"], cfg["server"]["port"],
+                                      test_user)
+        cfg["user_label"] = f'{test_user.get("user", "test")} (guest)'
         cfg["inject_token"] = True
     print(f"install: {APPID} [{FLAVOUR}] — triggers and log under {RUNDIR}")
     print(f"test identity: {cfg['user_label']}  (playback + watch-history isolation)")
 
-    # The second server, if anything selected needs one. AFTER the identity above and before the TV
-    # is touched: it can exit, and an exit here still leaves an app nobody has driven yet alone.
-    cases, shared_skipped = setup_shared(manifest, cfg, args, cases, "case")
     if not cases:
         sys.exit("no selected case can run: "
-                 + (f"{len(item_skipped)} skipped for want of a library item, " if item_skipped else "")
-                 + f"{len(shared_skipped)} for want of a second server "
-                 + f"(see {MANIFEST_LOCAL})")
+                 + f"{len(item_skipped)} skipped for want of a library item (see {MANIFEST_LOCAL})")
 
     acquire_tv_lock(cfg["tv"], f"tests/run.py ({len(cases)} cases) [{FLAVOUR}]")
     arm_teardown(cfg["tv"])
     if args.build:
         do_build(cfg["tv"])
-
-    # `session: stored` cases need a sign-in already on the install (see stored_session_reason).
-    # That is a property of the INSTALL, not of any one case, so it is checked once here — same
-    # shape as the link conditioner below — and an unmet precondition SKIPS just those cases
-    # instead of aborting the whole batch (`sys.exit` inside a per-case `run_case` is NOT caught
-    # by that loop's `except Exception`, so one offline case used to take the other 34 down with
-    # it). A `--filter`/`--suite` that selected ONLY stored-session cases still gets a loud exit
-    # naming the reason, so the operator sees why nothing ran rather than a quiet "0 passed".
-    stored_reason = None
-    if any(c.get("session") == "stored" for c in cases):
-        stored_reason = stored_session_reason(cfg["tv"])
-    cases, stored_skipped = partition_stored_sessions(cases, stored_reason)
-    if stored_skipped:
-        print(f"stored session UNAVAILABLE — {stored_reason}")
-        for c in stored_skipped:
-            print(f"    SKIP {c['name']}: `session: stored` {stored_reason}")
-        if not cases:
-            sys.exit(f"every case matching --filter {args.filter!r} / --suite {args.suite!r} "
-                     f"is `session: stored` and none can run: {stored_reason}")
 
     # The link conditioner, started ONCE for the tier — the binary points at its port for every
     # case, conditioned or not, so it cannot be a per-case resource. `usable` decides whether a
@@ -6431,19 +5847,13 @@ def main():
             detail = "  <- " + ", ".join(fails)
         print(f"  [{mark}] {name}{detail}")
     # A case that was never run is reported, never counted as a pass: an installation missing a
-    # media shape -- or a friend's server -- must be able to see, in the summary, exactly what its
-    # matrix did not cover. The bare pass count is the number that gets quoted; it must never be
+    # media shape must be able to see, in the summary, exactly what its matrix did not cover. The bare pass count is the number that gets quoted; it must never be
     # quotable without the skips beside it.
     for name, reason in item_skipped:
         print(f"  [SKIP] {name}  <- {reason}")
-    for name in shared_skipped:
-        print(f"  [SKIP] {name}  <- needs a second server; none configured in "
-              f"{os.path.basename(MANIFEST_LOCAL)}")
     for c in link_skipped:
         print(f"  [SKIP] {c['name']}  <- needs a conditioned link: {cond.why}")
-    for c in stored_skipped:
-        print(f"  [SKIP] {c['name']}  <- `session: stored` {stored_reason}")
-    nskip = len(shared_skipped) + len(item_skipped) + len(link_skipped) + len(stored_skipped)
+    nskip = len(item_skipped) + len(link_skipped)
     tail = f", {nskip} skipped" if nskip else ""
     print(f"\n{npass} passed, {real_fail} failed, {nxfail} known-gap of {len(summary)}{tail}")
     return 0 if real_fail == 0 else 1

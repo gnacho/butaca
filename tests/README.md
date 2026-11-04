@@ -14,15 +14,15 @@ how a green run means nothing.
 
 | | **synthetic** — the DEFAULT | **server** (`--server`) |
 |---|---|---|
-| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from server metadata, markers, resume, the `/:/timeline` reporter |
+| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from server metadata, markers, resume, the `/Sessions/Playing` progress reports |
 | what it needs | a TV address and `make fixtures-pipeline` | a media server, a token, a `manifest.local.json`, and a library holding the shapes the matrix names |
 | media | generated clips, served off your Mac | real items on your server |
 | who can run it | **anyone** | whoever owns that library |
 | cost | ~0.9 GB, a few minutes to build; seconds per case | ~3 GB, ~20 minutes to build; ten to twenty minutes to run |
 
 ```sh
-./tests/run.py                  # the synthetic tier — 20 cases, ~7 min, needs nothing
-./tests/run.py --server         # the library-backed 21, through the whole server chain
+./tests/run.py                  # the synthetic tier: 45 cases, ~7 min, needs nothing
+./tests/run.py --server         # the library-backed 35, through the whole server chain
 ```
 
 **The synthetic tier is the default**, and that inversion (2026-08-22) is about what a bare
@@ -100,10 +100,10 @@ since 2026-09-03) — the profile sent to server still carries no frame-rate lim
 
 - `manifest.json` — the test matrix, and **installation-independent**: the triggers each case
   needs, the expected log signals, and the *shape* of the item it needs (`item`, a symbolic key
-  like `movie_h264_ac3_1080p`) rather than any ratingKey.
+  like `movie_h264_ac3_1080p`) rather than any item id.
 - `manifest.local.json` — **gitignored, one per installation**, and required. Maps each `item`
-  key to a ratingKey on *your* server, and carries your `server` host, `tv` address, `test_user`,
-  which `flavour` to drive, and (optionally) the `shared_server` a two-source case needs.
+  key to the Id of an item on *your* server, and carries your `server` host, `tv` address,
+  `test_user` and which `flavour` to drive.
   Copy it from `manifest.local.json.example` and fill it in; `run.py` merges it over the manifest
   at load and refuses to run without it. An `item` key it cannot resolve is **not** fatal — see
   *Running it against your own library*.
@@ -200,97 +200,35 @@ logs, or writes it — progress URLs are redacted to `<token>` in output. The TV
 credentials are already in the committed `Makefile`, so the runner shells out to `make` /
 `sshpass` for device I/O (no new secret is introduced).
 
-Every other token the harness uses is **derived from that one at run time and stored nowhere**: the
-managed user's per-server token (below), and a second server's access token (further below). Both
-are written to a `butaca-*` file in the TV's runtime root and cleared by the same glob wipe —
-before every case, and again by `teardown()` on *every* exit path, including Ctrl-C and a crash.
+Every other token the harness uses is **the test user's, derived at run time and stored nowhere**:
+`run.py` obtains it from `POST /Users/AuthenticateByName` (below), never prints it, and uses it for
+the per-case progress reset and the resume seed. `butaca-token` is still written before each case
+for the archived scenarios the legacy note describes, and cleared by the same glob wipe before every
+case, and again by `teardown()` on *every* exit path, including Ctrl-C and a crash.
 
 ## Test identity — runs as a managed user (no watch-history pollution)
 
 > **Legacy note.** The binary no longer reads the `butaca-token` file: the dev-token arm went with the account flow (#190). `tests/run.py` and the on-device tooling still write it for archived scenarios.
 
-By default the harness plays **as the household-roster managed user in `manifest.local.json` →
-`test_user`**, so test playback + timeline scrobbles land on *that* user's history and your real
-account stays clean. It works without storing any new secret:
+By default the harness plays **as the managed user in `manifest.local.json` → `test_user`**, so
+test playback + the scrobbles the app posts land on *that* user's history and your real account
+stays clean. It works without storing any new secret:
 
-- `run.py` uses the owner token (from `config.local.h`) to look up that user's **per-server
-  access token** from `GET https://plex.tv/api/servers/<machineId>/shared_servers` (keyed by
-  `userID` — which is what `test_user.id` is). The managed user must already have the libraries
-  shared with it.
-- That token is used for the `/:/progress` resume seed **and** written to `butaca-token` in the
-  TV's runtime root. The binary carries **no** token, so this file is the only way an automated run
-  gets server access at all (see `butaca_run`); the **app itself** then plays and scrobbles as the
-  managed user, not just the seed. The token value is never printed (redacted to
-  `<…, redacted>`), and `butaca-token` is cleared between cases like every other trigger.
+- `test_user` is either `{ "user": "<username>", "password": "<password>" }` or
+  `{ "token": "..." }`. With credentials, `run.py` signs in at `POST /Users/AuthenticateByName`
+  carrying `Authorization: MediaBrowser Client="Butaca harness", Device="harness",
+  DeviceId="butaca-test-harness", Version="1"`, and keeps the returned `AccessToken` in memory. Its
+  value is never printed.
+- That token is the one the runner uses for the two server-side writes around every case: the reset
+  (`DELETE /Users/{uid}/PlayedItems/{itemId}` plus a `{"PlaybackPositionTicks": 0}` write to
+  `POST /Users/{uid}/Items/{itemId}/UserData`) and the `viewOffset_ms` seed (`POST
+  /Users/{uid}/Items/{itemId}/UserData`). The user's `Id` comes from `GET /Users/Me` with the same
+  token.
+- The app itself boots on the install's own signed-in session, so the driven install has to be
+  signed in as the same user. That is what keeps its playback and its scrobbles on the managed
+  account rather than the owner's.
 - Pass **`--owner`** to run as the `config.local.h` owner token instead (history *will* be
   affected). If the overlay has no `test_user`, the runner falls back to owner with a warning.
-
-## A second server (a friend's shared one)
-
-`butaca-token` carries exactly **one** token, and a shared server is a **separate
-authority**: its own `machineIdentifier`, its own per-(user,server) access token, and a 401 for
-anybody else's. So a screen that shows two sources at once could only ever be checked by hand, one
-capture at a time. `butaca-servers` is the second credential channel — **purely additive**:
-the primary server is still `butaca-token` against the compiled-in host, unchanged, and a run
-that names one server behaves exactly as it always did.
-
-**Configure it once**, in the gitignored `manifest.local.json` (the block is optional — delete it if
-you have no such server):
-
-```json
-"shared_server": {
-  "machine_id": "aaaabbbbccccddddeeeeffff0000111122223333",
-  "name": "nas-home",
-  "host": "10.0.0.9",
-  "port": 32400
-}
-```
-
-- `machine_id` (the server's `clientIdentifier`) is the match key; `name` alone also works,
-  case-insensitively, but is not stable. **No token here** — `run.py` looks the server up in
-  `GET https://plex.tv/api/v2/resources` with the owner token from `config.local.h` and takes the
-  `accessToken` the account service returns for it, exactly like it does for `test_user`.
-- `host`/`port` are **optional but usually right to set**. Without them the runner picks a
-  connection the account service advertises and prints which - and for a *shared* server its `local` flag means
-  the **owner's** LAN, not yours (a real one here advertises `10.9.9.5:32400 local=true`, which
-  the TV can never reach), so the public address is preferred instead, dotted quads before
-  hostnames (the app's transport has no DNS). Anything but a LAN address prints a NOTE saying so.
-- **Watch history:** there is no managed-user token for someone *else's* server, so a case that
-  plays from it plays as **you** on your friend's server. `test_user` isolation does not extend
-  there.
-
-**Ask for it per case**, in `manifest.json` (installation-independent — it says *that* a second
-server is needed, never *which*):
-
-```json
-{ "name": "shared_home_shelf", "needs_shared_server": true, ... }
-```
-
-- With `shared_server` configured, the runner resolves it **before touching the TV** and writes
-  `butaca-servers` for those cases only — a JSON array of
-  `{name, machine_id, host, port, token}` — beside `butaca-token`. Value never on stdout; the
-  printed line is `butaca-servers: <nas-home @ 10.0.0.9:32400, token redacted>`.
-- Without it, those cases are **SKIPPED**, with the reason, and appear as `[SKIP]` in the summary —
-  an installation with no friend's server is a normal installation. Anything unresolvable *is* a
-  loud exit that names it (server no longer shared, no `accessToken`, no address).
-- `./tests/run.py --shared-server` injects it into **every** case/scene of one run — for bringing a
-  second-source screen up by hand. It exits if the overlay has no `shared_server` block.
-- `./tests/run.py --list` marks such entries `[+2nd server]` and says whether one is configured.
-  It is offline: nothing is resolved, the account service is not called.
-
-On the device the app parses the file in `dev::servers()` (`rust-modules/src/dev.rs`) and logs
-
-```
-servers: #0 name="nas-home" 10.0.0.9:32400 mid=a348a464.. creds=ok
-servers: 1 extra server(s) injected, 1 usable
-```
-
-— never a token (`DevServer` has no `Debug`, and `describe()` prints everything but). That pair of
-lines is the headless proof the credentials arrived, and is what a shared-server case can assert on
-before any of its screen exists. `butaca-servers` is deliberately **not** on `dev.rs`'s `DIAG`
-exemption list: it names a host *and* the token to trust it with, so like `butaca-token` it marks
-the boot automated and skips the who's-watching picker — a run that landed on the picker would grade
-the wrong screen.
 
 ## Running it against your own library
 
@@ -301,7 +239,7 @@ do not contain. Until 2026-08-22 that made the suite unrunnable by anyone else: 
 unresolvable key called `_die_no_overlay` and killed all 21 cases, so the honest answer to "can I
 test my change?" was no.
 
-Now an `item` key the overlay cannot resolve — **absent, or left as the example's `<ratingKey>`
+Now an `item` key the overlay cannot resolve, **absent or left as the example's `<item id>`
 placeholder** — skips the cases and fps scenes that need it and runs the rest:
 
 ```
@@ -311,7 +249,8 @@ placeholder** — skips the cases and fps scenes that need it and runs the rest:
 
 Skips are printed in the summary and by `--list` (which is offline — it needs neither the TV nor
 the server, so you can see your own coverage before touching anything). **The pass count is never
-quotable without them**: `16 passed` means sixteen of the shapes you have, not sixteen of twenty-one.
+quotable without them**: `16 passed` means sixteen of the shapes you have, not sixteen of the
+whole matrix.
 
 What that buys, concretely. One ordinary **h264/AC-3 1080p movie with embedded SRT** — the shape
 nearly every library has — is enough for `dp_h264_ac3_1080p`, `seek_inplace_h264`,
@@ -328,33 +267,32 @@ Three things are worth knowing before you read a green run as a portable claim:
   six cases with it, including the whole marker/up-next tier.
 - **Two shapes are not portable and never will be.** VC-1 has no free encoder anywhere, and Dolby
   Vision profile 5 / dual-layer profile 7 cannot be authored with free tooling — see *Library gaps*.
-- **A mis-mapped item fails as a player bug.** The harness cannot tell "this ratingKey is the wrong
-  shape" from "the player regressed": map an mp4 to a case expecting mkv direct play and you get a
-  transcode assertion failure that reads exactly like a routing regression. When a case fails on a
-  fresh installation, confirm the item's shape on the server before believing the failure.
+- **A mis-mapped item fails as a player bug.** The harness cannot tell "this item id points at the
+  wrong shape" from "the player regressed": map an mp4 to a case expecting mkv direct play and you
+  get a transcode assertion failure that reads exactly like a routing regression. When a case fails
+  on a fresh installation, confirm the item's shape on the server before believing the failure.
 
-**Watch history:** every case clears the item's resume point (`/:/unscrobble`) before it runs and
-may seed a fake one. That is intentional and documented below, but it is destructive against a
-library you care about — which is what `test_user` is for.
+**Watch history:** every case clears the item's resume point (`DELETE
+/Users/{uid}/PlayedItems/{itemId}` plus a `PlaybackPositionTicks: 0` write) before it runs and may
+seed a fake one. That is intentional and documented below, but it is destructive against a library
+you care about, which is what `test_user` is for.
 
 ## Prerequisites
 
 - The same toolchain the main dev loop needs: the webOS NDK (`make setup-env`), `sshpass`,
   and (for `--build`) the Rust nightly + `rust-src` (see the repo `Makefile` / `docs/agent-reference.md`).
 - `tests/manifest.local.json` present — `cp tests/manifest.local.json.example` and fill in the
-  server host/port, the TV address, `test_user`, and **as many `item` ratingKeys as your library can
+  server host/port, the TV address, `test_user`, and **as many `item` ids as your library can
   actually supply**; leave the rest bracketed and the cases that need them are skipped (below).
   If your library cannot supply them, **generate them**: `make fixtures` builds every shape from
   ffmpeg and writes a `fixtures.json` keyed by the same symbolic names — see
-  `tests/fixtures/README.md`, including the three `marker_*` cases it cannot solve. Its
-  `shared_server` block is optional; delete it unless a second server is shared with your account
-  (see below). Its `flavour` key is optional too — see above; the fallback is the Makefile's own
-  default.
+  `tests/fixtures/README.md`, including the three `marker_*` cases it cannot solve. Its `flavour`
+  key is optional too (see above). The fallback is the Makefile's own default.
 - **The install being driven must already exist on the TV.** `make deploy` scp's into an app
   directory SAM already knows about; a flavour is registered once with
   `make FLAVOR=<f> install`, which builds its .ipk, installs it and then deploys into it.
 - The TV powered on and reachable (`root@<tv>`, the overlay's `tv`).
-- The server reachable at `http://<server-host>:32400` (the overlay's `server` block).
+- The server reachable at `http://<server-host>:8096` (the overlay's `server` block).
 - `src/config.local.h` present with `SERVER_TOKEN`.
 
 ## Running
@@ -381,9 +319,6 @@ library you care about — which is what `test_user` is for.
 
 # run as the OWNER token instead of the overlay's test_user (history WILL be affected)
 ./tests/run.py --owner --filter dp_h264
-
-# hand the app a SECOND server's credentials for every case of this run (see below)
-./tests/run.py --shared-server --filter dp_h264
 ```
 
 The runner prints per-assertion PASS/FAIL with the failing evidence line, then a final
@@ -539,7 +474,9 @@ marks pacing invalid if a render-profiler trigger is armed.
 ### What each case does (per case, automatically)
 
 1. `make kill` — close the app (luna-send `closeByAppId` + `fuser -k`) **first**.
-2. If the case sets `viewOffset_ms`: `PUT /:/progress` to seed the resume point — done
+2. Reset the item's server-side progress (`DELETE /Users/{uid}/PlayedItems/{itemId}`, then a
+   `PlaybackPositionTicks: 0` write to `POST /Users/{uid}/Items/{itemId}/UserData`), then seed
+   `viewOffset_ms` if the case sets one (`POST /Users/{uid}/Items/{itemId}/UserData`), done
    **after** the close so the app's `timeline_thread` can't re-scrobble over it.
 3. Create the runtime root (`mkdir` + `chmod 1777`), clear every `butaca-*` trigger in it,
    then write only the ones this case needs.
@@ -547,26 +484,22 @@ marks pacing invalid if a render-profiler trigger is armed.
    `butaca-events.log` back.
 5. Filter the `smp_cb type=43 num=0 str=` flood and evaluate the assertions.
 
-## The `butaca-play=<rk>` trigger (added for this harness)
+## The `butaca-play=<item id>` trigger (added for this harness)
 
-Tests use `butaca-play=<ratingKey>` instead of the fragile `butaca-detail`. `butaca-detail`
-only *plays* if the rk is in the home catalog (Continue Watching / hubs); off-catalog it loads
-data-only and never plays. `butaca-play` fetches the item's metadata fresh (`metadata::load_detail`,
-works for **any** rk) and drives the same field-based play path the detail Play button uses
-(`route::play_episode` — generic over movie/episode — + `player::resume_at` + `start_bufferfeed`),
-bypassing the catalog lookup entirely. It honors the server `viewOffset` for resume and logs
-`butaca-play: rk=<rk> server=<slot> start` so the harness can confirm both halves of the item
-identity that fired. A bare `butaca-play` keeps the historical current-server behaviour;
-`butaca-server=<slot>` makes a by-hand/direct-screen run target a registered secondary server and
-fails closed when that slot does not exist. `tools/tv-session.sh up --screen player=<rk> --server
-<slot>` writes the pair without navigating the UI, boots from the signed-in stored roster (rather
-than the singular injected-token server), and exits nonzero unless the log confirms the exact
-`ratingKey + server slot` that started.
+Tests use `butaca-play=<item id>` instead of the fragile `butaca-detail`. `butaca-detail` only
+*plays* if the item is in the home catalog (Continue Watching / hubs). Off-catalog it loads
+data-only and never plays. `butaca-play` asks the metadata layer for that item directly, so it works
+for **any** id, and drives the same field-based play path the detail Play button uses (the server
+resume offset included), bypassing the catalog lookup entirely. It logs
+`butaca-play: rk=<id> server=<slot> start`, so the id that fired is visible in the log. A bare
+`butaca-play` keeps the historical current-server behaviour. `butaca-server=<slot>` makes a
+by-hand/direct-screen run target a registered server slot and fails closed when that slot does not
+exist.
 
 ## Coverage — the 8 matrix item shapes + operations
 
-The `item` column is the symbolic key `manifest.local.json` maps to a ratingKey on your server;
-it is also the specification of what that item has to be.
+The `item` column is the symbolic key `manifest.local.json` maps to the Id of an item on your
+server. It is also the specification of what that item has to be.
 
 Base playback (decision + codec + not-stuck), one case each:
 
@@ -620,7 +553,7 @@ Operation cases (each also re-checks not-stuck / no-error afterward):
 ## Gotchas the harness handles for you
 
 - **Close-before-progress.** A live `timeline_thread` re-scrobbles every ~10 s and would
-  overwrite a seeded `viewOffset`; the runner does `make kill` before every `PUT /:/progress`.
+  overwrite a seeded `viewOffset`. The runner does `make kill` before every progress write.
 - **`make` runs from the repo root** (via `make -C <root>`), and `--build` shells out to it
   (the Makefile owns the cargo invocation), so cwd/toolchain flags can't drift.
 - **Type=43 flood** is filtered on every log read.
@@ -663,9 +596,6 @@ Append an entry to `manifest.json` → `cases`:
   "covers": ["…"],
   "run_secs": 60,
   "setup": { "viewOffset_ms": 600000 },        // optional — seeds resume
-  "needs_shared_server": true,                 // optional — also inject a SECOND server's
-                                               // credentials (see "A second server" above);
-                                               // SKIPPED where none is configured
   "operations": [
     { "op": "play" },
     { "op": "seek", "mode": "inplace", "target_s": 140 }
@@ -710,7 +640,7 @@ make fixtures-pipeline          # ~0.9 GB into $FIXTURES_OUT/pipeline; ~4 min, o
 ./tests/run.py --list           # offline: what would run, at what resolution, what is missing
 ```
 
-Nothing else is required — no `manifest.local.json`, no server, no token, no ratingKey, no library, no
+Nothing else is required: no `manifest.local.json`, no server, no token, no item id, no library, no
 sharing. The TV address comes from the overlay's `tv` if you have one, else from the gitignored
 `.tv-host`, else `--tv`. That is the whole configuration.
 
@@ -745,7 +675,7 @@ intended declaration rather than relying on generic playback liveness.
 **Assertions.** `stream_path` (the demuxer opened *this* case's fixture, not something a stale
 trigger pointed it at), `load_decl` (above), `codec` and `audio_stream_index` (what the demuxer
 *found*, independent of what was *declared* — the two can only ever agree on the integration tier),
-`video_bound`, `pos_climb` (the 1 Hz heartbeat only; there is no `/:/timeline` fallback here and
+`video_bound`, `pos_climb` (the 1 Hz heartbeat only, with no 10 s progress-report fallback here and
 accepting its absence would make a broken assertion read as a pass), `no_error`, `finished` (below),
 the seek assertions, and **`server_wire`** — the counters from the fixture server itself, which is
 the one assertion no log line can give: the pump logs its seek intent whether or not the demuxer
