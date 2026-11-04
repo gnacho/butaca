@@ -629,7 +629,7 @@
       "run_secs": 20,
       "warmup_s": 6,
       "item": "collection",
-      "comment": "Direct Collection-page boot on the `collection` item (a MOVIE collection with at least two members that have posters), resolved through manifest.local.json like every other `item`: `$rk` below becomes that collection's ratingKey. The screen loads its header and ordered children through the real collection store and settles after artwork and scroll motion. An installation that maps no collection SKIPS this scene rather than opening a ratingKey its server does not hold, which would settle on the failure read-out and pass the ceiling vacuously. By hand in the simulator against tests/mock_server.py, the trigger's value is that mock's collection ratingKey, 50001. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 61, median 61 (n=13, two runs); fps robust_max 1, median 0 once the page settles.",
+      "comment": "Direct Collection-page boot on the `collection` item (a MOVIE collection with at least two members that have posters), resolved through manifest.local.json like every other `item`: `$rk` below becomes that collection's ratingKey. The screen loads its header and ordered children through the real collection store and settles after artwork and scroll motion. An installation that maps no collection SKIPS this scene rather than opening a ratingKey its server does not hold, which would settle on the failure read-out and pass the ceiling vacuously. By hand in the simulator the trigger's value is a collection ratingKey the server actually holds; the 2026-09-28 numbers below were taken with the retired mock's collection 50001. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 61, median 61 (n=13, two runs); fps robust_max 1, median 0 once the page settles.",
       "triggers": {
         "butaca-collection": "$rk"
       },
@@ -644,7 +644,7 @@
       "run_secs": 20,
       "warmup_s": 6,
       "item": "collection_member_movie",
-      "comment": "Detail page of a movie that belongs to a collection with at least two members, so /related carries a collection.related hub and the page draws the collection shelf under its linked heading above Related. detailsec=3 walks focus from the hero to that shelf (hero, extras, cast, collection: the item needs extras and cast too), which scrolls the page and lifts the heading label with the shelf's focus. On the simulator, mock_server movie 1041 (a member of collection 50001) has that shape. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 60-61, median 61; fps robust_max 1, median 0 once the page settles.",
+      "comment": "Detail page of a movie that belongs to a collection with at least two members, so /related carries a collection.related hub and the page draws the collection shelf under its linked heading above Related. detailsec=3 walks focus from the hero to that shelf (hero, extras, cast, collection: the item needs extras and cast too), which scrolls the page and lifts the heading label with the shelf's focus. The 2026-09-28 numbers below were taken on a movie that is a member of that collection (the retired mock's 1041). MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 60-61, median 61; fps robust_max 1, median 0 once the page settles.",
       "triggers": {
         "butaca-detail": "$rk",
         "butaca-detailsec": 3

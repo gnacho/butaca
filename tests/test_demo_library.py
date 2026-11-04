@@ -1,31 +1,30 @@
 """The demo library and the screenshot manifest: the contracts `make screenshots` relies on.
 
-The first half needs nothing but this checkout — the manifests, the QR encoder, the account-service
-stand-in and the scene manifest. The second half serves the catalog itself, which needs the
-derived artwork cache (`make demo-library`, ~390 MB of downloads); it is skipped, loudly, where
-the cache is absent, so a fresh clone's `make check` stays offline.
+The first half needs nothing but this checkout - the manifests, the scene manifest and the
+driver's own spec parsing. The second half serves the catalog itself, which needs the derived
+artwork cache (`make demo-library`, ~390 MB of downloads); it is skipped, loudly, where the cache
+is absent, so a fresh clone's `make check` stays offline.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import json
 import pathlib
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 import unittest.mock
-import urllib.parse
-import zlib
+import urllib.error
+import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
-import mock_server  # noqa: E402
-from demo_library import qr  # noqa: E402  (tests/demo_library/qr.py)
+import mock_jf  # noqa: E402
 
 # tools/demo_library.py shares its name with the tests/demo_library package, so it is loaded by
 # path under another name rather than through sys.path.
@@ -40,26 +39,12 @@ SCENES = ROOT / "tests" / "screenshots" / "scenes.json"
 CATALOG = ROOT / "tests" / "demo_library" / "catalog.json"
 RUST = ROOT / "rust-modules" / "src"
 # Armed by tools/screenshots.py on every scene, not by the manifest.
-DRIVER_TRIGGERS = {"token", "account", "stillclock"}
+DRIVER_TRIGGERS = {"stillclock"}
 
-HAVE_CACHE = (mock_server.demo_cache_dir() / "derived").is_dir() and shutil.which("ffmpeg") and shutil.which("ffprobe")
-
-
-def decode_png(data):
-    """(width, height, colour type, raw scanlines) of an unfiltered 8-bit PNG."""
-    assert data[:8] == b"\x89PNG\r\n\x1a\n"
-    pos, idat, ihdr = 8, b"", None
-    while pos < len(data):
-        n, tag = struct.unpack(">I4s", data[pos:pos + 8])
-        body = data[pos + 8:pos + 8 + n]
-        if tag == b"IHDR":
-            ihdr = struct.unpack(">IIBBBBB", body)
-        elif tag == b"IDAT":
-            idat += body
-        pos += 12 + n
-    w, h, depth, colour = ihdr[:4]
-    assert depth == 8
-    return w, h, colour, zlib.decompress(idat)
+HAVE_CACHE = (mock_jf.demo_cache_dir() / "derived").is_dir() and shutil.which("ffmpeg") and shutil.which("ffprobe")
+# The identity every request to the mock carries: the client's own carrier shape (its token is
+# accepted, never checked - mock_jf's module doc says why).
+AUTH = 'MediaBrowser Token="%s", Client="T", Device="D", DeviceId="dev", Version="1"'
 
 
 class Manifests(unittest.TestCase):
@@ -120,6 +105,13 @@ class Manifests(unittest.TestCase):
         broken = dict(assets, **{aid: dict(assets[aid], licence="CC BY-SA 4.0")})
         with self.assertRaises(AssertionError):
             tool.check(broken, catalog)
+
+    def test_check_refuses_a_collection_order_that_is_not_the_whole_collection(self):
+        assets, catalog = tool.load()
+        order = dict(catalog["collection_order"])
+        order["Blender Open Movies"] = order["Blender Open Movies"][:-1]
+        with self.assertRaises(AssertionError):
+            tool.check(assets, dict(catalog, collection_order=order))
 
 
 class Credits(unittest.TestCase):
@@ -253,6 +245,39 @@ class OutputSpec(unittest.TestCase):
                     screenshots.resolve_output(s, o, canvas)
 
 
+class ItemRefs(unittest.TestCase):
+    """`@<slug>` in a trigger or an expect line is the catalog item's id, resolved per run."""
+
+    BY_SLUG = {"sintel": "a" * 32, "caminandes/1/2": "b" * 32}
+
+    def test_a_trigger_value_resolves_to_the_id(self):
+        self.assertEqual(screenshots.resolve_refs("sintel", self.BY_SLUG), "sintel")
+        self.assertEqual(screenshots.resolve_refs("@sintel", self.BY_SLUG), "a" * 32)
+        self.assertEqual(screenshots.resolve_refs("@caminandes/1/2", self.BY_SLUG), "b" * 32)
+
+    def test_an_expect_line_resolves_every_reference_it_carries(self):
+        line = "detail: sid=0 rk=@sintel next=S1E3 @caminandes/1/2"
+        self.assertEqual(screenshots.resolve_refs(line, self.BY_SLUG),
+                         "detail: sid=0 rk=%s next=S1E3 %s" % ("a" * 32, "b" * 32))
+
+    def test_an_unknown_reference_is_refused(self):
+        with self.assertRaises(ValueError):
+            screenshots.resolve_refs("@no-such-film", self.BY_SLUG)
+
+    def test_every_reference_in_the_manifest_names_the_catalog(self):
+        if not HAVE_CACHE:
+            self.skipTest("no derived demo cache (make demo-library)")
+        by_slug = mock_jf.CatalogLibrary(CATALOG).by_slug
+        manifest = json.loads(SCENES.read_text())
+        for s in manifest["scenes"]:
+            for value in s.get("triggers", {}).values():
+                with self.subTest(scene=s["name"], value=value):
+                    screenshots.resolve_refs(str(value), by_slug)
+            for line in s.get("expect", []):
+                with self.subTest(scene=s["name"], line=line):
+                    screenshots.resolve_refs(line, by_slug)
+
+
 class CardSpec(unittest.TestCase):
     """A `card` output is composed around another output of its scene, never cut from the capture."""
 
@@ -291,12 +316,12 @@ class Fetch(unittest.TestCase):
 
 
 class Chapters(unittest.TestCase):
-    chapters = staticmethod(mock_server.CatalogLibrary._chapters)
+    chapters = staticmethod(mock_jf.CatalogLibrary.chapters)
 
-    def test_chapters_tile_the_film(self):
+    def test_chapters_carry_the_catalog_titles_as_tick_offsets(self):
         rows = self.chapters([{"start": "0:00", "title": "A"}, {"start": "1:41", "title": "B"}], 300_000, "x")
-        self.assertEqual([(r["index"], r["tag"], r["startTimeOffset"], r["endTimeOffset"]) for r in rows],
-                         [(1, "A", 0, 101_000), (2, "B", 101_000, 300_000)])
+        self.assertEqual([(r["Name"], r["StartPositionTicks"]) for r in rows],
+                         [("A", 0), ("B", 1_010_000_000)])
 
     def test_malformed_chapters_are_refused(self):
         for marks in ([{"start": "0:05", "title": "late"}],
@@ -311,72 +336,6 @@ class Chapters(unittest.TestCase):
             if m.get("chapters"):
                 self.assertEqual(len(self.chapters(m["chapters"], m["minutes"] * 60_000, m["id"])),
                                  len(m["chapters"]))
-
-
-class Qr(unittest.TestCase):
-    def setUp(self):
-        self.m = qr.encode(mock_server.DEMO_QR_TEXT, "M")
-
-    def test_the_symbol_has_the_right_version_and_finder_patterns(self):
-        # 20 bytes in byte mode at ECC M needs version 2: 25x25 modules.
-        self.assertEqual(len(self.m), 25)
-        self.assertTrue(all(len(row) == 25 for row in self.m))
-        finder = [[max(abs(x - 3), abs(y - 3)) in (0, 1, 3) for x in range(7)] for y in range(7)]
-        for ox, oy in ((0, 0), (18, 0), (0, 18)):
-            with self.subTest(corner=(ox, oy)):
-                self.assertEqual([row[ox:ox + 7] for row in self.m[oy:oy + 7]], finder)
-
-    def test_timing_patterns_and_the_dark_module(self):
-        self.assertEqual([self.m[6][x] for x in range(8, 17)], [x % 2 == 0 for x in range(8, 17)])
-        self.assertEqual([self.m[y][6] for y in range(8, 17)], [y % 2 == 0 for y in range(8, 17)])
-        self.assertTrue(self.m[25 - 8][8])
-
-    def test_the_format_information_says_ecc_m_with_a_valid_bch_code(self):
-        bits = [self.m[8][x] for x in (0, 1, 2, 3, 4, 5, 7)] + [self.m[8][8], self.m[7][8]] \
-            + [self.m[y][8] for y in (5, 4, 3, 2, 1, 0)]
-        word = sum(b << (14 - i) for i, b in enumerate(bits)) ^ 0x5412
-        rem = word
-        for i in range(14, 9, -1):
-            if rem >> i & 1:
-                rem ^= 0x537 << (i - 10)
-        self.assertEqual(rem, 0, "BCH(15,5) remainder")
-        self.assertEqual(word >> 13, 0b00, "ECC level M")
-
-    def test_the_styled_png_is_white_modules_on_a_transparent_ground(self):
-        w, h, colour, raw = decode_png(qr.png(self.m, scale=2, border=0, account_style=True))
-        self.assertEqual((w, h, colour), (50, 50, 4))
-        stride = 1 + 2 * w
-        px = lambda x, y: raw[y * stride + 1 + 2 * x: y * stride + 3 + 2 * x]
-        self.assertEqual(px(0, 0), b"\xff\xff")      # finder corner: dark module, opaque white
-        self.assertEqual(px(2, 2), b"\xff\x00")      # finder's light ring: transparent
-        self.assertEqual({raw[y * stride] for y in range(h)}, {0})
-
-    def test_the_default_png_is_black_on_white_grayscale(self):
-        w, h, colour, raw = decode_png(qr.png(self.m, scale=1, border=4))
-        self.assertEqual((w, h, colour), (33, 33, 0))
-        self.assertEqual(raw[1], 255)                # quiet zone
-        self.assertEqual(raw[4 * 34 + 1 + 4], 0)     # first finder module
-
-
-class AccountServiceStandIn(unittest.TestCase):
-    """`butaca-account` points the sign-in at the mock: the pin never links."""
-
-    def setUp(self):
-        self.srv = mock_server.MockServer(mock_server.Library())
-
-    def test_a_pin_is_minted_with_the_demo_code_and_stays_pending(self):
-        status, _, body = self.srv.handle("POST", "/api/v2/pins?strong=false")
-        self.assertEqual(status, 201)
-        pin = json.loads(body)
-        self.assertEqual((pin["id"], pin["code"], pin["authToken"]), (mock_server.DEMO_PIN_ID, "DEMO", None))
-        status, _, body = self.srv.handle("GET", f"/api/v2/pins/{mock_server.DEMO_PIN_ID}")
-        self.assertEqual((status, json.loads(body)["authToken"]), (200, None))
-
-    def test_the_qr_is_a_styled_png(self):
-        status, ctype, body = self.srv.handle("GET", "/api/v2/pins/qr/DEMO")
-        self.assertEqual((status, ctype), (200, "image/png"))
-        self.assertEqual(decode_png(body)[2], 4)
-        self.assertEqual(body, self.srv.handle("GET", "/api/v2/pins/qr/DEMO")[2])
 
 
 class SceneManifest(unittest.TestCase):
@@ -444,208 +403,205 @@ class SceneManifest(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_CACHE, "no derived demo cache (make demo-library) or no ffmpeg/ffprobe")
 class Catalog(unittest.TestCase):
+    """The demo library on the Jellyfin wire: the world `make screenshots` records against."""
+
     @classmethod
     def setUpClass(cls):
-        cls.lib = mock_server.CatalogLibrary(CATALOG)
-        cls.srv = mock_server.MockServer(cls.lib)
+        cls.srv, cls.lib = mock_jf.serve(0, catalog=CATALOG)
+        mock_jf.run(cls.srv)
+        cls.base = "http://127.0.0.1:%d" % cls.srv.server_address[1]
         cls.catalog = json.loads(CATALOG.read_text())
 
-    def get(self, path, srv=None):
-        status, ctype, data = (srv or self.srv).handle("GET", path)
-        self.assertEqual((status, ctype), (200, "application/json"), path)
-        return json.loads(data)["MediaContainer"]
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
 
-    def test_keys_follow_catalog_order(self):
-        for n, m in enumerate(self.catalog["movies"]):
-            self.assertEqual(self.lib.items[101 + n]["title"], m["title"])
-        for n, s in enumerate(self.catalog["shows"]):
-            self.assertEqual(self.lib.items[201 + n]["title"], s["title"])
+    def get(self, path, raw=False):
+        request = urllib.request.Request(self.base + path)
+        request.add_header("Authorization", AUTH % self.lib.token)
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            data = reply.read()
+            return (reply.headers.get("Content-Type"), data) if raw else json.loads(data)
+
+    def test_ids_are_derived_from_the_catalog_slugs(self):
+        for rec in self.catalog["movies"] + self.catalog["shows"]:
+            with self.subTest(item=rec["id"]):
+                item_id = self.lib.by_slug[rec["id"]]
+                self.assertRegex(item_id, r"^[0-9a-f]{32}$")
+                self.assertEqual(self.lib.items[item_id]["Name"], rec["title"])
+
+    def test_every_episode_has_an_id_of_its_own(self):
+        slug = "caminandes/1/2"
+        self.assertRegex(self.lib.by_slug[slug], r"^[0-9a-f]{32}$")
+        self.assertNotEqual(self.lib.by_slug[slug], self.lib.by_slug["caminandes"])
+        self.assertEqual(self.lib.items[self.lib.by_slug[slug]]["Name"], "Gran Dillama")
+
+    def test_a_second_construction_answers_the_same_ids(self):
+        other = mock_jf.CatalogLibrary(CATALOG)
+        self.assertEqual(other.by_slug, self.lib.by_slug)
 
     def test_the_hero_heads_continue_watching_with_progress(self):
-        cw = self.get("/hubs/continueWatching?count=12")["Hub"][0]
-        self.assertEqual(cw["title"], "Continue Watching")
-        head = cw["Metadata"][0]
-        self.assertEqual(head["ratingKey"], str(self.lib.by_slug[self.catalog["hero"]]))
-        self.assertGreater(head["viewOffset"], 0)
-        self.assertLess(head["viewOffset"], head["duration"])
+        deck = self.get("/Users/%s/Items/Resume?Limit=20&MediaTypes=Video" % self.lib.user_id)["Items"]
+        head = deck[0]
+        self.assertEqual(head["Id"], self.lib.by_slug[self.catalog["hero"]])
+        self.assertGreater(head["UserData"]["PlaybackPositionTicks"], 0)
+        self.assertLess(head["UserData"]["PlaybackPositionTicks"], head["RunTimeTicks"])
+
+    def test_the_deck_is_the_catalog_continue_watching_in_order(self):
+        deck = self.get("/Users/%s/Items/Resume?Limit=20" % self.lib.user_id)["Items"]
+        self.assertEqual([it["Id"] for it in deck],
+                         [self.lib.by_slug[c["item"]] for c in self.catalog["continue_watching"]])
 
     def test_hero_swaps_the_head_and_keeps_the_rest_in_order(self):
         for film in self.catalog["hero_alternatives"]:
             with self.subTest(hero=film):
-                lib = mock_server.CatalogLibrary(CATALOG, hero=film)
-                rows = lib.continue_watching()
-                self.assertEqual(rows[0]["ratingKey"], str(lib.by_slug[film]))
-                others = [r["ratingKey"] for r in rows[1:]]
-                base = [r["ratingKey"] for r in self.lib.continue_watching() if r["ratingKey"] != str(lib.by_slug[film])]
-                self.assertEqual(others, base)
+                lib = mock_jf.CatalogLibrary(CATALOG, hero=film)
+                pool = [lib.items[i] for i in lib.movies]
+                for i in lib.series:
+                    pool += lib.series_episodes(lib.items[i])
+                deck = [it for it in pool if 0 < it["UserData"]["PlaybackPositionTicks"]
+                        and not it["UserData"]["Played"]]
+                deck.sort(key=lambda it: it["UserData"]["LastPlayedDate"] or "", reverse=True)
+                self.assertEqual(deck[0]["Id"], lib.by_slug[film])
+                rest = [it["Id"] for it in deck[1:]]
+                want = [lib.by_slug[c["item"]] for c in self.catalog["continue_watching"]
+                        if c["item"] != film]
+                self.assertEqual(rest, want)
 
-    def test_the_player_film_is_the_complete_sintel_with_its_chapters(self):
-        rk = self.lib.by_slug["sintel"]
-        it = self.get(f"/library/metadata/{rk}?includeChapters=1")["Metadata"][0]
-        self.assertEqual(it["duration"], 888_064)
-        self.assertEqual(it["Chapter"][-1]["endTimeOffset"], it["duration"])
-        self.assertEqual([c["tag"] for c in it["Chapter"]][:2], ["Snowbound", "The Shaman's Hut"])
-        self.assertLess(it["viewOffset"], 446_000, "the resume point sits before the pinned pause")
+    def test_a_watched_film_is_played_and_an_unwatched_one_is_not(self):
+        for slug in self.catalog["watched"]:
+            with self.subTest(slug=slug):
+                row = self.get("/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug[slug]))
+                self.assertTrue(row["UserData"]["Played"])
+        row = self.get("/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug["sprite-fright"]))
+        self.assertFalse(row["UserData"]["Played"])
 
-    def test_a_continuous_queue_of_an_episode_carries_the_rest_of_its_show(self):
-        rk = self.lib.by_slug["caminandes/1/2"]
-        path = f"/playQueues?type=video&uri=server%3A%2F%2Fx%2Flibrary%2Fmetadata%2F{rk}&continuous=1"
-        q = self.get(path)
-        self.assertEqual([m["ratingKey"] for m in q["Metadata"]],
-                         [str(rk), str(self.lib.by_slug["caminandes/1/3"])])
-        self.assertEqual([m["playQueueItemID"] for m in q["Metadata"]], [1, 2])
-        self.assertEqual(q["playQueueSelectedItemID"], 1)
-        # without continuous, and for a movie, the queue is the item alone
-        self.assertEqual(len(self.get(path.replace("&continuous=1", ""))["Metadata"]), 1)
-        film = self.lib.by_slug["sintel"]
-        self.assertEqual(len(self.get(f"/playQueues?uri=library%2Fmetadata%2F{film}&continuous=1")["Metadata"]), 1)
+    def test_recently_added_follows_the_catalog_added_order(self):
+        latest = self.get("/Users/%s/Items/Latest?ParentId=%s&Limit=5"
+                          % (self.lib.user_id, self.lib.movies_view))
+        want = [self.lib.by_slug[slug] for slug in self.catalog["added_order"]
+                if slug in self.lib.by_slug and self.lib.items[self.lib.by_slug[slug]]["Type"] == "Movie"]
+        self.assertEqual([it["Id"] for it in latest], want[:5])
 
-    def test_a_stand_in_episode_plays_a_real_file_of_its_catalog_length(self):
-        rk = self.lib.by_slug["caminandes/1/2"]
-        it = self.get(f"/library/metadata/{rk}")["Metadata"][0]
-        part = it["Media"][0]["Part"][0]
-        self.assertEqual(it["duration"], 180_000)
-        self.assertIn(part["id"], self.lib.media_files)
-        self.assertEqual(self.lib.media_files[part["id"]].name, "stand-in.mp4")
+    def test_a_series_says_how_many_episodes_are_left(self):
+        row = self.get("/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug["caminandes"]))
+        show = next(s for s in self.catalog["shows"] if s["id"] == "caminandes")
+        episodes = [e for season in show["seasons"] for e in season["episodes"]]
+        watched = {slug for slug in self.catalog["watched"] if slug.startswith("caminandes/")}
+        left = sum(1 for e in episodes
+                   if "caminandes/1/%d" % e["index"] not in watched)
+        self.assertEqual(row["UserData"]["UnplayedItemCount"], left)
+        self.assertEqual(row["UserData"]["Played"], left == 0)
 
-    def test_an_unknown_hero_is_refused(self):
-        with self.assertRaises(ValueError):
-            mock_server.CatalogLibrary(CATALOG, hero="no-such-film")
+    def test_an_episode_carries_its_series_and_its_catalog_minutes(self):
+        row = self.get("/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug["caminandes/1/2"]))
+        self.assertEqual(row["Type"], "Episode")
+        self.assertEqual(row["SeriesId"], self.lib.by_slug["caminandes"])
+        self.assertEqual(row["IndexNumber"], 2)
+        self.assertEqual(row["ParentIndexNumber"], 1)
+        self.assertEqual(row["RunTimeTicks"], 3 * mock_jf.TICKS_PER_MINUTE)
 
-    def test_home_hubs_are_titled_like_a_real_server(self):
-        hubs = self.get("/hubs?count=12")["Hub"]
-        self.assertEqual([h["title"] for h in hubs],
-                         ["Continue Watching", *(h["title"] for h in self.catalog["hubs"])])
-        self.assertTrue(all(h["Metadata"] for h in hubs))
-        for key, rest in (("1", ["Recently Added Movies", *self.catalog["collections"]]),
-                          ("2", ["Recently Added TV"])):
-            titles = [h["title"] for h in self.get(f"/hubs/sections/{key}")["Hub"]]
-            self.assertEqual(titles, ["Continue Watching", *rest])
+    def test_a_collection_lists_its_members_in_the_pinned_order(self):
+        pinned = self.catalog["collection_order"]["Blender Open Movies"]
+        box = next(i for i in self.lib.boxsets
+                   if self.lib.items[i]["Name"] == "Blender Open Movies")
+        kids = self.get("/Users/%s/Items?ParentId=%s&SortBy=SortName&SortOrder=Ascending"
+                        % (self.lib.user_id, box))["Items"]
+        self.assertEqual([k["Id"] for k in kids], [self.lib.by_slug[slug] for slug in pinned])
 
-    def test_a_library_lists_its_collections_as_shelves_after_recently_added(self):
-        hubs = self.get("/hubs/sections/1")["Hub"][2:]
-        self.assertTrue(hubs)
-        pinned = self.catalog.get("collection_order", {})
-        for h in hubs:
-            self.assertRegex(h["hubIdentifier"], r"^custom\.collection\.1\.(\d+)\.\1$")
-            self.assertTrue(all(m["librarySectionID"] == 1 for m in h["Metadata"]))
-            if h["title"] in pinned:
-                # a custom order is served as pinned (the website's glass close-up depends on it)
-                want = [str(self.lib.by_slug[s]) for s in pinned[h["title"]]][:len(h["Metadata"])]
-                self.assertEqual([m["ratingKey"] for m in h["Metadata"]], want, h["title"])
-            else:
-                added = [m["addedAt"] for m in h["Metadata"]]
-                self.assertEqual(added, sorted(added, reverse=True), h["title"])
-        self.assertIn("Blender Open Movies", pinned)
-        self.assertTrue(any(h["title"] not in pinned for h in hubs), "one collection keeps the default")
+    def test_a_collection_without_a_pinned_order_lists_its_members_in_the_asked_order(self):
+        name = "Silent Classics"
+        box = next(i for i in self.lib.boxsets if self.lib.items[i]["Name"] == name)
+        kids = self.get("/Users/%s/Items?ParentId=%s&SortBy=SortName&SortOrder=Ascending"
+                        % (self.lib.user_id, box))["Items"]
+        want = {m["id"] for m in self.catalog["movies"] if name in m.get("collections", [])}
+        self.assertEqual({self.lib.items[k["Id"]]["Name"] for k in kids},
+                         {m["title"] for m in self.catalog["movies"] if m["id"] in want})
+        names = [self.lib.items[k["Id"]]["Name"] for k in kids]
+        self.assertEqual(names, sorted(names, key=str.lower))
 
-    def test_a_collection_composite_is_a_poster_and_an_empty_collection_has_none(self):
-        """The server's automatic composite (a 2x2 of members' posters) serves as JPEG at the
-        requested size; the empty collection sends no thumb, so the client draws its neutral tile."""
-        rows = self.get("/library/sections/1/all?type=18")["Metadata"]
-        with_art = [r for r in rows if r.get("thumb")]
-        self.assertTrue(with_art and any(not r.get("thumb") for r in rows))
-        url = urllib.parse.quote(with_art[0]["thumb"], safe="")
-        status, ctype, data = self.srv.handle("GET", f"/photo/:/transcode?width=250&height=375&minSize=1&url={url}")
-        self.assertEqual((status, ctype), (200, "image/jpeg"))
-        self.assertTrue(data.startswith(b"\xff\xd8"))
+    def test_artwork_is_the_real_derived_file(self):
+        for slug, kind, ctype in (("sintel", "Primary", "image/jpeg"),
+                                  ("sintel", "Backdrop", "image/jpeg"),
+                                  ("caminandes/1/2", "Primary", "image/jpeg")):
+            with self.subTest(slug=slug, kind=kind):
+                path = "/Items/%s/Images/%s" % (self.lib.by_slug[slug], kind)
+                got_type, data = self.get(path + "?api_key=%s" % self.lib.token, raw=True)
+                self.assertEqual(got_type, ctype)
+                self.assertEqual(data[:2], b"\xff\xd8")
+                self.assertGreater(len(data), 10_000, "the placeholder, not the derived artwork")
 
-    def test_check_refuses_a_collection_order_that_is_not_the_whole_collection(self):
-        assets, catalog = tool.load()
-        order = dict(catalog["collection_order"])
-        order["Blender Open Movies"] = order["Blender Open Movies"][:-1]
-        with self.assertRaises(AssertionError):
-            tool.check(assets, dict(catalog, collection_order=order))
+    def test_a_film_without_art_names_no_backdrop(self):
+        bare = next(m["id"] for m in self.catalog["movies"] if "art" not in m)
+        row = self.get("/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug[bare]))
+        self.assertEqual(row["BackdropImageTags"], [])
+        self.assertTrue(row["ImageTags"]["Primary"], "its poster is still there")
 
-    def test_artwork_is_served_and_a_missing_image_is_a_404(self):
-        rk = self.lib.by_slug[self.catalog["hero"]]
-        status, ctype, data = self.srv.handle(
-            "GET", f"/photo/:/transcode?url=/library/metadata/{rk}/thumb/1&width=300&height=450&minSize=1")
-        self.assertEqual((status, ctype), (200, "image/jpeg"))
-        self.assertEqual(data[:2], b"\xff\xd8")
-        status, _, _ = self.srv.handle("GET", "/photo/:/transcode?url=/library/metadata/99999/thumb/1&width=10&height=10")
-        self.assertEqual(status, 404)
+    def test_a_missing_image_and_an_unknown_item_are_404s(self):
+        path = "/Items/%s/Images/Primary?api_key=%s"
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.get(path % ("0" * 32, self.lib.token), raw=True)
+        self.assertEqual(caught.exception.code, 404)
+        unknown_kind = "/Items/%s/Images/Screenshot?api_key=%s" % (self.lib.by_slug["sintel"],
+                                                                  self.lib.token)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.get(unknown_kind, raw=True)
+        self.assertEqual(caught.exception.code, 404)
 
-    def test_a_clear_logo_is_served_as_a_transparent_png(self):
-        # The path the app asks for (`ui/hero_logo.rs`), through the photo transcoder.
-        ask = "/photo/:/transcode?url=/library/metadata/{}/clearLogo&width=600&height=240&minSize=1"
-        rk = self.lib.by_slug[self.catalog["hero"]]
-        status, ctype, data = self.srv.handle("GET", ask.format(rk))
-        self.assertEqual((status, ctype), (200, "image/png"))
-        w, h = struct.unpack(">II", data[16:24])
-        self.assertEqual(data[25], 6, "colour type 6 is RGBA")
-        self.assertTrue(w >= 600 and h >= 240, (w, h))
-        bare = next(k for k in self.lib.items if "clearLogo" not in self.lib.images.get(k, {}))
-        self.assertEqual(self.srv.handle("GET", ask.format(bare))[0], 404)
+    def test_search_answers_media_and_people(self):
+        media = self.get("/Users/%s/Items?searchTerm=camin&Recursive=true"
+                         "&IncludeItemTypes=Movie,Series,Episode,BoxSet&Limit=12"
+                         % self.lib.user_id)["Items"]
+        self.assertIn(self.lib.by_slug["caminandes"], [it["Id"] for it in media])
+        people = self.get("/Persons?searchTerm=pablo&UserId=%s&Limit=12"
+                          % self.lib.user_id)["Items"]
+        self.assertEqual([p["Name"] for p in people], ["Pablo Vazquez"])
 
-    def search(self, query, limit=12):
-        # 12 is what the app asks for (`search::LIMIT`).
-        hubs = self.get("/hubs/search?" + urllib.parse.urlencode({"query": query, "limit": limit}))["Hub"]
-        return {h["type"]: [r.get("title") or r.get("tag") for r in h.get("Metadata", h.get("Directory", []))]
-                for h in hubs}
-
-    def test_search_caps_each_hub_at_limit_and_its_size_says_what_it_returned(self):
-        hubs = self.get("/hubs/search?query=an&limit=2")["Hub"]
-        movie = next(h for h in hubs if h["type"] == "movie")
-        self.assertEqual((movie["size"], len(movie["Metadata"])), (2, 2))
-        # No limit: server's own default of three rows per hub.
-        hubs = self.get("/hubs/search?query=an")["Hub"]
-        self.assertEqual(next(h for h in hubs if h["type"] == "movie")["size"], 3)
-
-    def test_a_genre_match_brings_that_genres_movies_after_the_title_hits(self):
-        hubs = {h["type"]: h for h in self.get("/hubs/search?query=co&limit=12")["Hub"]}
-        rows = hubs["movie"]["Metadata"]
-        # Direct title hits first, carrying no reason ...
-        self.assertEqual([r["title"] for r in rows[:2]], ["Cosmos Laundromat", "Coffee Run"])
-        self.assertTrue(all("reason" not in r for r in rows[:2]))
-        # ... then the related films, each saying why it is there: the Comedy genre's, and
-        # Caligari for Conrad Veidt, who acts in it.
-        why = {r["title"]: (r["reason"], r["reasonTitle"]) for r in rows[2:]}
-        self.assertEqual(why["Sprite Fright"], ("genre", "Comedy"))
-        self.assertEqual(why["The Cabinet of Dr. Caligari"], ("actor", "Conrad Veidt"))
-        # Only movies are related; Caminandes is a comedy, and still no show hit.
-        self.assertEqual(self.search("an")["show"], [])
-
-    def test_an_actor_match_brings_the_movies_they_act_in(self):
-        hubs = {h["type"]: h for h in self.get("/hubs/search?query=halina&limit=12")["Hub"]}
-        self.assertEqual([t["tag"] for t in hubs["actor"]["Directory"]], ["Halina Reijn"])
-        self.assertEqual([(r["title"], r["reason"]) for r in hubs["movie"]["Metadata"]], [("Sintel", "actor")])
-        # A director is not an actor: Fritz Lang's name brings no film.
-        self.assertNotIn("Metropolis", self.search("fritz")["movie"])
-
-    def test_search_matches_the_start_of_a_word_not_the_middle(self):
-        # Word-prefix, as the mock assumes server does: "sp" begins Spring, Sprite and Space;
-        # "in" sits inside Spring and Sintel and begins no word, so it finds no film.
-        hits = self.search("sp")
-        self.assertEqual(hits["movie"], ["Spring", "Sprite Fright", "Plan 9 from Outer Space"])
-        self.assertEqual(self.search("in")["movie"], [])
-        # Every word of the query must begin a word of the name, in any order.
-        self.assertEqual(self.search("st te")["movie"], ["Tears of Steel"])
-        self.assertEqual(self.search("sherlock holmes")["show"], ["Sherlock Holmes"])
-        # People and collections match by the same rule.
-        self.assertIn("Fritz Lang", self.search("fr")["actor"])
-        self.assertEqual(self.search("si")["collection"], ["Silent Classics"])
-
-    def test_a_one_character_search_finds_nothing(self):
-        # server answers a one-character query with every hub empty (docs: tests/manifest.json).
-        self.assertTrue(all(not rows for rows in self.search("s").values()))
+    def test_the_player_film_has_its_catalog_chapters(self):
+        row = self.get("/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug["sintel"]))
+        self.assertEqual([c["Name"] for c in row["Chapters"]][:2], ["Snowbound", "The Shaman's Hut"])
+        self.assertEqual(row["Chapters"][0]["StartPositionTicks"], 0)
+        self.assertEqual(row["RunTimeTicks"], 15 * mock_jf.TICKS_PER_MINUTE)
 
     def test_two_libraries_serve_the_same_bytes(self):
-        other = mock_server.MockServer(mock_server.CatalogLibrary(CATALOG))
-        for path in ("/hubs?count=12", "/library/sections/1/all?sort=titleSort:asc", "/hubs/search?query=the",
-                     f"/library/metadata/{self.lib.by_slug[self.catalog['hero']]}"):
-            with self.subTest(path=path):
-                self.assertEqual(self.srv.handle("GET", path), other.handle("GET", path))
+        other, _ = mock_jf.serve(0, catalog=CATALOG)
+        mock_jf.run(other)
+        try:
+            other_base = "http://127.0.0.1:%d" % other.server_address[1]
+            for path in ("/Users/%s/Items/Resume?Limit=20" % self.lib.user_id,
+                         "/Users/%s/Items?ParentId=%s&IncludeItemTypes=Movie&Limit=5"
+                         % (self.lib.user_id, self.lib.movies_view),
+                         "/Users/%s/Items/%s" % (self.lib.user_id, self.lib.by_slug["sintel"])):
+                with self.subTest(path=path):
+                    def fetch(base):
+                        request = urllib.request.Request(base + path)
+                        request.add_header("Authorization", AUTH % self.lib.token)
+                        with urllib.request.urlopen(request, timeout=10) as reply:
+                            return reply.read()
+                    self.assertEqual(fetch(self.base), fetch(other_base))
+        finally:
+            other.shutdown()
+            other.server_close()
 
     def test_nothing_reads_the_wall_clock(self):
         now = self.catalog["now"]
+        stamp_of = lambda text: datetime.datetime.strptime(
+            text, "%Y-%m-%dT%H:%M:%S.0000000Z").replace(tzinfo=datetime.timezone.utc).timestamp()
         for it in self.lib.items.values():
-            self.assertLessEqual(it.get("addedAt", 0), now)
-            self.assertLessEqual(it.get("lastViewedAt", 0), now)
+            if it.get("DateCreated"):
+                self.assertLessEqual(stamp_of(it["DateCreated"]), now, it["Name"])
+            played = it["UserData"].get("LastPlayedDate")
+            if played:
+                self.assertLessEqual(stamp_of(played), now, it["Name"])
+
+    def test_an_unknown_hero_is_refused(self):
+        with self.assertRaises(ValueError):
+            mock_jf.CatalogLibrary(CATALOG, hero="no-such-film")
 
 
 if __name__ == "__main__":
     if not HAVE_CACHE:
         print("test_demo_library: the Catalog cases are SKIPPED — no derived demo cache "
-              f"({mock_server.demo_cache_dir()}); `make demo-library` builds it", file=sys.stderr)
+              f"({mock_jf.demo_cache_dir()}); `make demo-library` builds it", file=sys.stderr)
     unittest.main(verbosity=1)

@@ -1,307 +1,47 @@
 #!/usr/bin/env bash
-# tests/focusfp.sh — the FOCUS FINGERPRINT flows, on the simulator, against the synthetic server.
+# tests/focusfp.sh — RETIRED: the focus-fingerprint flows have no synthetic world to run against.
 #
-# Each flow boots `butaca-sim` into an instance root with `butaca-focus` armed, drives it
-# through the remote FIFO with the same tokens a television session uses, and keeps every
-# `focus …` fingerprint line (`crate::focusprobe`, logged only on CHANGE) plus every `route=`
-# heartbeat transition the run produced. The result is one `.fp` file per flow under $OUT: the
-# (screen x key) characterisation of the app's focus behaviour, taken against data that is pinned
-# (`tests/mock_server.py --seed`) and free of household bytes, so it can be diffed across commits and
-# committed as a fixture.
+# What this was: the harness that booted `butaca-sim` once per flow into a fresh instance root with
+# `butaca-focus` armed, drove it through the remote FIFO with the tokens a television session uses,
+# and kept every `focus …` fingerprint line (`crate::focusprobe`, logged only on CHANGE) plus every
+# `route=` heartbeat transition. One `.fp` file per flow under $OUT: the (screen x key)
+# characterisation of the app's focus behaviour, taken against pinned synthetic data, so it could be
+# diffed across commits and committed as a fixture (restructure spec §15.4).
 #
-# Phase 0 of the UI restructure runs this as a LIVE-SIM SMOKE: a flow passes when the app stayed
-# alive and produced at least MIN_LINES fingerprint lines. From phase 2 the flows are replayed
-# from the committed recording instead (restructure spec §15.4). --targets (also --replay) feeds
-# recorded resolution; --resolve grades the real engine/map before recorded continuation.
+# Why it cannot run: every flow injected a `butaca-token` and named its item by a numeric
+# ratingKey. The boot gate no longer reads either — it speaks Jellyfin (`jellyfin/boot.rs`: a
+# `butaca-jellyfin` config, item ids that are the server's own GUIDs) — and the synthetic mock
+# server the flows were recorded against was deleted with the Plex wire. The committed replay
+# fixtures still encode that wire as well, so the replay half is no greener than the live one.
 #
-# Flow 10 (root BACK at Home / picker / QR) is a television flow — on the simulator a root BACK is
-# a log line and nothing else — and is listed here as SKIP so the numbering matches the spec.
+# What a re-recorded harness needs: `tests/mock_jf.py` as the server (catalog mode for real titles,
+# `--seed` for the closed alphabet), a `butaca-jellyfin` config in each instance root instead of
+# `butaca-token`, and `--write-synthetic-initial ... flow12=<item id>` seeded with the GUID that
+# server hands out rather than `1001`. Nothing else about a flow's shape changes.
 #
-#   tests/focusfp.sh                    # all flows, own mock server on 127.0.0.1:32498
-#   tests/focusfp.sh --only 2,8         # a subset
-#   tests/focusfp.sh --rec --only 1     # RECORD each flow (butaca-rec): the recording lands in
-#                                       #   $OUT/root-<n>/butaca-recordings/latest, ready for
-#                                       #   `tools/butaca-rec import <dir> <name>`
-#   tests/focusfp.sh --replay --only 1  # REPLAY tests/fixtures/replay/<n>-<name> instead of
-#                                       #   sending tokens; a flow passes when the app's own
-#                                       #   `replay: done … verdict=SAME` line is produced
-#   tests/focusfp.sh --server 10.0.0.5:32400   # against a real server (fingerprints then carry
-#                                            #   real ratingKeys: NOT committable)
+# The flows it covered, kept here as the record of the intended coverage:
 #
-# Needs `make sim` (the binary) and nothing else. Every flow gets a fresh instance root.
+#   1  boot-home-chip-grid        boot -> Home -> chip -> grid (the picker is suppressed by a token)
+#   2  grid-detail-back           the grid's card -> Detail -> BACK
+#   3  home-library-detail-back   Library -> card -> Detail -> BACK to the same card
+#   4  search-shelf-detail-back   a seeded query -> result shelf -> Detail -> BACK
+#   5  detail-person-detail       Detail -> Person -> Detail -> BACK -> Person -> BACK -> Detail
+#   6  settings-family            the Settings overlay: Legal -> About -> Playback -> BACK
+#   7  firstrun-consent-onboard   first-run consent -> onboarding -> Home
+#   8  detail-hold-itemmenu       Detail -> hold on Related -> item menu -> BACK
+#   9  player-readout             Play -> the player's failure read-out (no video off-device)
+#   10 root-back                  SKIP on the simulator: a root BACK is a television flow
+#   11 pointer-stops              pointer clicks on every stop class, one clipped, one on the track
+#   12 filmography-detail-return  a credit opens Detail, BACK restores Filmography and the Person
+#
+# Runs nothing, and exits 2 so a script that still calls it fails loudly instead of quietly passing.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SIM_BIN="${SIM_BIN:-$ROOT/rust-modules/target-sim/debug/butaca-sim}"
-OUT="${OUT:-/tmp/butaca-focusfp}"
-PORT="${MOCK_PORT:-32498}"
-SEED="${MOCK_SEED:-1}"
-SERVER=""
-ONLY=""
-REC=""
-REPLAY=""
-MODE=""
-MIN_LINES=2
-BOOT_WAIT=25     # seconds to wait for the boot marker before giving up on a flow
-STEP=0.9         # seconds between tokens — a human D-pad cadence, and past every settle spring
-SETTLE=3         # seconds after the last token before the run is read
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --server) SERVER="$2"; shift 2 ;;
-    --only) ONLY="$2"; shift 2 ;;
-    --out) OUT="$2"; shift 2 ;;
-    --seed) SEED="$2"; shift 2 ;;
-    --rec|--replay|--targets|--resolve)
-      [ -z "$MODE" ] || { echo "focusfp: conflicting modes" >&2; exit 2; }
-      MODE="$1"
-      if [ "$1" = --rec ]; then REC=1; else REPLAY=1; fi
-      shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
-    *) echo "focusfp: unknown argument $1" >&2; exit 2 ;;
-  esac
-done
-
-[ -x "$SIM_BIN" ] || { echo "focusfp: no simulator at $SIM_BIN — run \`make sim\` first" >&2; exit 2; }
-mkdir -p "$OUT"
-
-MOCK_PID=""
-if [ -n "$REPLAY" ]; then
-  SERVER="127.0.0.1:$PORT"
-elif [ -z "$SERVER" ]; then
-  python3 "$ROOT/tests/mock_server.py" --port "$PORT" --seed "$SEED" > "$OUT/mock_server.log" 2>&1 &
-  MOCK_PID=$!
-  for _ in $(seq 1 30); do
-    grep -q 'serving' "$OUT/mock_server.log" 2>/dev/null && break
-    sleep 0.2
-  done
-  grep -q 'serving' "$OUT/mock_server.log" || { echo "focusfp: mock server did not start (see $OUT/mock_server.log)" >&2; exit 2; }
-  SERVER="127.0.0.1:$PORT"
-fi
-SERVER_HOST="${SERVER%%:*}"
-SERVER_PORT="${SERVER##*:}"
-
-SIM_PID=""
-cleanup() {
-  [ -n "$SIM_PID" ] && kill "$SIM_PID" 2>/dev/null || true
-  [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null || true
-}
-trap cleanup EXIT
-
-# The synthetic library's ratingKeys are dense and seeded (tests/mock_server.py): the first movie is
-# 1001 and the first show is 2001 — under any seed. A real server needs `--rk`; not offered yet.
-RK_MOVIE=1001
-RK_SHOW=2001
-
-# run_flow <n> <name> "<triggers: name[=value] …>" "<tokens …>" <boot-marker-regex> [step]
-run_flow() {
-  local n="$1" name="$2" triggers="$3" tokens="$4" marker="$5" step="${6:-$STEP}"
-  local d="$OUT/root-$n"
-  local fp="$OUT/$n-$name.fp"
-  rm -rf "$d"; mkdir -p "$d"
-  if [ -n "$REC" ] && { [ "$n" = 1 ] || [ "$n" = 6 ] || [ "$n" = 12 ]; } && [ -n "$MOCK_PID" ]; then
-    # Complete typed initial inputs, before boot. Never seed/copy an auth file or rewrite an ID
-    # in a completed recording. These are the supported synthetic bootstrap domains.
-    if [ "$n" = 12 ]; then
-      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$SERVER_PORT" flow12
-    elif [ "$n" = 6 ]; then
-      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$SERVER_PORT" settings=root
-    else
-      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$SERVER_PORT"
-    fi
-  else
-    printf 'synthetic-token' > "$d/butaca-token"
-  fi
-  touch "$d/butaca-focus" "$d/butaca-noidle"
-  [ -n "$REC" ] && touch "$d/butaca-rec"
-  if [ -n "$REPLAY" ]; then
-    local fixture="${REPLAY_FIXTURE:-$ROOT/tests/fixtures/replay/$n-$name}"
-    [ -d "$fixture" ] || { echo "  [SKIP] $n $name: no committed fixture at $fixture"; return 2; }
-    local resolution=targets
-    [ "$MODE" = --resolve ] && resolution=resolve
-    printf 'v1\n%s\n%s' "$resolution" "$fixture" > "$d/butaca-recplay"
-  fi
-  for t in $triggers; do
-    case "$t" in
-      *=*) printf '%s' "${t#*=}" > "$d/butaca-${t%%=*}" ;;
-      *)   touch "$d/butaca-$t" ;;
-    esac
-  done
-  BUTACA_RUNTIME_DIR="$d" BUTACA_APP_DIR="$ROOT/pkg" BUTACA_WIN=1920x1080 \
-    "$SIM_BIN" "$SERVER_HOST" "$SERVER_PORT" > "$d/sim.out" 2>&1 &
-  SIM_PID=$!
-  local log="$d/butaca-events.log"
-  local ok_boot=0
-  for _ in $(seq 1 $((BOOT_WAIT * 5))); do
-    if [ -f "$log" ] && grep -qE "$marker" "$log"; then ok_boot=1; break; fi
-    kill -0 "$SIM_PID" 2>/dev/null || break
-    sleep 0.2
-  done
-  if [ "$ok_boot" != 1 ]; then
-    echo "  [FAIL] $n $name: boot marker /$marker/ never appeared (see $log)"
-    kill "$SIM_PID" 2>/dev/null || true; wait "$SIM_PID" 2>/dev/null || true; SIM_PID=""
-    return 1
-  fi
-  if [ -n "$REPLAY" ]; then
-    # The recording carries the inputs; the app ends the run itself when the recording does.
-    local waited=0
-    while kill -0 "$SIM_PID" 2>/dev/null && [ "$waited" -lt 120 ]; do
-      grep -q '^replay: REFUSED' "$log" && break
-      sleep 1; waited=$((waited+1))
-    done
-    kill "$SIM_PID" 2>/dev/null || true; wait "$SIM_PID" 2>/dev/null || true; SIM_PID=""
-    local verdict
-    if verdict=$(grep -E '^replay: REFUSED' "$log" | head -1) && [ -n "$verdict" ]; then
-      echo "  [FAIL] $n $name: $verdict"
-      return 1
-    fi
-    verdict=$(grep -E '^replay: done ' "$log" | tail -1 || true)
-    grep -E '^replay: (diverge|input diverge|present|INITIAL)' "$log" | sed 's/^/    /' || true
-    if [ -z "$verdict" ]; then
-      echo "  [FAIL] $n $name: no \`replay: done\` line after ${waited}s ($log)"; return 1
-    fi
-    if python3 - "$log" <<'PY'
-import re
-import sys
-lines = [line.strip() for line in open(sys.argv[1]) if line.startswith('replay: done ')]
-fields = ('diverged', 'present_diffs', 'input_diffs', 'result_diffs', 'land_diffs',
-          'effect_diffs', 'focus_diffs', 'hit_diffs')
-ok = len(lines) == 1
-if ok:
-    pairs = re.findall(r'(\w+)=(\w+)', lines[0])
-    values = dict(pairs)
-    ok = len(values) == len(pairs) and values.get('verdict') == 'SAME'
-    ok = ok and all(values.get(field) == '0' for field in fields)
-    ok = ok and all(values.get(field, '').isdigit() and int(values[field]) > 0 for field in ('frames', 'graded'))
-sys.exit(0 if ok else 1)
-PY
-    then
-      echo "  [PASS] $n $name: $verdict"; return 0
-    else
-      echo "  [FAIL] $n $name: $verdict"; return 1
-    fi
-  fi
-  sleep 2   # posters and the async landings the first keys must not race
-  if [ -n "$tokens" ]; then
-    # `<>`: a FIFO opened write-only blocks in open(2) with no reader (ui-sim skill, trap 1).
-    exec 3<> "$d/butaca-remote"
-    for tok in $tokens; do
-      case "$tok" in
-        sleep:*) sleep "${tok#sleep:}" ;;
-        *) printf '%s ' "$tok" >&3; sleep "$step" ;;
-      esac
-    done
-    exec 3>&-
-  fi
-  sleep "$SETTLE"
-  local alive=1
-  kill -0 "$SIM_PID" 2>/dev/null || alive=0
-  kill "$SIM_PID" 2>/dev/null || true; wait "$SIM_PID" 2>/dev/null || true; SIM_PID=""
-  {
-    echo "# focusfp flow $n $name - server=$SERVER_HOST:$SERVER_PORT seed=$SEED triggers=[$triggers] tokens=[$tokens]"
-    # fingerprints, and every heartbeat whose route word CHANGED — the two lines the harness reads
-    awk '/^focus / {print; next}
-         match($0, /route=[a-z]+( overlay=[a-z-]+)?/) { r=substr($0, RSTART, RLENGTH); if (r != last) { print "hb " r; last=r } }' "$log"
-  } > "$fp"
-  local lines
-  lines=$(grep -c '^focus ' "$fp" || true)
-  if [ "$alive" != 1 ]; then
-    echo "  [FAIL] $n $name: the app DIED during the flow ($lines fingerprint lines; $d/sim.out)"
-    return 1
-  fi
-  local min_lines="$MIN_LINES"
-  # The Settings overlays leave the underlying Home fingerprint unchanged. Their actual
-  # traversal is asserted from heartbeat stages below, not from unrelated Home log volume.
-  [ "$n" = 6 ] && min_lines=1
-  if [ "$lines" -lt "$min_lines" ]; then
-    echo "  [FAIL] $n $name: only $lines fingerprint line(s) (need >= $min_lines) — $fp"
-    return 1
-  fi
-  local proof
-  if ! proof=$(python3 "$ROOT/tests/focusfp_check.py" "$n" "$fp"); then
-    echo "  [FAIL] $n $name: $proof — $fp"
-    return 1
-  fi
-  echo "  [PASS] $n $name: $lines fingerprint lines -> $fp"
-  [ -n "$REC" ] && echo "         recording: $d/butaca-recordings/latest ($(cat "$d"/butaca-recordings/latest/rec-*.jsonl 2>/dev/null | wc -l | tr -d " ") lines)"
-  return 0
-}
-
-want() { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$1,"* ]]; }
-
-passed=0; fails=0; skipped=0; selected=0
-record_flow() {
-  local n="$1"; shift
-  want "$n" || return 0
-  selected=$((selected+1))
-  if run_flow "$n" "$@"; then
-    passed=$((passed+1))
-  else
-    local status=$?
-    if [ "$status" -eq 2 ]; then
-      skipped=$((skipped+1))
-    else
-      fails=$((fails+1))
-    fi
-  fi
-}
-echo "=== focusfp: $SERVER (seed $SEED), out=$OUT ==="
-# 1 boot -> Home -> chip -> grid   (the picker is suppressed by the injected token; a TV flow)
-record_flow 1 boot-home-chip-grid "" "up left down down down" 'hubs: landed'
-# 2 grid -> Detail -> BACK
-record_flow 2 grid-detail-back "grid" "down ok sleep:2 back" 'hubs: landed'
-# 3 Home -> Library -> real grid card -> Detail -> BACK to the same Library card. The shot tokens
-# retain the Library grid before Detail and after the return; they do not alter navigation. The
-# second pre-detail shot is intentional: the first can catch the simulator's route transition.
-record_flow 3 home-library-detail-back "" "up right right ok sleep:3 down down down sleep:1 shot sleep:2 shot sleep:1 ok sleep:3 back sleep:3 shot" 'hubs: landed'
-# 4 Search with a seeded query -> shelf -> Detail -> BACK   (typing is the television's keyboard;
-#   the seed is the only way a headless run reaches a result shelf — docs/search.md)
-record_flow 4 search-shelf-detail-back "search=s0" "sleep:2 down down ok sleep:2 back" 'route=search'
-# 5 Detail -> Person -> Detail -> BACK -> Person -> BACK -> Detail
-record_flow 5 detail-person-detail "detail=$RK_MOVIE detailsec=1 detailok" "sleep:2 down ok sleep:2 back sleep:1 back sleep:1 down ok sleep:2 back" 'route=person'
-# 6 chip -> Settings -> Legal -> About -> Playback -> BACK (out of the modal)
-# The synthetic token boot has no signed-in account, so the Privacy section is row 0 and its first
-# row is the DESTRUCTIVE "delete all local data". Start with DOWN and never press OK on it: the run
-# visits Legal (a pushed index) and Playback (a pushed settings page), leaving each with BACK.
-# The Language picker is stepped over, never opened: its option labels are native names
-# (English/Español/Беларуская) that the fixture's closed alphabet does not carry, and widening that
-# alphabet buys a recording nothing a static label can drift into.
-# The walk is written against the TABLE's ends, not against a down count from the first row: the
-# modal's table swallows whatever arrives before it wires focus (observed: five downs landed three
-# rows down), so six downs clamp on Playback and five ups clamp back on row 0 before one down
-# reaches Legal. A count that has to be exact is a count that breaks the next time the frame rate
-# or the settle time changes.
-# The step is shorter than the harness default because this is the longest walk of the set and a
-# controlled recording is priced per frame: at 0.9 s between keys the six stages came to 14.469
-# lines and the fixture no longer fit the recorder's budget.
-record_flow 6 settings-family "settings=root" "sleep:2 down down down down down ok sleep:1 back sleep:1 up up up up up down ok sleep:1 back back" 'overlay=settings' 0.6
-# 7 first-run consent -> onboard -> Home
-record_flow 7 firstrun-consent-onboard "firstrun" "sleep:1 ok sleep:1 ok sleep:1 down ok sleep:2" 'route='
-# 8 Detail -> hold on Related -> ItemMenu -> BACK. detailsec is a DOWN count, not a section id:
-# the synthetic movie's order is hero -> Cast -> Related -> About.
-record_flow 8 detail-hold-itemmenu "detail=$RK_MOVIE detailsec=2" "sleep:2 okdown sleep:0.7 okup sleep:1 back" 'route=detail'
-# 9 player (the mock's part bytes are not a film: the run lands on the failure read-out, which is
-#   the one screen the simulator reaches for playback — spec §15.4 requires a player line)
-record_flow 9 player-readout "play=$RK_MOVIE clocksink" "sleep:3 down sleep:1 ok sleep:1 back" 'route=player'
-if want 10; then
-  selected=$((selected+1)); skipped=$((skipped+1))
-  echo "  [SKIP] 10 root-back: a television flow (tv-session skill) — the simulator's root BACK is a log line"
-fi
-# 11 pointer clicks on every stop class incl. a clipped one and one under the tab track
-record_flow 11 pointer-stops "" "ck:960,92 sleep:1 ck:133,92 sleep:1 back sleep:1 ck:220,960 sleep:1 ck:1850,960 sleep:1 ck:960,540" 'hubs: landed'
-# 12 Phase-7 adoption: Filmography owns its own focus scope. A library-matched credit opens Detail, BACK
-# restores the Filmography entry and the next BACK dismisses it to its Person host. `nowan`: the
-# person page's F_PROFILE/F_CREDITS mailboxes used to dial the catalogue provider's `discover`
-# host over the WAN for real (the
-# `personcredits` seed only stands in for a landing, it does not suppress the fetch `pump` already
-# sent before the seed runs), and against the injected token that call 401s - so this flow's
-# stability otherwise depended on the internet answering that 401 promptly. That provider is gone
-# with the wire, and `nowan` is kept anyway: it makes the name refuse locally and at once, the same
-# offline reproduction `docs/agent-reference.md` documents.
-# Controlled recording instead captures that offline policy in the typed initial input and
-# produces the failed provider replies without a WAN call. Replay supplies every recorded reply
-# and admission with the mock off and resource execution denied.
-record_flow 12 filmography-detail-return "detail=$RK_MOVIE detailsec=1 detailok filmography personcredits nowan" "sleep:2 down ok sleep:2 back sleep:2 back" 'route=person'
-
-echo "=== focusfp: $passed passed, $fails failed, $skipped skipped of $selected ==="
-[ "$fails" -eq 0 ]
+cat >&2 <<'REFUSED'
+focusfp: retired — its flows inject a `butaca-token` and name items by numeric ratingKey, and the
+app's boot gate reads neither any more (it speaks Jellyfin, whose ids are the server's GUIDs). The
+synthetic server they were recorded against went with the Plex wire. Nothing was started and no
+.fp file was written. tests/mock_jf.py is the server a re-recorded harness would run against; see
+this file's header for what else changes.
+REFUSED
+exit 2

@@ -246,93 +246,18 @@ class ContentFocusFlows(unittest.TestCase):
 
 
 class FocusFpAccounting(unittest.TestCase):
-    def test_product_modes_are_explicit_exclusive_and_grade_all_counters(self):
-        summary = ('replay: done frames=1 graded=1 diverged=0 present_diffs=0 input_diffs=0 '
-                   'result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME')
-        for mode in ('--replay', '--targets', '--resolve'):
-            expected = 'resolve' if mode == '--resolve' else 'targets'
-            script = ('#!/bin/sh\nroot="$BUTACA_RUNTIME_DIR"\n'
-                      'test "$(sed -n 1p "$root/butaca-recplay")" = v1 || exit 3\n'
-                      f'test "$(sed -n 2p "$root/butaca-recplay")" = {expected} || exit 3\n'
-                      f'printf "hubs: landed\\n{summary}\\n" > "$root/butaca-events.log"\n')
-            result = self._run_isolated_focusfp(script, '--only', '1', mode=mode)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for pair in (('--rec', '--replay'), ('--targets', '--resolve'), ('--resolve', '--replay'),
-                     ('--targets', '--targets')):
-            result = self._run_isolated_focusfp('#!/bin/sh\nexit 88\n', pair[1], mode=pair[0])
-            self.assertEqual(result.returncode, 2)
-            self.assertIn('conflicting modes', result.stderr)
-        for field in ('input_diffs', 'focus_diffs', 'hit_diffs'):
-            for bad in (summary.replace(field + '=0', field + '=1'),
-                        summary.replace(' ' + field + '=0', '')):
-                script = ('#!/bin/sh\nroot="$BUTACA_RUNTIME_DIR"\n'
-                          f'printf "hubs: landed\\n{bad}\\n" > "$root/butaca-events.log"\n')
-                result = self._run_isolated_focusfp(script, '--only', '1', mode='--resolve')
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-
-    @staticmethod
-    def _run_isolated_focusfp(simulator, *args, mode="--replay"):
-        """Run a copied focusfp script against only the fixtures this accounting test needs."""
-        fixture_names = (
-            "1-boot-home-chip-grid",
-            "6-settings-family",
-            "12-filmography-detail-return",
-        )
+    def test_the_retired_tool_refuses_instead_of_passing_quietly(self):
+        """Its flows named items by numeric ratingKey and injected a token the boot gate no longer reads."""
         with tempfile.TemporaryDirectory() as tmp:
-            repo = os.path.join(tmp, "repo")
-            tests = os.path.join(repo, "tests")
-            fixtures = os.path.join(tests, "fixtures", "replay")
-            os.makedirs(fixtures)
-            for name in fixture_names:
-                os.makedirs(os.path.join(fixtures, name))
-
-            focusfp = os.path.join(tests, "focusfp.sh")
-            shutil.copyfile(os.path.join(TESTS_DIR, "focusfp.sh"), focusfp)
-            os.chmod(focusfp, 0o755)
-
-            sim = os.path.join(tmp, "fake-sim")
-            with open(sim, "w", encoding="utf-8") as f:
-                f.write(simulator)
-            os.chmod(sim, 0o755)
-
-            env = os.environ.copy()
-            env.update({"SIM_BIN": sim, "OUT": os.path.join(tmp, "out")})
-            return subprocess.run(
-                [focusfp, "--server", "127.0.0.1:9", mode, *args],
-                cwd=repo,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-
-    def test_replay_counts_pass_skip_and_failure_separately(self):
-        """A missing replay fixture is a skip, not a successful flow."""
-        script = """#!/bin/sh
-root="$BUTACA_RUNTIME_DIR"
-if [ -e "$root/butaca-settings" ]; then
-    marker='overlay=settings'
-elif [ -e "$root/butaca-filmography" ]; then
-    marker='route=person'
-else
-    marker='hubs: landed'
-fi
-printf '%s\\nreplay: done frames=1 graded=1 diverged=0 present_diffs=0 input_diffs=0 result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME\\n' "$marker" > "$root/butaca-events.log"
-exit 0
-"""
-        result = self._run_isolated_focusfp(script)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("=== focusfp: 3 passed, 0 failed, 9 skipped of 12 ===", result.stdout)
-
-
-    def test_only_counts_a_failed_simulator_and_the_tv_root_as_selected_outcomes(self):
-        script = """#!/bin/sh
-root="$BUTACA_RUNTIME_DIR"
-printf 'hubs: landed\\n' > "$root/butaca-events.log"
-exit 0
-"""
-        result = self._run_isolated_focusfp(script, "--only", "1,10")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("=== focusfp: 0 passed, 1 failed, 1 skipped of 2 ===", result.stdout)
+            out = os.path.join(tmp, "out")
+            env = dict(os.environ)
+            env["OUT"] = out
+            result = subprocess.run(
+                [os.path.join(TESTS_DIR, "focusfp.sh"), "--replay", "--only", "1"],
+                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("focusfp: retired", result.stderr)
+        self.assertFalse(os.path.exists(out))
 
 
 class ReplayFixtures(unittest.TestCase):
@@ -1497,8 +1422,9 @@ class LoadManifest(unittest.TestCase):
 
     def test_collection_scenes_resolve_through_the_overlay(self):
         """manifest.json is installation-independent, so the collection scenes may not carry a
-        mock_server ratingKey: on a real server `butaca-collection=50001` opens a collection that
-        does not exist and the page's fps_ceiling passes vacuously on its failure read-out."""
+        ratingKey from a synthetic server: on a real server `butaca-collection=50001` opens a
+        collection that does not exist and the page's fps_ceiling passes vacuously on its failure
+        read-out."""
         tracked = {s["name"]: s for s in _manifest()["fps_scenes"]}
         for name in ("collection-page", "library-collections"):
             with self.subTest(scene=name):
