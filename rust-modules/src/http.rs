@@ -292,6 +292,44 @@ pub(crate) fn credential_transport_allowed_by_policy(
     }
 }
 
+/// **The two sign-in attempts' gate** — [`credential_transport_allowed_by_policy`] plus the one
+/// crossing that has no address to be anchored to yet.
+///
+/// The Jellyfin relaxation admits plaintext only towards the address already signed in against
+/// ([`crate::jellyfin::plaintext_host_allowed`]). The sign-in POST is what CREATES that anchor, so
+/// on a clean install the rule refused the very request that would have satisfied it, and a person
+/// typing their own LAN server on a release build was told to use a local network address while
+/// already using one. Here the address on the form is the only one the credential is issued for,
+/// and a success anchors the relaxation to it — so a private literal is dialled, a public address
+/// or a hostname is still refused exactly as everywhere else, and every request after the sign-in
+/// keeps the anchored rule. Only the two sign-in call sites reach this.
+pub(crate) fn credential_transport_allowed_at_signin_by_policy(
+    origin: &Origin,
+    path: &str,
+    headers: &[&str],
+    policy: CredentialPolicy,
+) -> bool {
+    credential_transport_allowed_by_policy(origin, path, headers, policy)
+        || (credential_carried(path, headers) == Credential::Jellyfin && is_lan_host(origin.host()))
+}
+
+/// [`credential_transport_allowed_at_signin_by_policy`] under the build's own policy, keeping the
+/// per-request gate's once-per-outcome report.
+pub(crate) fn credential_transport_allowed_at_signin(
+    origin: &Origin,
+    path: &str,
+    headers: &[&str],
+) -> bool {
+    let allowed = credential_transport_allowed_at_signin_by_policy(
+        origin,
+        path,
+        headers,
+        CredentialPolicy::build(),
+    );
+    report_plaintext(origin, path, headers, allowed);
+    allowed
+}
+
 /// The shared control/media credential boundary: a request that carries a credential reaches the
 /// wire only when THE authority (`grant`) says its origin may carry one — TLS, a developer
 /// build, or a live consented grant for exactly this plaintext origin. Asked per request, so a
@@ -304,13 +342,20 @@ pub(crate) fn credential_transport_allowed(origin: &Origin, path: &str, headers:
         headers,
         CredentialPolicy::build(),
     );
-    if !origin.is_tls() && carries_credential(path, headers) {
-        static REPORTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-        if let Some(line) = plaintext_credential_report(&REPORTED, CredentialPolicy::build(), allowed) {
-            crate::log(line);
-        }
-    }
+    report_plaintext(origin, path, headers, allowed);
     allowed
+}
+
+/// The once-per-outcome plaintext line, for a gate that has just answered: only a plaintext
+/// crossing is worth a line, and only the first of each outcome.
+fn report_plaintext(origin: &Origin, path: &str, headers: &[&str], allowed: bool) {
+    if origin.is_tls() || !carries_credential(path, headers) {
+        return;
+    }
+    static REPORTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+    if let Some(line) = plaintext_credential_report(&REPORTED, CredentialPolicy::build(), allowed) {
+        crate::log(line);
+    }
 }
 
 /// The plaintext-credential log line for this outcome, the first time the process meets it —
@@ -498,6 +543,47 @@ fn tls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sign-in gate and the per-request gate answer the SAME question differently on a clean
+    /// install, and both answers are the point: sign-in admits the private literal on the form
+    /// (the request that creates the anchor), while everything after it stays anchored to the
+    /// address that was signed in against. The literal here is one no other test signs in
+    /// against, so a client installed by a parallel test cannot satisfy the anchoring half.
+    #[test]
+    fn the_sign_in_gate_admits_a_private_literal_with_nothing_installed() {
+        let headers = ["Authorization: MediaBrowser …"];
+        let path = "/Users/AuthenticateByName";
+        let lan = Origin::parse("http://10.9.9.9:8096").unwrap();
+        let public = Origin::parse("http://203.0.113.10:8096").unwrap();
+        let named = Origin::parse("http://jellyfin.local:8096").unwrap();
+        let store = CredentialPolicy::HttpsOnly;
+
+        assert!(
+            credential_transport_allowed_at_signin_by_policy(&lan, path, &headers, store),
+            "the address on the form is the one the credential is issued for"
+        );
+        assert!(
+            !credential_transport_allowed_at_signin_by_policy(&public, path, &headers, store),
+            "a public address over http still refuses the password"
+        );
+        assert!(
+            !credential_transport_allowed_at_signin_by_policy(&named, path, &headers, store),
+            "a hostname is never the carve-out, sign-in included"
+        );
+        assert!(
+            credential_transport_allowed_at_signin_by_policy(
+                &Origin::parse("https://jellyfin.example.com").unwrap(),
+                path,
+                &headers,
+                store,
+            ),
+            "TLS is admitted as it always was"
+        );
+        assert!(
+            !credential_transport_allowed_by_policy(&lan, "/Users/abc/Items?api_key=t", &[], store),
+            "the anchoring rule itself is unchanged: no install, no token on the wire"
+        );
+    }
 
     /// The dispatch is on the SCHEME and on nothing else — not on whether the host looks numeric,
     /// not on the port, not on what the caller thinks it is doing. Asserted through the arms'
