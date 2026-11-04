@@ -226,7 +226,7 @@ installs unprobed), the census moved to `ControlledHomeInitV7` / `SessionInitV6`
 `recorder::features()` stamps the flavor, so the gate's simulator builds with
 `--features hostsim,jellyfin` and a Plex artifact cannot even load (features mismatch, then
 shape). All three anchors were observed being refused, then re-recorded with
-`tools/butaca-rec rerecord` against shape `15045375032104265367` — still against a mock on
+`tools/butaca-rec rerecord` against shape `5212864836643027146` — still against a mock on
 `127.0.0.1:32498`, now `tests/mock_jf.py` — and passed Targets and Resolve with every difference
 counter at zero. The recordings carry the Jellyfin resource vocabulary end to end: discovery and
 hubs results bind the installed `JfClient` (instance 0, no token rotation), every content

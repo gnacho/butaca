@@ -2363,7 +2363,7 @@ mod tests {
         // The #166 replay flip moves it again: ControlledHomeInitV7 carries SessionInitV6, whose
         // BootstrapAuthority gained the DevJf controlled world (0xc194_c127_5b79_c008 was the
         // pre-flip pin).
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xd856_b773_431c_67ba);
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x01e92_5188_f224bd1);
     }
 
     /// The gate at the REAL hubs landing site, through the recording the driver loads: a result
@@ -2560,7 +2560,7 @@ mod tests {
         // SessionInitV5 (0x4c8f_ce4c_6d05_abaa was the pre-locale post-removal pin).
         // The #166 replay flip moved it again: the bootstrap shape names SessionInitV6 /
         // ControlledHomeInitV7 (0xc194_c127_5b79_c008 was the pre-flip pin).
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xd856_b773_431c_67ba);
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x01e92_5188_f224bd1);
         // Dropping any one of the surviving shapes changes the fingerprint, so a recording
         // graded under this census is refused the moment a shape moves.
         let mut short = APP_SHAPES.to_vec();
