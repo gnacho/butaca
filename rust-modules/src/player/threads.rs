@@ -157,7 +157,7 @@ pub(crate) fn timeline_thread(
             return;
         }
         // The state/position line stays as the reporter's own heartbeat: the wire POST that used
-        // to ride beside it (the Plex `/:/timeline`) is gone, and the log is where "the reporter
+        // to ride beside it (the `/:/timeline` report) is gone, and the log is where "the reporter
         // is alive and sampling" remains visible.
         let dur = SHARED.duration_ns.load(Ordering::Relaxed);
         let t = SHARED.playpos_ns.load(Ordering::Relaxed) / 1_000_000;

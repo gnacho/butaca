@@ -111,7 +111,7 @@ pub(super) fn hold_off(owner: &mut Owner) {
 }
 
 /// The live fan-out's one source. The multi-slot roster this used to seed went with the registry
-/// (#166): `slots()` is the empty Plex roster plus the Jellyfin slot while its client is
+/// (#166): `slots()` is the empty roster plus the Jellyfin slot while its client is
 /// installed, so the helper installs the synthetic client — the port is never dialled, `hold_off`
 /// parks every spawn — and the count is accepted for signature stability and ignored.
 pub(super) fn register(owner: &mut Owner, n: usize) {

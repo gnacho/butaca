@@ -94,13 +94,13 @@ can follow.
 | layer | may name |
 |---|---|
 | `ui/` — the LIBRARY | `crate::{gfx,text,paths,task,i18n}` — **never an application type** |
-| `screens/` — the application's screens | `ui/`, `stores/`, `plex/` types, `player/` — never a sibling screen |
+| `screens/` - the screens | `ui/`, `stores/`, `pms/` types, `player/` - never a sibling screen |
 | `stores/` | data crates and `ui::machine` only — never `screens/` |
 | `app/` | everything |
 
 `ui/` is generic over one application bundle and is compiled and tested against `FixtureHost`
-with no Plex type in scope (`fixture.rs`). If you find yourself reaching for `crate::plex` or
-`crate::browse` from a file in this directory, the design says the code belongs in `screens/`.
+with no application type in scope (`fixture.rs`). If you find yourself reaching for `crate::browse`
+or a screen from a file in this directory, the design says the code belongs in `screens/`.
 
 **One owner per state, event and resource (§2.2).** `App` owns a containment tree — never
 references: `Session` (auth, profile, the one `ProfileScope`), `Consent`, `Input` (press, key-repeat
@@ -193,7 +193,8 @@ the spike, not dead code to delete.
 
 ## Product idiom (settled owner verdicts)
 
-The reference clients are a checklist of CAPABILITIES, never a mockup. Plex says *what* a screen
+The reference clients are a checklist of CAPABILITIES, never a mockup. The retired client says
+*what* a screen
 must be able to do; Apple TV is what it should look like; the presentation stays ours. Each rule
 below is a verdict the owner has already given — satisfy the capability, and do not re-open the
 presentation in a design pass.
@@ -201,7 +202,8 @@ presentation in a design pass.
 1. **Menus are popovers, never full-screen sheets.** A new menu — playback settings, a quality
    ladder, an item context menu, the play-queue list — is a `popover.rs` container over the live
    screen with a `table.rs` `TableView` inside, anchored near its trigger, the way `track_menu.rs`
-   and the library sort/filter menus already work. Plex's full-screen modals were rejected by name.
+   and the library sort/filter menus already work. The old client's full-screen modals were rejected
+   by name.
    A menu never opens with its focus on a destructive action: tag such rows
    `Row::destructive(true)` and open the table with `TableView::open_sections`, whose
    `opening_row` is also the focus fallback when a focused row disappears.

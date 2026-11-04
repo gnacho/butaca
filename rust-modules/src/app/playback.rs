@@ -129,7 +129,7 @@ pub(crate) fn apply_more_action(ps: &mut crate::route::PlaybackSession, pa: &mut
     }
 }
 
-/// Replace a terminal attempt with a new resolve of the same Plex item.
+/// Replace a terminal attempt with a new resolve of the same item.
 ///
 /// This is a REAL stop followed by a new request, not an Engine reload: it covers the pre-flight
 /// refusal which never created an Engine, retires a failed server transcode when there was one,
@@ -144,7 +144,7 @@ pub(crate) fn retry_failed_playback(
     meta: &mut crate::stores::metadata::MetadataStore,
     direct_play: Option<crate::server::session::DirectPlayMode>,
 ) -> bool {
-    // URL/dev-trigger playback has no Plex descriptor.  Check BEFORE teardown: extinguishing its
+    // URL/dev-trigger playback has no route descriptor.  Check BEFORE teardown: extinguishing its
     // Error Engine and only then discovering it cannot be rebuilt would replace an actionable
     // read-out with an idle black frame.
     if !crate::route::can_retry_current_play(ps) {
@@ -855,7 +855,7 @@ pub(crate) fn play_up_next(
 /// "play now" ritual: route cfg + streams metadata + the shared start ritual.
 /// `from_start` ignores the item's resume point — the item menu's "Play from Start", which is
 /// the ONLY difference between restarting a Continue Watching tile and resuming it. Taking it
-/// as a flag (rather than a resume_ns the caller computes) keeps Plex's resume rule
+/// as a flag (rather than a resume_ns the caller computes) keeps the resume rule
 /// (`metadata::resume_ns`, which also refuses to resume the last few percent) in one place.
 pub(crate) unsafe fn play_item_now(
     ps: &mut crate::route::PlaybackSession,

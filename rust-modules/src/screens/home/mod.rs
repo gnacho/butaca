@@ -728,7 +728,7 @@ impl HomeScreen {
             self.snap.jump(0.0);
         }
         // The registry half (`client_for(current())` → the current slot's machine id) went with
-        // the client slots (#166): no Plex slot carries a machine any more, so the question's
+        // the client slots (#166): no slot carries a machine any more, so the question's
         // machine subject is always absent and the refresh below only ever withdraws.
         let current = None;
         if self.plaintext.refresh(current, Near::First) {

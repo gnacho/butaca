@@ -1344,7 +1344,7 @@ fn title_w(text: *const c_char, measure: &dyn crate::ui::machine::Measure) -> f3
 
 /// The under-tile text budget: the tile, a gap either side, PLUS half of each neighbouring tile's
 /// width (item 10) — a focused label may bleed into the gap and up to the midpoint of the next
-/// tile without visually colliding with it, which is what makes a real Plex title ("Wallace &
+/// tile without visually colliding with it, which is what makes a long real title ("Wallace &
 /// Gromit: The Curse of the Were-Rabbit") legible instead of "Wallace & Gr…". Two neighbours
 /// contributing half their width each is one extra tile-width overall, hence `+ sty.w` once more
 /// on top of the plain tile-plus-gaps budget. [`place_label`] only ever narrows it where the panel

@@ -1,5 +1,5 @@
 //! `FixtureHost` — the application bundle the library is compiled and tested against with no
-//! Plex type in scope (spec §3.1, §13 phase 2-i): one `FixtureScreen` that is `Composed` of one
+//! backend type in scope (spec §3.1, §13 phase 2-i): one `FixtureScreen` that is `Composed` of one
 //! `Part` (a row of N stops), one `FixtureStore` behind a `StoreOrd`, a `FixtureMeasure`, a stub
 //! `Uploader` under a `TexCache<PosterKey>`, and the `Rig` that hands the dispatcher all of it.
 //!

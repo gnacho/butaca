@@ -1,6 +1,6 @@
 //! Media opens that meet an HTTP redirect.
 //!
-//! Field report (debug build of a788b27a): a Plex-hosted trailer's Part URL answered
+//! Field report (debug build of a788b27a): a remote trailer's Part URL answered
 //! `302`, the socket open reported `ff: http_open FAILED status=302`, and the demuxer saw no
 //! access units. The server redirects those parts to a presigned CDN URL on ANOTHER origin, usually
 //! https, sometimes via a relative `Location`. These grade every plaintext media open the demux

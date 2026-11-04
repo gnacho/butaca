@@ -4,7 +4,7 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-/// Canon-only since the plex.tv account surface was removed (#190): nothing constructs any
+/// Canon-only since the account surface was removed (#190): nothing constructs any
 /// variant any more, but old recordings replay `SessionArrival::Data` payloads of every one of
 /// them, so both their serde shapes and every arm of `write` — part of the frozen
 /// `SessionInit::write` digest those replays pin — must stay exactly as recorded.
@@ -25,8 +25,8 @@ pub(crate) struct EndpointFact {
     pub fresh: Option<SourceRef>,
     /// What the probe itself proved, whether or not `fresh` has a source to install (R2/A5's
     /// "publish rather than retire" applies to the endpoint worker too). `None` when the worker
-    /// exited early — plex.tv itself unreachable, or the machine no longer among its resources —
-    /// meaning nothing was actually dialled, so there is no verdict to report at all.
+    /// exited early (the account service unreachable, or the machine no longer among its
+    /// resources), meaning nothing was actually dialled, so there is no verdict to report.
     pub probe: Option<SettledProbe>,
 }
 
@@ -81,7 +81,7 @@ impl Observation {
 
     pub(crate) fn matches_request(&self, _pending: &owner::Pending, _terminal: bool) -> bool {
         // Every variant this stream can still carry reported on the roster/endpoint/registry
-        // workers the plex.tv account surface lost (#190), and the union of #190 and #45 left
+        // workers the account surface lost (#190), and the union of #190 and #45 left
         // the owner no work that any worker observes — so nothing ever matches a pending
         // request any more.
         false
@@ -154,7 +154,7 @@ fn write_resources(w: &mut crate::ui::machine::Canon, resources: &[Resource]) {
 
 use std::sync::Arc;
 
-/// The one live import path into `plex/models.rs` from outside `plex/`: `auth.rs` names `Resource`
+/// The one live import path into `crate::media` from outside it: `auth.rs` names `Resource`
 /// through it, and the frozen `resources` serde adapters + `write_resources` below type their
 /// Canon-only vocabulary with it. The models types themselves are Canon-only since #190 (no
 /// producer; old recordings deserialize them).

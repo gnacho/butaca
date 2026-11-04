@@ -186,7 +186,7 @@ pub struct Section {
     /// Right-aligned accessory on the HEADER line — a second fact about the group, one rung down
     /// and in the header's own dim ink ("Dolby Atmos"; the Sources list's owner handle beside a
     /// machine name). It is the last run on that line and is **elided** to [`ACCESSORY_W`], so a
-    /// long plex.tv handle truncates on a character instead of colliding with the header or
+    /// long owner handle truncates on a character instead of colliding with the header or
     /// widening the panel — the rows below it are never touched.
     pub accessory: String,
     /// Dim the WHOLE group — header, accessory and every row — at one alpha.
@@ -262,7 +262,7 @@ const ROW_SUB_GAP: f32 = 15.0; // title baseline → detail cap-top, in a two-li
 /// `pub` for the [`ROW_H`] caller shape.
 pub const HDR_H: f32 = 58.0;
 /// Measure a [`Section::accessory`] is elided to. It is the LAST run on the header line, so it is
-/// the one that gives way: a 34-character plex.tv handle truncates on a character and the library
+/// the one that gives way: a 34-character owner handle truncates on a character and the library
 /// names underneath keep their full width.
 const ACCESSORY_W: f32 = 320.0;
 /// The alpha a [`Section::dim`]med group is drawn at — the same weight an unreachable tab pill
@@ -938,7 +938,7 @@ impl TableView {
                         // MICRO, a rung below the header: "the header names the group, the
                         // accessory only qualifies it, so it never ties with the header"
                         // (`TableView.prompt.md`). At CAPTION the two were the same size and a
-                        // plex.tv handle read as loud as the machine it hangs off.
+                        // owner handle read as loud as the machine it hangs off.
                         let asz = theme::size::MICRO;
                         let a = crate::text::elide_by(&sec.accessory, ACCESSORY_W, false, |t| {
                             measure.width_str(t, asz, false)

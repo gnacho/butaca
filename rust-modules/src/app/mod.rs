@@ -305,7 +305,7 @@ pub(crate) struct App {
     /// **The launch-param deep link** (argv[1] `jellyfinItemId`): one item id carried from the
     /// C shim, seeded ONLY when the boot gate reached Home on its own (see `boot::construct`),
     /// and consumed once by `dev::scenarios::deeplink_arm` on the first frames. None on a plain
-    /// launch, a non-Home landing, or a Plex build.
+    /// launch, a non-Home landing, or a build whose launcher sends no item id.
     pub(crate) deeplink_rk: Option<String>,
     /// The Input machine: owner of the press (restructure spec §2.2); the ladders borrow it.
     pub(crate) input: crate::ui::input::Input,

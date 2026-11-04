@@ -56,7 +56,7 @@ pub(crate) fn decode(value: Value) -> Result<Landing, &'static str> {
     if p.kind != "hubs" || p.version != 1 { return Err("unsupported hubs result"); }
     // The Jellyfin flavor's own result vocabulary: instance 0, no token rotation, the one
     // installed client. Any payload naming a client through a recorded-id mapping is refused:
-    // that vocabulary was the Plex arm's, and no Plex mapping exists to consult anymore.
+    // that vocabulary was the retired arm's, and no mapping for it exists to consult anymore.
     let resolved = if p.client == Some(0) && p.token_gen == 0
         && p.sid.raw() == crate::jellyfin::SERVER_ID.raw()
         && crate::jellyfin::client().is_some()

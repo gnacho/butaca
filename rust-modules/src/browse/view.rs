@@ -235,15 +235,15 @@ impl<'a> ListingView<'a> {
         self.0.data.as_ref().map_or(super::LibraryType::default(), |s| s.library_type)
     }
     pub(crate) fn rail_available(self) -> bool {
-        // The rail only exists for the title ordering. Plex's token is "titleSort"; Jellyfin's
-        // fixed vocabulary says "SortName" — the two never appear on the other backend, so the
-        // disjunction is the slot test without needing the section's sid up here.
+        // The rail only exists for the title ordering. The old backend's token is "titleSort"
+        // and Jellyfin's fixed vocabulary says "SortName", so the two never appear on the other
+        // side and the disjunction is the slot test without needing the section's sid up here.
         let title_key = |key: &str| key == "titleSort" || key == "SortName";
         #[cfg(any())]
         let title_key = |key: &str| key == "titleSort";
         // Issue #37: Jellyfin recomputes the per-letter counts WITH the active filter, so its
         // rail may stay for unwatched-only and per-genre listings; the backend test is the
-        // fixed sort vocabulary ("SortName" never appears on Plex). Plex's firstCharacter
+        // fixed sort vocabulary ("SortName" only exists here). The retired backend's firstCharacter
         // counts are query-independent and would index the wrong rows filtered, so its lane
         // keeps the gate.
         let filters_ok = self.jellyfin_sorts() || (!self.unwatched() && self.genre().is_none());
@@ -256,9 +256,9 @@ impl<'a> ListingView<'a> {
             && self.letters().len() > 1
     }
 
-    /// Whether this section's sort vocabulary is Jellyfin's fixed list — the token test the
-    /// rail uses for the backend, since "SortName" never appears on Plex and "titleSort" never
-    /// on Jellyfin.
+    /// Whether this section's sort vocabulary is Jellyfin's fixed list, the token test the
+    /// rail uses for the backend, since "SortName" never appears on the retired backend and
+    /// "titleSort" never on Jellyfin.
     fn jellyfin_sorts(self) -> bool {
         {
             self.sorts().iter().any(|s| s.key == "SortName")
@@ -759,7 +759,7 @@ mod tests {
 
     /// Issue #37: a Jellyfin section (SortName vocabulary) keeps the rail under an active
     /// unwatched/genre filter, because its letter counts are recomputed WITH the filter. The
-    /// same filters on the Plex-shaped section above must keep hiding it.
+    /// same filters on the old backend's section above must keep hiding it.
     #[test]
     fn jellyfin_rail_stays_under_a_filter() {
         let _guard = crate::testlock::serial();

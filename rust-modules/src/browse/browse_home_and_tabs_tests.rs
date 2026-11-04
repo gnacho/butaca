@@ -181,7 +181,7 @@ fn apply_pins_writes_the_whole_batch_in_one_record() {
 /// **An explicit answer that a DEFAULT has caught up with is still an answer.**
 ///
 /// Codex review finding 1 (2026-09-20) against the household-grading work, and the sequence is
-/// the whole of it: before the Plex Home roster lands, a friend's films read On; the viewer
+/// the whole of it: before the household roster lands, a friend's films read On. The viewer
 /// switches them Off; the roster arrives, the household turns out to have films of its own and
 /// the LIVE pin moves to Off as well. `apply_pins` used to INFER "the viewer touched this row"
 /// from "the row disagrees with the live pin", so the commit saw `Off == Off`, read the row as
@@ -495,8 +495,8 @@ fn a_flip_made_while_a_share_is_absent_does_not_erase_its_answer() {
 ///
 /// **Seeded as a MANAGED profile sees the house**, which is what the two people switching here
 /// actually are. `seed_two_servers` is the admin's view — `mac-mini` `owned:true` — and that made
-/// this test quietly unable to reach the case it is about: two profiles in one Plex Home, both of
-/// whom plex.tv answers `owned:false` on the family server, indistinguishable from the friend's
+/// this test quietly unable to reach the case it is about: two profiles in one household roster,
+/// both answered `owned:false` on the family server, indistinguishable from the friend's
 /// share beside it on the raw flag alone. Every expectation below is unchanged, and that IS the
 /// assertion: a managed profile's per-profile selection behaves exactly as the admin's does.
 #[test]
@@ -1169,7 +1169,7 @@ fn the_sources_panel_offers_only_libraries_of_the_tab_being_browsed() {
 /// Two Movies libraries, one on the household's own server and one on a friend's share, both
 /// pinned, neither remembered — the tie [`BrowseState::section_of_kind`] breaks. The friend's is
 /// seeded FIRST on purpose: under the old `!owned` tiebreak every row of this roster scored the
-/// same (plex.tv says `owned:false` about the family server too), so `min_by_key` kept the first
+/// same (the account service says `owned:false` there too), so `min_by_key` kept the first
 /// it met and the Movies tab opened on a stranger's shelf, permanently, with no control anywhere
 /// that would move it. That is GitHub #68's mechanism — *"I have two TV Shows libraries … only my
 /// Animes are being displayed"* — still open for every profile but the admin's.

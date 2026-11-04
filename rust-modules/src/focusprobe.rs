@@ -644,7 +644,7 @@ mod tests {
         push_rk(&mut s, "01234567890123456789");
         assert_eq!(s, "0123456789012345~");
 
-        // multi-byte input must not panic the scan (the app holds real Plex strings)
+        // multi-byte input must not panic the scan (the app holds real server strings)
         let mut s = String::new();
         push_rk(&mut s, "sé☃ance42");
         assert_eq!(s, "sance42");

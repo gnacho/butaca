@@ -18,7 +18,7 @@ fn an_empty_track_list_falls_back_to_the_codec_default() {
 }
 
 
-/// **With no Plex language preference, the file's default track wins — English has no say.**
+/// **With no language preference, the file's default track wins - English has no say.**
 /// Issue #202: a French MKV whose default-flagged track is French, beside an English one, opened
 /// in English because of a built-in English rung. Both orderings, so the pick is the flag and
 /// not the list position.
@@ -280,7 +280,7 @@ fn a_picks_sibling_matches_across_iso_639_spellings() {
     assert!(!lang_matches("fre", "eng") && !lang_matches("", "") && !lang_matches("xx", "yy"));
 }
 
-/// `""` and `"-1"` are Plex's "Account default": unset, so the file's default wins.
+/// `""` and `"-1"` are the recorded "Account default": unset, so the file's default wins.
 
 
 

@@ -539,7 +539,7 @@ impl SearchScreen {
         self.ground.key(colours, crate::ui::widgets::PageGround::CARD_W, tick.dt());
         let target_row = cx.focus.current.and_then(|key| self.rows.iter()
             .position(|row| row.elems.contains(&key.elem)));
-        // The scope publication died with the Plex registry fan-out: one Jellyfin server has no
+        // The scope publication died with the registry fan-out: one Jellyfin server has no
         // per-source credit to name. The owner annotation's state fields stay in the recorded
         // shape (`SHAPE` is frozen), permanently at rest on their defaults.
         let settled = self.owner_row == target_row && self.owner.is_empty();

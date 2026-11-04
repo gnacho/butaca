@@ -124,7 +124,7 @@ fn usable(g: &SrcGroup) -> bool {
 ///
 /// **The state leads**, and that is load-bearing rather than cosmetic. The accessory is the last
 /// run on the header line and is elided from the right ([`Section::accessory`]), so whatever is
-/// last is what gives way — leading with the state means a 34-character plex.tv handle truncates
+/// last is what gives way. Leading with the state means a 34-character owner handle truncates
 /// instead of the fact that the server is not answering.
 ///
 /// The TIER is only spoken for a group that is working. On a dead one it is at best stale and at
@@ -243,7 +243,7 @@ mod tests {
 
     /// **The three states, as the sentences they earn.** The two that say nothing say nothing for
     /// the same reason (see [`state_word`]): the one fault that speaks is the only sentence left
-    /// since the 401/InsecureOnly states went with the Plex arm (#166).
+    /// since the 401/InsecureOnly states went with the retired arm (#166).
     #[test]
     fn every_source_state_gets_its_own_word() {
         let words: Vec<String> = [
@@ -300,7 +300,7 @@ mod tests {
 
     /// **The dim is `usable`, never `reachable()`.** The two names stay apart so a future state
     /// that answers but cannot be browsed has to pick a side explicitly (its last two arms went
-    /// with the Plex arm, #166).
+    /// with the retired arm, #166).
     #[test]
     fn only_the_states_with_something_behind_them_stay_lit() {
         let u = |s| usable(&group(s, None, "friend"));

@@ -644,7 +644,7 @@ pub(crate) fn slot(ps: &crate::route::PlaybackSession, meta: crate::metadata::Me
     // invented for a card nobody will see.
     let has_next = crate::route::up_next(ps).is_some() && crate::route::up_next_offered();
     // Server marker first; the synthesized tail only exists where credits DETECTION does not
-    // (a Plex Pass server feature) — see `metadata::synthesized_tail_marker`.
+    // (a feature of the server's paid tier). See `metadata::synthesized_tail_marker`.
     let m = meta.active_marker(ps).or_else(|| meta.synthesized_tail_marker(ps, has_next));
     slot_for(m, has_next)
 }
@@ -1464,10 +1464,9 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
     };
     // Trickplay thumbnail (issue #65) - the preview still that would sit ABOVE the playhead while
     // scrubbing, fed from the scrub fraction `frac`. NOT drawn here: the data layer exists
-    // (Jellyfin `jellyfin::client::trickplay_info`, Plex `server::bif::parse_bif_index`), but drawing
-    // it needs (1) an async fetch + decode of the one frame - `/Videos/{id}/Trickplay/{width}/
-    // {index}.jpg` for Jellyfin, `/library/parts/{id}/indexes/sd/{offsetMs}` for Plex - that must
-    // not block this draw thread, and (2) a cached texture just above `(hx, sy)` shown only while
+    // (Jellyfin `jellyfin::client::trickplay_info`), but drawing it needs (1) an async fetch plus
+    // a decode of the one frame, `/Videos/{id}/Trickplay/{width}/{index}.jpg`, which must not
+    // block this draw thread, and (2) a cached texture just above `(hx, sy)` shown only while
     // `bar.knob` is `Held`. Until that lands the scrubber keeps its numeric clock only.
     p.rect(Rect::new(sx, sy, sw, sh), sh * 0.5, track, track, 0.0);
     let fw = (sw as f64 * frac) as f32;

@@ -1,4 +1,4 @@
-//! retui — a retained, UIKit-style view tree for the webOS Plex client.
+//! retui: a retained, UIKit-style view tree for the webOS app.
 //!
 //! Layered purely over the crate's own gfx/text primitives + spring(): it never
 //! touches GL. A View is `update -> layout -> draw` each frame; springs live as

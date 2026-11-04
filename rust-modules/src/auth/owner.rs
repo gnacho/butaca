@@ -250,9 +250,9 @@ pub(crate) struct CommitDelta {
     pub complete_signin: bool,
     pub profile_seated: bool,
     pub ready: Option<bool>,
-    /// plex.tv answered this identity with a roster (a sign-in's own, or the picker's refresh):
-    /// the question [`SessionInit::switch_refused_for`] recorded a refusal to is answered again,
-    /// so the verdict goes with the commit that carries the answer.
+    /// The account service answered this identity with a roster (a sign-in's own, or the picker's
+    /// refresh): the question [`SessionInit::switch_refused_for`] recorded a refusal to is answered
+    /// again, so the verdict goes with the commit that carries the answer.
     #[serde(default)]
     pub roster_answered: bool,
 }
@@ -260,7 +260,7 @@ pub(crate) struct CommitDelta {
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum BootstrapAuthority {
     Account { extras: Vec<crate::server::session::SourceRef> },
-    /// The controlled Jellyfin world (#166 replay flip). There is no plex.tv account surface
+    /// The controlled Jellyfin world (#166 replay flip). There is no account surface
     /// behind it: no registry install, no token rotation, no profile machinery — the typed
     /// Initial carries the exact client identity the controlled boot installs unprobed, and
     /// every fetch the recording admits rides that one origin. Nothing in this world issues a
@@ -564,7 +564,7 @@ pub(crate) struct SessionInit {
     pub active_profile: Option<UserRef>,
     pub profile_scope: ProfileScope,
     pub delete_leftovers: usize,
-    /// plex.tv has left at least two consecutive polls of the code on screen unanswered.
+    /// The account service left at least two consecutive polls of the code on screen unanswered.
     #[serde(default)]
     pub link_trouble: bool,
     /// The one account retry run currently outstanding during discovery. Its elapsed value is
@@ -576,14 +576,14 @@ pub(crate) struct SessionInit {
     /// failure whose server is eligible; cleared by every other ending and by a new attempt.
     #[serde(default)]
     pub plaintext: Option<super::PlaintextVerdict>,
-    /// The identity plex.tv REFUSED a roster to while nothing was cached to switch from — the
-    /// verdict behind [`roster_refused`]'s read-out, kept so the account menu stops offering
-    /// *Change profile* into that dead end ([`SessionSnapshot::switch_refused`]). Keyed by the
-    /// identity, so a profile switch to anyone else reads it as unrefused. The identity's
+    /// The identity the account service REFUSED a roster to while nothing was cached to switch
+    /// from. It is the verdict behind [`roster_refused`]'s read-out, kept so the account menu stops
+    /// offering *Change profile* into that dead end ([`SessionSnapshot::switch_refused`]). Keyed by
+    /// the identity, so a profile switch to anyone else reads it as unrefused. The identity's
     /// lifecycle retires it outright: `erase` (sign-out; the same account signed back in is the
     /// same `Identity`), and any commit carrying a roster for it
     /// ([`CommitDelta::roster_answered`] — a sign-in's own or the picker's refresh). In memory
-    /// only: a relaunch asks plex.tv again.
+    /// only: a relaunch asks the account service again.
     #[serde(default)]
     pub switch_refused_for: Option<Identity>,
 }
@@ -642,8 +642,9 @@ pub(super) fn write_sources(w: &mut Canon, sources: &[crate::server::session::So
     w.seq(sources.len());
     for s in sources {
         // The carried household EVIDENCE joins the canonical digest beside raw `owned`. It has to:
-        // a state whose only difference is that plex.tv now names the grant's owner is a different
-        // state, and a digest blind to it would grade the correction as no change at all.
+        // a state whose only difference is that the account now names the grant's owner is a
+        // different state, and a digest blind to it would grade the correction as no change at
+        // all.
         w.str(&s.machine_id).str(&s.name).str(&s.shared_by).bool(s.owned)
             .bool(s.home).u64(s.owner_id as u64)
             .str(&s.address).u64(s.port as u64).str(&s.token).str(&s.origin_url);
@@ -1168,7 +1169,7 @@ impl SessionMachine {
 
     fn apply_resource_observation(&mut self, envelope: &SessionEnvelope,
         emit: &mut impl FnMut(SessionFx)) -> bool {
-        // The roster/endpoint workers are gone with the plex.tv account surface. Any envelope
+        // The roster/endpoint workers are gone with the account surface. Any envelope
         // that still arrives (none can be produced) ends its own request without planning a
         // commit: the transport, its receipts and the canon of an arriving envelope are frozen
         // (SessionInit::write layout), so this intake retires instead of disappearing.
@@ -1215,8 +1216,8 @@ impl<H: SessionHost> crate::ui::machine::Machine<H> for SessionMachine {
         let mut emit = |effect| fx.push(Fx::App(H::session_effect(effect)));
         let handled = match ev {
             SessionEvent::Command(Command::EraseLocal) => self.erase(false, &mut emit),
-            // The roster commands are gone with the plex.tv account surface; the answer command
-            // survives only as the alert UI's vocabulary, and there is nothing left to answer:
+            // The roster commands are gone with the account surface. The answer command survives
+            // only as the alert UI's vocabulary, and there is nothing left to answer:
             // no probe can produce an insecure-only verdict to ask about.
             SessionEvent::Command(Command::AnswerPlaintext { .. }) => false,
             SessionEvent::Command(Command::NoteDeleteLeftovers(count)) => {

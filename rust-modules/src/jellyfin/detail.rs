@@ -9,9 +9,9 @@
 //! (a failed extra is an empty shelf, never a failed page) — so the two backends can be read
 //! side by side.
 //!
-//! ## Kinds, spelled Plex's way
+//! ## Kinds, spelled the app's way
 //!
-//! `Detail.kind` is read by the UI in PLEX's vocabulary ("movie"/"show"/"season"/"episode"),
+//! `Detail.kind` is read by the UI in the app's own vocabulary ("movie"/"show"/"season"/"episode"),
 //! and so are the fields around it (`is_show`, `show_title`, …). The converter therefore
 //! translates Jellyfin's "Series" to "show" etc. at the border — one small table in
 //! [`detail_from_dto`] — rather than teaching forty draw sites a second spelling.
@@ -190,7 +190,7 @@ fn chapters_from_dto(chs: &[super::dto::ChapterDto]) -> Vec<Chapter> {
         .collect()
 }
 
-/// Jellyfin kind → the Plex spelling the UI reads. `None` (a kind the app has no page for) is
+/// Jellyfin kind → the internal spelling the UI reads. `None` (a kind the app has no page for) is
 /// filtered by the caller; [`detail_from_dto`] is only ever asked with a playable kind.
 fn item_kind(kind: &str) -> Option<&'static str> {
     match kind {
@@ -216,7 +216,7 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
     let (resume_ms, watched) = match &it.user_data {
         Some(ud) => {
             let watched = if is_show || kind == "season" {
-                // Plex's rule (`leaf_count > 0 && viewed >= leaf_count`), with Jellyfin's
+                // The app's rule (`leaf_count > 0 && viewed >= leaf_count`), with Jellyfin's
                 // complement arithmetic: viewed = ChildCount − UnplayedItemCount.
                 let leaf = it.child_count.unwrap_or(0);
                 let viewed = leaf - ud.unplayed_item_count.unwrap_or(leaf);
@@ -367,7 +367,7 @@ fn fill_streams(it: &BaseItemDto, d: &mut Detail) {
 /// the file declares NO HDR10, HLG or SDR base layer, which is exactly the shape of a
 /// **Profile 5** (a single IPT-PQ layer with nothing an ordinary decoder can fall back on).
 /// Reading it as profile 5 is not inventing a profile — it is the only reading consistent with
-/// what the string says — and it makes the gate treat the file exactly as a Plex P5 item:
+/// what the string says, and it makes the gate treat the file exactly as a Profile 5 item:
 /// declared to the panel when the set supports DV, refused otherwise, never played as a bare
 /// base layer.
 ///
@@ -404,7 +404,7 @@ fn dovi_from_range(video_range_type: Option<&str>) -> Dovi {
 }
 
 /// `4k` / `1080` / `720` / `sd` — the hero badge's vocabulary, classified by frame height
-/// exactly as Plex's `Media.videoResolution` is (a 1918-pixel-wide scope film is 1080p).
+/// exactly as the retired `Media.videoResolution` was (a 1918-pixel-wide scope film is 1080p).
 fn resolution_class(height: i32) -> String {
     match height {
         h if h >= 2000 => "4k",
@@ -435,7 +435,7 @@ fn convert_stream(st: &super::dto::MediaStreamDto) -> Stream {
         can_normalize_loudness: false,
         language_tag: st.language.clone().unwrap_or_default(),
         // The Language column is the ISO code on both backends; the human line ("English") is
-        // derived from it by the track menu's own naming, as it is for Plex's "eng".
+        // derived from it by the track menu's own naming, as it is for the "eng" language tag.
         lang: st.language.clone().unwrap_or_default(),
         lang_code: st.language.clone().unwrap_or_default(),
         codec: st.codec.clone().unwrap_or_default(),
@@ -456,8 +456,8 @@ fn convert_stream(st: &super::dto::MediaStreamDto) -> Stream {
 }
 
 /// Actor rows, in server order. The headshot is the person's own Primary image — a
-/// server-relative path, so the poster pipeline treats it like any other art (Plex headshots
-/// arrive as absolute URLs and take a special path; this backend's never do).
+/// server-relative path, so the poster pipeline treats it like any other art (the retired wire's
+/// headshots arrived as absolute URLs and took a special path, this backend's never do).
 fn cast_from_people(people: &[PersonDto]) -> Vec<Cast> {
     people
         .iter()
@@ -466,7 +466,7 @@ fn cast_from_people(people: &[PersonDto]) -> Vec<Cast> {
             tag: p.name.clone(),
             role: p.role.clone().unwrap_or_default(),
             thumb: person_thumb(p),
-            id: 0, // Plex's numeric person id has no counterpart; `tag_key` is the address
+            id: 0, // the numeric person id has no counterpart, `tag_key` is the address
             tag_key: p.id.clone(),
         })
         .collect()
@@ -752,7 +752,7 @@ mod tests {
 
     /// Bare `DOVI` is the whole point of issue #77: it names no base layer, so it must never
     /// fall through to `NotDv` (feeding IPT-PQ to an ordinary HEVC decoder shows wrong colours).
-    /// The converter reads it as Profile 5, so the plan carries it to the same decision a Plex P5
+    /// The converter reads it as Profile 5, so the plan carries it to the same decision a Profile 5
     /// item gets: declared to the panel when we say so, refused otherwise.
     #[test]
     fn a_bare_dovi_range_is_declared_as_profile_5_not_played_as_a_base_layer() {

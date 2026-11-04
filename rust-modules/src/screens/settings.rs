@@ -934,7 +934,7 @@ enum Action {
     QuickConnect,
 }
 
-/// The Settings root: the two Jellyfin server doors and no Plex account actions.
+/// The Settings root: the two Jellyfin server doors and the Quick Connect sign-in.
 pub(crate) struct RootPage {
     entry: EntryId,
     table: TableView,

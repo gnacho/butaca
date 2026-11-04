@@ -9,7 +9,7 @@
 //! own LRU. [`super::SecState`] is *already* the per-library-section aggregate — it owns that
 //! section's query, verdict, items, focus and scroll — so a second store meant a second section
 //! identity, a second generation gate, a second mailbox and a second retry policy for one library,
-//! plus a cache that would **survive a Plex Home profile switch** and show the next profile the
+//! plus a cache that would **survive a profile switch** and show the next profile the
 //! previous one's resume and watched state. [`super::reset`] already solves that, and `EPOCH`
 //! already gates landings. One identity, not two that must agree.
 //!

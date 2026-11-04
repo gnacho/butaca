@@ -20,7 +20,7 @@ use super::present::{Present, PresentEvent, Provenance};
 use super::screen::{ScreenArg, ScreenEvent};
 
 /// The application bundle a generic `ui/` is compiled against (§3.1). The library is tested with
-/// `FixtureHost` and no Plex type in scope.
+/// `FixtureHost` and no backend type in scope.
 pub trait Host: 'static {
     /// The app's screen argument enum (what an entry is mounted from).
     type Arg: ScreenArg;

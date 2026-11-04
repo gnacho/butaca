@@ -1,12 +1,12 @@
 //! The **account menu** - a registered `Style::Sheet` surface on the shared `ModalStack`, opened
 //! from the top-left profile chip. Jellyfin sign-out or sign-in, Settings, and - in a lab build -
-//! "Send diagnostics". No Plex profile action is offered.
+//! "Send diagnostics". No profile action is offered.
 //!
 //! **Navigation owns its lifetime, its phase, its input scope and its dim.** The page under the
 //! panel stays on screen and stays the top PAGE, so there is nothing to name and nowhere to close
 //! back to.
 //!
-//! The rows come only from the installed Jellyfin client. A legacy Plex session is never an
+//! The rows come only from the installed Jellyfin client. An old account session is never an
 //! account source. [`chip_label`] stays beside the rows because the app chrome and this menu must
 //! agree on the account words they present.
 
@@ -79,7 +79,7 @@ fn rows_for(signed_in: bool) -> &'static [Action] {
 ///   cannot say different things about the same press.
 ///
 /// **The bug this replaced** was the chip deciding all three from `current().title.is_empty()`. An
-/// account **without Plex Home** never gets a profile written at all, so that title is empty for a
+/// account **without a roster** never gets a profile written at all, so that title is empty for a
 /// signed-in owner and the chip offered them "Sign in" — which is the first thing a reviewer on a
 /// fresh test account sees, and the last thing they should.
 pub(crate) fn chip_label(acc: &Account) -> String {
@@ -166,7 +166,7 @@ impl AccountMenuScreen {
         }
     }
 
-    /// Build only from the installed Jellyfin client. A legacy Plex session is never an
+    /// Build only from the installed Jellyfin client. An old account session is never an
     /// account source for this menu.
     fn build(&mut self) {
         if self.built {

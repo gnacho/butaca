@@ -1056,7 +1056,7 @@ fn sort_chosen_during_section_fade_commits_to_the_incoming_library() {
 }
 
 /// Issue #100/#165: a Guest or managed profile's own household server always arrives from
-/// `/resources` with `owned: false` (`plex/account.rs:1128-1157`), so on such a profile EVERY
+/// `/resources` with `owned: false` (the retired account client's rule), so on such a profile EVERY
 /// section it sees would once have read as `borrowed`. The 0.6.x server picker's old singleton
 /// exception — carried forward wholesale into the restructure by `3c2de7ad` — read that as "still
 /// ambiguous" and left the legacy `Library · <name> ⌄` chip up, opening the old Sources popover.
