@@ -528,6 +528,10 @@
     "value": "Playback",
     "description": "Settings, consent or sign-in UI: settings.playback.section"
   },
+  "settings.preferences.section": {
+    "value": "Preferences",
+    "description": "Settings, consent or sign-in UI: settings.preferences.section"
+  },
   "settings.playback.title": {
     "value": "Video & playback",
     "description": "Settings, consent or sign-in UI: settings.playback.title"
