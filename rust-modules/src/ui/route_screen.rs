@@ -251,7 +251,7 @@ impl RouteGround {
     /// Draw a pre-content route on the product's authored fallback atmosphere.
     ///
     /// Login and the profile ceremony have no Home frame and no media item to sample.  They still
-    /// belong to the same route family, so they take the same broad graphite/amber envelope as an
+    /// belong to the same route family, so they take the same broad blue envelope as an
     /// artwork-less first-run screen instead of inventing another flat background locally.
     pub(crate) fn draw_default(&mut self, p: Painter) {
         self.latch_default();
@@ -1671,6 +1671,13 @@ mod tests {
     }
 
     #[test]
+    fn the_pre_home_fallback_leans_blue() {
+        for (i, corner) in theme::ROUTE_GROUND_FALLBACK.iter().enumerate() {
+            assert!(corner[2] > corner[0], "corner {i} must lean blue, got {corner:?}");
+        }
+    }
+
+    #[test]
     fn pre_home_fallback_is_an_envelope_not_a_flat_grey() {
         let c = theme::ROUTE_GROUND_FALLBACK;
         assert!(c.windows(2).any(|pair| pair[0] != pair[1]));
@@ -1737,7 +1744,7 @@ mod tests {
     /// stops used to sit within ~15 8-bit codes of it in both hue AND luminance). Measured as raw
     /// mean per-channel distance (display-encoded, not WCAG-linearized) rather than luminance
     /// alone: WCAG luminance compresses the shadow end sharply, so a corner that is UNMISTAKABLY
-    /// darker at the near-black end (this fallback's own `ATMOS_CHARCOAL`) can read as luminance-
+    /// darker at the near-black end can read as luminance-
     /// close to the surface while an 8-bit-code comparison — closer to how banding-free darks
     /// actually read on a panel — shows it plainly is not.
     #[test]
