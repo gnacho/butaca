@@ -137,6 +137,14 @@ pub enum RenderStrategy {
     VideoPlane,
 }
 
+/// Who paints a surface's visible Back control. Most surfaces share the dispatcher's top-left
+/// disc. A route with its own measured crumb keeps that control instead of drawing a second one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BackChrome {
+    Shared,
+    Existing,
+}
+
 /// Borrowed frame data passed to a [`Scrim::lift`]. Shared chrome comes from its application's
 /// captured owner, while the material is the face the application-owned `GlassPlan` resolved and
 /// the normal chrome draw published for this frame. Fixtures without either capability use
@@ -263,6 +271,10 @@ pub trait Screen<H: Host>: Machine<H, Ev = ScreenEvent<H>> + Focusable<H> {
     fn name(&self) -> &'static str;
     fn state(&self) -> &dyn LogicalState;
     fn crumb(&self, cx: &Cx<'_, H>) -> Option<Cow<'_, str>>;
+    /// The shared dispatcher paints the top-left Back control unless this screen already has one.
+    fn back_chrome(&self) -> BackChrome {
+        BackChrome::Shared
+    }
     /// RENDER resources only.
     fn prepare(&mut self, b: &mut Budget, cx: &Cx<'_, H>);
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>);

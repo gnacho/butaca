@@ -2534,37 +2534,6 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
     }
 }
 
-/// [`profile_chip_with`], re-drawn over the account menu's scrim — the `Scrim::lift` contract
-/// (`ui::screen::Scrim`, drawn by `ModalStack::draw_scrims`), for the one surface in the app that
-/// hangs off a piece of shared CHROME rather than off a card.
-///
-/// It lives HERE, beside the chip itself, for the reason the chip does: the control is drawn
-/// verbatim by Home, the Library and Search, and the menu can be opened from any of the three.
-/// It was Home's own `redraw_profile_chip` while Home was the only screen
-/// whose chip could be pressed, which would have lifted the HOME chip's spring over whichever page
-/// the user was actually on — and there is only one chip, so there is only one lift.
-///
-/// On `nav::chrome_alpha` and not `page_alpha`, because that is the alpha the chip is drawn on: the
-/// top band holds still while pages swap under it. A lift on the wrong alpha would make the chip
-/// flicker through a route change that nothing else on the bar reacts to.
-///
-/// [`crate::ui::screen::ScrimLiftRead`] is `Scrim::lift`'s own argument (spec phase 12,
-/// PX-WIDGETS). Its `ChromeRead` borrows the captured profile, labels and unfurl from
-/// `Rig::scrim_chrome_read`; its material is the face the same frame's `GlassPlan` received from
-/// normal strip paint. This bare `fn` therefore redraws the exact owner publication without a
-/// static or a draw-time session/vocabulary read.
-///
-/// [`Opener`]: crate::ui::popover::Opener
-pub(crate) fn redraw_profile_chip(read: crate::ui::screen::ScrimLiftRead<'_>) {
-    let Some(chrome) = read.chrome else { return };
-    crate::ui::guard(|| profile_chip_with(
-        Painter::root().alpha(crate::ui::nav::chrome_alpha()),
-        chrome.profile,
-        chrome.chip_expand,
-        read.bar_material,
-    ));
-}
-
 // ---- CircleButton: circular disc + centered glyph, same keyed/unkeyed ControlStyle family as
 // Button / TransportButton. The hero + detail +/i/> circles. ----
 
@@ -2851,6 +2820,49 @@ impl View for CircleButton {
                 .draw(p, Rect::new(r.x, r.y, d, d));
         }
     }
+}
+
+/// The shared top-left Back control for a non-root page or a visible playback HUD.
+///
+/// It deliberately reuses the account chip's frame and the circle-button family. Root tab pages
+/// keep the chip instead, so the two controls never compete for the same spot. The control is
+/// pointer-only: the remote's established Back key remains the D-pad path and the page restores
+/// focus through the ordinary navigation return state.
+pub(crate) fn draw_back_control(p: Painter) {
+    let button = CircleButton::new(std::ptr::null())
+        .frame(CHIP_FRAME)
+        .icon(crate::ui::icons::Icon::ChevronLeft)
+        .ground(ControlGround::Unkeyed);
+    button.draw(&Env::inert(), p);
+}
+
+/// Register the visible Back control without adding an unreachable element to the D-pad model.
+pub(crate) fn back_control_stop<H: crate::ui::machine::Host>(
+    f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    entry: crate::ui::machine::EntryId,
+    elem: H::Elem,
+) {
+    back_control_stop_at(f, entry, elem, CHIP_FRAME);
+}
+
+/// The pointer-only Back stop at an existing crumb's measured rectangle.
+pub(crate) fn back_control_stop_at<H: crate::ui::machine::Host>(
+    f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    entry: crate::ui::machine::EntryId,
+    elem: H::Elem,
+    rect: Rect,
+) {
+    f.stop(
+        f.painter,
+        crate::ui::screen::Stop {
+            key: crate::ui::machine::FocusKey { entry, elem },
+            rect,
+            rest_rect: rect,
+            clip: Rect::FULL,
+            hover: crate::ui::screen::Hover::Ignore,
+            activate: crate::ui::screen::Activate::Direct,
+        },
+    );
 }
 
 // ---- PageDots: page indicators; active dot elongated ----
@@ -5447,7 +5459,7 @@ impl StripRender {
     }
 
     /// This frame's chip unfurl amount. `Bridge::scrim_chrome_read` includes it in the borrowed
-    /// [`ChromeRead`] passed to the bare-`fn` lift — see [`redraw_profile_chip`].
+    /// [`ChromeRead`] passed to a bare-`fn` scrim lift.
     pub(crate) fn chip_expand_pos(&self) -> f32 {
         self.chip_expand.pos
     }

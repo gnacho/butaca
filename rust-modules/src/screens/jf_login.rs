@@ -220,6 +220,48 @@ impl JfLoginScreen {
         self.dirty = false;
     }
 
+    /// Whether this mounted login has an app destination behind it. Quick Connect entered from
+    /// this boot form only switches back to the password form, so it deliberately has no disc.
+    fn has_back_destination(&self) -> bool {
+        self.code_pushed || signin::add_mode()
+    }
+
+    /// The one Back behavior shared by the physical key and the visible pointer control.
+    fn back(&mut self, fx: &mut Effects<'_, impl AppLike>) -> Handled {
+        // BACK with no edit in flight: the boot gate's form keeps swallowing it (nothing lives
+        // behind a first-ever boot's sign-in), but the Settings "quick connect" copy was PUSHED
+        // over the page that asked - disarm add mode and hand the user back there (#56). The
+        // invalidate is load-bearing: structural ops apply at the frame's NAV COMMIT, and an idle
+        // loop renders no frame - without it the parked pop sat uncommitted forever.
+        if in_quick_connect() {
+            // Quick Connect: BACK during the poll cancels it (the form keeps the remote and shows
+            // why it stopped); BACK while editing disarms the mode and pops back to Settings,
+            // exactly as add-server does.
+            if qc::phase() != qc::Phase::Editing {
+                qc::cancel();
+            } else {
+                qc::set_add_mode(false);
+                self.qc_fail = None;
+                self.dirty = true;
+                // Back to the password form, or back to Settings when this copy was pushed over
+                // the page that asked. The route's root is this screen on a first boot, so popping
+                // there would pop nothing and BACK has to mean "give me the other form" instead.
+                if self.code_pushed || signin::add_mode() {
+                    fx.push(Fx::Nav(NavOp::Pop));
+                }
+                fx.invalidate(crate::ui::present::Provenance::Input);
+            }
+            Handled::Yes
+        } else if signin::add_mode() {
+            signin::set_add_mode(false);
+            fx.push(Fx::Nav(NavOp::Pop));
+            fx.invalidate(crate::ui::present::Provenance::Input);
+            Handled::Yes
+        } else {
+            Handled::No
+        }
+    }
+
     /// OK (or the pointer) landed on a row. Rows 0..3 are fields; row 3 is Connect.
     fn activate(&mut self, elem: u32, fx: &mut Effects<'_, impl AppLike>) {
         if in_quick_connect() {
@@ -504,6 +546,10 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                     crate::textinput::stop();
                     fx.invalidate(crate::ui::present::Provenance::Input);
                     Handled::Yes
+                } else if *elem == crate::screens::registry::HEADER_CRUMB
+                    && self.has_back_destination()
+                {
+                    self.back(fx)
                 } else {
                     self.activate(*elem, fx);
                     Handled::Yes
@@ -541,40 +587,7 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         fx.invalidate(crate::ui::present::Provenance::Input);
                         Handled::Yes
                     } else if key == Key::Back {
-                        // BACK with no edit in flight: the boot gate's form keeps swallowing it
-                        // (nothing lives behind a first-ever boot's sign-in), but the Settings
-                        // "quick connect" copy was PUSHED over the page that asked - disarm add
-                        // mode and hand the user back there (#56). The invalidate is load-bearing:
-                        // structural ops apply at the frame's NAV COMMIT, and an idle loop renders
-                        // no frame - without it the parked pop sat uncommitted forever.
-                        if in_quick_connect() {
-                            // Quick Connect: BACK during the poll cancels it (the form keeps the
-                            // remote and shows why it stopped); BACK while editing disarms the
-                            // mode and pops back to Settings, exactly as add-server does.
-                            if qc::phase() != qc::Phase::Editing {
-                                qc::cancel();
-                            } else {
-                                qc::set_add_mode(false);
-                                self.qc_fail = None;
-                                self.dirty = true;
-                                // Back to the password form, or back to Settings when this copy
-                                // was pushed over the page that asked. The route's root is this
-                                // screen on a first boot, so popping there would pop nothing and
-                                // BACK has to mean "give me the other form" instead.
-                                if self.code_pushed || signin::add_mode() {
-                                    fx.push(Fx::Nav(NavOp::Pop));
-                                }
-                                fx.invalidate(crate::ui::present::Provenance::Input);
-                            }
-                            Handled::Yes
-                        } else if signin::add_mode() {
-                            signin::set_add_mode(false);
-                            fx.push(Fx::Nav(NavOp::Pop));
-                            fx.invalidate(crate::ui::present::Provenance::Input);
-                            Handled::Yes
-                        } else {
-                            Handled::No
-                        }
+                        self.back(fx)
                     } else {
                         Handled::No
                     }
@@ -728,6 +741,14 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
                 .phase(self.spin_ms as u32)
                 .tint(theme::TEXT_SECONDARY)
                 .draw(&env, p);
+        }
+        if self.has_back_destination() {
+            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::back_control_stop(
+                f,
+                self.entry,
+                crate::screens::registry::HEADER_CRUMB,
+            );
         }
     }
     fn render(&self) -> crate::ui::screen::RenderStrategy {
@@ -976,5 +997,190 @@ mod tests {
         assert!(delete_text(&mut value, &TextEdit::Clear));
         assert!(value.is_empty());
         assert!(!delete_text(&mut value, &TextEdit::Backspace));
+    }
+
+    struct LoginHost;
+
+    impl crate::ui::machine::Host for LoginHost {
+        type Arg = super::super::family::SettingsPage;
+        type Fx = super::super::registry::AppFx;
+        type Msg = super::super::registry::AppMsg;
+        type Elem = u32;
+        type Views<'a> = ();
+        type Init = super::super::family::NoInit;
+        type Memory = ();
+    }
+
+    struct ResetModes;
+
+    impl ResetModes {
+        fn new() -> Self {
+            signin::set_add_mode(false);
+            qc::set_add_mode(false);
+            Self
+        }
+    }
+
+    impl Drop for ResetModes {
+        fn drop(&mut self) {
+            signin::set_add_mode(false);
+            qc::set_add_mode(false);
+        }
+    }
+
+    fn set_flow(quick: bool, on: bool) {
+        signin::set_add_mode(!quick && on);
+        qc::set_add_mode(quick && on);
+    }
+
+    fn login_cx(measure: &dyn crate::ui::machine::Measure) -> Cx<'_, LoginHost> {
+        Cx {
+            views: (),
+            tick: crate::ui::machine::Tick::default(),
+            measure,
+            press: crate::ui::machine::PressRead::default(),
+            focus: crate::ui::machine::FocusRead::default(),
+            owner: crate::ui::machine::InputOwner::Entry(EntryId(9)),
+        }
+    }
+
+    fn draw_login(
+        screen: &mut JfLoginScreen,
+        frame: &mut DrawFrame<'_, '_, LoginHost>,
+    ) -> Vec<(u64, Rect)> {
+        use crate::ui::frame::backdrop::{self, Sources};
+        use std::{cell::RefCell, rc::Rc};
+        let sources = Rc::new(RefCell::new(Sources::default()));
+        sources.borrow_mut().begin(Vec::new());
+        let _walk = backdrop::discover(sources.clone());
+        crate::ui::draw_census::capture(|| {
+            crate::gfx::without_frame_clear(|| Screen::<LoginHost>::draw(screen, frame));
+        })
+    }
+
+    fn login_step(
+        screen: &mut JfLoginScreen,
+        event: ScreenEvent<LoginHost>,
+        context: &Cx<'_, LoginHost>,
+    ) -> (Handled, Vec<crate::ui::machine::Stamped<LoginHost>>) {
+        let mut out = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let mut fx = Effects::new(
+            &mut out,
+            crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(9)),
+            &mut present,
+        );
+        let handled = Machine::<LoginHost>::step(screen, &event, context, &mut fx);
+        drop(fx);
+        (handled, out)
+    }
+
+    fn physical_back() -> ScreenEvent<LoginHost> {
+        use crate::ui::machine::{Edge, InputEvent, InputKind, Key, Source, Tick};
+        ScreenEvent::Input(InputEvent {
+            at: Tick::default(),
+            source: Source::Replay,
+            kind: InputKind::Key {
+                key: Key::Back,
+                sym: 0,
+                wcode: 0,
+                edge: Edge::Down,
+                at_edge: false,
+            },
+        })
+    }
+
+    fn pop_count(out: &[crate::ui::machine::Stamped<LoginHost>]) -> usize {
+        out.iter().filter(|event| matches!(&event.fx, Fx::Nav(NavOp::Pop))).count()
+    }
+
+    fn back_is_drawn(ops: &[(u64, Rect)]) -> bool {
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        ops.iter().any(|(tag, rect)| {
+            *tag == 10 && [rect.x, rect.y, rect.w, rect.h] == [origin.x, origin.y, origin.w, origin.h]
+        })
+    }
+
+    fn back_stop(frame: &DrawFrame<'_, '_, LoginHost>) -> bool {
+        frame.stops().iter().any(|stop| {
+            stop.key.elem == crate::screens::registry::HEADER_CRUMB
+                && [stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h] == [
+                    crate::ui::widgets::CHIP_FRAME.x,
+                    crate::ui::widgets::CHIP_FRAME.y,
+                    crate::ui::widgets::CHIP_FRAME.w,
+                    crate::ui::widgets::CHIP_FRAME.h,
+                ]
+        })
+    }
+
+    #[test]
+    fn stacked_logins_draw_the_shared_back_control() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        for quick in [false, true] {
+            set_flow(quick, true);
+            let mut screen = JfLoginScreen::new(EntryId(9));
+            let context = login_cx(&measure);
+            let mut frame = DrawFrame::new(&context, crate::ui::Painter::recording());
+            let ops = draw_login(&mut screen, &mut frame);
+            assert!(back_is_drawn(&ops), "quick={quick}: the stacked login paints Back");
+            let mut hit_frame = DrawFrame::new(&context, crate::ui::Painter::root());
+            draw_login(&mut screen, &mut hit_frame);
+            assert!(back_stop(&hit_frame), "quick={quick}: the visible Back is clickable");
+        }
+    }
+
+    #[test]
+    fn visible_back_activation_matches_the_physical_pop() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        for quick in [false, true] {
+            set_flow(quick, true);
+            let mut pointer = JfLoginScreen::new(EntryId(9));
+            let (_, pointer_out) = login_step(
+                &mut pointer,
+                ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB),
+                &login_cx(&measure),
+            );
+            assert_eq!(pop_count(&pointer_out), 1, "quick={quick}: pointer Back pops once");
+            assert!(!signin::add_mode() && !qc::add_mode(), "pointer Back leaves add mode");
+
+            set_flow(quick, true);
+            let mut remote = JfLoginScreen::new(EntryId(9));
+            let (_, remote_out) = login_step(&mut remote, physical_back(), &login_cx(&measure));
+            assert_eq!(pop_count(&remote_out), 1, "quick={quick}: physical Back pops once");
+            assert!(!signin::add_mode() && !qc::add_mode(), "physical Back leaves add mode");
+        }
+    }
+
+    #[test]
+    fn destinationless_login_has_no_back_control_or_pop() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        for quick in [false, true] {
+            let mut screen = JfLoginScreen::new(EntryId(9));
+            if quick {
+                qc::set_add_mode(true);
+            }
+            let context = login_cx(&measure);
+            let mut frame = DrawFrame::new(&context, crate::ui::Painter::recording());
+            let ops = draw_login(&mut screen, &mut frame);
+            assert!(!back_is_drawn(&ops), "quick={quick}: boot has no Back to paint");
+            let mut hit_frame = DrawFrame::new(&context, crate::ui::Painter::root());
+            draw_login(&mut screen, &mut hit_frame);
+            assert!(!back_stop(&hit_frame), "quick={quick}: boot has no invisible Back hit-stop");
+            let (_, pointer_out) = login_step(
+                &mut screen,
+                ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB),
+                &context,
+            );
+            assert_eq!(pop_count(&pointer_out), 0, "quick={quick}: no phantom pointer pop");
+            let (_, remote_out) = login_step(&mut screen, physical_back(), &context);
+            assert_eq!(pop_count(&remote_out), 0, "quick={quick}: boot Back stays inside the flow");
+            qc::set_add_mode(false);
+        }
     }
 }

@@ -78,8 +78,9 @@ LEFT do the same thing there (`ui/consts.rs`, the `Key::Left` doc). This asymmet
 
 The Magic Remote's pointer is supported everywhere as a peer of the D-pad: motion, hover, click and
 the scroll wheel all reach the same handlers the keys do, and the remote reports pointer auto-hide
-(keycode `0x1e4`) so the UI can drop back to D-pad focus cleanly. **Nothing in the app requires the
-pointer** — an IR remote with only a four-way pad reaches every control.
+(keycode `0x1e4`) so the UI can drop back to D-pad focus cleanly. **An IR remote with only a
+four-way pad reaches every D-pad-focusable control.** The visible Back disc is the deliberate
+pointer-only exception, and its action remains available on physical BACK.
 
 ---
 
@@ -130,7 +131,8 @@ carries no such ambiguity (`app.rs`, the `Key::Exit` arm). Device-verified 2026-
 
 Every focusable control has three visually distinct states — **idle**, **focused** and
 **pressed**. Focus is drawn as a scale-up on a critically damped spring plus a glow; press is a
-separate depression (`ui/press.rs`). **Every control that performs an action responds to OK.**
+separate depression (`ui/press.rs`). **Every D-pad-focusable action control responds to OK.** The
+visible Back disc is pointer-only, with physical BACK as its remote-key path.
 
 Two focus stops do not, and both are deliberate rather than dead: the tab pill for the page you are
 *already on* (OK on Home's own pill, standing on Home, is a documented no-op), and the person page's
@@ -484,10 +486,11 @@ grounds are below, and they are the reason this document exists.
    scrubber and a state read-out rather than a persistent focusable `<< ⏸ >>` row. *(Tier: observed
    behaviour of a third-party shipping app, not an LG statement. It is offered as precedent that the
    idiom passes QA on these sets, not as a rule LG has written down.)*
-4. **Every control the app does draw is fully operable by four-way + OK + BACK**, which is the hard
-   UX rule (§3). Nothing anywhere in the app is reachable only by the pointer. (The one gesture in
-   the app is the card hold of §5.6; its actions are otherwise reachable from the detail page, with
-   the single exception of *Remove from Deck*.)
+4. **Every D-pad-focusable action control is fully operable by four-way + OK**, with physical BACK
+   providing the same navigation as the visible Back control (§3). The visible Back disc is
+   pointer-only. Every other action remains available through the established remote-key paths.
+   (The one gesture in the app is the card hold of §5.6; its actions are otherwise reachable from
+   the detail page, with the single exception of *Remove from Deck*.)
 
 ### 6.3 The HUD
 
@@ -728,7 +731,7 @@ Where the four deferring items are answered, and the neighbouring items this doc
 | #6 correct text | §3 (elision and long-form scrolling) |
 | #7 focus / mouse-over states | §3 |
 | #10 all UI buttons work | §3, §4, §5, §6.3 |
-| #11 / #12 BACK and EXIT *UI buttons* | N/A — the app draws neither; the **keys** are §2.2 and §2.3 |
+| #11 / #12 BACK and EXIT *UI buttons* | #11 is implemented by the shared top-left Back control on non-root pages and the visible playback HUD. #12 remains N/A because the app draws no EXIT control. The **keys** are §2.2 and §2.3 |
 | #21 sign out | §5.7 (account menu) and §5.3 (the picker's own *Sign out* pill) |
 | #26–33 remote, pointer, OK, wheel, navigation | §1 |
 | #37 BACK key | §2.2, §5.9 |

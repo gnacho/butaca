@@ -1326,6 +1326,7 @@ pub(crate) fn draw_scrim(p: Painter) {
         theme::scrim_black(0.86),
         0.0,
     );
+    crate::ui::widgets::draw_back_control(p);
 }
 
 /// The line over a transport's display title. Non-owning `*const c_char`, the `Label` rule

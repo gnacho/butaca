@@ -154,7 +154,10 @@ text, consent scrolling and the contribution QR. See `docs/localization.md` for 
 transport HUD rather than a focusable Play/Pause/Stop/FF/RW row. The compliance description belongs
 in `docs/ux-scenario.md`, which is what the checklist tells QA to consult for movement details.
 
-Genuinely N/A: #4 advertisement · #11 BACK UI button · #12 EXIT UI button · #18 terms · #19 sign-up
+**#11 BACK UI button.** The shared top-left Back control is available on non-root pages and the
+visible playback HUD.
+
+Genuinely N/A: #4 advertisement · #12 EXIT UI button · #18 terms · #19 sign-up
 (account creation happens on the account service) · #23 adult authentication · #24 / #25 payment · #32 colour
 keys (unused) · #35 MMRC-only restriction · #42 in-app UI sound control (there is no UI audio) · #44
 full/original screen toggle · #47 live/real-time TV streaming · #48 subtitle appearance settings ·

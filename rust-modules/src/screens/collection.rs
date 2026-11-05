@@ -675,6 +675,10 @@ impl<H: ContentLike + CollectionLike> Machine<H> for CollectionScreen {
                 }
                 fx.invalidate(Provenance::Input); Handled::Yes
             }
+            ScreenEvent::Activate(elem) if !self.id.is_favorites()
+                && *elem == crate::screens::registry::HEADER_CRUMB => {
+                fx.push(crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back))); Handled::Yes
+            }
             ScreenEvent::Activate(elem) if *elem == RETRY_ELEM => {
                 self.request_store(PAGE_SIZE, fx); Handled::Yes
             }
@@ -767,6 +771,10 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
         } else {
             Self::status_overlay(None, f.cx.tick.ms, f.measure).draw_measured(&Env::inert(), p, f.measure);
         }
+        if !self.id.is_favorites() {
+            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
+        }
     }
     fn render(&self) -> RenderStrategy { RenderStrategy::Page }
     fn focus_source(&self) -> FocusSource { FocusSource::Engine }
@@ -815,6 +823,32 @@ mod tests {
         Cx { views: view, tick: Tick::default(), measure: &FixtureMeasure,
             press: PressRead::default(), focus: FocusRead { current: focus, ..Default::default() },
             owner: InputOwner::Entry(EntryId(9)) }
+    }
+
+    #[test]
+    fn an_ordinary_collection_has_a_visible_back_control_but_favorites_does_not() {
+        let (mut store, mut screen) = seeded();
+        let context = cx(store.view(), None);
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        crate::gfx::without_frame_clear(|| Screen::<CollectionHost>::draw(&mut screen, &mut frame));
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+            .expect("an ordinary collection publishes its visible Back control");
+        assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
+            [origin.x, origin.y, origin.w, origin.h]);
+        let out = step(&mut screen, ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB), &context);
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back)))));
+
+        let favorites = CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favorites");
+        store.edit_for_test(|collection| collection.id = favorites.clone());
+        screen = CollectionScreen::new(EntryId(9), favorites);
+        screen.sync(store.view().current().unwrap(), &FixtureMeasure);
+        let context = cx(store.view(), None);
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        crate::gfx::without_frame_clear(|| Screen::<CollectionHost>::draw(&mut screen, &mut frame));
+        assert!(!frame.stops().iter().any(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB),
+            "Favorites is a tab root and keeps its account chip instead");
     }
 
     #[test]

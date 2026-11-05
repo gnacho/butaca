@@ -347,15 +347,12 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
     fn crumb(&self, _: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         None
     }
-    /// The modal dim, and the CHIP lifted back out of it. The chip is what the panel unfurls from
-    /// and the only thing on screen the panel is about, so dimming it under its own menu is the
-    /// same bug the focused card had. Only the DRAW half of the legacy `Opener` is used: this
-    /// panel's placement is its own (it hangs under the top bar), not a function of the chip's
-    /// rect.
+    /// The modal dim. The shared Back control takes the chip's top-left frame, so the chip is
+    /// deliberately not lifted over it. The menu still hangs from that same place.
     fn scrim(&self) -> Scrim {
         // The SHEET role: how dark the page goes behind this menu, the peak the container ramps
         // with the appear spring (`ModalStack::draw_scrims`).
-        Scrim::lifting(crate::ui::theme::underlay::DIM_SHEET, crate::ui::widgets::redraw_profile_chip)
+        Scrim::dim(crate::ui::theme::underlay::DIM_SHEET)
     }
     fn prepare(&mut self, _: &mut Budget, _: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
