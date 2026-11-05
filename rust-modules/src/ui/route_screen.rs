@@ -930,6 +930,12 @@ impl RouteLayout {
         Rect::new(self.narrative.x, self.narrative.y, w.min(self.narrative.w), CRUMB_BAND)
     }
 
+    /// The crumb's pointer target without a text measurement. The full narrative column shares
+    /// the crumb's band, so a replay needs no new metric for the destination name.
+    pub(crate) fn crumb_hit_rect(self) -> Rect {
+        Rect::new(self.narrative.x, self.narrative.y, self.narrative.w, CRUMB_BAND)
+    }
+
     /// The Home word's box in the action band: the right-hand end of [`Self::action`], as wide as
     /// the word needs and never narrower than a control, so the pointer reaches it as easily as the
     /// band's own buttons.

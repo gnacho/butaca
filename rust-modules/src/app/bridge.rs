@@ -1168,9 +1168,9 @@ impl Rig<AppHost> for Bridge {
             .focused(self.strip.gear_focused());
         crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p);
     }
-    /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — the account menu's chip lift borrows
-    /// the SAME captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher
-    /// adds this frame's material from `GlassPlan`; neither value crosses through a static.
+    /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — a scrim lift borrows the SAME
+    /// captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher adds this
+    /// frame's material from `GlassPlan`; neither value crosses through a static.
     fn scrim_chrome_read(&self) -> Option<crate::ui::widgets::ChromeRead<'_>> {
         Some(self.chrome.read(self.strip.chip_expand_pos()))
     }

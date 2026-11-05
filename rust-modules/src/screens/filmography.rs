@@ -676,7 +676,7 @@ impl FilmographyScreen {
             f,
             self.entry,
             crate::screens::registry::HEADER_CRUMB,
-            layout.crumb_rect(&self.name, f.measure),
+            layout.crumb_hit_rect(),
         );
 
         if !self.tab_c.is_empty() {
@@ -1605,7 +1605,7 @@ mod tests {
         let context = cx(&measure, None);
         let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
         crate::gfx::without_frame_clear(|| s.draw_content(&mut frame));
-        let wanted = route_layout(&measure).crumb_rect(&s.name, &measure);
+        let wanted = route_layout(&measure).crumb_hit_rect();
         let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
             .expect("Filmography registers its existing crumb as a pointer target");
         assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
