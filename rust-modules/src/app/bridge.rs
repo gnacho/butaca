@@ -1162,6 +1162,11 @@ impl Rig<AppHost> for Bridge {
             chrome.chip_expand,
             glass.tab_face(),
         );
+        let gear = crate::ui::widgets::CircleButton::new(std::ptr::null())
+            .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
+            .icon(crate::ui::icons::Icon::Settings)
+            .focused(self.strip.gear_focused());
+        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p);
     }
     /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — the account menu's chip lift borrows
     /// the SAME captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher
@@ -1796,7 +1801,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
         let position = home.grid_position::<AppHost>(focus, &cx);
         let (row, col) = position.map(|(r, c)| (r as i64, c as i64)).unwrap_or((-1, -1));
         let hf = match rig.chrome.focus(focus) {
-            crate::ui::widgets::TopFocus::Chip => -1,
+            crate::ui::widgets::TopFocus::Chip | crate::ui::widgets::TopFocus::Gear => -1,
             crate::ui::widgets::TopFocus::Pill(i) => -(i as i64 + 2),
             crate::ui::widgets::TopFocus::Away => focus.filter(|key| key.elem < 2).map_or(-1, |key| key.elem as i64),
         };
@@ -1836,6 +1841,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
         let top = rig.chrome.focus(focus);
         let (zone, row, col, recent, card) = match top {
             crate::ui::widgets::TopFocus::Chip => ("Chip", -1i64, -1i64, -1i64, false),
+            crate::ui::widgets::TopFocus::Gear => ("Gear", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Pill(_) => ("Strip", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Away => search.probe(focus),
         };

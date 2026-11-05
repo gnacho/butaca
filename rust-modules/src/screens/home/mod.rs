@@ -995,6 +995,10 @@ impl HomeScreen {
     }
 
     fn activate<H: HomeLike>(&mut self, elem: u32, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
+        if elem == crate::ui::dispatch::STRIP_BASE + 7 {
+            fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return;
+        }
         if let Some(req) = Self::request_for_strip(elem) {
             fx.push(Fx::App(AppFx::Home(req)));
             return;

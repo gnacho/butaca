@@ -147,6 +147,7 @@ impl ChromeSnapshot {
     pub(crate) fn focus(&self, focus: Option<FocusKey<u32>>) -> TopFocus {
         match focus.map(|focus| focus.elem) {
             Some(key) if key == STRIP_BASE + 4 => TopFocus::Chip,
+            Some(key) if key == STRIP_BASE + 7 => TopFocus::Gear,
             Some(key) => self.keys.iter().position(|&id| id == key).map(TopFocus::Pill).unwrap_or(TopFocus::Away),
             None => TopFocus::Away,
         }
@@ -159,6 +160,7 @@ impl ChromeSnapshot {
         out.clear();
         out.push(StripMember::new(STRIP_BASE + 4, widgets::CHIP_FRAME));
         widgets::tab_members(&self.widths, &self.keys, selected, self.focus(focus), scroll, out);
+        out.push(StripMember::new(STRIP_BASE + 7, widgets::SETTINGS_GEAR_FRAME));
     }
 
     #[cfg(test)]
@@ -224,6 +226,21 @@ mod tests {
     }
 
     #[test]
+    fn settings_gear_is_the_rightmost_stable_member() {
+        let snapshot = ChromeSnapshot { labels: vec!["Home".into(), "TV Shows".into(), String::new()],
+            keys: vec![STRIP_BASE, STRIP_BASE + 2, STRIP_BASE + 3], widths: vec![100.0; 3],
+            ..Default::default() };
+        let mut members = Vec::new();
+        snapshot.members(0, None, 0.0, &mut members);
+        let gear = members.last().expect("the Settings gear is published");
+        assert_eq!(gear.elem, STRIP_BASE + 7);
+        assert!(gear.target.x > members[members.len() - 2].target.x,
+            "the gear sits after Search at the right edge");
+        assert_eq!(snapshot.focus(Some(FocusKey { entry: EntryId(1), elem: STRIP_BASE + 7 })),
+            TopFocus::Gear);
+    }
+
+    #[test]
     fn four_libraries_on_two_servers_publish_two_type_destinations() {
         let directory = directory(&[SecKind::Movie, SecKind::Show, SecKind::Movie, SecKind::Show]);
         let mut snapshot = ChromeSnapshot {
@@ -235,7 +252,7 @@ mod tests {
         let mut members = Vec::new();
         snapshot.members(0, None, 0.0, &mut members);
         assert_eq!(members.iter().map(|member| member.elem).collect::<Vec<_>>(),
-            vec![STRIP_BASE + 4, STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3]);
+            vec![STRIP_BASE + 4, STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3, STRIP_BASE + 7]);
     }
 
     #[test]

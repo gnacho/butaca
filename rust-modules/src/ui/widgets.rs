@@ -2215,6 +2215,14 @@ pub(crate) const CHIP_FRAME: Rect = Rect::new(
     CHIP_D,
 );
 
+/// The Settings gear mirrors the profile chip at the right safe-area edge.
+pub(crate) const SETTINGS_GEAR_FRAME: Rect = Rect::new(
+    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - TAB_TRACK_PAD - CHIP_D,
+    TOP_BAR_Y,
+    CHIP_D,
+    CHIP_D,
+);
+
 /// **The focused capsule's rect — the ONE expression, drawn and priced from the same place.**
 ///
 /// [`profile_chip_with`] draws this and [`CHIP_CAP_MAX_R`] prices it, and until 2026-08-21 they were two
@@ -2253,6 +2261,8 @@ pub(crate) enum TopFocus {
     Away,
     /// the profile chip
     Chip,
+    /// the Settings gear at the bar's right edge
+    Gear,
     /// a pill of the strip, by index (0 = Home)
     Pill(usize),
 }
@@ -5398,6 +5408,8 @@ pub(crate) struct StripRender {
     /// Home↔Library↔Search route flip rather than restart on the far side. It lived in `home.rs`
     /// while Home was the only screen the chip could be focused on.
     chip_expand: crate::ui::Spring,
+    /// Whether the Settings gear owns the remote this frame. Presentation only, never logical state.
+    gear_focused: bool,
 }
 
 impl StripRender {
@@ -5406,6 +5418,7 @@ impl StripRender {
             tab_scroll: crate::ui::Spring::at(0.0),
             top_strip: TabStrip::new(),
             chip_expand: crate::ui::Spring::at(0.0),
+            gear_focused: false,
         }
     }
 
@@ -5419,6 +5432,10 @@ impl StripRender {
     /// [`ChromeRead`] passed to the bare-`fn` lift — see [`redraw_profile_chip`].
     pub(crate) fn chip_expand_pos(&self) -> f32 {
         self.chip_expand.pos
+    }
+
+    pub(crate) fn gear_focused(&self) -> bool {
+        self.gear_focused
     }
 
 }
@@ -6298,6 +6315,7 @@ fn tab_scroll_target(widths: &[f32], idx: usize, cur: f32) -> f32 {
 /// pending tab off its own `navigation_presentation()` before calling this).
 impl StripRender {
     pub(crate) fn update(&mut self, data: TabLabels<'_>, selected: c_int, focus: TopFocus, dt: f32) {
+        self.gear_focused = matches!(focus, TopFocus::Gear);
         let focused = focus.pill();
         // The chip is the bar's other stop, so its unfurl is stepped here rather than by whichever
         // screen happens to own the focus this frame — the same reason the capsules and the track's

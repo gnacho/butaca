@@ -207,6 +207,10 @@ impl CollectionScreen {
 
     fn activate_strip<H: ContentLike + CollectionLike>(&self, elem: u32, fx: &mut Effects<'_, H>) -> Handled {
         if !self.id.is_favorites() { return Handled::No; }
+        if elem == crate::ui::dispatch::STRIP_BASE + 7 {
+            fx.push(crate::ui::machine::Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return Handled::Yes;
+        }
         let req = match elem.checked_sub(crate::ui::dispatch::STRIP_BASE) {
             Some(0) => Some(LibraryReq::Tab(HomeTab::Home)),
             Some(1) => Some(LibraryReq::Tab(HomeTab::Movies)),
@@ -857,6 +861,11 @@ mod tests {
         assert!(out.iter().any(|event| matches!(event.fx,
             crate::ui::machine::Fx::App(AppFx::Library(LibraryReq::Tab(HomeTab::Search))))),
             "a committed press on Favorites' Search pill opens Search too");
+        let out = step(&mut screen, ScreenEvent::Activate(crate::ui::dispatch::STRIP_BASE + 7),
+            &cx(store.view(), None));
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Loop(super::super::registry::LoopReq::AccountSettings)))),
+            "Favorites' Settings gear opens the same Settings flow as the account menu");
     }
 
     #[test]
