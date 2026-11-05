@@ -70,6 +70,8 @@ the Rust unit suite); Quick Connect authorizes itself on the 2nd poll.
 Usage:
 
     python3 tests/mock_jf.py --port 8920              # serve until Ctrl-C
+    python3 tests/mock_jf.py --port 8920 --host 0.0.0.0 --cors-origin http://localhost:8000
+                                                    # opt-in browser CORS for exactly that page origin
     python3 tests/mock_jf.py --port 8920 --catalog    # serve the demo library instead
     python3 tests/mock_jf.py --port 8920 --selftest   # prove the shapes without an app
 
@@ -948,9 +950,10 @@ def wire_row(item):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, addr, lib):
+    def __init__(self, addr, lib, cors_origin=None):
         super().__init__(addr, Handler)
         self.lib = lib
+        self.cors_origin = cors_origin
         self.lock = threading.Lock()
         self.requests = []       # {"method","path","query","status"} — token values redacted
         self.unknown = []        # paths that fell through handle()
@@ -974,6 +977,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass  # _do logs a redacted route; BaseHTTPRequestHandler would log tokens.
+
+    def end_headers(self):
+        # Opt-in exact-origin CORS for browser integration tests. Never enable this by default:
+        # the mock normally behaves like an ordinary server with no browser origin policy.
+        origin = self.headers.get("Origin")
+        if self.server.cors_origin and origin == self.server.cors_origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
+            requested_headers = self.headers.get("Access-Control-Request-Headers")
+            if requested_headers:
+                self.send_header("Access-Control-Allow-Headers", requested_headers)
+            if self.headers.get("Access-Control-Request-Private-Network") == "true":
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.send_header("Vary", "Origin")
+        super().end_headers()
 
     # ---- plumbing ----------------------------------------------------------------------
 
@@ -1046,6 +1065,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         self._do("DELETE")
+
+    def do_OPTIONS(self):
+        # Browsers preflight the app's JSON and Authorization headers. The CORS headers are only
+        # emitted by end_headers for the configured exact origin above.
+        if not self.server.cors_origin or self.headers.get("Origin") != self.server.cors_origin:
+            self.send_error(403)
+            return
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def route(self, method, path, query):
         lib = self.server.lib
@@ -1417,7 +1446,7 @@ class Handler(BaseHTTPRequestHandler):
 # ------------------------------------------------------------------ entry point ---------------
 
 def serve(port, seed=1, host="127.0.0.1", movies=48, shows=6, catalog=None,
-          catalog_cache=None, hero=None):
+          catalog_cache=None, hero=None, cors_origin=None):
     """Start the mock and return `(srv, lib)`; the caller runs `srv.serve_forever()` (a thread in
     the tools and the tests, the foreground in `main`). `catalog` serves the demo library
     (`tests/demo_library/catalog.json` by default) instead of a generated seed."""
@@ -1426,7 +1455,7 @@ def serve(port, seed=1, host="127.0.0.1", movies=48, shows=6, catalog=None,
                              cache=catalog_cache, hero=hero)
     else:
         lib = Library(seed=seed, movies=movies, shows=shows)
-    return Server((host, port), lib), lib
+    return Server((host, port), lib, cors_origin=cors_origin), lib
 
 
 def run(srv):
@@ -1444,11 +1473,29 @@ def selftest(catalog=None):
     import urllib.error
     import urllib.request
 
-    srv, lib = serve(0, seed=7)
+    cors_origin = "http://butaca.invalid"
+    srv, lib = serve(0, seed=7, cors_origin=cors_origin)
     run(srv)
     port = srv.server_address[1]
     base = "http://127.0.0.1:%d" % port
     failures = []
+
+    cors_get = urllib.request.Request(base + "/System/Info/Public",
+                                     headers={"Origin": cors_origin})
+    with urllib.request.urlopen(cors_get, timeout=5) as reply:
+        assert reply.headers.get("Access-Control-Allow-Origin") == cors_origin
+    preflight = urllib.request.Request(
+        base + "/Users/AuthenticateByName", method="OPTIONS",
+        headers={"Origin": cors_origin, "Access-Control-Request-Method": "POST",
+                 "Access-Control-Request-Headers": "authorization, content-type"})
+    with urllib.request.urlopen(preflight, timeout=5) as reply:
+        assert reply.status == 204
+        assert reply.headers.get("Access-Control-Allow-Methods")
+        assert reply.headers.get("Access-Control-Allow-Headers") == "authorization, content-type"
+    wrong_origin = urllib.request.Request(base + "/System/Info/Public",
+                                         headers={"Origin": "http://other.invalid"})
+    with urllib.request.urlopen(wrong_origin, timeout=5) as reply:
+        assert reply.headers.get("Access-Control-Allow-Origin") is None
 
     def request(method, path, body=None, token=None, want_status=200):
         req = urllib.request.Request(base + path, data=body, method=method)
@@ -1769,13 +1816,15 @@ def main():
     ap.add_argument("--catalog-cache", metavar="DIR",
                     help="the demo artwork cache (default: ~/.cache/butaca-demo)")
     ap.add_argument("--hero", help="the film the home deck pins (default: the catalog's `hero`)")
+    ap.add_argument("--cors-origin", help="allow browser requests from exactly this origin")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         selftest(a.catalog)
         return
     srv, lib = serve(a.port, seed=a.seed, host=a.host, movies=a.movies, shows=a.shows,
-                     catalog=a.catalog, catalog_cache=a.catalog_cache, hero=a.hero)
+                     catalog=a.catalog, catalog_cache=a.catalog_cache, hero=a.hero,
+                     cors_origin=a.cors_origin)
     if a.catalog is not None:
         print("mock_jf: serving the demo library on http://%s:%d (user id %s, %d movies, "
               "%d series, %d box sets)"
