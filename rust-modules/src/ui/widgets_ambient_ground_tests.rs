@@ -57,14 +57,13 @@ fn a_ground_never_outshines_the_fine_print_that_sits_on_it() {
     }
 }
 
-/// The other end: a ground keyed to near-black key art must not sink below the value a card's
-/// drop shadow needs to read against. `SURFACE_APP`'s own doc rejects the old near-black
-/// (25,25,29)/255 for exactly that reason; `GROUND_W ≤ 0.26` is what keeps the floor above it,
-/// with no floor constant anywhere.
+/// The other end: a ground keyed to near-black key art keeps a floor of its own rather than
+/// collapsing to pure black. The mockup's ember base is deliberately near-black, so the card's
+/// elevation is carried by its warm focus ring; the ground labels, not the shadow, are what must
+/// stay readable on it.
 #[test]
-fn a_ground_stays_light_enough_for_a_card_shadow() {
+fn a_ground_never_collapses_to_pure_black() {
     let floor = AmbientWash::keyed([[0.0; 3]; 4], [AmbientWash::GROUND_W; 4]);
-    let rejected = [25.0 / 255.0, 25.0 / 255.0, 29.0 / 255.0, 1.0];
     for corner in floor {
         for ch in 0..3 {
             let want = theme::SURFACE_APP[ch] * (1.0 - AmbientWash::GROUND_W);
@@ -73,8 +72,8 @@ fn a_ground_stays_light_enough_for_a_card_shadow() {
                 "the darkest ground is the surface scaled by 1-GROUND_W"
             );
             assert!(
-                corner[ch] > rejected[ch],
-                "channel {ch} sank to {} — into the near-black the palette rejects",
+                corner[ch] > 0.02,
+                "channel {ch} sank to {} — the ground collapsed toward pure black",
                 corner[ch]
             );
         }
@@ -289,16 +288,16 @@ fn a_page_changing_subject_jumps_rather_than_washing_the_old_one_across_it() {
 
 /// An artwork-less browsing page carries a soft blue envelope instead of the flat app surface.
 #[test]
-fn the_artworkless_page_ground_is_a_blue_gradient() {
+fn the_artworkless_page_ground_is_a_warm_gradient() {
     let mut ground = PageGround::new();
     for _ in 0..120 {
         ground.key(None, PageGround::CARD_W, 1.0 / 60.0);
     }
-    assert!(!ground.is_flat(), "the blue fallback is drawn");
+    assert!(!ground.is_flat(), "the warm fallback is drawn");
     let corners = ground.corners();
     assert!(corners.iter().any(|a| *a != corners[0]), "a gradient, not a flat fill");
     for (i, corner) in corners.iter().enumerate() {
-        assert!(corner[2] > corner[0], "corner {i} must lean blue, got {corner:?}");
+        assert!(corner[0] > corner[2], "corner {i} must lean warm, got {corner:?}");
         assert!(contrast(theme::TEXT_TERTIARY, [corner[0], corner[1], corner[2], 1.0]) >= 3.0,
             "corner {i} drops tertiary ink below the floor");
         assert!(contrast(theme::TEXT_PRIMARY, [corner[0], corner[1], corner[2], 1.0]) >= 7.0,
@@ -308,13 +307,13 @@ fn the_artworkless_page_ground_is_a_blue_gradient() {
 
 /// Artwork still keys the ground, but the wash leans toward the same blue atmosphere.
 #[test]
-fn an_artwork_keyed_page_ground_leans_blue_and_stays_legible() {
+fn an_artwork_keyed_page_ground_leans_warm_and_stays_legible() {
     let mut ground = PageGround::new();
     for _ in 0..120 {
         ground.key(Some([[0.4, 0.4, 0.4]; 4]), PageGround::CARD_W, 1.0 / 60.0);
     }
     for (i, corner) in ground.corners().iter().enumerate() {
-        assert!(corner[2] - corner[0] > 0.01, "corner {i} did not take the blue lean: {corner:?}");
+        assert!(corner[0] - corner[2] > 0.01, "corner {i} did not take the warm lean: {corner:?}");
         assert!(contrast(theme::TEXT_TERTIARY, [corner[0], corner[1], corner[2], 1.0]) >= 3.0,
             "corner {i} drops tertiary ink below the floor");
         assert!(contrast(theme::TEXT_PRIMARY, [corner[0], corner[1], corner[2], 1.0]) >= 7.0,

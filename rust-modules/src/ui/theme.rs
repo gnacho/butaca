@@ -35,11 +35,11 @@ const fn rgb8(r: u8, g: u8, b: u8) -> [f32; 4] {
 }
 
 // Warm — the mockup's ember palette: page ground, inks, gold accents and the ambient wash.
-const WARM_0: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
+const WARM_0: [f32; 4] = rgb8(0xff, 0xfd, 0xf8);
 const WARM_100: [f32; 4] = rgb8(0xff, 0xce, 0xa3);
 const WARM_300: [f32; 4] = rgb8(0xe8, 0xcd, 0xb0);
-const WARM_500: [f32; 4] = rgb8(0xa0, 0x84, 0x6c);
-const WARM_700: [f32; 4] = rgb8(0x6b, 0x5b, 0x4f);
+const WARM_500: [f32; 4] = rgb8(0xd8, 0xc6, 0xb4);
+const WARM_700: [f32; 4] = rgb8(0xd0, 0xc3, 0xb4);
 const WARM_900: [f32; 4] = rgb8(0x24, 0x16, 0x11);
 const WARM_950: [f32; 4] = rgb8(0x1d, 0x12, 0x0c);
 const WARM_1000: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
@@ -83,9 +83,9 @@ const CAPTION_28: [f32; 4] = rgb8(0x47, 0x47, 0x47);
 // Warm atmosphere — four dark, low-frequency stops for the artwork-less page ground. The range
 // moves from ember at the top left to wine at the bottom right, over the app's near-black base.
 // These are page grounds, never control fills or state colours.
-const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0xb3, 0x40, 0x1f);
+const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x8c, 0x32, 0x1c);
 const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x7a, 0x2c, 0x3f);
-const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
+const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x2a, 0x1a, 0x12);
 const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x5a, 0x24, 0x18);
 
 // Semantic — amber / red / green: state and verdict, never decoration.
@@ -343,7 +343,7 @@ pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
 /// The cool-tinted selected-row fill while a table field accepts text. Reuses [`COOL_150`]
 /// rather than the default near-white [`ACCENT`], so editing is visibly distinct without a stroke or
 /// a new palette stop; the existing near-black accent ink remains legible over it.
-pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = WARM_300;
+pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = WARM_0;
 
 /// The Search query field's **focused-but-not-editing** ink — the `hot` cross-fade's bright
 /// endpoint for the one state that has no caret, no keyboard and (since 2026-09-04) no plate to
