@@ -1,9 +1,0 @@
-{
-  "expected": "0xc5f6119a6ef847dd",
-  "first_frame": 1,
-  "from_state_fp": 5212864836643027146,
-  "got": "0xe25e788fcc881cec",
-  "preceding_event_kinds": [],
-  "reason": "The shared chrome gained a Settings gear at stable id 7 (#273), which changes the strip census from the first Home frame. The recorded key script is unchanged.",
-  "to_state_fp": 5212864836643027146
-}

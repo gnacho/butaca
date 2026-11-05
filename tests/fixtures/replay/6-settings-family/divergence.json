@@ -1,9 +1,0 @@
-{
- "expected": "0x8860ffd76450e661",
- "first_frame": 1,
- "from_state_fp": 5212864836643027146,
- "got": "0xc79676147c2dfb40",
- "preceding_event_kinds": [],
- "reason": "The Settings root reconnects its existing preference pages and Sign out (#272), and the shared chrome adds a Settings gear at stable id 7 (#273). The recorded key script is unchanged.",
- "to_state_fp": 5212864836643027146
-}
