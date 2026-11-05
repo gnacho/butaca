@@ -1570,6 +1570,7 @@ impl crate::ui::screen::ScreenArg for AppArg {
     fn chrome(&self) -> Chrome {
         match self {
             AppArg::Home | AppArg::Library | AppArg::Search => Chrome::TabBar,
+            AppArg::Content(ContentArg::Collection(id)) if id.is_favorites() => Chrome::TabBar,
             AppArg::Login
             | AppArg::Profiles
             | AppArg::Onboard

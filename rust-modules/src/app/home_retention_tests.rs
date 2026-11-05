@@ -373,6 +373,26 @@ fn library_publishes_the_actual_container_strip() {
 }
 
 #[test]
+fn favorites_publishes_the_container_strip_with_its_own_pill() {
+    let _guard = crate::testlock::serial();
+    let mut dispatcher = Dispatcher::<AppHost>::new();
+    let mut bridge = Bridge::for_test(|| 0);
+    bridge.stores.browse.borrow_mut().seed_two_source_table_for_test();
+    bridge.refresh_browse_directory();
+    let favorites = AppArg::Content(crate::screens::registry::ContentArg::Collection(
+        crate::collection::CollectionRef::favorites(crate::jellyfin::SERVER_ID, "Favorites"),
+    ));
+    frame(&mut dispatcher, &mut bridge, favorites.clone(), tick(0), vec![]);
+    assert!(dispatcher.top_arg() == Some(&favorites), "the Favorites page is the route being published");
+    bridge.capture_chrome(&mut dispatcher);
+    let base = crate::ui::dispatch::STRIP_BASE;
+    assert_eq!(dispatcher.nav.tabs.strip.iter().map(|member| member.elem).collect::<Vec<_>>(),
+        vec![base + 4, base, base + 1, base + 2, base + 6, base + 3]);
+    assert_eq!(dispatcher.nav.tabs.strip_fallback, Some(base + 6),
+        "Favorites is the selected destination, not Home");
+}
+
+#[test]
 fn all_splits_in_one_frame_keep_the_same_library_listing() {
     use crate::ui::dispatch::Rig;
     let _guard = crate::testlock::serial();

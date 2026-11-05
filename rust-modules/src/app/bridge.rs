@@ -665,8 +665,15 @@ impl Bridge {
         let route = d.top_arg().cloned().unwrap_or(AppArg::Home);
         let route = &route;
         let search = *route == AppArg::Search;
-        if matches!(route, AppArg::Home | AppArg::Library) || search {
-            d.nav.tabs.strip_fallback = Some(if search { crate::ui::dispatch::STRIP_BASE + 3 } else { crate::screens::home::STRIP_HOME_ELEM });
+        let favorites = matches!(route, AppArg::Content(ContentArg::Collection(id)) if id.is_favorites());
+        if matches!(route, AppArg::Home | AppArg::Library) || search || favorites {
+            d.nav.tabs.strip_fallback = Some(if search {
+                crate::ui::dispatch::STRIP_BASE + 3
+            } else if favorites {
+                crate::ui::dispatch::STRIP_BASE + 6
+            } else {
+                crate::screens::home::STRIP_HOME_ELEM
+            });
             if let Some(io) = &self.home_io {
                 refresh_chrome(&mut self.chrome, &self.measure, self.directory.view(),
                     Some((&io.profile, &io.preferences)));
@@ -675,7 +682,12 @@ impl Bridge {
             }
             self.chrome_selection = if *route == AppArg::Library {
                 self.directory.view().current().map(|i| self.chrome.library_selection(self.directory.view().sections()[i].kind)).unwrap_or(0)
-            } else if search { self.chrome.search_selection() } else { 0 };
+            } else if search {
+                self.chrome.search_selection()
+            } else if favorites {
+                crate::app::chrome::pill_of(self.directory.view(), crate::app::chrome::Pill::Favorites)
+                    .unwrap_or(0) as u32
+            } else { 0 };
             let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
             self.chrome.members(selected, Self::home_focus(d), self.strip.scroll_pos(), &mut d.nav.tabs.strip);
         } else {
@@ -2403,6 +2415,9 @@ fn pill_of_arg(arg: &AppArg, directory: crate::stores::browse::DirectoryView<'_>
     match arg {
         AppArg::Home => pill_of(directory, Pill::Home),
         AppArg::Search => pill_of(directory, Pill::Search),
+        AppArg::Content(ContentArg::Collection(id)) if id.is_favorites() => {
+            pill_of(directory, Pill::Favorites)
+        }
         AppArg::Library => {
             let kind = directory.current().map(|i| directory.sections()[i].kind)?;
             pill_of(directory, Pill::Section(kind))
