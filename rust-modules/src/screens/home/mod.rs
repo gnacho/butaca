@@ -2450,6 +2450,11 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
         &hero.title
     };
     let title_h = hero_logo::band_h(LogoRung::Hero);
+    let kicker = CString::new(match hero.kind {
+        1 | 3 => crate::i18n::msg::browse_kind_show(),
+        _ => crate::i18n::msg::browse_kind_movie(),
+    }).unwrap_or_default();
+    let kicker_h = crate::text::text_height(theme::size::CAPTION, 1) + theme::space::SM;
     let meta = if episode {
         let mut text = crate::ui::fmt::episode_address(i64::from(hero.season_index), i64::from(hero.ep_index)).to_string();
         if !text.is_empty() && !hero.title.is_empty() {
@@ -2459,8 +2464,7 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
         text
     } else {
         format!(
-            "{} \u{b7} {} \u{b7} {}",
-            if hero.kind == 1 { crate::i18n::msg::browse_kind_show() } else { crate::i18n::msg::browse_kind_movie() },
+            "{} \u{b7} {}",
             hero.year,
             if hero.rating.is_empty() {
                 crate::i18n::msg::browse_detail_unrated()
@@ -2476,7 +2480,10 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
         .as_ref()
         .map(|v| theme::space::SM + v.measure_h(HERO_COL_W))
         .unwrap_or(0.0);
-    let mut y = hero_stack_top(title_h, meta_h, synopsis_h);
+    let mut y = hero_stack_top(title_h + kicker_h, meta_h, synopsis_h);
+    Label::new(kicker.as_ptr(), theme::size::CAPTION, theme::ACCENT)
+        .draw(p, Rect::new(MARGIN_X, y, HERO_COL_W, 0.0));
+    y += kicker_h;
     HeroLogo::new(hero.sid, hero_logo_rk(hero), title, LogoRung::Hero)
         .draw(p, Rect::new(MARGIN_X, y, HERO_COL_W, title_h), measure);
     y += title_h + theme::space::MD;
