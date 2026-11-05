@@ -162,11 +162,15 @@ coordinates as Feather's `chevron-right` / `chevron-down` / `chevron-up`, re-exp
 at stroke width 3. Whether that constitutes derivation or independent authorship of trivial
 geometry was **not established**; they are credited here out of caution under the same notice.
 
-**Heroicons** — the `check` icon (`assets/icons/check.svg`)
+**Heroicons** - the `check` icon (`assets/icons/check.svg`)
 Copyright (c) Tailwind Labs, Inc. Licence: **MIT** (`licenses/MIT.txt`).
 The path data `M5 13l4 4L19 7` on a 24×24 grid is identical to Heroicons v1
 `optimized/outline/check.svg` (confirmed against upstream). *Modified*: stroke width 2 → 3,
 stroke colour set to white.
+
+**Lucide** - the `settings` icon (`assets/icons/settings.svg`)
+Copyright (c) 2026 Lucide Icons and Contributors. Licence: **ISC** (`licenses/lucide.txt`).
+The path data comes from Lucide's `settings` icon. *Modified*: stroke colour set to white.
 
 The remaining icons in the application are original work by the Butaca author. See section 4
 for a trademark note that applies to some of them.
@@ -448,6 +452,7 @@ runtime notices listed below:
 |---|---|
 | `licenses/LGPL-2.1.txt` | FFmpeg, FriBidi, GLib, GNU C Library (§1) — GNU Lesser General Public License, version 2.1 |
 | `licenses/MIT.txt` | Feather Icons, Heroicons, the MIT-elected Rust packages, Sentry Native and libunwind (§2.2, §2.4, §2.6). One copy of the MIT text; the copyright holders it refers to are the ones named in this file |
+| `licenses/lucide.txt` | Lucide Settings icon (§2.2) |
 | `licenses/Apache-2.0.txt` | Google Material Design Icons; calendrical_calculations; moxcms; pxfm; compiler_builtins (§2.2, §2.4) |
 | `licenses/LLVM-exception.txt` | compiler_builtins (§2.4) |
 | `licenses/Unicode-3.0.txt` | Unicode Character Database tables in Rust `core` (§2.4) — UNICODE LICENSE V3, "Copyright © 1991-2024 Unicode, Inc." |
