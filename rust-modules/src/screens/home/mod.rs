@@ -184,13 +184,10 @@ impl Backdrop {
             h.map(|h| crate::ui::widgets::resolve_tex_wh_on(h.item.sid, &h.item.art, 1280, 720, 0))
                 .unwrap_or((0, 0.0, 0.0))
         };
-        if snap < HERO_ART_CULL {
-            self.tex = resolve(hero);
-            self.outgoing_tex = resolve(outgoing);
-        } else {
-            self.tex = (0, 0.0, 0.0);
-            self.outgoing_tex = (0, 0.0, 0.0);
-        }
+        // Keep the current hero texture after the dive: the shelves draw it attenuated instead of
+        // dropping the backdrop on the floor. The outgoing hero is still only a transition layer.
+        self.tex = resolve(hero);
+        self.outgoing_tex = resolve(outgoing);
 
         let changed = match (self.keyed.as_ref(), selected) {
             (Some((a, x)), Some((b, y))) => a != b || x != y,
@@ -265,6 +262,17 @@ impl Backdrop {
                 backdrop_art(p, self.tex, env.sp, in_x, incoming_a);
             } else {
                 backdrop_art(p, self.tex, env.sp, 0.0, incoming_a);
+            }
+        }
+        if !folded && slide.is_none() && env.sp >= HERO_ART_CULL {
+            let alpha = shelf_art_alpha(self.tex.0, env.sp, incoming_a);
+            if alpha > 0.01 {
+                p.tex(
+                    self.tex.0,
+                    Rect::new(0.0, 0.0, SCR_W, SCR_H).cover(self.tex.1, self.tex.2),
+                    0.0,
+                    theme::with_a(theme::TINT_WHITE, alpha),
+                );
             }
         }
         if !folded && env.hero_a > 0.01 {
@@ -2278,6 +2286,9 @@ fn wash_corners(hero: Option<&CatalogMovie>, grid: [[f32; 4]; 4], snap: f32) -> 
         .map(|m| AmbientWash::keyed(m.blur, HERO_WASH_W))
         .unwrap_or([theme::SURFACE_APP; 4]);
     let t = snap.clamp(0.0, 1.0);
+    // A focused tile with no envelope of its own must not erase the backdrop the page already
+    // had. Keep the hero's attenuated wash in that case; a real tile wash still takes over.
+    let grid = if grid == [theme::SURFACE_APP; 4] { hero } else { grid };
     std::array::from_fn(|i| theme::mix(hero[i], grid[i], t))
 }
 fn wash_hidden(snap: f32, art: f32, outgoing: Option<f32>) -> bool {
@@ -2293,6 +2304,10 @@ fn reveal(tex: u32, spring: &Spring) -> f32 {
 fn art_rect(tex: (u32, f32, f32), snap: f32, dx: f32) -> Rect {
     Rect::new(dx, -snap * (SCR_H - 120.0), SCR_W, SCR_H).cover(tex.1, tex.2)
 }
+fn shelf_art_alpha(tex: u32, snap: f32, reveal: f32) -> f32 {
+    if tex == 0 || snap < HERO_ART_CULL { 0.0 } else { reveal * 0.16 }
+}
+
 fn backdrop_art(p: Painter, tex: (u32, f32, f32), snap: f32, dx: f32, alpha: f32) {
     if tex.0 == 0 || alpha <= 0.01 || !on_axis(dx, SCR_W, SCR_W, 0.0) {
         return;

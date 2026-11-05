@@ -546,105 +546,36 @@ fn blurred(blur: [[f32; 3]; 4]) -> CatalogMovie {
 }
 
 #[test]
-fn the_wash_floors_on_the_app_surface_and_never_dims_toward_black() {
+fn an_artless_grid_keeps_the_wash_floored_on_the_hero() {
     let flat = [theme::SURFACE_APP; 4];
-    // "no artwork" IS the app's own ground, with no special case
-    assert_eq!(
-        wash_corners(None, flat, 0.0),
-        flat,
-        "an empty pool is the app's ground"
-    );
-    assert_eq!(
-        wash_corners(Some(&CatalogMovie::default()), flat, 0.0),
-        flat,
-        "…and so is an item with no envelope"
-    );
-    // the grid end of the snap lands on exactly the colour `frame_clear` already laid down —
-    // where the old `dim` ramp landed on black
+    assert_eq!(wash_corners(None, flat, 0.0), flat, "an empty pool is the app's ground");
+    assert_eq!(wash_corners(Some(&CatalogMovie::default()), flat, 0.0), flat,
+        "an item with no envelope leaves the app's ground alone");
+
     let bright = blurred([
         [0.95, 0.93, 0.90],
         [1.0, 1.0, 1.0],
         [0.8, 0.75, 0.2],
         [0.1, 0.1, 0.12],
     ]);
-    assert_eq!(
-        wash_corners(Some(&bright), flat, 1.0),
-        flat,
-        "the dive resolves to the app ground, not to black"
-    );
-    assert_eq!(
-        wash_corners(Some(&bright), flat, 1.5),
-        flat,
-        "…and an overshooting snap cannot push past it"
-    );
-
-    // **The grid end held at the app's own surface, which is what makes every assertion below
-    // hold VERBATIM through the change that gave this function a second subject.** With
-    // `grid = SURFACE_APP` the lerp `mix(hero_t, SURFACE, sp)` is algebraically the old
-    // `keyed(blur, W * (1 - sp))` weight ramp, corner for corner — so these are still the same
-    // measurements of the same behaviour, not loosened ones. The grid end's own bound is
-    // `the_grid_end_of_the_dive_is_the_focused_tiles_ground` below.
-    const FLAT_GRID: [[f32; 4]; 4] = [theme::SURFACE_APP; 4];
-
-    // The tail of the dive — the exact frames that used to be near-black — for a DARK envelope
-    // as much as a bright one. The bound is the one invariant that separates a WEIGHT scale
-    // from a brightness ramp: a corner can only travel as far from the app surface as the lean
-    // weight STILL IN PLAY allows it to, so the deviation is capped by that corner's own
-    // remaining weight times the furthest a mix could take it (toward white above the surface,
-    // toward black below it). Do not loosen this to a flat percentage — the whole point is that
-    // it tightens to nothing as `sp → 1`, which is what pins the grid end of the snap.
-    //
-    // For scale: at sp=0.9 this allows ±0.046 on the two top corners, and the old `dim` ramp
-    // put them at 0.010 — a deviation of 0.163, off by three and a half times the budget.
+    // A tile with no envelope contributes no second subject. The hero's attenuated wash therefore
+    // survives the whole dive instead of being replaced by the flat app ground at its end.
     for m in [&bright, &blurred([[0.0; 3]; 4])] {
-        for &sp in &[0.9f32, 0.99, 0.996] {
-            for (c, w) in wash_corners(Some(m), FLAT_GRID, sp).iter().zip(HERO_WASH_W) {
-                let lean = w * (1.0 - sp);
-                for (ch, s) in c.iter().zip(theme::SURFACE_APP) {
-                    let budget = lean * s.max(1.0 - s);
-                    assert!(
-                        (ch - s).abs() <= budget + 1e-6,
-                        "at sp={sp} the ground is {ch} against a {s} surface — that is {} off a \
-                         {budget} budget, so the old dim ramp is back",
-                        (ch - s).abs()
-                    );
+        let wanted = AmbientWash::keyed(m.blur, HERO_WASH_W);
+        for sp in [0.0f32, 0.5, 0.9, 0.99, 0.996, 1.0, 1.5] {
+            for (corner, expected) in wash_corners(Some(m), flat, sp).iter().zip(wanted) {
+                for (value, want) in corner.iter().zip(expected) {
+                    assert!((value - want).abs() <= 1e-6,
+                        "at snap={sp} the retained wash is {value}, wanted {want}");
                 }
-                assert_eq!(c[3], 1.0, "a wash corner is opaque");
+                assert_eq!(corner[3], 1.0, "a wash corner is opaque");
             }
         }
     }
 
-    // the lean is a WEIGHT SCALE on the shared mix, not a brightness scale over it. Re-deriving
-    // it as `dim(keyed(blur, W), lean)` would darken the surface itself and fails here.
-    //
-    // Compared to a float epsilon rather than exactly, because the two spellings of the same
-    // algebra — the weight ramp on the right, the lerp between two finished targets on the left
-    // — associate their multiplies differently and land up to one ULP apart. The failure this
-    // guards against is a brightness scale, which is wrong by three and a half TIMES the budget
-    // asserted above, so an ULP of slack costs it nothing.
-    for (c, w) in wash_corners(Some(&bright), FLAT_GRID, 0.5)
-        .iter()
-        .zip(AmbientWash::keyed(bright.blur, HERO_WASH_W.map(|w| w * 0.5)))
-    {
-        for (a, b) in c.iter().zip(w) {
-            assert!(
-                (a - b).abs() <= 1e-6,
-                "half-dived is half the lean toward the artwork ({b}), not half the \
-                 brightness ({a})"
-            );
-        }
-    }
-    // …and the lean does go TOWARD the artwork: a bright envelope lifts the panel off the
-    // surface rather than sinking it.
-    let lit = wash_corners(Some(&bright), FLAT_GRID, 0.0);
-    assert!(
-        lit[1][0] > theme::SURFACE_APP[0],
-        "a white corner must brighten the ground it keys"
-    );
-    assert!(
-        lit[1][0] < 1.0,
-        "…but never all the way: it is a wash, not the photograph"
-    );
+    let lit = wash_corners(Some(&bright), flat, 0.0);
+    assert!(lit[1][0] > theme::SURFACE_APP[0], "a white corner brightens the ground");
+    assert!(lit[1][0] < 1.0, "it is a wash, not the photograph");
 }
 
 #[test]
@@ -687,8 +618,8 @@ fn the_grid_end_of_the_dive_is_the_focused_tiles_ground() {
     // on a library with no envelopes at all.
     same(
         wash_corners(Some(&hero), [theme::SURFACE_APP; 4], 1.0),
-        [theme::SURFACE_APP; 4],
-        "an artless shelf is the app's own ground, not a leftover hero tint",
+        AmbientWash::keyed(hero.blur, HERO_WASH_W),
+        "an artless shelf keeps the hero's own ground",
     );
 
     // Halfway is halfway between the two grounds — a lerp, not a sum. Summing the two leans
@@ -704,6 +635,30 @@ fn the_grid_end_of_the_dive_is_the_focused_tiles_ground() {
                 (v - want).abs() <= 1e-6,
                 "mid-dive corner channel is {v}, halfway between the two grounds is {want}"
             );
+        }
+    }
+}
+
+#[test]
+fn the_hero_backdrop_stays_visible_but_attenuated_under_shelves() {
+    assert_eq!(shelf_art_alpha(7, 0.5, 1.0), 0.0, "the hero itself uses the full backdrop");
+    let alpha = shelf_art_alpha(7, 1.0, 1.0);
+    assert!(alpha > 0.0, "the backdrop must not disappear when the hero leaves");
+    assert!(alpha < 0.2, "the shelves keep their content ahead of the art");
+    assert_eq!(shelf_art_alpha(0, 1.0, 1.0), 0.0, "no texture draws no backdrop");
+}
+
+#[test]
+fn an_artless_grid_keeps_the_hero_wash() {
+    let hero = blurred([[0.95, 0.1, 0.1]; 4]);
+    let want = AmbientWash::keyed(hero.blur, HERO_WASH_W);
+    for snap in [1.0, 1.5] {
+        let got = wash_corners(Some(&hero), [theme::SURFACE_APP; 4], snap);
+        for (corner, wanted) in got.iter().zip(want) {
+            for (value, expected) in corner.iter().zip(wanted) {
+                assert!((value - expected).abs() <= 1e-6,
+                    "an artless shelf keeps the hero's backdrop at snap={snap}: got {value}, wanted {expected}");
+            }
         }
     }
 }
