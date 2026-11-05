@@ -95,7 +95,7 @@ pointer-only exception, and its action remains available on physical BACK.
 
   HOME ──── tab strip ────→ LIBRARY (one pill per library section)
    │  └───────────────────→ SEARCH
-   │  └── profile chip ───→ Account menu (popover)
+   │  └── gear ───────────→ SETTINGS
    │  └── press-and-hold ─→ Card context menu (popover)
    │
    └── OK on a card ──→ DETAIL ──→ PERSON (cast headshot) ──→ DETAIL ──→ …
@@ -177,11 +177,11 @@ dots under the row show the position.
 **Above it**, the top tab strip: **Home**, then **one pill per library section the server reports**
 (here *Movies* and *TV Shows*), then the **Search** pill — drawn as a magnifier mark, not a word.
 The strip is uncapped and scrolls once it outgrows the bar, so every discovered section is
-focusable. At the left margin, outside the group, sits the **profile chip** (§5.7).
+focusable. At the right safe-area edge, outside the group, sits the **Settings gear** (§5.7).
 
-**UP from the hero reaches the bar**, landing on the profile chip; LEFT and RIGHT then walk the
-whole band — **chip → Home → Movies → TV Shows → … → Search**. DOWN leaves the bar: back to the
-hero action row from the chip, or into the shelves from a pill. The bar is worn by Home, the Library
+**UP from the hero reaches the bar**, landing on Home; LEFT and RIGHT then walk the whole band —
+**Home → Movies → TV Shows → … → Search → gear**. DOWN leaves the bar: back to the hero action row
+from Home, or into the shelves from a pill. The bar is worn by Home, the Library
 and Search and by nothing else — the detail, person, player and onboarding screens have none, which
 is why moving to or from them fades the whole screen rather than just the page.
 
@@ -228,7 +228,7 @@ draws rather than cutting to it. (LG's guidance is explicit that the splash shou
 
 ![Sign in](screenshots/ux-signin.jpg)
 
-Reached automatically when there is no usable session, and on demand from the account menu. It shows
+Reached automatically when there is no usable session, and on demand from the Settings gear. It shows
 a **QR code** and a **four-character link code**, with the instruction to scan it or go to
 the account service's link page and enter the code. A spinner reads *"Waiting for you to sign in…"* and the screen
 advances by itself the moment the account is linked. Nothing needs pressing; after a minute with no
@@ -302,7 +302,7 @@ BACK closes the popover and returns focus to the pill.
 ![Search](screenshots/ux-search.jpg)
 
 The last pill in the top strip. The screen is a vertical stack of zones — the shared top bar (the
-profile chip and the pills), the **field**, and under it either the **recent searches** or the
+pills and the Settings gear), the **field**, and under it either the **recent searches** or the
 **results**.
 
 **OK on the focused field toggles editing**: it raises the **television's own on-screen keyboard**
@@ -314,7 +314,7 @@ as ordinary keys, so every button on it does something.
 Results arrive as you type and are grouped into one shelf per kind (*Movies*, *TV Shows*, …) with a
 result count beside each heading. UP/DOWN moves between the zones and between shelves, LEFT/RIGHT
 walks a shelf, OK opens the item's detail page. ▲ from the field reaches the top strip; ◀ off the
-first pill reaches the profile chip. **BACK returns to Home** — Search is a peer, not a page (§2.2).
+first pill stops on Home. **BACK returns to Home** — Search is a peer, not a page (§2.2).
 
 The line beside the field names the **scope** — which server or servers are being searched. Search
 covers the user's own servers and any shared with the account; the vendor's Discover / Watchlist
@@ -333,27 +333,16 @@ apply to that item; for an in-progress movie on the deck:
 
 *Go to Movie* · *Mark as Watched* · *Mark as Unwatched* · *Play from Start* · *Remove from Deck*.
 
-### 5.7 Account menu
+### 5.7 Settings
 
-![Account menu](screenshots/ux-account-menu.jpg)
+![Settings](screenshots/ux-settings.jpg)
 
-The **profile chip** at the top left. Focusing it expands the chip to show the current identity;
-OK opens a popover headed *ACCOUNT*. Signed in, it offers switching profile and **signing out**
-(checklist #21); signed out, it offers **Sign in**, which is the figure above.
+The **gear** at the right edge of the shared bar. It opens the Settings root: **Select server**,
+**Quick Connect**, **Video & playback**, **Language** and **Sign out**. Sign out is the last row and
+is marked destructive; it uses the same disconnect flow as the server picker.
 
-One more row, **Settings**, is offered in **every** state, signed in or out. A person who cannot get
-past sign-in has still received a copy of this software, so privacy and legal information cannot be
-conditional on an account. Settings opens a full-screen
-modal: signed-in users also get **Favorite libraries** (under a **Libraries** section — which
-libraries this television shows, on Home, in the top strip and in the Library's own picker), while
-everyone gets **Privacy & data**, **Legal notices** and **About Butaca**.
-
-- **Privacy & data** holds the two saved reporting choices, one scrollable what-is-actually-sent document PER CHANNEL (Crashes / Errors, Analytics / Usage),
-  the privacy policy, and Delete all local data. Changed switches commit through Done; BACK
-  discards the draft. Playback diagnostics remain a playback action rather than a global setting.
-- **Legal notices** contains six readable documents: **Privacy policy**, **Open-source licences**,
-  **FFmpeg & source offer**, **Butaca source code**, **Trademarks & non-affiliation**, and
-  **Privacy & security contact**. UP/DOWN scrolls a notice; BACK leaves it.
+The old account chip at the top left is gone. Its account menu is retired: settings, server choice
+and signing out all live behind the gear, so there is no second entry point to keep in step.
 
 ### 5.8 Detail
 
@@ -732,7 +721,7 @@ Where the four deferring items are answered, and the neighbouring items this doc
 | #7 focus / mouse-over states | §3 |
 | #10 all UI buttons work | §3, §4, §5, §6.3 |
 | #11 / #12 BACK and EXIT *UI buttons* | #11 is implemented by the shared top-left Back control on non-root pages and the visible playback HUD. #12 remains N/A because the app draws no EXIT control. The **keys** are §2.2 and §2.3 |
-| #21 sign out | §5.7 (account menu) and §5.3 (the picker's own *Sign out* pill) |
+| #21 sign out | §5.7 (Settings root) and §5.3 (the picker's own *Sign out* pill) |
 | #26–33 remote, pointer, OK, wheel, navigation | §1 |
 | #37 BACK key | §2.2, §5.9 |
 | #38 EXIT key | §2.3 |
@@ -763,7 +752,7 @@ HUD looks like over a picture; it says nothing about LG's decoder or the hardwar
 
 | figure | source | status |
 |---|---|---|
-| Home hero, Home shelves, Detail, Card menu, Library grid, Library sort, Search, Account menu, Sign in, Failure read-out | simulator, demo library, 1920×1080 | **in this document** |
+| Home hero, Home shelves, Detail, Card menu, Library grid, Library sort, Search, Settings, Sign in, Failure read-out | simulator, demo library, 1920×1080 | **in this document** |
 | Player HUD (`screenshots/player.jpg`) | simulator, demo library, simulator-decoded frame | **in this document** — shows the paused state mark |
 | Player HUD, playing steadily (empty mark slot) | device | **needed** |
 | Player HUD, fast-forward and rewind marks | device | **needed** |
