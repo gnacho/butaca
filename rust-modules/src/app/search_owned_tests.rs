@@ -740,12 +740,12 @@ fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
     for i in 2..10 {
         frame(&mut d, &mut rig, AppArg::Search, tick(i), script_key(Key::Left, tick(i)));
     }
-    assert_eq!(d.focus().map(|key| key.elem), Some(base + 4),
-        "◀ walks the pills to the profile chip and stops there rather than wrapping");
+    assert_eq!(d.focus().map(|key| key.elem), Some(base),
+        "◀ walks the pills to Home and stops there rather than wrapping");
 
     frame(&mut d, &mut rig, AppArg::Search, tick(10), script_key(Key::Right, tick(10)));
-    assert_eq!(d.focus().map(|key| key.elem), Some(base),
-        "▶ walks back onto the FIRST pill, the one it left");
+    assert_eq!(d.focus().map(|key| key.elem), Some(base + 6),
+        "▶ walks from Home onto the next destination, Favorites");
 
     frame(&mut d, &mut rig, AppArg::Search, tick(11), script_key(Key::Down, tick(11)));
     assert_eq!(d.focus(), Some(field), "▼ off the bar lands on the field, whatever pill it was on");

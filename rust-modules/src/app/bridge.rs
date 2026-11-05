@@ -1156,12 +1156,6 @@ impl Rig<AppHost> for Bridge {
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
         let chrome = self.chrome.read(self.strip.chip_expand_pos());
         self.strip.draw(chrome.labels, p, glass.tab_band_mut());
-        crate::ui::widgets::profile_chip_with(
-            p,
-            chrome.profile,
-            chrome.chip_expand,
-            glass.tab_face(),
-        );
         let gear = crate::ui::widgets::CircleButton::new(std::ptr::null())
             .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
             .icon(crate::ui::icons::Icon::Settings)
