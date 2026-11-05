@@ -73,7 +73,7 @@ const CAPTION_28: [f32; 4] = rgb8(0x47, 0x47, 0x47);
 // cyan lift at the bottom left. These are page grounds, never control fills or state colours.
 const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x25, 0x4a, 0x78);
 const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x1b, 0x2d, 0x52);
-const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x11, 0x1a, 0x2e);
+const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x10, 0x15, 0x25);
 const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x17, 0x49, 0x5c);
 
 // Semantic — amber / red / green: state and verdict, never decoration.
