@@ -30,6 +30,15 @@ use butaca_modules::butaca_run;
 use std::os::raw::c_int;
 
 fn main() {
+    // Browser assets and runtime state live in Emscripten's virtual filesystem. Set these before
+    // the shared app helpers resolve their directories; JS preRun code cannot mutate libc's
+    // process environment because Emscripten keeps ENV inside its runtime closure.
+    #[cfg(target_os = "emscripten")]
+    {
+        std::env::set_var("BUTACA_APP_DIR", "/app");
+        std::env::set_var("BUTACA_RUNTIME_DIR", "/tmp/butaca-emscripten");
+    }
+
     // SIGPIPE needs no handling here, unlike `src/main.c:105`: that file installs `SIG_IGN` by hand
     // precisely because a C `main` skips Rust's `std::rt::init`. This IS a Rust main, so std has
     // already done it, and the first server socket closed mid-write cannot kill the process.
