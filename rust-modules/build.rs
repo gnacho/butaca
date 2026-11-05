@@ -75,13 +75,14 @@ fn main() {
 
     println!("cargo:rustc-link-lib=dylib=GL");
 
-    // The non-hostsim host test build retains the native Wayland system seam, which calls
-    // wl_proxy_marshal directly when its guarded platform path is exercised. SDL's own
-    // DT_NEEDED entry does not satisfy that reference under --as-needed linkers: the consumer
-    // must name libwayland-client itself. The hostsim build gates that seam out, and the ARM
-    // shipping link has its own explicit -lwayland-client in the Makefile above.
+    // The non-hostsim host test build retains the native Wayland/GLib system seam, which
+    // references their symbols directly. SDL's DT_NEEDED entries do not satisfy those references
+    // under --as-needed linkers: the consumer must name the libraries itself. The hostsim build
+    // gates that seam out, and the ARM shipping link has its own explicit Wayland/GLib libraries
+    // in the Makefile above.
     if target_os == "linux" && std::env::var_os("CARGO_FEATURE_HOSTSIM").is_none() {
         println!("cargo:rustc-link-lib=dylib=wayland-client");
+        println!("cargo:rustc-link-lib=dylib=glib-2.0");
     }
 
     compile_svg();
