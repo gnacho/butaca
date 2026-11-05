@@ -68,33 +68,13 @@ const CAPTION_55: [f32; 4] = rgb8(0x8c, 0x8c, 0x8c);
 const CAPTION_40: [f32; 4] = rgb8(0x66, 0x66, 0x66);
 const CAPTION_28: [f32; 4] = rgb8(0x47, 0x47, 0x47);
 
-// Sand — one warm off-white, and it has exactly one job: the ambient wash's resting cast.
-const SAND_100: [f32; 4] = rgb8(0xe9, 0xe6, 0xe0);
-
-// Atmosphere — deliberately dark, warm light for a pre-content route. These are not state colours
-// and never ink a control; together they stand in for an artwork UltraBlur envelope before the
-// catalog has supplied one. The range stays on Butaca's graphite/amber axis so first-run does
-// not invent a rainbow identity before any actual artwork exists.
-//
-// **Corrected 2026-09-02.** The first cut of these four stops sat within ~15 8-bit codes of
-// `SURFACE_APP` (0x2c,0x2c,0x2e) in BOTH hue and luminance — three of the four were, to the eye,
-// the app's own flat ground with one warm corner — which is exactly what a device capture of
-// first-run consent showed: "no ambient light on the privacy onboarding screen", not a wash. A
-// real keyed hero ground (`AmbientWash::keyed`, capped at `GROUND_LUMA` 0.42 and mixed toward the
-// surface at `GROUND_W` 0.26) can and does land in a similarly narrow band when the source artwork
-// itself is flat — the difference is that a `RouteGround` fallback bypasses that mix entirely
-// (`underlay::Grade::Dim` is the identity grade `RouteGround` latches this quad through — unmixed,
-// unlike the `Grade::Ground` a real seed or live frame is capped and leaned through) and has no
-// artwork to fall back on if it reads as flat, so it has to carry its OWN contrast rather than borrow the keying
-// pipeline's. These four now spread across a ~3x luminance range (see
-// `route_screen::tests::the_pre_home_fallback_reads_as_a_directional_wash`) on the same diagonal
-// an authored key light would use — bright near one corner, dark at its opposite — while every
-// corner still clears 3:1 against `TEXT_TERTIARY` and 7:1 against `TEXT_PRIMARY`, the same floors
-// `AmbientWash::keyed` holds a real hero to.
-const ATMOS_CHARCOAL: [f32; 4] = rgb8(0x18, 0x18, 0x1a);
-const ATMOS_WARM_GREY: [f32; 4] = rgb8(0x4a, 0x46, 0x40);
-const ATMOS_UMBER: [f32; 4] = rgb8(0x5e, 0x3e, 0x24);
-const ATMOS_ASH: [f32; 4] = rgb8(0x42, 0x42, 0x4a);
+// Blue atmosphere — four dark, low-frequency stops for the artwork-less page ground. The range
+// moves from a soft key light at the top left to deep navy at the bottom right, with a quieter
+// cyan lift at the bottom left. These are page grounds, never control fills or state colours.
+const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x25, 0x4a, 0x78);
+const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x1b, 0x2d, 0x52);
+const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x11, 0x1a, 0x2e);
+const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x17, 0x49, 0x5c);
 
 // Semantic — amber / red / green: state and verdict, never decoration.
 const AMBER_300: [f32; 4] = rgb8(0xfa, 0xb8, 0x2e);
@@ -830,19 +810,20 @@ pub const RAIL_FILL: [f32; 4] = with_a(WHITE, 0.95);
 // (RAIL_MARKER, white @ 0.42, was the intro/credits band on the scrubber. Removed 2026-08-04 with
 // the band itself — at twice the track's opacity it read as a rendering artifact rather than as
 // information. See the "the rail carries NO marks" note in ui/player_hud.rs.)
-/// The **ambient wash's** resting tint — the faint warm cast a page carries when no artwork is
-/// keying it (the person page's header state, `Person Screen.dc.html`'s
-/// `rgba(233,230,224,.10)`). The palette's one warm stop, and the only survivor of the warm "Snow"
-/// [`ACCENT`] used to be: a page GROUND, never a control. Its own role rather than a borrowed one,
-/// so retuning a focus colour can never silently restyle a page background.
-pub const WASH_WARM: [f32; 4] = SAND_100;
+/// The blue ambient envelope for a page with no artwork to key from. The four stops create a
+/// soft directional wash at the same low cost as an UltraBlur gradient, without a blur pass.
+pub const WASH_BLUE_CORNERS: [[f32; 4]; 4] =
+    [ATMOS_BLUE_KEY, ATMOS_BLUE_INDIGO, ATMOS_BLUE_DEEP, ATMOS_BLUE_TEAL];
+/// Strength of that envelope at the four corners: top left, top right, bottom right, bottom left.
+pub const AMBIENT_BLUE_W: [f32; 4] = [0.55, 0.45, 0.30, 0.40];
+/// How much of the blue envelope an artwork-keyed wash carries. The source still supplies most
+/// of the colour, so a poster's identity survives the shared atmosphere.
+pub const AMBIENT_BLUE_MIX: f32 = 0.45;
 /// Frozen ambient envelope for a route that intentionally appears before Home has fetched any
-/// artwork (Shared Sources).  It is a DESIGN-SYSTEM fallback, not a screen colour: the graphite
-/// and amber stops create the low-frequency wallpaper light of an UltraBlur envelope without
-/// pretending there is a poster behind a pre-Home screen.  Once real artwork exists,
-/// [`crate::ui::route_screen::RouteGround`] uses that instead.
-pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
-    [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
+/// artwork (Shared Sources). It is a DESIGN-SYSTEM fallback, not a screen colour: the blue stops
+/// create low-frequency wallpaper light without pretending there is a poster behind a pre-Home
+/// screen. Once real artwork exists, [`crate::ui::route_screen::RouteGround`] uses that instead.
+pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] = WASH_BLUE_CORNERS;
 /// Warm amber Continue-Watching progress fill (Home only, no player equivalent). `#fab82e`.
 pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
 /// Unfilled track behind the Continue-Watching resume bar — the full-bleed card-bottom rail. A

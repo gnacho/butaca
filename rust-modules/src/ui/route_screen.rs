@@ -251,7 +251,7 @@ impl RouteGround {
     /// Draw a pre-content route on the product's authored fallback atmosphere.
     ///
     /// Login and the profile ceremony have no Home frame and no media item to sample.  They still
-    /// belong to the same route family, so they take the same broad graphite/amber envelope as an
+    /// belong to the same route family, so they take the same broad blue envelope as an
     /// artwork-less first-run screen instead of inventing another flat background locally.
     pub(crate) fn draw_default(&mut self, p: Painter) {
         self.latch_default();
@@ -1668,6 +1668,13 @@ mod tests {
             tr[0] - tr[1] > 0.2,
             "the top-right corner must read RED, got {tr:?}"
         );
+    }
+
+    #[test]
+    fn the_pre_home_fallback_leans_blue() {
+        for (i, corner) in theme::ROUTE_GROUND_FALLBACK.iter().enumerate() {
+            assert!(corner[2] > corner[0], "corner {i} must lean blue, got {corner:?}");
+        }
     }
 
     #[test]
