@@ -1,6 +1,6 @@
 # Desktop Browser Port Plan (Emscripten + SDL + WebGL)
 
-**Status: feasibility plan; not implemented or validated.** This document scopes a possible desktop-browser target for Butaca. It does not target the webOS browser, and does not claim that the current crate builds under Emscripten. No Emscripten compiler was available during the repository inspection, so the first milestone is explicitly a build-and-runtime spike.
+**Status: port in progress; no browser build or runtime is verified yet.** This document scopes a desktop-browser target for Butaca, not the webOS browser, and does not claim that the full application builds under Emscripten. The official Emscripten 6.0.13 SDK is installed user-locally and pinned by `tools/emsdk-pin`; the current milestone is a build-and-runtime spike.
 
 ## Goal and non-goals
 
@@ -102,6 +102,8 @@ Decide supported desktop browsers/OSes, whether playback is required, authentica
 
 Install/pin Emscripten in a reproducible developer/CI environment. The repository pin is `tools/emsdk-pin`; run `tools/setup-emsdk.sh`, then source the printed `emsdk_env.sh` path. This pins SDK release 6.0.13 and the emsdk bootstrap revision, installs under the user's data directory, and avoids system package changes. Emscripten's official downloads guide recommends emsdk; its build guide documents `--use-port=sdl2`, with SDL_ttf enabled via the version-matched port setting. Add an isolated experimental target configuration; do not alter default Make targets. Build a minimal SDL window + WebGL context first, then compile the current Rust crate/binary with `--features hostsim` and the Emscripten target. This tests whether `hostsim` is a viable feature boundary while isolating Emscripten-specific GL/window choices behind target cfgs. Adapt `build.rs` for Emscripten SDL/SDL_ttf ports and `emcc` compilation of `src/svg.c`. Record every failure by dependency/module and classify whether it is build-system-only, target-gatable, or needs an implementation.
 
+The minimal SDL/WebGL 1 smoke source and build entry point are `tests/emscripten/sdl_webgl_smoke.c` and `tests/emscripten/build-smoke.sh`; they are a toolchain/runtime probe, not a substitute for building Butaca.
+
 **Exit:** documented successful minimal SDL/WebGL shell and a truthful compile/link blocker inventory for the app. A partial successful object build is not a full app build.
 
 ### Phase 2 — Representative UI renderer in browser
@@ -154,4 +156,5 @@ No person-week estimate is responsible before Phase 1 and playback scope are res
 - `rust-modules/src/player/CLAUDE.md`, `src/starfish.c`: native Starfish/ACB playback seam.
 - `rust-modules/src/lib.rs`: current module graph and target-specific gates.
 - `tools/emsdk-pin`, `tools/setup-emsdk.sh`: pinned, user-local Emscripten SDK bootstrap.
+- `tests/emscripten/sdl_webgl_smoke.c`, `tests/emscripten/build-smoke.sh`: minimal WebGL 1 SDL/GLES shader and VBO runtime probe.
 - Official toolchain references: [Emscripten SDK downloads](https://emscripten.org/docs/getting_started/downloads.html), [building projects and ports](https://emscripten.org/docs/compiling/Building-Projects.html), and [OpenGL support](https://emscripten.org/docs/porting/multimedia_and_graphics/OpenGL-support.html).
