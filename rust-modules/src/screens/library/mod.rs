@@ -650,6 +650,10 @@ impl LibraryScreen {
             fx.push(Fx::App(AppFx::Library(req)));
             return Handled::Yes;
         }
+        if elem == crate::ui::dispatch::STRIP_BASE + 7 {
+            fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return Handled::Yes;
+        }
         let strip = crate::ui::dispatch::STRIP_BASE;
         let req = match elem.checked_sub(strip) {
             Some(0) => Some(LibraryReq::Tab(HomeTab::Home)),
