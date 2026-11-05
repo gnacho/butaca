@@ -1901,6 +1901,28 @@ fn back_falls_through_to_navigation_when_no_background_preview_is_up() {
     clear();
 }
 
+/// The visible Back control shares the route crumb's pointer identity and the physical key's
+/// ordinary navigation request when no preview is up.
+#[test]
+fn the_visible_back_control_registers_and_navigates() {
+    let sid = ServerId::UNSET;
+    let _guard = install(detail(sid, "show"));
+    let mut screen = bare(&_guard, sid, "show");
+    let context = cx(&crate::ui::fixture::FixtureMeasure, None);
+    let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+    screen.record_stops(&mut frame);
+    let frame_origin = crate::ui::widgets::CHIP_FRAME;
+    let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+        .expect("Detail publishes its visible Back control");
+    assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
+        [frame_origin.x, frame_origin.y, frame_origin.w, frame_origin.h]);
+
+    let (handled, effects) = step(&mut screen, &ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB), None);
+    assert_eq!(handled, Handled::Yes);
+    assert!(effects.iter().any(|effect| matches!(effect.fx, Fx::App(AppFx::Content(ContentReq::Back)))));
+    clear();
+}
+
 /// `preview_completed_naturally` is the pure core of §8.2's play-once suppression, extracted
 /// specifically so it is testable without driving the live, process-wide `player::preview`
 /// singleton (which needs `server::session::peek()` file I/O to even start a Load — exactly the

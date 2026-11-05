@@ -672,6 +672,12 @@ impl FilmographyScreen {
             theme::size::LABEL,
             f.measure,
         );
+        crate::ui::widgets::back_control_stop_at(
+            f,
+            self.entry,
+            crate::screens::registry::HEADER_CRUMB,
+            layout.crumb_rect(&self.name, f.measure),
+        );
 
         if !self.tab_c.is_empty() {
             let clip_top = layout.content.y - CLIP_VPAD;
@@ -960,6 +966,10 @@ impl<H: ContentLike + PersonLike> Machine<H> for FilmographyScreen {
                 fx.invalidate(Provenance::Input);
                 Handled::Yes
             }
+            ScreenEvent::Activate(elem) if *elem == crate::screens::registry::HEADER_CRUMB => {
+                fx.push(crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back)));
+                Handled::Yes
+            }
             ScreenEvent::Activate(elem) => {
                 self.activate_focus(
                     Some(crate::ui::machine::FocusKey {
@@ -1019,6 +1029,10 @@ impl<H: ContentLike + PersonLike> Screen<H> for FilmographyScreen {
 
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         Some(Cow::Owned(self.name.clone()))
+    }
+
+    fn back_chrome(&self) -> crate::ui::screen::BackChrome {
+        crate::ui::screen::BackChrome::Existing
     }
 
     fn prepare(&mut self, _budget: &mut Budget, _cx: &Cx<'_, H>) {}
@@ -1579,6 +1593,25 @@ mod tests {
         });
         let entry = focus(&s, Located::Tab(0));
         let (handled, out, _) = step_screen(&mut s, &ev, Some(entry));
+        assert_eq!(handled, Handled::Yes);
+        assert!(has_content(&out, |r| matches!(r, ContentReq::Back)));
+    }
+
+    #[test]
+    fn the_visible_crumb_is_a_pointer_target_and_navigates_back() {
+        let _serial = crate::testlock::serial();
+        let mut s = screen(6, &_serial);
+        let measure = FixtureMeasure;
+        let context = cx(&measure, None);
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        crate::gfx::without_frame_clear(|| s.draw_content(&mut frame));
+        let wanted = route_layout(&measure).crumb_rect(&s.name, &measure);
+        let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+            .expect("Filmography registers its existing crumb as a pointer target");
+        assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
+            [wanted.x, wanted.y, wanted.w, wanted.h]);
+        let (handled, out, _) = step_screen(&mut s,
+            &ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB), None);
         assert_eq!(handled, Handled::Yes);
         assert!(has_content(&out, |r| matches!(r, ContentReq::Back)));
     }

@@ -808,6 +808,9 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         None
     }
+    fn back_chrome(&self) -> crate::ui::screen::BackChrome {
+        crate::ui::screen::BackChrome::Existing
+    }
     fn prepare(&mut self, b: &mut Budget, cx: &Cx<'_, H>) {
         let icx = inner_cx(cx);
         for e in self.inner.entries.iter_mut() {

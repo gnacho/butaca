@@ -763,6 +763,27 @@ fn a_fixture_screen_mounts_with_no_app_change() {
     assert!(probe.contains("\"mount\", \"enter\""), "{probe}");
 }
 
+/// A generic surface gets the shared top-left Back control, and activating it follows the same
+/// dismissal path as the physical key.
+#[test]
+fn the_shared_surface_back_control_is_clickable_and_dismisses() {
+    use crate::ui::hit::PointerKind;
+    let (mut d, mut rig, _) = booted();
+    let id = open_modal(&mut d, &mut rig, Style::Compact, 16);
+    d.draw(&mut rig, true);
+    let frame = crate::ui::widgets::CHIP_FRAME;
+    let hit = d.input.hit.resolve(Some(id), PointerKind::Click, frame.cx(), frame.cy(), None);
+    assert_eq!(hit.activate.map(|(key, _)| key.elem), Some(crate::ui::table_screen::CRUMB_ELEM));
+    let r = d.frame(&mut rig, tick(32), vec![crate::ui::machine::InputEvent {
+        at: tick(32), source: crate::ui::machine::Source::Replay,
+        kind: crate::ui::machine::InputKind::Click {
+            x: frame.cx(), y: frame.cy(), hit: Some(crate::ui::table_screen::CRUMB_ELEM),
+        },
+    }], vec![], &mut NoTap);
+    assert!(!r.back_at_root);
+    assert_eq!(d.nav.modals.top().unwrap().phase, Phase::Closing);
+}
+
 /// The Settings family's BACK (§6.2 `SettingsSurface`): the surface walks its OWN stack — two
 /// inner pushes, two inner pops — and only at its own depth 0 does BACK reach the container,
 /// which dismisses the surface. The app's stack never moves.

@@ -2853,6 +2853,49 @@ impl View for CircleButton {
     }
 }
 
+/// The shared top-left Back control for a non-root page or a visible playback HUD.
+///
+/// It deliberately reuses the account chip's frame and the circle-button family. Root tab pages
+/// keep the chip instead, so the two controls never compete for the same spot. The control is
+/// pointer-only: the remote's established Back key remains the D-pad path and the page restores
+/// focus through the ordinary navigation return state.
+pub(crate) fn draw_back_control(p: Painter) {
+    let button = CircleButton::new(std::ptr::null())
+        .frame(CHIP_FRAME)
+        .icon(crate::ui::icons::Icon::ChevronLeft)
+        .ground(ControlGround::Unkeyed);
+    button.draw(&Env::inert(), p);
+}
+
+/// Register the visible Back control without adding an unreachable element to the D-pad model.
+pub(crate) fn back_control_stop<H: crate::ui::machine::Host>(
+    f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    entry: crate::ui::machine::EntryId,
+    elem: H::Elem,
+) {
+    back_control_stop_at(f, entry, elem, CHIP_FRAME);
+}
+
+/// The pointer-only Back stop at an existing crumb's measured rectangle.
+pub(crate) fn back_control_stop_at<H: crate::ui::machine::Host>(
+    f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    entry: crate::ui::machine::EntryId,
+    elem: H::Elem,
+    rect: Rect,
+) {
+    f.stop(
+        f.painter,
+        crate::ui::screen::Stop {
+            key: crate::ui::machine::FocusKey { entry, elem },
+            rect,
+            rest_rect: rect,
+            clip: Rect::FULL,
+            hover: crate::ui::screen::Hover::Ignore,
+            activate: crate::ui::screen::Activate::Direct,
+        },
+    );
+}
+
 // ---- PageDots: page indicators; active dot elongated ----
 pub struct PageDots {
     pub count: usize,
