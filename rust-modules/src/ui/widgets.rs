@@ -5441,7 +5441,7 @@ impl StripRender {
     }
 
     /// This frame's chip unfurl amount. `Bridge::scrim_chrome_read` includes it in the borrowed
-    /// [`ChromeRead`] passed to the bare-`fn` lift — see [`redraw_profile_chip`].
+    /// [`ChromeRead`] passed to a bare-`fn` scrim lift.
     pub(crate) fn chip_expand_pos(&self) -> f32 {
         self.chip_expand.pos
     }
