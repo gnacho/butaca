@@ -753,8 +753,12 @@ pub(crate) unsafe fn construct(
     crate::surface::probe(win);
     // vsync on → the frame rate locks to the panel refresh. `/tmp/butaca-novsync` uncaps it so
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
-    // blocking, so the software budget in `run` follows the same switch.
+    // blocking, so the software budget in `run` follows the same switch. Emscripten's SDL routes
+    // this setter to `emscripten_set_main_loop_timing`, but Butaca owns a synchronous SDL loop and
+    // yields through Asyncify on swap; no Emscripten main loop exists to set a timing mode on.
+    #[cfg(not(target_os = "emscripten"))]
     let vsync_enabled = controlled || !crate::dev::scenarios::novsync_armed();
+    #[cfg(not(target_os = "emscripten"))]
     SDL_GL_SetSwapInterval(if vsync_enabled { 1 } else { 0 });
     #[cfg(all(feature = "hostsim", target_os = "linux"))]
     let wslg_frame_pacing = vsync_enabled
