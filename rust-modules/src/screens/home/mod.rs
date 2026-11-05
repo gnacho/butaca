@@ -162,7 +162,7 @@ impl Backdrop {
     fn new() -> Self {
         Self {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            grid_target: [theme::SURFACE_APP; 4],
+            grid_target: AmbientWash::blue(AmbientWash::BLUE_W),
             art: Spring::at(0.0),
             outgoing_art: Spring::at(0.0),
             tex: (0, 0.0, 0.0),
@@ -211,7 +211,7 @@ impl Backdrop {
             self.outgoing_art.step(1.0, AmbientWash::K, dt);
         }
         if let Some(item) = grid_item.filter(|m| m.has_blur) {
-            self.grid_target = AmbientWash::keyed(item.blur, PageGround::CARD_W);
+            self.grid_target = AmbientWash::blue_keyed(item.blur, PageGround::CARD_W);
         }
         self.wash.step(
             wash_corners(hero.map(|h| h.item), self.grid_target, snap),
@@ -2283,8 +2283,8 @@ fn shelf_top_banded(row: usize, band_row: Option<usize>) -> f32 {
 fn wash_corners(hero: Option<&CatalogMovie>, grid: [[f32; 4]; 4], snap: f32) -> [[f32; 4]; 4] {
     let hero = hero
         .filter(|m| m.has_blur)
-        .map(|m| AmbientWash::keyed(m.blur, HERO_WASH_W))
-        .unwrap_or([theme::SURFACE_APP; 4]);
+        .map(|m| AmbientWash::blue_keyed(m.blur, HERO_WASH_W))
+        .unwrap_or_else(|| AmbientWash::blue(HERO_WASH_W));
     let t = snap.clamp(0.0, 1.0);
     // A focused tile with no envelope of its own must not erase the backdrop the page already
     // had. Keep the hero's attenuated wash in that case; a real tile wash still takes over.

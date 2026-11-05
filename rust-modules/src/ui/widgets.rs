@@ -3129,13 +3129,35 @@ impl AmbientWash {
     /// the docs above) rather than a loop each screen writes, so "no artwork" is the app's own flat
     /// ground on every page **by construction** — `w = 0` returns exactly the surface. Colours that
     /// came from ARTWORK go through [`keyed`](Self::keyed), which caps them first.
-    pub(crate) fn target(src: [[f32; 4]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
-        std::array::from_fn(|i| theme::mix(theme::SURFACE_APP, src[i], w[i]))
+    pub(crate) const fn target(src: [[f32; 4]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
+        [
+            theme::mix(theme::SURFACE_APP, src[0], w[0]),
+            theme::mix(theme::SURFACE_APP, src[1], w[1]),
+            theme::mix(theme::SURFACE_APP, src[2], w[2]),
+            theme::mix(theme::SURFACE_APP, src[3], w[3]),
+        ]
+    }
+
+    /// The shared blue envelope at a four-corner strength. No runtime blur is involved: the
+    /// existing bilinear ambient pass supplies the soft edges for one deterministic draw.
+    pub(crate) const BLUE_W: [f32; 4] = theme::AMBIENT_BLUE_W;
+
+    /// [`target`](Self::target) for the artwork-less blue ground.
+    pub(crate) const fn blue(w: [f32; 4]) -> [[f32; 4]; 4] {
+        Self::target(theme::WASH_BLUE_CORNERS, w)
+    }
+
+    /// An artwork-keyed wash carrying the shared blue atmosphere. The original keyed target
+    /// remains dominant, so the artwork's own colours still identify the focused item.
+    pub(crate) fn blue_keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
+        let keyed = Self::keyed(blur, w);
+        let blue = Self::blue(w);
+        std::array::from_fn(|i| theme::mix(keyed[i], blue[i], theme::AMBIENT_BLUE_MIX))
     }
 
     /// [`target`](Self::target) for corners taken from an item's `UltraBlurColors` envelope
     /// (`CatalogMovie::blur` / `metadata::Detail::blur`), each held under [`GROUND_LUMA`] first. Every
-    /// artwork-keyed wash goes through here; a palette token (the resting warm tint) does not need
+    /// artwork-keyed wash goes through here; a palette token does not need
     /// it, because we chose that value.
     pub(crate) fn keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
         std::array::from_fn(|i| Self::keyed_one(blur[i], w[i]))
@@ -3435,26 +3457,22 @@ impl PageGround {
         0.08,
     ];
 
-    /// The faint warm tint a page's HEADER leans when no focused card hands the ground colours —
-    /// strongest top-left, where the page's title sits.
-    pub(crate) const HEADER_W: [f32; 4] = [0.10, 0.06, 0.02, 0.03];
-
     /// A header-and-cards page's ground target: `focused`'s `UltraBlurColors` along
-    /// [`CARD_W`](Self::CARD_W) when it carries any, else the warm [`HEADER_W`](Self::HEADER_W)
-    /// tint. The Person and Collection pages share it.
+    /// [`CARD_W`](Self::CARD_W) when it carries any, else the shared blue fallback. The Person
+    /// and Collection pages share it.
     pub(crate) fn page_target(focused: Option<&crate::catalog::CatalogMovie>) -> [[f32; 4]; 4] {
         match focused.filter(|m| m.has_blur) {
-            Some(m) => AmbientWash::keyed(m.blur, Self::CARD_W),
-            None => AmbientWash::target([theme::WASH_WARM; 4], Self::HEADER_W),
+            Some(m) => AmbientWash::blue_keyed(m.blur, Self::CARD_W),
+            None => AmbientWash::blue(AmbientWash::BLUE_W),
         }
     }
 
-    /// A ground resting on the app's own surface — what a screen mounts with, and what it stays
+    /// A ground resting on the app's own surface, dissolving toward the shared blue fallback
     /// until something focused hands it colours.
     pub(crate) const fn new() -> Self {
         PageGround {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            target: [theme::SURFACE_APP; 4],
+            target: AmbientWash::blue(AmbientWash::BLUE_W),
         }
     }
 
@@ -3465,7 +3483,7 @@ impl PageGround {
     /// Called once per frame from a screen's update, before anything reads the ground.
     pub(crate) fn key(&mut self, src: Option<[[f32; 3]; 4]>, w: [f32; 4], dt: f32) {
         if let Some(b) = src {
-            self.target = AmbientWash::keyed(b, w);
+            self.target = AmbientWash::blue_keyed(b, w);
         }
         self.wash.step(self.target, AmbientWash::K, dt);
     }

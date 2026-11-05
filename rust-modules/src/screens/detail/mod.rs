@@ -3046,9 +3046,9 @@ impl DetailScreen {
                 dt,
             );
             let target = if d.has_blur {
-                AmbientWash::keyed(d.blur, [AmbientWash::GROUND_W; 4])
+                AmbientWash::blue_keyed(d.blur, [AmbientWash::GROUND_W; 4])
             } else {
-                [theme::SURFACE_APP; 4]
+                AmbientWash::blue([AmbientWash::GROUND_W; 4])
             };
             self.ground.step(target, AmbientWash::K, dt);
         }

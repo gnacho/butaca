@@ -25,9 +25,9 @@ fn hostile_sources() -> Vec<[f32; 3]> {
         [1.0, 0.0, 1.0],
         [0.5, 0.5, 0.5],
         [
-            theme::WASH_WARM[0],
-            theme::WASH_WARM[1],
-            theme::WASH_WARM[2],
+            theme::TEXT_SECONDARY[0],
+            theme::TEXT_SECONDARY[1],
+            theme::TEXT_SECONDARY[2],
         ],
         [
             theme::TEXT_PRIMARY[0],
@@ -284,6 +284,41 @@ fn a_page_changing_subject_jumps_rather_than_washing_the_old_one_across_it() {
         for (a, b) in c.iter().zip(t) {
             assert_eq!(*a, b, "a jump lands ON the target, with nothing in between");
         }
+    }
+}
+
+/// An artwork-less browsing page carries a soft blue envelope instead of the flat app surface.
+#[test]
+fn the_artworkless_page_ground_is_a_blue_gradient() {
+    let mut ground = PageGround::new();
+    for _ in 0..120 {
+        ground.key(None, PageGround::CARD_W, 1.0 / 60.0);
+    }
+    assert!(!ground.is_flat(), "the blue fallback is drawn");
+    let corners = ground.corners();
+    assert!(corners.iter().any(|a| *a != corners[0]), "a gradient, not a flat fill");
+    for (i, corner) in corners.iter().enumerate() {
+        assert!(corner[2] > corner[0], "corner {i} must lean blue, got {corner:?}");
+        assert!(contrast(theme::TEXT_TERTIARY, [corner[0], corner[1], corner[2], 1.0]) >= 3.0,
+            "corner {i} drops tertiary ink below the floor");
+        assert!(contrast(theme::TEXT_PRIMARY, [corner[0], corner[1], corner[2], 1.0]) >= 7.0,
+            "corner {i} drops primary ink below the floor");
+    }
+}
+
+/// Artwork still keys the ground, but the wash leans toward the same blue atmosphere.
+#[test]
+fn an_artwork_keyed_page_ground_leans_blue_and_stays_legible() {
+    let mut ground = PageGround::new();
+    for _ in 0..120 {
+        ground.key(Some([[0.4, 0.4, 0.4]; 4]), PageGround::CARD_W, 1.0 / 60.0);
+    }
+    for (i, corner) in ground.corners().iter().enumerate() {
+        assert!(corner[2] - corner[0] > 0.01, "corner {i} did not take the blue lean: {corner:?}");
+        assert!(contrast(theme::TEXT_TERTIARY, [corner[0], corner[1], corner[2], 1.0]) >= 3.0,
+            "corner {i} drops tertiary ink below the floor");
+        assert!(contrast(theme::TEXT_PRIMARY, [corner[0], corner[1], corner[2], 1.0]) >= 7.0,
+            "corner {i} drops primary ink below the floor");
     }
 }
 
