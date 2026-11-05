@@ -234,6 +234,10 @@ impl SearchScreen {
             fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
             return Handled::Yes;
         }
+        if elem == crate::ui::dispatch::STRIP_BASE + 8 {
+            fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return Handled::Yes;
+        }
         if let Some(tab) = elem.checked_sub(crate::ui::dispatch::STRIP_BASE) {
             let request = match tab {
                 0 => SearchReq::Tab(HomeTab::Home), 1 => SearchReq::Tab(HomeTab::Movies),

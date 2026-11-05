@@ -2215,6 +2215,14 @@ pub(crate) const CHIP_FRAME: Rect = Rect::new(
     CHIP_D,
 );
 
+/// The active server's badge, immediately right of the Butaca wordmark. Hidden with one source.
+pub(crate) const INSTANCE_FRAME: Rect = Rect::new(
+    crate::ui::consts::MARGIN_X + 190.0,
+    TOP_BAR_Y,
+    CHIP_D,
+    CHIP_D,
+);
+
 /// The Settings gear mirrors the profile chip at the right safe-area edge.
 pub(crate) const SETTINGS_GEAR_FRAME: Rect = Rect::new(
     crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - TAB_TRACK_PAD - CHIP_D,
@@ -2263,6 +2271,8 @@ pub(crate) enum TopFocus {
     Chip,
     /// the Settings gear at the bar's right edge
     Gear,
+    /// the active server badge beside the wordmark
+    Instance,
     /// a pill of the strip, by index (0 = Home)
     Pill(usize),
 }
@@ -5440,6 +5450,8 @@ pub(crate) struct StripRender {
     chip_expand: crate::ui::Spring,
     /// Whether the Settings gear owns the remote this frame. Presentation only, never logical state.
     gear_focused: bool,
+    /// Whether the active-server badge owns the remote this frame. Presentation only.
+    instance_focused: bool,
 }
 
 impl StripRender {
@@ -5449,6 +5461,7 @@ impl StripRender {
             top_strip: TabStrip::new(),
             chip_expand: crate::ui::Spring::at(0.0),
             gear_focused: false,
+            instance_focused: false,
         }
     }
 
@@ -5466,6 +5479,10 @@ impl StripRender {
 
     pub(crate) fn gear_focused(&self) -> bool {
         self.gear_focused
+    }
+
+    pub(crate) fn instance_focused(&self) -> bool {
+        self.instance_focused
     }
 
 }
@@ -6346,6 +6363,7 @@ fn tab_scroll_target(widths: &[f32], idx: usize, cur: f32) -> f32 {
 impl StripRender {
     pub(crate) fn update(&mut self, data: TabLabels<'_>, selected: c_int, focus: TopFocus, dt: f32) {
         self.gear_focused = matches!(focus, TopFocus::Gear);
+        self.instance_focused = matches!(focus, TopFocus::Instance);
         let focused = focus.pill();
         // The chip is the bar's other stop, so its unfurl is stepped here rather than by whichever
         // screen happens to own the focus this frame — the same reason the capsules and the track's

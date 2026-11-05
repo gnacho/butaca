@@ -8,7 +8,7 @@
 //! `tokens/colors.css`), so a palette decision is one edit here and one there.
 //!
 //! Two roles may resolve to the SAME primitive and still stay two roles — [`ACCENT`] and
-//! [`TEXT_PRIMARY`] are both `COOL_0`, [`TEXT_TERTIARY`] and [`RATING_MUTED`] both `COOL_400` —
+//! [`TEXT_PRIMARY`] are both `WARM_0`, [`TEXT_TERTIARY`] and [`RATING_MUTED`] both warm stops —
 //! because sharing a value is not sharing a job: retuning the focus fill must not restyle every
 //! title on the screen. They are values on one stop for that reason, not `pub use` aliases of each
 //! other.
@@ -33,6 +33,18 @@
 const fn rgb8(r: u8, g: u8, b: u8) -> [f32; 4] {
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
 }
+
+// Warm — the mockup's ember palette: page ground, inks, gold accents and the ambient wash.
+const WARM_0: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
+const WARM_100: [f32; 4] = rgb8(0xff, 0xce, 0xa3);
+const WARM_300: [f32; 4] = rgb8(0xe8, 0xcd, 0xb0);
+const WARM_500: [f32; 4] = rgb8(0xa0, 0x84, 0x6c);
+const WARM_700: [f32; 4] = rgb8(0x6b, 0x5b, 0x4f);
+const WARM_900: [f32; 4] = rgb8(0x24, 0x16, 0x11);
+const WARM_950: [f32; 4] = rgb8(0x1d, 0x12, 0x0c);
+const WARM_1000: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
+const WARM_ACCENT: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
+const WARM_GOLD: [f32; 4] = rgb8(0xe8, 0xa0, 0x4c);
 
 // Cool — blue-leaning: everything that is text, and artwork that has not loaded.
 const COOL_0: [f32; 4] = rgb8(0xf7, 0xfa, 0xfc);
@@ -68,13 +80,13 @@ const CAPTION_55: [f32; 4] = rgb8(0x8c, 0x8c, 0x8c);
 const CAPTION_40: [f32; 4] = rgb8(0x66, 0x66, 0x66);
 const CAPTION_28: [f32; 4] = rgb8(0x47, 0x47, 0x47);
 
-// Blue atmosphere — four dark, low-frequency stops for the artwork-less page ground. The range
-// moves from a soft key light at the top left to deep navy at the bottom right, with a quieter
-// cyan lift at the bottom left. These are page grounds, never control fills or state colours.
-const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x25, 0x4a, 0x78);
-const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x1b, 0x2d, 0x52);
-const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x10, 0x15, 0x25);
-const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x17, 0x49, 0x5c);
+// Warm atmosphere — four dark, low-frequency stops for the artwork-less page ground. The range
+// moves from ember at the top left to wine at the bottom right, over the app's near-black base.
+// These are page grounds, never control fills or state colours.
+const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0xb3, 0x40, 0x1f);
+const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x7a, 0x2c, 0x3f);
+const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
+const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x5a, 0x24, 0x18);
 
 // Semantic — amber / red / green: state and verdict, never decoration.
 const AMBER_300: [f32; 4] = rgb8(0xfa, 0xb8, 0x2e);
@@ -93,19 +105,19 @@ const GREEN_500: [f32; 4] = rgb8(0x2f, 0xae, 0x5b);
 
 // ── Text ────────────────────────────────────────────────────────────────────
 /// Primary reading text / high-emphasis title. Collapses the 3-4 near-whites.
-pub const TEXT_PRIMARY: [f32; 4] = COOL_0;
+pub const TEXT_PRIMARY: [f32; 4] = WARM_0;
 /// Section headings ("Related", "Cast & Crew", About headings) — a touch below primary.
-pub const TEXT_HEADING: [f32; 4] = COOL_50;
+pub const TEXT_HEADING: [f32; 4] = WARM_0;
 /// Secondary text: metadata lines, idle row titles.
-pub const TEXT_SECONDARY: [f32; 4] = COOL_300;
+pub const TEXT_SECONDARY: [f32; 4] = WARM_500;
 /// **Reading copy** — a multi-line paragraph someone actually reads through, one step brighter than
 /// the label grey above it (`#cdd3dd`, `Details Screen.dc.html`). Its one job today is the detail
 /// hero's synopsis, which is the longest run of text on the page and sits over the backdrop scrim;
 /// at [`TEXT_SECONDARY`] it read as fine print rather than as the blurb. A one-line metadata VALUE
 /// stays secondary — the distinction is paragraph-vs-label, not importance.
-pub const TEXT_READING: [f32; 4] = COOL_200;
+pub const TEXT_READING: [f32; 4] = WARM_300;
 /// Tertiary text: runtime, kickers, inactive tabs, About labels, dim/empty states.
-pub const TEXT_TERTIARY: [f32; 4] = COOL_400;
+pub const TEXT_TERTIARY: [f32; 4] = WARM_700;
 /// The `·` between fine-print facts, and **only** that — a step below the words it separates.
 /// Both mocks set every separator dot `opacity:.45` against the run around it, and the reason is
 /// worth keeping: a dot at the full ink of its neighbours joins the list instead of punctuating
@@ -277,20 +289,13 @@ pub mod logo {
 }
 
 // ── Accent / control ─────────────────────────────────────────────────────────
-/// **The focus fill — and the only fill a control can light up with.** `COOL_0`: the same near-white
-/// [`TEXT_PRIMARY`] is, and the same the tab bar inks a selected label in, because a control lights
-/// up for exactly one reason — the remote is on it. Nothing is filled by RANK, so there is no
-/// always-filled primary CTA: the hero Play pill sits idle like everything else until focus reaches
-/// it.
-///
-/// It was the mockup's warm "Snow" `#e9e6e0` until the 2026-08-13 palette sync, alongside a second,
-/// cooler control white for the "primary" CTA (`FILL_PRIMARY`/`INK_ON_PRIMARY`, and
-/// `ControlStyle::Primary` with them). At ten feet nobody could tell the two whites apart, so the
-/// pair collapsed onto this one. The cool plate survives elsewhere as [`SURFACE_QR_PLATE`], a
-/// scan surface rather than a control.
-pub const ACCENT: [f32; 4] = COOL_0;
+/// **The focus fill — and the only fill a control can light up with.** The mockup's warm sand
+/// `#ffcea3`: a control lights up for exactly one reason, the remote is on it. Nothing is filled by
+/// rank, so there is no always-filled primary CTA: the hero Play pill sits idle like everything
+/// else until focus reaches it.
+pub const ACCENT: [f32; 4] = WARM_100;
 /// Near-black ink/glyphs drawn over [`ACCENT`].
-pub const ACCENT_INK: [f32; 4] = NEUTRAL_950;
+pub const ACCENT_INK: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
 /// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this
 /// file: it is the same ROLE under a second name, not a second role that happens to share a stop.
 pub const INK_ON_ACCENT: [f32; 4] = ACCENT_INK;
@@ -318,7 +323,7 @@ pub const CONTROL_SPENT_FOCUS_W: f32 = 0.76;
 /// focus state changing. Deliberately close enough to `ACCENT` that [`ACCENT_INK`] stays legible on
 /// BOTH sides — the first version flipped the ink at the sweep line and cut the label in half
 /// mid-word.
-pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_SPENT_FOCUS_W);
+pub const CONTROL_SPENT_FILL: [f32; 4] = mix(WARM_100, WARM_1000, 1.0 - CONTROL_SPENT_FOCUS_W);
 
 /// The Search query field's **editing** ink — the bright endpoint of the `hot` cross-fade in
 /// `search::field::draw` (idle end: `TEXT_SECONDARY`) while the television's keyboard is up. Its own
@@ -338,7 +343,7 @@ pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
 /// The cool-tinted selected-row fill while a table field accepts text. Reuses [`COOL_150`]
 /// rather than the default near-white [`ACCENT`], so editing is visibly distinct without a stroke or
 /// a new palette stop; the existing near-black accent ink remains legible over it.
-pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = COOL_150;
+pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = WARM_300;
 
 /// The Search query field's **focused-but-not-editing** ink — the `hot` cross-fade's bright
 /// endpoint for the one state that has no caret, no keyboard and (since 2026-09-04) no plate to
@@ -429,10 +434,9 @@ pub const CONTROL_RIM_FOCUS_UNKEYED_GLOW: [f32; 4] = [5.0, 1.0, 2.5, 0.55];
 pub const CONTROL_CAST_FOCUS: [(f32, f32, f32); 2] = [(5.0, 32.0, 0.34), (1.0, 6.0, 0.20)];
 
 // ── Surfaces / backgrounds ───────────────────────────────────────────────────
-/// Flat shelf/app base (both gradient stops) — Apple TV's shelf gray **#2C2C2E (44,44,46)**. A
-/// MEDIUM gray, deliberately not near-black: the focused-card drop-shadow only reads against a base
-/// this light (on the old near-black 25,25,29 a black shadow had almost nothing to darken).
-pub const SURFACE_APP: [f32; 4] = NEUTRAL_500;
+/// Flat shelf/app base — the mockup's ember-black **#130B07 (19,11,7)**. It is deliberately
+/// near-black, so artwork carries the light and the warm ambient wash colours the page around it.
+pub const SURFACE_APP: [f32; 4] = WARM_1000;
 /// Opaque sheet drawn over the hardware video plane when a detail page scrolls the hero away.
 /// Same stop as [`SURFACE_APP`] so the rising page and the cover are one surface. Different role:
 /// this hides the plane. It is not atmosphere, so [`scrim`] is the wrong token.
@@ -448,18 +452,18 @@ pub const IDLE_OLED_BLACK: [f32; 4] = BLACK;
 pub const IDLE_CLOCK_INK: [f32; 4] = with_a(WHITE, 0.16);
 /// GL clear color — 3-float (`frame_clear` takes r,g,b, no alpha). The app's DEFAULT base, and
 /// [`SURFACE_APP`] itself rather than a second copy of its code: browsing screens clear to the
-/// Apple-TV gray, which is what makes a route change read as a seamless dip. Home overdraws it
+/// ember base, which is what makes a route change read as a seamless dip. Home overdraws it
 /// with `SURFACE_APP` (the identical gray). Two punches through to the hardware video plane use
 /// transparent black instead: the player route, and the detail page while a trailer preview has
 /// presented a frame (`gfx::frame_clear_through`).
 pub const CLEAR_RGB: (f32, f32, f32) = (SURFACE_APP[0], SURFACE_APP[1], SURFACE_APP[2]);
 /// Opaque menu panel / fade mask / badge knockout interior.
-pub const SURFACE_PANEL: [f32; 4] = NEUTRAL_650;
+pub const SURFACE_PANEL: [f32; 4] = WARM_900;
 /// Near-opaque sheet/card gradient — top stop. [`SURFACE_PANEL`]'s own stop at .985, so the sheet
 /// and its opaque twin are one material rather than two greys a hair apart.
-pub const PANEL_TOP: [f32; 4] = with_a(NEUTRAL_650, 0.985);
+pub const PANEL_TOP: [f32; 4] = with_a(WARM_900, 0.985);
 /// Near-opaque sheet gradient — bottom stop (kept distinct; the gradient is deliberate).
-pub const PANEL_BOT: [f32; 4] = with_a(NEUTRAL_750, 0.985);
+pub const PANEL_BOT: [f32; 4] = with_a(WARM_950, 0.985);
 /// **The material scale, named rather than numbered — SwiftUI's `Material` is the vocabulary.**
 ///
 /// Every glass surface in this app used to be described by two unrelated numbers written at its own
@@ -645,13 +649,13 @@ pub const PANEL_FROST_BOT: [f32; 4] = with_a(NEUTRAL_750, 0.72);
 /// bright on purpose.
 pub const SURFACE_QR_PLATE: [f32; 4] = COOL_0;
 /// Poster/thumb skeleton flat placeholder.
-pub const CARD_PLACEHOLDER: [f32; 4] = COOL_850;
+pub const CARD_PLACEHOLDER: [f32; 4] = WARM_950;
 /// Loading-skeleton gradient — top. The same `COOL_850` stop as [`CARD_PLACEHOLDER`]: a card whose
 /// artwork is on the way and one with none to load are the same object at rest. Both lean BLUE,
 /// away from the neutral panel greys, so a missing poster never reads as a panel.
-pub const SKELETON_TOP: [f32; 4] = COOL_850;
+pub const SKELETON_TOP: [f32; 4] = WARM_950;
 /// Loading-skeleton gradient — bottom.
-pub const SKELETON_BOT: [f32; 4] = COOL_900;
+pub const SKELETON_BOT: [f32; 4] = WARM_1000;
 
 // ── Scrims (near-black; alpha supplied per call) ─────────────────────────────
 /// Hero/scroll scrim ink; use via [`scrim`].
@@ -835,7 +839,7 @@ pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.22);
 /// **No consumer today** — its one user was the amber watched DISC, which the 2026-08-13 evening
 /// sync replaced with a bare tick over a veil ([`TILE_MARK_INK`]). Kept because the design system
 /// still carries the role, and because the next amber surface needs exactly this ink.
-pub const INK_ON_RESUME: [f32; 4] = NEUTRAL_850;
+pub const INK_ON_RESUME: [f32; 4] = WARM_1000;
 
 // ── A list row's trailing VALUE read-out ─────────────────────────────────────
 /// The word at a row's trailing edge that says what it is SET to (`On`/`Off`, "English"), over the
@@ -860,7 +864,7 @@ pub const ROW_VALUE_INK_DIM: [f32; 4] = with_a(TEXT_TERTIARY, 0.45);
 /// artwork stays visible and only the veil below touches it. (The mark was an amber disc with a
 /// knocked-out check for one day, 2026-08-13; the amber is now the resume bar's alone, so the two
 /// states cannot be mistaken for each other at a glance across a shelf.)
-pub const TILE_MARK_INK: [f32; 4] = COOL_0;
+pub const TILE_MARK_INK: [f32; 4] = WARM_0;
 /// The **veil**: a corner falloff under the tick, and the only thing that touches the picture. A
 /// white tick has no contrast of its own over a light frame — a snowfield, a white title card, the
 /// office's white backdrop — so this guarantees it reads without putting a plate on the artwork.
@@ -913,7 +917,7 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 /// camera's chroma subsampling, which is the output format of this surface.
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
 /// Section divider hairline.
-pub const HAIRLINE: [f32; 4] = with_a(WHITE, 0.10);
+pub const HAIRLINE: [f32; 4] = with_a(WARM_100, 0.12);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
 /// tiles' own [`CARD_SHEEN`] (.22) because a sheet's edge is quieter than a card's.
 ///
@@ -1198,7 +1202,7 @@ pub const RATING_LEAF: [f32; 4] = GREEN_500;
 /// [`TEXT_TERTIARY`] resolves to, because the negation is literally "this has the weight of a
 /// caption now". Its own role ON that stop rather than an alias OF the text token: a verdict mark
 /// and a runtime label are two jobs, and retuning one must not restyle the other.
-pub const RATING_MUTED: [f32; 4] = COOL_400;
+pub const RATING_MUTED: [f32; 4] = WARM_700;
 
 // ── Card-glow geometry (the glow *color* is shader-baked in gfx.rs's FS_SRC/FS_IMG; only geometry
 // is tunable). The hero-grid card's wide glow pad is `consts::GLOW_PAD` (shared with off-screen

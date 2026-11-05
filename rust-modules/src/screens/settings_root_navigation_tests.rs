@@ -32,11 +32,11 @@ fn the_root_reconnects_preferences_and_sign_out() {
     let root = RootPage::new(EntryId(0), cx(None).views);
     assert_eq!(root.rows, vec![
         Action::SelectServer, Action::QuickConnect,
-        Action::Playback, Action::Language, Action::SignOut,
+        Action::Playback, Action::SignOut,
     ]);
     assert_eq!(root.table.sections.len(), 3, "server doors, preferences, then the destructive action");
     assert_eq!(root.table.sections[0].rows.len(), 2, "select and quick connect");
-    assert_eq!(root.table.sections[1].rows.len(), 2, "playback and language stay reachable");
+    assert_eq!(root.table.sections[1].rows.len(), 1, "playback stays reachable, interface rows do not");
     assert_eq!(root.table.sections[2].rows.len(), 1, "sign out stays last");
 }
 
@@ -147,7 +147,6 @@ fn preference_rows_push_their_existing_pages_and_sign_out_disconnects() {
     let _sess = scratch_session("root-preference-actions");
     for (row, wanted) in [
         (2, SettingsPage::Playback),
-        (3, SettingsPage::Language),
     ] {
         let mut root = RootPage::new(EntryId(0), cx(None).views);
         let mut out = Vec::new();
@@ -162,7 +161,7 @@ fn preference_rows_push_their_existing_pages_and_sign_out_disconnects() {
     let mut out = Vec::new();
     let mut present = Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Instance(InstanceId(0)), &mut present);
-    root.activate(4, cx(None).views, &mut fx);
+    root.activate(3, cx(None).views, &mut fx);
     assert!(out.iter().any(|st| matches!(st.fx, Fx::App(AppFx::Loop(LoopReq::JfDisconnectServer)))),
         "the last row uses the existing disconnect flow");
     assert!(!out.iter().any(|st| matches!(st.fx, Fx::Nav(_))));

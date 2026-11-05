@@ -999,6 +999,10 @@ impl HomeScreen {
             fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
             return;
         }
+        if elem == crate::ui::dispatch::STRIP_BASE + 8 {
+            fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return;
+        }
         if let Some(req) = Self::request_for_strip(elem) {
             fx.push(Fx::App(AppFx::Home(req)));
             return;
