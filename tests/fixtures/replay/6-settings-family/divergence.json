@@ -1,9 +1,9 @@
 {
-  "expected": "0x62678122110fbdf0",
+  "expected": "0x8860ffd76450e661",
   "first_frame": 1,
   "from_state_fp": 5212864836643027146,
-  "got": "0x8860ffd76450e661",
+  "got": "0xc79676147c2dfb40",
   "preceding_event_kinds": [],
-  "reason": "The strip gained its Favorites pill (#121), so the screens that paint the chrome draw one more destination at stable id 6. The repaint is the whole change: every state, effect, result and landing count is unchanged.",
+  "reason": "The shared chrome gained a Settings gear at stable id 7 (#273), which changes the strip census behind Settings. The recorded key script is unchanged.",
   "to_state_fp": 5212864836643027146
 }
