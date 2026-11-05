@@ -725,18 +725,20 @@ struct ArtWashProgram {
 /// nearly did: the preamble probes, while `bind_core_profile_vao` trusted `cfg!(hostsim)` — so a
 /// host build against a Mesa GLES2 driver (a Pi, a Linux VM) would have bound a VAO into a context
 /// that has none *while* compiling ES shaders. A nonsense state that compiles clean.
+fn glsl_version_is_es(version: &[u8]) -> bool {
+    // GLES implementations use "OpenGL ES GLSL ES ..."; WebGL exposes the equivalent
+    // "WebGL GLSL ES ..." string. Both consume the unmodified GLSL ES 1.00 shader sources.
+    version.starts_with(b"OpenGL ES") || version.starts_with(b"WebGL GLSL ES")
+}
+
 fn gl_is_es() -> bool {
     use std::sync::OnceLock;
     static ES: OnceLock<bool> = OnceLock::new();
     *ES.get_or_init(|| unsafe {
         let v = glGetString(GL_SHADING_LANGUAGE_VERSION);
-        // "OpenGL ES GLSL ES 1.00" on the television; "4.10" on a desktop core profile. An
-        // unreadable string is treated as ES, which is the configuration that needs no preamble
-        // and therefore the safe default — a wrong guess there changes nothing.
-        // `starts_with`, not a substring scan: the ES spec mandates this exact prefix, while a
-        // desktop vendor string containing "ES" anywhere would otherwise skip the preamble and
-        // hard-exit at the first shader compile.
-        v.is_null() || CStr::from_ptr(v).to_bytes().starts_with(b"OpenGL ES")
+        // An unreadable string is treated as ES, which needs no preamble and is the safe default.
+        // Prefix matching avoids mistaking a desktop vendor string containing "ES" for GLES.
+        v.is_null() || glsl_version_is_es(CStr::from_ptr(v).to_bytes())
     })
 }
 
@@ -6288,6 +6290,14 @@ pub(crate) fn draw_field_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn webgl_glsl_version_selects_the_gles_shader_preamble() {
+        assert!(glsl_version_is_es(b"OpenGL ES GLSL ES 1.00"));
+        assert!(glsl_version_is_es(b"WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)"));
+        assert!(!glsl_version_is_es(b"4.10"));
+        assert!(!glsl_version_is_es(b"OpenGL 4.1 vendor ES compatibility"));
+    }
 
     /// **[`enc_u8`] is `(enc(v).clamp(0, 1) * 255 + 0.5) as u8` to the bit, without a `powf`.**
     /// Every threshold is checked from both sides (the last float below it and the threshold

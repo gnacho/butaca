@@ -690,13 +690,12 @@ pub(crate) unsafe fn construct(
             ));
         }
     }
-    // The television has a real GLES2 driver (a shim over libmali). A desktop has none at all —
-    // it ships desktop GL only, capped at 4.1 core — so asking for ES here fails context
-    // creation outright. 4.1 core is the closest thing that exists, and it is a superset for
-    // everything this renderer does: a real VBO (never client arrays) and RGBA/UNSIGNED_BYTE
-    // textures, both core-profile-legal. The shader sources are adapted at compile time by
-    // `gfx::glsl_preamble`, which reads the driver's GLSL version rather than assuming.
-    if cfg!(feature = "hostsim") {
+    // The television has a real GLES2 driver (a shim over libmali). A native desktop has none —
+    // it ships desktop GL only, capped at 4.1 core — so hostsim asks for that profile. Emscripten's
+    // SDL driver maps an ES2 context request to WebGL 1, and must not inherit the desktop profile
+    // merely because it shares hostsim's platform seams. `gfx::glsl_preamble` then reads the actual
+    // shading-language string and keeps the driver's native shader dialect.
+    if cfg!(all(feature = "hostsim", not(target_os = "emscripten"))) {
         SDL_GL_SetAttribute(A_CTX_PROFILE_MASK, CTX_PROFILE_CORE);
         SDL_GL_SetAttribute(A_CTX_MAJOR, 4);
         SDL_GL_SetAttribute(A_CTX_MINOR, 1);
