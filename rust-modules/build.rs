@@ -57,21 +57,28 @@ fn main() {
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    if let Some(libdirs) = sdl_search_paths(&target_os) {
-        for libdir in libdirs {
-            println!("cargo:rustc-link-search=native={}", libdir.display());
+    if target_os != "emscripten" {
+        if let Some(libdirs) = sdl_search_paths(&target_os) {
+            for libdir in libdirs {
+                println!("cargo:rustc-link-search=native={}", libdir.display());
+            }
+        } else {
+            // Not fatal — a system-wide install may need no extra search path. This is not labelled
+            // "hostsim": plain host tests now reach the same drawing symbols.
+            println!(
+                "cargo:warning=host link: could not discover SDL2/SDL2_ttf with the platform package \
+                 manager; relying on the default linker search path"
+            );
         }
-    } else {
-        // Not fatal — a system-wide install may need no extra search path. This is not labelled
-        // "hostsim": plain host tests now reach the same drawing symbols.
-        println!(
-            "cargo:warning=host link: could not discover SDL2/SDL2_ttf with the platform package \
-             manager; relying on the default linker search path"
-        );
     }
 
-    println!("cargo:rustc-link-lib=dylib=SDL2");
-    println!("cargo:rustc-link-lib=dylib=SDL2_ttf");
+    if target_os != "emscripten" {
+        // Emscripten's --use-port=sdl2 / USE_SDL_TTF settings select the matching pthread or
+        // non-pthread archives. A bare -lSDL2 would also resolve the default non-pthread archive
+        // beside the port and break --shared-memory linking.
+        println!("cargo:rustc-link-lib=dylib=SDL2");
+        println!("cargo:rustc-link-lib=dylib=SDL2_ttf");
+    }
 
     println!("cargo:rustc-link-lib=dylib=GL");
 
@@ -86,6 +93,9 @@ fn main() {
     }
 
     compile_svg();
+    if target_os == "emscripten" {
+        compile_emscripten_http();
+    }
 }
 
 /// Publish `BUTACA_VERSION` — the version this build REPORTS, which is not always the version it was
@@ -275,6 +285,39 @@ fn triplet(pkg: &str) -> (u64, u64, u64) {
 /// Shelling out to the C compiler rather than taking the `cc` crate as a build-dependency: this is
 /// one translation unit with two include paths, and the crate's dependency list is deliberately
 /// short — a build-dep would be fetched for the ARM build too, which never runs this function.
+fn compile_emscripten_http() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("rust-modules has a parent");
+    let src = repo.join("rust-modules/src/http_emscripten.c");
+    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("http_emscripten.o");
+    println!("cargo:rerun-if-changed={}", src.display());
+
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let st = Command::new(&cc)
+        .arg("-c")
+        .arg("-pthread")
+        .arg(&src)
+        .arg("-o")
+        .arg(&out)
+        .arg("-O2")
+        .arg("-fPIC")
+        .arg("-fno-stack-protector")
+        .status()
+        .unwrap_or_else(|e| {
+            panic!(
+                "Emscripten link: could not run {cc:?} to compile {}: {e}",
+                src.display()
+            )
+        });
+    assert!(
+        st.success(),
+        "Emscripten link: compiling {} failed ({st})",
+        src.display()
+    );
+    println!("cargo:rustc-link-arg={}", out.display());
+}
+
 fn compile_svg() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

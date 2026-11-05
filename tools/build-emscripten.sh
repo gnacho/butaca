@@ -16,9 +16,9 @@ cd "$sdk_dir"
 # shellcheck disable=SC1091
 . ./emsdk_env.sh >/dev/null
 
-# Build ports separately so SDL_ttf's nested FreeType/Harfbuzz builds do not contend for
-# Emscripten's cache lock during the Rust link.
-embuilder build sdl2 sdl2_ttf
+# Build the pthread variants separately so SDL_ttf's nested FreeType/Harfbuzz builds do not
+# contend for Emscripten's cache lock during the Rust link.
+embuilder build sdl2-mt sdl2_ttf-mt
 
 cd "$repo/rust-modules"
 target_dir="$repo/rust-modules/target"
@@ -28,8 +28,9 @@ CARGO_INCREMENTAL=0 \
 CC=emcc \
 CARGO_TARGET_DIR="$target_dir" \
 CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_LINKER=emcc \
-CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C link-arg=--use-port=sdl2 -C link-arg=-sUSE_SDL_TTF=2 -C link-arg=-sMIN_WEBGL_VERSION=1 -C link-arg=-sMAX_WEBGL_VERSION=1 -C link-arg=-sASYNCIFY=1 -C link-arg=-sSTACK_SIZE=8388608 -C link-arg=--pre-js -C link-arg=$repo/tests/emscripten/browser-pre.js -C link-arg=--preload-file=$repo/pkg/appfont.ttf@/app/appfont.ttf -C link-arg=--preload-file=$repo/pkg/appfont-bold.ttf@/app/appfont-bold.ttf -C link-arg=--preload-file=$repo/pkg/appfont-cjk.ttf@/app/appfont-cjk.ttf -C link-arg=--preload-file=$repo/pkg/butaca-name.png@/app/butaca-name.png -C link-arg=--oformat=html -C link-arg=-o -C link-arg=$html_out" \
+CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C target-feature=+atomics,+bulk-memory -C link-arg=-pthread -C link-arg=-sPTHREAD_POOL_SIZE=12 -C link-arg=-sPTHREAD_POOL_SIZE_STRICT=1 -C link-arg=-sDEFAULT_PTHREAD_STACK_SIZE=2097152 -C link-arg=-sINITIAL_MEMORY=134217728 -C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=--use-port=sdl2 -C link-arg=-sUSE_SDL_TTF=2 -C link-arg=-sMIN_WEBGL_VERSION=1 -C link-arg=-sMAX_WEBGL_VERSION=1 -C link-arg=-sJSPI=1 -C link-arg=-sSTACK_SIZE=8388608 -C link-arg=-sFORCE_FILESYSTEM=1 -C link-arg=-lidbfs.js -C link-arg=--pre-js -C link-arg=$repo/tests/emscripten/browser-pre.js -C link-arg=--preload-file=$repo/pkg/appfont.ttf@/app/appfont.ttf -C link-arg=--preload-file=$repo/pkg/appfont-bold.ttf@/app/appfont-bold.ttf -C link-arg=--preload-file=$repo/pkg/appfont-cjk.ttf@/app/appfont-cjk.ttf -C link-arg=--preload-file=$repo/pkg/butaca-name.png@/app/butaca-name.png -C link-arg=--oformat=html -C link-arg=-o -C link-arg=$html_out" \
     cargo +nightly build \
+        -Z build-std=std,panic_unwind \
         --bin butaca-sim \
         --no-default-features \
         --features "$rust_features" \

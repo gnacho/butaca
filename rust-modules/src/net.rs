@@ -496,6 +496,7 @@ impl Drop for HeaderList {
 /// An HTTP response: numeric status + raw body bytes.
 pub struct Resp {
     pub status: u16,
+    #[cfg_attr(target_os = "emscripten", allow(dead_code))]
     pub body: Vec<u8>,
 }
 impl Resp {

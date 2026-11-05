@@ -3,26 +3,30 @@
 //!
 //! ## Why this file exists
 //!
-//! The control plane has two request transports and they are not interchangeable:
+//! Native control-plane requests have two transports and they are not interchangeable:
 //!
 //! * [`crate::stream`] is a raw TCP socket. It resolves through `getaddrinfo` and dials either
 //!   address family, it is fast, and it speaks **cleartext only**.
 //! * [`crate::net`] is libcurl. It also validates certificates, and it is what the account
 //!   service has always been reached through.
 //!
+//! The Emscripten target uses a third, target-only bridge: browser `fetch()` from
+//! `http_emscripten.c`. It uses browser DNS/TLS and requires CORS permission from a remote server;
+//! it does not route browser traffic through raw sockets or native libcurl.
+//!
 //! Media makes its own scheme decision under `ff.rs`: the same `stream.rs` socket for plaintext,
 //! or [`crate::curlio`]'s interruptible libcurl-multi pull source for HTTPS. That is deliberately
 //! outside this REST request façade.
 //!
-//! **TLS is now the only thing that separates them**, which `stream.rs`'s own module doc says in
-//! those words. Until this file, the control plane was hard-wired to the first of the two, and
-//! that is the whole of why a reviewer with no server on their LAN dead-ends: an account signed in
-//! from anywhere else reaches its servers over HTTPS on a public name that carries a certificate,
-//! and cleartext to the address behind it fails validation by design (`server::origin`).
+//! **On native targets, TLS is what separates the two transports**, which `stream.rs`'s own
+//! module doc says in those words. An account signed in from anywhere else reaches its servers
+//! over HTTPS on a public name that carries a certificate, and cleartext to the address behind it
+//! fails validation by design (`server::origin`).
 //!
-//! So the dispatch is on [`Origin::scheme`] and nowhere else. An [`Origin`] is parsed from a URL
-//! and never rebuilt from an address, so by the time a request reaches here the question "which
-//! transport" has exactly one answer and no call site has to know it.
+//! Native dispatch is on [`Origin::scheme`]. An [`Origin`] is parsed from a URL and never rebuilt
+//! from an address, so no call site has to select a native transport. The Emscripten target has a
+//! compile-time browser adapter for both HTTP and HTTPS; the same origin/security policy still
+//! applies before the adapter is called.
 //!
 //! ## What it returns, and why that is the interesting half
 //!
@@ -44,29 +48,26 @@
 //!
 //! ## Two asymmetries worth knowing before you read a failure
 //!
-//! **Deadlines.** Small API calls take [`net::API`] (8 s connect, 25 s total). Content-dependent
-//! library reads take [`net::BULK`] instead: the same connect setting, a 1-byte/s low-speed
-//! guard held for 30 s, and no whole-transfer timeout, so a healthy large library/art/subtitle
-//! response is not cut off at 25 s while a stalled body is still bounded. The connect value is not
-//! a promise over a synchronous resolver when `NOSIGNAL` is set; `net::global_init` logs the
-//! runtime's `AsynchDNS` feature bit. The plaintext arm cannot select either policy: `stream.rs`
-//! compiles in its own 2 s connect and 15 s `SO_RCVTIMEO`.
+//! **Deadlines.** Native requests use the timeout policy selected by their transport. The browser
+//! bridge instead applies a 25-second wall-clock `AbortController` deadline to Fetch and response
+//! body reading; this is not a socket connect timeout or libcurl's low-speed policy. A slow browser
+//! connection can therefore fail as a generic transport error when that deadline expires.
 //!
-//! **Redirects.** The plaintext transport returns a 3xx response and never follows it. The TLS
-//! arm does the same for control-plane requests. This is a correctness rule and a credential
-//! boundary: the routes that take a credential carry it in the query string, so an automatic
-//! cross-origin follow would give libcurl permission to replay a token-bearing URL outside the
-//! origin we selected and verified. The account wrappers also keep redirects off because their
-//! custom headers carry a token. Only the public, headerless QR-image fetch may follow one: at
-//! most five hops, HTTP(S) only, and never from HTTPS down to HTTP.
+//! **Redirects.** Native control-plane transports return 3xx responses and never follow them. This
+//! is a correctness rule and a credential boundary: routes that take a credential carry it in the
+//! query string or a header, so an automatic cross-origin follow could replay a token outside the
+//! selected origin. Browser Fetch uses `redirect: "manual"`; any response the browser marks
+//! `opaqueredirect` is rejected by the adapter. Only the public, headerless QR-image fetch may
+//! follow a redirect: at most five hops, HTTP(S) only, and never from HTTPS down to HTTP.
 //!
-//! **A short body is reported on one arm only.** `stream.rs` logs a line when a response ends
-//! before its `Content-Length` (`note_short_body` — the difference between "the JSON would not
-//! parse" and "the server never answered"), and the plaintext arm below calls it; the TLS arm
-//! cannot, because libcurl owns that framing and `net.rs` sees only the assembled body. The gap is
-//! narrower than it looks: `server::client::get_json` logs the status, the byte count and serde's own
-//! error whenever a 2xx will not parse, over either transport.
-use crate::origin::{CredentialPolicy, Origin, Scheme, ResolvePin};
+//! **A short body is reported on one native arm only.** `stream.rs` logs a line when a response
+//! ends before its `Content-Length` (`note_short_body`); the TLS arm cannot, because libcurl owns
+//! that framing and `net.rs` sees only the assembled body. The browser adapter reads an
+//! `arrayBuffer()` and does not perform an explicit `Content-Length` comparison. In all cases,
+//! `server::client::get_json` logs the status, byte count and serde error when a 2xx will not parse.
+#[cfg(not(target_os = "emscripten"))]
+use crate::origin::Scheme;
+use crate::origin::{CredentialPolicy, Origin, ResolvePin};
 
 /// The verb. Reads, and the POSTs/DELETEs whose parameters ride the query string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,9 +107,9 @@ pub(crate) struct Reply {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum RequestOutcome {
     Response(Reply),
-    /// Nothing answered. Carries libcurl's [`crate::net::RequestFailure`] when the TLS transport
-    /// ran and produced one; `None` from the plaintext transport and from a request refused
-    /// before any transport ran.
+    /// Nothing answered. Carries libcurl's [`crate::net::RequestFailure`] when native TLS ran and
+    /// produced one; `None` from native plaintext, browser Fetch, or a request refused before any
+    /// transport ran.
     Transport(Option<crate::net::RequestFailure>),
 }
 
@@ -135,8 +136,8 @@ impl Reply {
 /// rather than failing, so this constant is shared rather than spelled per call site.
 pub(crate) const ACCEPT_JSON: &str = "Accept: application/json";
 
-/// **The one entry point.** One request to `origin` for `path`, over whichever transport that
-/// origin's scheme names.
+/// **The one entry point.** One request to `origin` for `path`; native targets dispatch by scheme,
+/// while Emscripten uses browser Fetch for both schemes.
 ///
 /// `path` is everything after the authority: it must already carry its query string and, on the
 /// routes that take one, its token (the client's own URL builders append it).
@@ -188,11 +189,148 @@ fn request_with(
     if !credential_transport_allowed(origin, path, headers) {
         return RequestOutcome::Transport(None);
     }
-    match origin.scheme() {
-        // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
-        Scheme::Http => plaintext(origin, path, method, headers, req_body),
-        Scheme::Https => tls(origin, path, method, headers, pin, req_body),
+    #[cfg(target_os = "emscripten")]
+    {
+        let _ = pin; // Browser TLS uses the browser trust store; Fetch cannot apply CURLOPT_RESOLVE.
+        emscripten_request(origin, path, method, headers, req_body)
     }
+    #[cfg(not(target_os = "emscripten"))]
+    {
+        match origin.scheme() {
+            // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
+            Scheme::Http => plaintext(origin, path, method, headers, req_body),
+            Scheme::Https => tls(origin, path, method, headers, pin, req_body),
+        }
+    }
+}
+
+/// Browser transport. JSPI suspends the calling Wasm thread while `fetch()` waits, allowing the
+/// SDL main thread to continue running when a request comes from one of the app's worker tasks.
+/// `redirect: "manual"` preserves the native credential boundary; `credentials: "omit"` keeps
+/// browser cookies out of this token-based client. Browser TLS uses the browser's trust store and
+/// cannot apply the native transport's resolver pin.
+#[cfg(target_os = "emscripten")]
+fn emscripten_request(
+    origin: &Origin,
+    path: &str,
+    method: Method,
+    headers: &[&str],
+    req_body: &[u8],
+) -> RequestOutcome {
+    use std::ffi::CString;
+    use std::os::raw::c_char;
+
+    #[cfg(target_os = "emscripten")]
+    extern "C" {
+        fn butaca_emscripten_http(
+            url: *const c_char,
+            method: *const c_char,
+            headers: *const *const c_char,
+            body: *const u8,
+            body_len: usize,
+            timeout_ms: u32,
+            status_out: *mut i32,
+            body_out: *mut *mut u8,
+            body_len_out: *mut usize,
+        ) -> i32;
+        fn butaca_emscripten_http_free(body: *mut u8);
+    }
+
+    let url = match CString::new(format!("{}{}", origin.base(), path)) {
+        Ok(url) => url,
+        Err(_) => return RequestOutcome::Transport(None),
+    };
+    let method = CString::new(method.as_str()).expect("static HTTP method has no NUL");
+
+    // Content-Length and the other transport-managed headers are forbidden by browser Fetch.
+    // Emscripten's JS bridge computes framing from the body just as the browser does.
+    let mut header_storage = Vec::<CString>::with_capacity(headers.len() * 2);
+    for header in headers {
+        let Some((name, value)) = header.split_once(':') else {
+            crate::log("http: browser request rejected a malformed header");
+            return RequestOutcome::Transport(None);
+        };
+        let name = name.trim();
+        if [
+            "content-length",
+            "connection",
+            "host",
+            "origin",
+            "referer",
+            "user-agent",
+            "cookie",
+            "cookie2",
+            "accept-encoding",
+            "transfer-encoding",
+            "upgrade",
+            "proxy-authorization",
+            "proxy-connection",
+        ]
+        .iter()
+        .any(|forbidden| name.eq_ignore_ascii_case(forbidden))
+        {
+            continue;
+        }
+        let (Ok(name), Ok(value)) = (CString::new(name), CString::new(value.trim())) else {
+            crate::log("http: browser request rejected a header containing NUL");
+            return RequestOutcome::Transport(None);
+        };
+        header_storage.push(name);
+        header_storage.push(value);
+    }
+    let mut header_ptrs: Vec<*const c_char> = header_storage.iter().map(|h| h.as_ptr()).collect();
+    header_ptrs.push(std::ptr::null());
+
+    let mut status = 0;
+    let mut body_ptr = std::ptr::null_mut();
+    let mut body_len = 0usize;
+    // SAFETY: all C strings and request bytes remain alive until the async-JS C wrapper
+    // returns; it copies response bytes into malloc-owned memory before returning to Rust.
+    let result = unsafe {
+        butaca_emscripten_http(
+            url.as_ptr(),
+            method.as_ptr(),
+            header_ptrs.as_ptr(),
+            req_body.as_ptr(),
+            req_body.len(),
+            25_000,
+            &mut status,
+            &mut body_ptr,
+            &mut body_len,
+        )
+    };
+    if result != 1
+        || status == 0
+        || body_len > isize::MAX as usize
+        || (body_len > 0 && body_ptr.is_null())
+    {
+        if !body_ptr.is_null() {
+            // SAFETY: the C bridge allocated this response with the same C allocator.
+            unsafe { butaca_emscripten_http_free(body_ptr) };
+        }
+        let reason = match result {
+            -1 => "request timed out",
+            -2 => "redirect refused",
+            -3 => "response allocation failed",
+            -4 => "request header rejected",
+            _ => "network, mixed-content, or CORS policy",
+        };
+        crate::log(&format!("http: browser fetch failed ({reason})"));
+        return RequestOutcome::Transport(None);
+    }
+
+    let body = if body_len == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: success guarantees a live C allocation of exactly body_len bytes; it is copied
+        // before being released through the matching C free function.
+        unsafe { std::slice::from_raw_parts(body_ptr, body_len).to_vec() }
+    };
+    if !body_ptr.is_null() {
+        // SAFETY: body_ptr came from the C bridge's malloc and has not been freed or aliased.
+        unsafe { butaca_emscripten_http_free(body_ptr) };
+    }
+    RequestOutcome::Response(Reply { status, body })
 }
 
 /// Which credential shape a request carries: the legacy arm's rule and the Jellyfin flavor's
@@ -387,6 +525,7 @@ fn plaintext_credential_report(
 /// resolved chain and dials either address family, so a plaintext hostname and a plaintext v6
 /// literal are both ordinary here — which is why `auth::dial_target` has no shape restriction left
 /// in it at all.
+#[cfg(not(target_os = "emscripten"))]
 fn plaintext(
     origin: &Origin,
     path: &str,
@@ -501,6 +640,7 @@ fn plaintext(
 /// a DIFFERENT host than this origin's is ignored: the entry is keyed on the URL's own host, and
 /// curl would simply never match it, but refusing to send it keeps the log honest. No product
 /// caller passes one since the pinned-name path went with the wire layer (#166).
+#[cfg(not(target_os = "emscripten"))]
 fn tls(
     origin: &Origin,
     path: &str,

@@ -36,7 +36,7 @@ fn main() {
     #[cfg(target_os = "emscripten")]
     {
         std::env::set_var("BUTACA_APP_DIR", "/app");
-        std::env::set_var("BUTACA_RUNTIME_DIR", "/tmp/butaca-emscripten");
+        std::env::set_var("BUTACA_RUNTIME_DIR", "/persist/butaca-emscripten");
     }
 
     // SIGPIPE needs no handling here, unlike `src/main.c:105`: that file installs `SIG_IGN` by hand

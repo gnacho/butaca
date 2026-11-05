@@ -6,9 +6,10 @@
 //! ([`resolve`]) and dialled down the whole returned chain ([`connect_any_result`]). It used to be
 //! four decimal octets parsed by hand into a `sockaddr_in`, which made a hostname and every IPv6
 //! server not "degraded" but impossible — the shape of the gap LG's checklist #43 CASE2 asks about.
-//! What is still missing here is TLS: this arm stays cleartext. [`crate::http`] sends an `https://`
-//! control-plane origin through [`crate::net`], while MEDIA bytes use [`crate::curlio`], a
-//! libcurl-multi pull source under the same `ff.rs` AVIO that this module serves for `http`.
+//! What is still missing here is TLS: this arm stays cleartext. On native targets, [`crate::http`]
+//! sends an `https://` control-plane origin through [`crate::net`]; Emscripten uses browser Fetch
+//! instead. MEDIA bytes use [`crate::curlio`], a libcurl-multi pull source under the same `ff.rs`
+//! AVIO that this module serves for `http`.
 //!
 //! Failures the legacy `0`/`-1` return cannot carry are reported to the event log instead: a
 //! non-2xx response (where the code is known and the socket is about to close) and a body that came
@@ -202,6 +203,7 @@ fn log_endpoint(path: &str) -> &str {
 /// the length is ignored, which is what the read path already does). A close-delimited body — no
 /// length, not chunked — has no completeness test at all, so there only a recv error can say the
 /// transfer ended early, and `want` says plainly that nothing knows how much was owed.
+#[cfg_attr(target_os = "emscripten", allow(dead_code))]
 fn short_body_line(
     method: &str,
     path: &str,
@@ -239,6 +241,7 @@ fn short_body_line(
 /// primitives directly: [`crate::http`]'s plaintext arm, which is now this function's only caller
 /// and the reason it did not go with them. The three fields it reads are private, so the notice
 /// could not have been reproduced from outside.
+#[cfg_attr(target_os = "emscripten", allow(dead_code))]
 pub(crate) fn note_short_body(method: &str, path: &str, hs: &HttpStream, recv_err: bool) {
     if let Some(line) = short_body_line(
         method,
@@ -1113,6 +1116,7 @@ unsafe fn set_socket_timeouts(fd: c_int, recv_timeout_ms: c_int, send_timeout_ms
     );
 }
 
+#[cfg_attr(target_os = "emscripten", allow(dead_code))]
 pub(crate) fn http_open(
     hs: *mut HttpStream,
     host: *const c_char,
@@ -1142,6 +1146,7 @@ pub(crate) fn http_open(
 /// POSTs need (`http::request_post_json` is the one caller, and it adds the matching
 /// `Content-Length` itself). Every other entry point passes an empty slice and keeps the exact
 /// bytes it always sent.
+#[cfg_attr(target_os = "emscripten", allow(dead_code))]
 pub(crate) fn http_open_body(
     hs: *mut HttpStream,
     host: *const c_char,
@@ -1177,6 +1182,7 @@ pub(crate) fn http_open_body(
 ///
 /// `checkpoint` is consulted before and during every blocking connect/send/header wait (not DNS,
 /// which is a synchronous `getaddrinfo`); [`HttpOpenError::Stopped`] is its answer, never a redial.
+#[cfg_attr(target_os = "emscripten", allow(dead_code))]
 fn legacy_open_result(result: Result<(), HttpOpenError>) -> c_int {
     if result.is_ok() {
         0
@@ -1643,6 +1649,7 @@ pub(crate) fn hs_redirect_location(hs: *const HttpStream) -> Option<String> {
     (n > 0).then(|| String::from_utf8_lossy(&hs.location[..n]).into_owned())
 }
 
+#[cfg_attr(target_os = "emscripten", allow(dead_code))]
 pub(crate) fn http_read(hs: *mut HttpStream, dst: *mut c_uchar, n: c_int) -> c_int {
     http_read_until(hs, dst, n, None, &mut NoCheckpoint)
 }
@@ -2202,10 +2209,10 @@ pub(crate) fn http_shutdown(hs: *mut HttpStream) {
 // `auth::get_identity` had already had to hand-roll its own open/read/close for that reason.
 //
 // Their replacement is `crate::http`, the one door that dispatches a control-plane request on its
-// origin's SCHEME — this module for plaintext, `net.rs`/libcurl for TLS — and returns the status
-// AND the body over either. Its plaintext arm is the same composition the wrappers were, so
-// nothing about the bytes on the wire moved; `note_short_body` above went `pub(crate)` to keep the
-// short-body notice on that path.
+// origin's scheme — on native targets this module for plaintext, `net.rs`/libcurl for TLS; on
+// Emscripten, browser Fetch — and returns the status AND the body. The native plaintext arm is the
+// same composition the wrappers were, so nothing about those bytes on the wire moved;
+// `note_short_body` above went `pub(crate)` to keep the short-body notice on that path.
 
 /// A boxed HttpStream in the CLOSED state (fd = -1, never 0 — a stray close on a zeroed box
 /// would take stdin), so http_close is a no-op until

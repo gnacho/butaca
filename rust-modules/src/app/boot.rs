@@ -755,7 +755,8 @@ pub(crate) unsafe fn construct(
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
     // blocking, so the software budget in `run` follows the same switch. Emscripten's SDL routes
     // this setter to `emscripten_set_main_loop_timing`, but Butaca owns a synchronous SDL loop and
-    // yields through Asyncify on swap; no Emscripten main loop exists to set a timing mode on.
+    // yields through Emscripten's async sleep on swap (JSPI in the browser build); no Emscripten
+    // main loop exists to set a timing mode on.
     #[cfg(not(target_os = "emscripten"))]
     let vsync_enabled = controlled || !crate::dev::scenarios::novsync_armed();
     #[cfg(not(target_os = "emscripten"))]

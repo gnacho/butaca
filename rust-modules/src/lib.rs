@@ -34,7 +34,7 @@ mod grant; // credential transport authority and consented plaintext grants
 #[cfg(feature = "devtriggers")]
 mod gpu_timer; // async EXT_disjoint_timer_query timing; no glFinish on the timing path
 mod hls; // strict parser/auth/timeline for the measured one-variant server HLS shape
-mod http; // the ONE door out of the control plane: dispatch a REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
+mod http; // the ONE control-plane REST door: native targets use stream.rs/net.rs by scheme; Emscripten uses browser Fetch
 #[cfg(feature = "devtriggers")]
 mod hwcnt; // direct userspace Mali r12p0 vinstr reader for the phase profiler
 mod img;
