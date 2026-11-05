@@ -9,8 +9,11 @@ if [ ! -f "$sdk_dir/emsdk_env.sh" ]; then
     exit 2
 fi
 
-# shellcheck disable=SC1090
-. "$sdk_dir/emsdk_env.sh" >/dev/null
+# emsdk_env.sh uses its working directory to find the SDK under POSIX /bin/sh.
+cd "$sdk_dir"
+# shellcheck disable=SC1091
+. ./emsdk_env.sh >/dev/null
+cd "$repo"
 out="$repo/rust-modules/target/emscripten-smoke"
 mkdir -p "$out"
 emcc "$repo/tests/emscripten/sdl_webgl_smoke.c" \

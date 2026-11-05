@@ -32,4 +32,4 @@ fi
 "$sdk_dir/emsdk" install "$version"
 "$sdk_dir/emsdk" activate "$version"
 printf 'Installed Emscripten %s at %s\n' "$version" "$sdk_dir"
-printf 'For this shell, run: . "%s/emsdk_env.sh"\n' "$sdk_dir"
+printf 'For this shell, run: cd "%s" && . ./emsdk_env.sh\n' "$sdk_dir"
