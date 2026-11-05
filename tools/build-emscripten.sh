@@ -28,7 +28,7 @@ CARGO_INCREMENTAL=0 \
 CC=emcc \
 CARGO_TARGET_DIR="$target_dir" \
 CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_LINKER=emcc \
-CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C link-arg=--use-port=sdl2 -C link-arg=-sUSE_SDL_TTF=2 -C link-arg=-sMIN_WEBGL_VERSION=1 -C link-arg=-sMAX_WEBGL_VERSION=1 -C link-arg=-sASYNCIFY=1 -C link-arg=--pre-js -C link-arg=$repo/tests/emscripten/browser-pre.js -C link-arg=--preload-file=$repo/pkg/appfont.ttf@/app/appfont.ttf -C link-arg=--preload-file=$repo/pkg/appfont-bold.ttf@/app/appfont-bold.ttf -C link-arg=--preload-file=$repo/pkg/appfont-cjk.ttf@/app/appfont-cjk.ttf -C link-arg=--preload-file=$repo/pkg/butaca-name.png@/app/butaca-name.png -C link-arg=--oformat=html -C link-arg=-o -C link-arg=$html_out" \
+CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C link-arg=--use-port=sdl2 -C link-arg=-sUSE_SDL_TTF=2 -C link-arg=-sMIN_WEBGL_VERSION=1 -C link-arg=-sMAX_WEBGL_VERSION=1 -C link-arg=-sASYNCIFY=1 -C link-arg=-sSTACK_SIZE=8388608 -C link-arg=--pre-js -C link-arg=$repo/tests/emscripten/browser-pre.js -C link-arg=--preload-file=$repo/pkg/appfont.ttf@/app/appfont.ttf -C link-arg=--preload-file=$repo/pkg/appfont-bold.ttf@/app/appfont-bold.ttf -C link-arg=--preload-file=$repo/pkg/appfont-cjk.ttf@/app/appfont-cjk.ttf -C link-arg=--preload-file=$repo/pkg/butaca-name.png@/app/butaca-name.png -C link-arg=--oformat=html -C link-arg=-o -C link-arg=$html_out" \
     cargo +nightly build \
         --bin butaca-sim \
         --no-default-features \
