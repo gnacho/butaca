@@ -211,6 +211,10 @@ impl CollectionScreen {
             fx.push(crate::ui::machine::Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
             return Handled::Yes;
         }
+        if elem == crate::ui::dispatch::STRIP_BASE + 8 {
+            fx.push(crate::ui::machine::Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return Handled::Yes;
+        }
         let req = match elem.checked_sub(crate::ui::dispatch::STRIP_BASE) {
             Some(0) => Some(LibraryReq::Tab(HomeTab::Home)),
             Some(1) => Some(LibraryReq::Tab(HomeTab::Movies)),

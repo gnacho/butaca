@@ -936,11 +936,12 @@ enum Action {
     SelectServer,
     QuickConnect,
     Playback,
-    Language,
     SignOut,
 }
 
-/// The Settings root: the two Jellyfin server doors and the Quick Connect sign-in.
+/// The Settings root: the server doors, the playback controls and the way out. Interface
+/// preferences are deliberately absent: the mockup keeps this surface about the media and the
+/// account, not about the app's own language, legal notices or credits.
 pub(crate) struct RootPage {
     entry: EntryId,
     table: TableView,
@@ -990,11 +991,6 @@ impl RootPage {
                 Row::new(crate::i18n::msg::settings_playback_title())
                     .detail(crate::i18n::msg::settings_playback_detail())
                     .chevron(true),
-            )
-            .row(
-                Row::new(crate::i18n::msg::settings_language_title())
-                    .detail(crate::i18n::msg::settings_language_detail())
-                    .chevron(true),
             );
         let sign_out = Section::new("").row(
             Row::new(crate::i18n::msg::settings_servers_disconnect())
@@ -1003,7 +999,7 @@ impl RootPage {
         );
         self.rows = vec![
             Action::SelectServer, Action::QuickConnect,
-            Action::Playback, Action::Language, Action::SignOut,
+            Action::Playback, Action::SignOut,
         ];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
@@ -1036,7 +1032,6 @@ impl RootPage {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
             }
             Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
-            Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
             Action::SignOut => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
             }

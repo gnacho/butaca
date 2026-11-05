@@ -9,10 +9,10 @@ use crate::ui::Rect;
 /// so `ui::consts`'s overscan-rects audit can reach it as `crate::screens::search::layout::FIELD`
 /// — the deleted legacy Search renderer's own `FIELD`/`CONTENT_TOP` this replaces.
 pub(crate) const FIELD: Rect = Rect {
-    x: MARGIN_X,
-    y: 138.0,
-    w: SCR_W - 2.0 * MARGIN_X,
-    h: 80.0,
+    x: 360.0,
+    y: 124.0,
+    w: 1200.0,
+    h: 96.0,
 };
 /// See [`FIELD`]'s doc: also reachable as `crate::screens::search::CONTENT_TOP`. Value pinned at
 /// 300.0 — the overscan audit and `top()`'s own layering both depend on it.

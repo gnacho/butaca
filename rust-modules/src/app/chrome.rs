@@ -71,6 +71,7 @@ pub(crate) struct ChromeSnapshot {
     initial: std::ffi::CString,
     name: std::ffi::CString,
     name_w: f32,
+    instance: Option<std::ffi::CString>,
 }
 
 impl ChromeSnapshot {
@@ -106,6 +107,15 @@ impl ChromeSnapshot {
             self.widths = widgets::tab_widths(&self.labels, measure);
             self.tabs_generation = Some(generation);
         }
+        self.instance = if directory.sources().len() > 1 {
+            let active = directory.source().map(|(_, source)| source)
+                .or_else(|| directory.sources().first().map(|(_, source)| source));
+            active.and_then(|source| source.name.chars().next())
+                .map(|c| c.to_uppercase().to_string())
+                .and_then(|letter| std::ffi::CString::new(letter).ok())
+        } else {
+            None
+        };
         let generation = captured.map_or_else(crate::server::session::current_gen, |(profile, _)| profile.generation);
         let session_changed = captured.is_none() && self.session_watch.changed();
         if self.profile_generation != Some(generation) || session_changed {
@@ -135,6 +145,10 @@ impl ChromeSnapshot {
         self.keys.iter().position(|key| *key == STRIP_BASE + 3).unwrap_or(0) as u32
     }
 
+    pub(crate) fn instance(&self) -> Option<&std::ffi::CStr> {
+        self.instance.as_deref()
+    }
+
     pub(crate) fn profile(&self) -> ProfileChipRead<'_> {
         ProfileChipRead { thumb: &self.thumb, initial: &self.initial, name: &self.name,
             name_w: self.name_w }
@@ -147,6 +161,7 @@ impl ChromeSnapshot {
     pub(crate) fn focus(&self, focus: Option<FocusKey<u32>>) -> TopFocus {
         match focus.map(|focus| focus.elem) {
             Some(key) if key == STRIP_BASE + 7 => TopFocus::Gear,
+            Some(key) if key == STRIP_BASE + 8 => TopFocus::Instance,
             Some(key) => self.keys.iter().position(|&id| id == key).map(TopFocus::Pill).unwrap_or(TopFocus::Away),
             None => TopFocus::Away,
         }
@@ -159,6 +174,9 @@ impl ChromeSnapshot {
         out.clear();
         widgets::tab_members(&self.widths, &self.keys, selected, self.focus(focus), scroll, out);
         out.push(StripMember::new(STRIP_BASE + 7, widgets::SETTINGS_GEAR_FRAME));
+        if self.instance.is_some() {
+            out.push(StripMember::new(STRIP_BASE + 8, widgets::INSTANCE_FRAME));
+        }
     }
 
     #[cfg(test)]
@@ -188,6 +206,24 @@ mod tests {
             row: SrcRow { section: i, title: format!("Library {i}"), pinned: true,
                 ..Default::default() },
         }).collect())
+    }
+
+    #[test]
+    fn the_instance_badge_only_exists_when_there_is_a_choice() {
+        use crate::browse::SrcGroup;
+        let source = |name: &str| SrcGroup { name: name.into(), ..Default::default() };
+        let one = crate::browse::view::DirectorySnapshot::fixture_with_sources(
+            1, 0, vec![(crate::registry::ServerId::from_raw(1), source("Dama"))], vec![]);
+        let mut snapshot = ChromeSnapshot::default();
+        snapshot.refresh(&crate::ui::fixture::FixtureMeasure, one.view());
+        assert!(snapshot.instance().is_none(), "one server needs no switcher");
+
+        let two = crate::browse::view::DirectorySnapshot::fixture_with_sources(
+            1, 0, vec![(crate::registry::ServerId::from_raw(1), source("Dama")),
+                (crate::registry::ServerId::from_raw(2), source("Verano"))], vec![]);
+        snapshot.refresh(&crate::ui::fixture::FixtureMeasure, two.view());
+        assert_eq!(snapshot.instance().and_then(|label| label.to_str().ok()), Some("D"),
+            "the active source's initial is the switcher");
     }
 
     #[test]

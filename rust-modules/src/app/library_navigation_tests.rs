@@ -40,7 +40,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
             .iter()
             .map(|member| member.elem)
             .collect::<Vec<_>>(),
-        vec![base, base + 1, base + 2, base + 6, base + 3, base + 7]
+        vec![base, base + 1, base + 2, base + 6, base + 3, base + 7, base + 8]
     );
     let seat = |d: &mut Dispatcher<AppHost>, elem| {
         d.emit(

@@ -256,6 +256,11 @@ pub(crate) struct Bridge {
     /// bar's one reachable owner: the only `Rig::draw_chrome` implementation, and the only place
     /// `update_home_chrome` is called from.
     strip: crate::ui::widgets::StripRender,
+    /// The Butaca wordmark, uploaded once on the render thread. `0` is "not loaded yet"; a
+    /// missing asset degrades to a text wordmark rather than an empty corner.
+    logo_tex: u32,
+    logo_px: (u32, u32),
+    logo_tried: bool,
     home_commands: std::collections::VecDeque<HomeCmd>,
     library_commands: std::collections::VecDeque<crate::screens::registry::LibraryCmd>,
     /// Requests the owned screens made of the loop this frame (§14), drained by [`frame`]'s caller.
@@ -424,6 +429,9 @@ impl Bridge {
             chrome: super::chrome::ChromeSnapshot::default(),
             chrome_selection: 0,
             strip: crate::ui::widgets::StripRender::new(),
+            logo_tex: 0,
+            logo_px: (0, 0),
+            logo_tried: false,
             home_commands: std::collections::VecDeque::new(),
             library_commands: std::collections::VecDeque::new(),
             reqs: Vec::new(),
@@ -1132,6 +1140,23 @@ impl Bridge {
     /// dozen small allocations this otherwise costs at the loop rate.
     /// The video plane's EDGE, from `Player::set_video_plane_bound` and from nowhere else
     /// (spec §16 risk 10). Reaches both the dispatcher's present gate and this rig's own copy.
+    /// Upload the original Butaca wordmark once. A failed read leaves `logo_tex` at zero and the
+    /// bar simply omits the mark; it never blocks the chrome pass.
+    fn prepare_chrome_logo(&mut self) {
+        if self.logo_tried { return; }
+        self.logo_tried = true;
+        let path = crate::paths::in_app_dir("butaca-name.png");
+        let Ok(png) = std::fs::read(&path) else { return };
+        let (mut w, mut h): (std::os::raw::c_int, std::os::raw::c_int) = (0, 0);
+        let px = crate::img::img_decode_rgba(png.as_ptr(), png.len() as _, &mut w, &mut h);
+        if px.is_null() { return; }
+        if w > 0 && h > 0 {
+            self.logo_tex = crate::img::img_upload_rgba(px, w, h);
+            self.logo_px = (w as u32, h as u32);
+        }
+        crate::img::img_free(px);
+    }
+
     pub(crate) fn publish_video_plane(&mut self, bound: bool) {
         self.video_plane = bound;
     }
@@ -1147,15 +1172,52 @@ impl Bridge {
     }
 }
 
+/// The bar's wall clock, in the television's own timezone. `localtime_r` rather than a UTC
+/// subtraction: a living-room clock that ignores the household's offset is simply wrong.
+fn clock_text() -> std::ffi::CString {
+    let mut now: libc::time_t = 0;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe { libc::time(&mut now); libc::localtime_r(&now, &mut tm); }
+    std::ffi::CString::new(format!("{:02}:{:02}", tm.tm_hour, tm.tm_min))
+        .unwrap_or_default()
+}
+
 impl Rig<AppHost> for Bridge {
     fn draw_chrome(&mut self, arg: &AppArg, _parts: &CxParts<u32>,
         nav: crate::ui::screen::NavPresentation,
         glass: Option<&mut crate::ui::frame::glass::GlassPlan>) {
         if !Self::draws_chrome_for(arg) { return; }
         let Some(glass) = glass else { return };
+        self.prepare_chrome_logo();
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
+        if self.logo_tex != 0 && self.logo_px.0 > 0 && self.logo_px.1 > 0 {
+            let h = 46.0;
+            let w = h * self.logo_px.0 as f32 / self.logo_px.1 as f32;
+            let logo = crate::ui::Rect::new(crate::ui::consts::MARGIN_X,
+                crate::ui::widgets::TOP_BAR_Y
+                    + (crate::ui::widgets::TAB_PILL_H - h) * 0.5,
+                w, h);
+            p.tex(self.logo_tex, logo, 0.0, crate::ui::theme::TEXT_PRIMARY);
+        }
+        if let Some(instance) = self.chrome.instance().map(|label| label.as_ptr()) {
+            let badge = crate::ui::widgets::CircleButton::new(instance)
+                .frame(crate::ui::widgets::INSTANCE_FRAME)
+                .focused(self.strip.instance_focused());
+            crate::ui::View::draw(&badge, &crate::ui::Env::inert(), p);
+        }
         let chrome = self.chrome.read(self.strip.chip_expand_pos());
         self.strip.draw(chrome.labels, p, glass.tab_band_mut());
+        let clock = clock_text();
+        let clock_frame = crate::ui::Rect::new(
+            crate::ui::widgets::SETTINGS_GEAR_FRAME.x - 154.0,
+            crate::ui::widgets::SETTINGS_GEAR_FRAME.y,
+            130.0,
+            crate::ui::widgets::SETTINGS_GEAR_FRAME.h,
+        );
+        crate::ui::label::Label::new(clock.as_ptr(), crate::ui::theme::size::BODY,
+            crate::ui::theme::TEXT_SECONDARY).bold()
+            .h(crate::ui::label::HAlign::Right)
+            .draw(p, clock_frame);
         let gear = crate::ui::widgets::CircleButton::new(std::ptr::null())
             .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
             .icon(crate::ui::icons::Icon::Settings)
@@ -1795,7 +1857,9 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
         let position = home.grid_position::<AppHost>(focus, &cx);
         let (row, col) = position.map(|(r, c)| (r as i64, c as i64)).unwrap_or((-1, -1));
         let hf = match rig.chrome.focus(focus) {
-            crate::ui::widgets::TopFocus::Chip | crate::ui::widgets::TopFocus::Gear => -1,
+            crate::ui::widgets::TopFocus::Chip
+            | crate::ui::widgets::TopFocus::Gear
+            | crate::ui::widgets::TopFocus::Instance => -1,
             crate::ui::widgets::TopFocus::Pill(i) => -(i as i64 + 2),
             crate::ui::widgets::TopFocus::Away => focus.filter(|key| key.elem < 2).map_or(-1, |key| key.elem as i64),
         };
@@ -1836,6 +1900,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
         let (zone, row, col, recent, card) = match top {
             crate::ui::widgets::TopFocus::Chip => ("Chip", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Gear => ("Gear", -1i64, -1i64, -1i64, false),
+            crate::ui::widgets::TopFocus::Instance => ("Instance", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Pill(_) => ("Strip", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Away => search.probe(focus),
         };

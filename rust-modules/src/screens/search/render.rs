@@ -10,6 +10,10 @@ use std::os::raw::c_int;
 
 const CARET_W: f32 = 5.0;
 const CARET_GAP: f32 = 8.0;
+const FIELD_TEXT: i32 = theme::size::HEADLINE;
+const FIELD_PAD: f32 = 30.0;
+const FIELD_ICON: f32 = 32.0;
+const FIELD_ICON_GAP: f32 = 18.0;
 const GHOST_GAP: f32 = theme::size::BODY as f32;
 const COUNT_GAP: f32 = theme::space::SM;
 const SOURCE_PAD: f32 = theme::space::XS;
@@ -53,11 +57,11 @@ impl Resources {
             };
             let (_, head) = run_and_head(q, caret);
             self.head = cstring(head);
-            self.run_w = cx.measure.width(&self.run, theme::size::HERO, true);
+            self.run_w = cx.measure.width(&self.run, FIELD_TEXT, true);
             self.head_w = if q.trim().is_empty() {
                 0.0
             } else {
-                cx.measure.width(&self.head, theme::size::HERO, true)
+                cx.measure.width(&self.head, FIELD_TEXT, true)
             };
         }
         let recents = H::search(cx).recents();
@@ -194,29 +198,46 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
     } else {
         theme::cross(theme::TEXT_SECONDARY, ink_target(screen.editing), hot)
     };
+    p.rect_rimmed(
+        rect,
+        22.0,
+        theme::SURFACE_PANEL,
+        theme::SURFACE_PANEL,
+        if screen.editing { theme::ACCENT } else { theme::HAIRLINE },
+        0.0,
+    );
+    let icon = Rect::new(
+        rect.x + FIELD_PAD,
+        rect.y + (rect.h - FIELD_ICON) / 2.0,
+        FIELD_ICON,
+        FIELD_ICON,
+    );
+    crate::ui::icons::draw(p, crate::ui::icons::Icon::Search, icon, theme::TEXT_SECONDARY);
+    let text_x = icon.x + FIELD_ICON + FIELD_ICON_GAP;
+    let text_w = rect.w - (text_x - rect.x) - FIELD_PAD;
     let (run_dx, caret_dx) = run_layout(
         data.run_w,
         run_caret_w(blank, data.head_w),
-        rect.w,
+        text_w,
         screen.editing,
     );
-    let (cap_top, cap_base) = crate::text::text_cap_band(theme::size::HERO, 1);
+    let (cap_top, cap_base) = crate::text::text_cap_band(FIELD_TEXT, 1);
     let pad = descent_pad(
         rect.h,
-        crate::text::text_height(theme::size::HERO, 1),
+        crate::text::text_height(FIELD_TEXT, 1),
         cap_top,
         cap_base,
     );
     {
-        let _clip = f.clip(p, Rect::new(rect.x, rect.y, rect.w, rect.h + pad));
-        Label::new(data.run.as_ptr(), theme::size::HERO, ink)
+        let _clip = f.clip(p, Rect::new(text_x, rect.y, text_w, rect.h + pad));
+        Label::new(data.run.as_ptr(), FIELD_TEXT, ink)
             .bold()
-            .draw(p, Rect::new(rect.x + run_dx, rect.y, rect.w, rect.h));
-        let text_y = crate::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
+            .draw(p, Rect::new(text_x + run_dx, rect.y, text_w, rect.h));
+        let text_y = crate::text::text_vcenter_y(FIELD_TEXT, 1, rect.cy());
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
-                    rect.x + caret_dx,
+                    text_x + caret_dx,
                     text_y + cap_top,
                     CARET_W,
                     cap_base - cap_top,
@@ -228,10 +249,10 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
         if ghost_shown(&data.query) {
-            let y = crate::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
+            let y = crate::text::baseline_y(theme::size::BODY, 0, FIELD_TEXT, 1, text_y);
             p.text(
                 crate::i18n::msg::browse_search_one_more_c().as_ptr(),
-                rect.x + caret_dx + CARET_W + GHOST_GAP,
+                text_x + caret_dx + CARET_W + GHOST_GAP,
                 y,
                 theme::size::BODY,
                 theme::cross(theme::TEXT_TERTIARY, theme::TEXT_SECONDARY, hot),
