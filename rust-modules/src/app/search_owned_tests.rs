@@ -859,7 +859,10 @@ fn leaving_owned_search_through_a_real_route_change_releases_its_keyboard() {
 /// Library only.
 #[test]
 fn every_route_wearing_the_shared_bar_reaches_the_chrome_paint_guard() {
-    for (route, name) in [(AppArg::Home, "Home"), (AppArg::Library, "Library"), (AppArg::Search, "Search")] {
+    let favorites = AppArg::Content(crate::screens::registry::ContentArg::Collection(
+        crate::collection::CollectionRef::favorites(crate::jellyfin::SERVER_ID, "Favorites"),
+    ));
+    for (route, name) in [(AppArg::Home, "Home"), (AppArg::Library, "Library"), (AppArg::Search, "Search"), (favorites, "Favorites")] {
         assert_eq!(route.chrome(), Chrome::TabBar, "{name} must still wear the shared bar");
         assert!(
             Bridge::draws_chrome_for(&route),
@@ -871,6 +874,12 @@ fn every_route_wearing_the_shared_bar_reaches_the_chrome_paint_guard() {
     // vacuously admits everything.
     assert!(!Bridge::draws_chrome_for(&detail_arg("1001")),
         "Detail has no shared bar and must not reach draw_chrome's paint body");
+    let ordinary_collection = AppArg::Content(crate::screens::registry::ContentArg::Collection(
+        crate::collection::CollectionRef::by_rk(crate::jellyfin::SERVER_ID, "boxset", 0, "Collection"),
+    ));
+    assert_eq!(ordinary_collection.chrome(), Chrome::None);
+    assert!(!Bridge::draws_chrome_for(&ordinary_collection),
+        "only the reserved Favorites collection wears the shared bar");
 }
 
 /// **Pins the USE SITE of `draws_chrome_for`, not just the predicate.**

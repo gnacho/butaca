@@ -777,6 +777,37 @@ mod search_action_tests {
     }
 }
 
+fn library_request_allowed(route: &AppArg, request: &crate::screens::registry::LibraryReq) -> bool {
+    use crate::screens::registry::LibraryReq;
+    if matches!(route, AppArg::Library) { return true; }
+    matches!(route, AppArg::Content(ContentArg::Collection(id)) if id.is_favorites())
+        && matches!(request, LibraryReq::Tab(_) | LibraryReq::Account)
+}
+
+#[cfg(test)]
+mod library_request_route_tests {
+    use super::*;
+    use crate::screens::registry::{HomeTab, LibraryReq};
+
+    #[test]
+    fn favorites_can_use_the_shared_tab_actions_but_an_ordinary_collection_cannot() {
+        let favorites = AppArg::Content(ContentArg::Collection(
+            crate::collection::CollectionRef::favorites(crate::jellyfin::SERVER_ID, "Favorites")));
+        let ordinary = AppArg::Content(ContentArg::Collection(crate::collection::CollectionRef::by_rk(
+            crate::jellyfin::SERVER_ID, "boxset".into(), 0, "Collection".into())));
+        let search = LibraryReq::Tab(HomeTab::Search);
+        assert!(library_request_allowed(&favorites, &search), "Favorites can open Search from its pill");
+        assert!(library_request_allowed(&favorites, &LibraryReq::Account), "Favorites can open the account chip");
+        assert!(!library_request_allowed(&ordinary, &search), "an ordinary collection has no shared strip");
+        assert!(!library_request_allowed(&favorites,
+            &LibraryReq::Detail { sid: crate::jellyfin::SERVER_ID, rk: "movie".into() }),
+            "a collection's own detail action is not a shared tab action");
+        assert!(library_request_allowed(&AppArg::Library,
+            &LibraryReq::Detail { sid: crate::jellyfin::SERVER_ID, rk: "movie".into() }),
+            "Library keeps its existing actions");
+    }
+}
+
 fn library_requests(app: &mut App, now: u32) {
     use crate::screens::registry::{LibraryReq, LibraryMenuArg};
     for (source, request, ret) in app.bridge.take_library_reqs() {
@@ -791,7 +822,10 @@ fn library_requests(app: &mut App, now: u32) {
             }
             continue;
         }
-        if app.pages.nav.input_owner() != Some(InputOwner::Entry(entry)) || app.route() != AppArg::Library { continue; }
+        if app.pages.nav.input_owner() != Some(InputOwner::Entry(entry))
+            || !library_request_allowed(&app.route(), &request) {
+            continue;
+        }
         match request {
             LibraryReq::PublishShelves { .. } => unreachable!(),
             LibraryReq::Menu { kind, anchor, target } => {
