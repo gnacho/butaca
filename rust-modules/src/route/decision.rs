@@ -4758,26 +4758,25 @@ pub(crate) fn restore_series_tracks(entries: &[crate::server::session::SeriesTra
     table.extend_from_slice(entries);
 }
 
-/// Record one series' pick. Blocking persistence seam, called from the track menu's commit and
-/// never from the draw path; the process copy follows the durable write, so a failed save leaves
-/// the running table describing what is on disk.
+/// Record one series' pick. Called from the track menu's commit on the frame thread: publish the
+/// process copy here so the next episode sees it immediately, and hand the durable write to the
+/// storage worker. Session I/O must never run on the frame (the threadcheck guard aborts there).
 pub(crate) fn remember_series_tracks(entry: crate::server::session::SeriesTracks) -> bool {
     #[cfg(test)]
     crate::testlock::assert_held("the series track table (remember_series_tracks)");
     if entry.series.is_empty() {
         return false;
     }
-    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_series_tracks(entry.clone())))
-        .is_some_and(|write| matches!(write.classify(),
-            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
-    if !saved {
-        return false;
+    {
+        let mut table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+        table.retain(|t| t.series != entry.series);
+        table.push(entry.clone());
+        let excess = table.len().saturating_sub(crate::server::session::SeriesTracks::CAP);
+        table.drain(..excess);
     }
-    let mut table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
-    table.retain(|t| t.series != entry.series);
-    table.push(entry);
-    let excess = table.len().saturating_sub(crate::server::session::SeriesTracks::CAP);
-    table.drain(..excess);
+    crate::storage_worker::submit_retained(move || {
+        let _ = crate::server::session::update_with_outcome(|s| Some(s.with_series_tracks(entry)));
+    });
     true
 }
 
@@ -6722,4 +6721,8 @@ mod carried_audio_tests;
 #[cfg(test)]
 #[path = "subtitle_style_tests.rs"]
 mod subtitle_style_tests;
+
+#[cfg(test)]
+#[path = "track_commit_tests.rs"]
+mod track_commit_tests;
 
