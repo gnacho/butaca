@@ -10,7 +10,7 @@ Initial non-goals:
 
 - Replacing or changing the webOS native build, app package, deployment workflow, or native playback.
 - Requiring complete feature parity with the TV client before a browser UI can be evaluated.
-- Treating the existing desktop `hostsim` simulator as proof of WebAssembly/browser compatibility.
+- Treating a native `hostsim` build or run as proof of WebAssembly/browser compatibility.
 - Porting Starfish/ACB, webOS LS2 services, the native crash handler, or TV-specific diagnostics into the browser.
 
 Keep the browser target additive and isolated. Existing TV and desktop simulator behavior must remain unchanged.
@@ -41,7 +41,7 @@ The UI renderer is a strong candidate for reuse: `rust-modules/src/gfx.rs` is do
 
 `rust-modules/src/app/run.rs` is a long-lived loop that calls `SDL_PollEvent`, draws and swaps with `SDL_GL_SwapWindow`, then sleeps with `SDL_Delay` when idle. Emscripten SDL commonly integrates with the browser's animation/event loop, but this exact loop must be checked for browser-thread yielding and shutdown behavior. A loop that monopolizes the browser main thread would make the page unresponsive.
 
-The browser needs its own target identity/seam rather than overloading `hostsim`. `hostsim` changes GL context profile to desktop core, window flags, input decoding and webOS/Linux-specific paths (`rust-modules/src/app/mod.rs`, `app/boot.rs`); an Emscripten/WebGL build needs distinct compile-time settings and should not accidentally inherit simulator assumptions.
+Use the existing `hostsim` feature as the browser build's starting feature boundary: it already replaces the TV media FFI seam and omits several webOS-only paths, while compiling the shared UI and Jellyfin data layer. Build the browser target with `--features hostsim` plus `--target wasm32-unknown-emscripten` (or the toolchain's equivalent), then use target-specific `cfg(target_os = "emscripten")` where browser behavior differs. Do not create a competing feature that repeats `hostsim`'s webOS exclusions. `hostsim` also selects desktop GL 4.1, desktop window sizing and host input decoding (`rust-modules/src/app/boot.rs`, `app/mod.rs`), so those settings need Emscripten-specific target branches rather than being inherited unmodified. A native `hostsim` build/run remains useful regression evidence, but does not prove the WebAssembly build or browser runtime.
 
 ### 2. GLES2/WebGL renderer details
 
@@ -100,7 +100,7 @@ Decide supported desktop browsers/OSes, whether playback is required, authentica
 
 ### Phase 1 — Emscripten compile/link spike
 
-Install/pin Emscripten in a reproducible developer/CI environment. Add an isolated experimental target configuration; do not alter default Make targets. Build a minimal SDL window + GLES context first, then compile the current Rust crate/binary with the intended feature set. Adapt `build.rs` for Emscripten SDL/SDL_ttf ports and `emcc` compilation of `src/svg.c`. Record every failure by dependency/module and classify whether it is build-system-only, target-gatable, or needs an implementation.
+Install/pin Emscripten in a reproducible developer/CI environment. Add an isolated experimental target configuration; do not alter default Make targets. Build a minimal SDL window + WebGL context first, then compile the current Rust crate/binary with `--features hostsim` and the Emscripten target. This tests whether `hostsim` is a viable feature boundary while isolating Emscripten-specific GL/window choices behind target cfgs. Adapt `build.rs` for Emscripten SDL/SDL_ttf ports and `emcc` compilation of `src/svg.c`. Record every failure by dependency/module and classify whether it is build-system-only, target-gatable, or needs an implementation.
 
 **Exit:** documented successful minimal SDL/WebGL shell and a truthful compile/link blocker inventory for the app. A partial successful object build is not a full app build.
 
