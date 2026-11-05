@@ -124,7 +124,7 @@ file would then have to keep in step.
 Surfaces over a page stand on the page's own latched light: `widgets::panel_ground` draws the
 underlay field the modal dim latched, windowed to the panel's rect and graded toward the panel
 material under its frost. Backdrop-blur glass (`Glass::DYNAMIC_BACKDROP`) is chrome-only — the top
-bar's track and the profile chip. See `docs/liquid-glass.md`.
+bar's track and the Settings gear. See `docs/liquid-glass.md`.
 
 ## Navigation says where BACK goes, once
 

@@ -40,7 +40,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
             .iter()
             .map(|member| member.elem)
             .collect::<Vec<_>>(),
-        vec![base + 4, base, base + 1, base + 2, base + 6, base + 3, base + 7]
+        vec![base, base + 1, base + 2, base + 6, base + 3, base + 7]
     );
     let seat = |d: &mut Dispatcher<AppHost>, elem| {
         d.emit(
@@ -65,25 +65,14 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
         );
         assert_eq!(
             d.focus(),
-            Some(FocusKey {
-                entry,
-                elem: base + 4
-            }),
-            "the profile chip is the left end, not a wrapping stop"
+            Some(FocusKey { entry, elem: base }),
+            "Home is the strip's left end, not a wrapping stop"
         );
     }
     assert!(
-        content_probe(&d, &rig).contains("pill=-1"),
-        "the profile chip is not a remembered pill"
+        content_probe(&d, &rig).contains("pill=0"),
+        "Home is a remembered pill"
     );
-    frame(
-        &mut d,
-        &mut rig,
-        AppArg::Library,
-        tick(86),
-        script_key(Key::Right, tick(86)),
-    );
-    assert_eq!(d.focus(), Some(FocusKey { entry, elem: base }));
     frame(
         &mut d,
         &mut rig,
@@ -96,7 +85,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
         from_home.is_some_and(|key| key.elem < base),
         "DOWN genuinely left the strip"
     );
-    seat(&mut d, base + 4);
+    seat(&mut d, base);
     frame(&mut d, &mut rig, AppArg::Library, tick(88), vec![]);
     frame(
         &mut d,
@@ -108,7 +97,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
     assert_eq!(
         d.focus(),
         from_home,
-        "profile and pills enter the same remembered document group"
+        "the strip and the grid enter the same remembered document group"
     );
     assert!(content_probe(&d, &rig).contains("pill=-1"));
 
@@ -125,7 +114,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
             .strip
             .iter()
             .position(|member| member.elem == search.elem),
-        Some(5),
+        Some(4),
         "Search's displayed slot is not its stable control identity"
     );
     rig.take_library_reqs();

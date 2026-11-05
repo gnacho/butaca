@@ -458,6 +458,13 @@ impl CollectionScreen {
         Rect::new(MARGIN_X, HEADER_TOP - self.scroll.pos, ART_W, ART_H)
     }
 
+    /// Favorites has no artwork of its own and its page title already names it. The neutral
+    /// collection mark would read as a stray icon before the grid appears, so this page draws no
+    /// header art at all; every ordinary collection keeps its tile.
+    fn shows_header_art(&self, _collection: &Collection) -> bool {
+        !self.id.is_favorites()
+    }
+
     fn draw_header(&self, p: Painter, collection: &Collection, focused: bool,
         measure: &dyn crate::ui::machine::Measure) {
         let dy = -self.scroll.pos;
@@ -466,13 +473,15 @@ impl CollectionScreen {
         let p = p.alpha(alpha);
         let art = self.art_rect();
         let name = if collection.title.is_empty() { &collection.id.name } else { &collection.title };
-        if collection.header_ready() && collection.thumb.is_empty() {
-            // No artwork of its own (an empty collection has no composite either): the neutral
-            // tile the Library grid draws for the same collection — its mark and its name.
-            crate::ui::collection_tile::draw(p, art, art, theme::CARD_RING_RAD, name);
-        } else {
-            widgets::card(p, art, Art::Thumb { sid: collection.id.sid, key: &collection.thumb, res: ART_RES },
-                theme::CARD_RING_RAD, false, 1.0, 0.0);
+        if self.shows_header_art(collection) {
+            if collection.header_ready() && collection.thumb.is_empty() {
+                // No artwork of its own (an empty collection has no composite either): the neutral
+                // tile the Library grid draws for the same collection — its mark and its name.
+                crate::ui::collection_tile::draw(p, art, art, theme::CARD_RING_RAD, name);
+            } else {
+                widgets::card(p, art, Art::Thumb { sid: collection.id.sid, key: &collection.thumb, res: ART_RES },
+                    theme::CARD_RING_RAD, false, 1.0, 0.0);
+            }
         }
         if collection.status == CollectionStatus::Ready {
             card_row::draw_heading(p, crate::i18n::msg::browse_collection_items(), order_note(collection),
@@ -900,6 +909,19 @@ mod tests {
         assert!(out.iter().any(|event| matches!(event.fx,
             crate::ui::machine::Fx::App(AppFx::Loop(super::super::registry::LoopReq::AccountSettings)))),
             "Favorites' Settings gear opens the same Settings flow as the account menu");
+    }
+
+    #[test]
+    fn favorites_draw_no_header_art_but_an_ordinary_collection_does() {
+        let (mut store, ordinary) = seeded();
+        assert!(ordinary.shows_header_art(store.view().current().unwrap()),
+            "an ordinary collection keeps its neutral tile");
+
+        let favorites = CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favorites");
+        store.edit_for_test(|collection| collection.id = favorites.clone());
+        let screen = CollectionScreen::new(EntryId(9), favorites);
+        assert!(!screen.shows_header_art(store.view().current().unwrap()),
+            "Favorites names itself and must not draw the collection mark");
     }
 
     #[test]

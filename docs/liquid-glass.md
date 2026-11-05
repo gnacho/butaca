@@ -314,7 +314,7 @@ popup menu is too pixelated" was, 2026-08-20 to 2026-08-21.
 
 ## 7. Where it can go today
 
-**Glass: the chrome.** The top bar's standing track and the profile chip's capsule, on
+**Glass: the chrome.** The top bar's standing track and the Settings gear's circle, on
 `Glass::DYNAMIC_BACKDROP` (the one preset left). **Popovers and sheets over a UI page are not glass**:
 Sort, Filter, Sources, the item menu, *Also available*, *Track information*, *About*, Account, the
 person biography and the decision alert all draw their ground through `widgets::panel_ground` over

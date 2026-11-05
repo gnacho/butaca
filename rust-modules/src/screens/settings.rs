@@ -937,9 +937,6 @@ enum Action {
     QuickConnect,
     Playback,
     Language,
-    Favourites,
-    Legal,
-    Contribute,
     SignOut,
 }
 
@@ -998,14 +995,7 @@ impl RootPage {
                 Row::new(crate::i18n::msg::settings_language_title())
                     .detail(crate::i18n::msg::settings_language_detail())
                     .chevron(true),
-            )
-            .row(Row::new(crate::i18n::msg::settings_libraries_title()).chevron(true))
-            .row(
-                Row::new(crate::i18n::msg::settings_legal_title())
-                    .detail(crate::i18n::msg::settings_legal_detail())
-                    .chevron(true),
-            )
-            .row(Row::new(crate::i18n::msg::settings_language_contribute()).chevron(true));
+            );
         let sign_out = Section::new("").row(
             Row::new(crate::i18n::msg::settings_servers_disconnect())
                 .detail(crate::i18n::msg::settings_servers_disconnect_detail())
@@ -1013,8 +1003,7 @@ impl RootPage {
         );
         self.rows = vec![
             Action::SelectServer, Action::QuickConnect,
-            Action::Playback, Action::Language, Action::Favourites, Action::Legal, Action::Contribute,
-            Action::SignOut,
+            Action::Playback, Action::Language, Action::SignOut,
         ];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
@@ -1048,9 +1037,6 @@ impl RootPage {
             }
             Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
             Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
-            Action::Favourites => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Favourites))),
-            Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
-            Action::Contribute => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Contribute))),
             Action::SignOut => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
             }

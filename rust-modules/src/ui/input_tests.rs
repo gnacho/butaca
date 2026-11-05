@@ -317,7 +317,7 @@ fn the_home_strip_walks_both_endpoints_for_every_type_composition() {
     for types in [vec![], vec![1], vec![2], vec![1, 2]] {
         let (mut d, mut rig) = boot(FixtureArg::Home);
         let entry = d.nav.top_page().unwrap().id;
-        let mut keys = vec![STRIP_BASE + 4, STRIP_BASE]; // chip, Home
+        let mut keys = vec![STRIP_BASE]; // Home is the left end
         keys.extend(types.into_iter().map(|id| STRIP_BASE + id));
         keys.push(STRIP_BASE + 3); // Search is always the last destination
         d.nav.tabs.strip = keys.iter().enumerate().map(|(i, &key)|
