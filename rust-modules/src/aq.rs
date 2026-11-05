@@ -240,7 +240,7 @@ fn aq_park_deadline() -> libc::timespec {
     }
     add_10ms(libc::timespec {
         tv_sec: tv.tv_sec,
-        tv_nsec: i64::from(tv.tv_usec) * 1000,
+        tv_nsec: libc::c_long::from(tv.tv_usec) * 1000,
     })
 }
 
@@ -495,6 +495,23 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn a_timed_wait_deadline_adds_ten_milliseconds_and_carries_nanosecond_overflow() {
+        let ordinary = add_10ms(libc::timespec {
+            tv_sec: 7,
+            tv_nsec: libc::c_long::from(123_000_000),
+        });
+        assert_eq!(ordinary.tv_sec, 7);
+        assert_eq!(ordinary.tv_nsec, libc::c_long::from(133_000_000));
+
+        let rollover = add_10ms(libc::timespec {
+            tv_sec: 7,
+            tv_nsec: libc::c_long::from(995_000_000),
+        });
+        assert_eq!(rollover.tv_sec, 8);
+        assert_eq!(rollover.tv_nsec, libc::c_long::from(5_000_000));
+    }
 
     #[test]
     fn a_preexisting_abort_prevents_the_publication_closure() {
