@@ -171,6 +171,7 @@ pub(crate) fn pre_boot() {
 // =================================================================================================
 
 /// `/tmp/butaca-novsync` — uncap the swap interval so `fps=` reports the true GPU render rate.
+#[cfg(not(target_os = "emscripten"))]
 pub(crate) fn novsync_armed() -> bool {
     crate::dev::flag("novsync")
 }

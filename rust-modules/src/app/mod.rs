@@ -144,6 +144,7 @@ extern "C" {
         flags: u32,
     ) -> *mut c_void;
     fn SDL_GL_CreateContext(win: *mut c_void) -> *mut c_void;
+    #[cfg(not(target_os = "emscripten"))]
     fn SDL_GL_SetSwapInterval(interval: c_int) -> c_int;
     fn SDL_Delay(ms: u32);
     fn SDL_PollEvent(event: *mut c_void) -> c_int;
