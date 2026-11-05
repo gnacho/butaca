@@ -932,6 +932,12 @@ impl Mounter<InnerHost> for RouteSurface {
 enum Action {
     SelectServer,
     QuickConnect,
+    Playback,
+    Language,
+    Favourites,
+    Legal,
+    Contribute,
+    SignOut,
 }
 
 /// The Settings root: the two Jellyfin server doors and the Quick Connect sign-in.
@@ -979,10 +985,37 @@ impl RootPage {
                     .detail(crate::i18n::msg::settings_servers_quick_detail())
                     .chevron(true),
             );
-        self.rows = vec![Action::SelectServer, Action::QuickConnect];
+        let preferences = Section::new(crate::i18n::msg::settings_preferences_section())
+            .row(
+                Row::new(crate::i18n::msg::settings_playback_title())
+                    .detail(crate::i18n::msg::settings_playback_detail())
+                    .chevron(true),
+            )
+            .row(
+                Row::new(crate::i18n::msg::settings_language_title())
+                    .detail(crate::i18n::msg::settings_language_detail())
+                    .chevron(true),
+            )
+            .row(Row::new(crate::i18n::msg::settings_libraries_title()).chevron(true))
+            .row(
+                Row::new(crate::i18n::msg::settings_legal_title())
+                    .detail(crate::i18n::msg::settings_legal_detail())
+                    .chevron(true),
+            )
+            .row(Row::new(crate::i18n::msg::settings_language_contribute()).chevron(true));
+        let sign_out = Section::new("").row(
+            Row::new(crate::i18n::msg::settings_servers_disconnect())
+                .detail(crate::i18n::msg::settings_servers_disconnect_detail())
+                .destructive(true),
+        );
+        self.rows = vec![
+            Action::SelectServer, Action::QuickConnect,
+            Action::Playback, Action::Language, Action::Favourites, Action::Legal, Action::Contribute,
+            Action::SignOut,
+        ];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
-        self.table.set_sections(vec![servers], sel, false);
+        self.table.set_sections(vec![servers, preferences, sign_out], sel, false);
         self.table.list_focused = true;
     }
 
@@ -1009,6 +1042,14 @@ impl RootPage {
             Action::SelectServer => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
             Action::QuickConnect => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
+            }
+            Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
+            Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
+            Action::Favourites => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Favourites))),
+            Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
+            Action::Contribute => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Contribute))),
+            Action::SignOut => {
+                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
             }
         }
     }
