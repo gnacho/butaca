@@ -808,6 +808,9 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         None
     }
+    fn back_chrome(&self) -> crate::ui::screen::BackChrome {
+        crate::ui::screen::BackChrome::Existing
+    }
     fn prepare(&mut self, b: &mut Budget, cx: &Cx<'_, H>) {
         let icx = inner_cx(cx);
         for e in self.inner.entries.iter_mut() {
@@ -932,6 +935,9 @@ impl Mounter<InnerHost> for RouteSurface {
 enum Action {
     SelectServer,
     QuickConnect,
+    Playback,
+    Language,
+    SignOut,
 }
 
 /// The Settings root: the two Jellyfin server doors and the Quick Connect sign-in.
@@ -979,10 +985,29 @@ impl RootPage {
                     .detail(crate::i18n::msg::settings_servers_quick_detail())
                     .chevron(true),
             );
-        self.rows = vec![Action::SelectServer, Action::QuickConnect];
+        let preferences = Section::new(crate::i18n::msg::settings_preferences_section())
+            .row(
+                Row::new(crate::i18n::msg::settings_playback_title())
+                    .detail(crate::i18n::msg::settings_playback_detail())
+                    .chevron(true),
+            )
+            .row(
+                Row::new(crate::i18n::msg::settings_language_title())
+                    .detail(crate::i18n::msg::settings_language_detail())
+                    .chevron(true),
+            );
+        let sign_out = Section::new("").row(
+            Row::new(crate::i18n::msg::settings_servers_disconnect())
+                .detail(crate::i18n::msg::settings_servers_disconnect_detail())
+                .destructive(true),
+        );
+        self.rows = vec![
+            Action::SelectServer, Action::QuickConnect,
+            Action::Playback, Action::Language, Action::SignOut,
+        ];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
-        self.table.set_sections(vec![servers], sel, false);
+        self.table.set_sections(vec![servers, preferences, sign_out], sel, false);
         self.table.list_focused = true;
     }
 
@@ -1009,6 +1034,11 @@ impl RootPage {
             Action::SelectServer => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
             Action::QuickConnect => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
+            }
+            Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
+            Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
+            Action::SignOut => {
+                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
             }
         }
     }

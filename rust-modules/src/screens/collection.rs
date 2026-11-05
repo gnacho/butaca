@@ -23,11 +23,12 @@ use crate::ui::widgets::{self, Art, PageGround, StatusKind, StatusOverlay};
 use crate::ui::{Env, Painter, Rect, Spring};
 
 use super::registry::{AppFx, CardKeys, CardPageMemory, CollectionLike, ContentArg,
-    ContentLike, ContentPanel, ContentReq, PageMemory};
+    ContentLike, ContentPanel, ContentReq, HomeTab, LibraryReq, PageMemory};
 
 const HEADER_ELEM: u32 = 0;
 const RETRY_ELEM: u32 = 1;
 const FIRST_CARD_ELEM: u32 = 0x1000;
+const STRIP: GroupId = crate::ui::containers::tabs::STRIP;
 const GRID_GROUP: GroupId = GroupId(0);
 const HEADER_GROUP: GroupId = GroupId(1);
 const STATUS_GROUP: GroupId = GroupId(2);
@@ -204,6 +205,28 @@ impl CollectionScreen {
         )));
     }
 
+    fn activate_strip<H: ContentLike + CollectionLike>(&self, elem: u32, fx: &mut Effects<'_, H>) -> Handled {
+        if !self.id.is_favorites() { return Handled::No; }
+        if elem == crate::ui::dispatch::STRIP_BASE + 7 {
+            fx.push(crate::ui::machine::Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return Handled::Yes;
+        }
+        let req = match elem.checked_sub(crate::ui::dispatch::STRIP_BASE) {
+            Some(0) => Some(LibraryReq::Tab(HomeTab::Home)),
+            Some(1) => Some(LibraryReq::Tab(HomeTab::Movies)),
+            Some(2) => Some(LibraryReq::Tab(HomeTab::Shows)),
+            Some(3) => Some(LibraryReq::Tab(HomeTab::Search)),
+            Some(4) => Some(LibraryReq::Account),
+            Some(5) => Some(LibraryReq::Tab(HomeTab::Videos)),
+            Some(6) => Some(LibraryReq::Tab(HomeTab::Favorites)),
+            _ => None,
+        };
+        if let Some(req) = req {
+            fx.push(crate::ui::machine::Fx::App(AppFx::Library(req)));
+            Handled::Yes
+        } else { Handled::No }
+    }
+
     fn collection<'a, H: CollectionLike>(&self, cx: &Cx<'a, H>) -> Option<&'a Collection> {
         H::collection(cx).current().filter(|c| c.id.same_collection(&self.id))
     }
@@ -220,6 +243,12 @@ impl CollectionScreen {
         if self.summary_more && !collection.items.is_empty() {
             self.links_c.push(Link { from: HEADER_GROUP, dir: Dir::Down, to: GRID_GROUP });
             self.links_c.push(Link { from: GRID_GROUP, dir: Dir::Up, to: HEADER_GROUP });
+        }
+        if self.id.is_favorites() && !collection.items.is_empty() {
+            // Favorites wears the shared tab bar. An ordinary collection keeps its own full-page
+            // focus graph: there is no visible strip for these links to reach.
+            self.links_c.push(Link { from: STRIP, dir: Dir::Down, to: GRID_GROUP });
+            self.links_c.push(Link { from: GRID_GROUP, dir: Dir::Up, to: STRIP });
         }
     }
 
@@ -429,6 +458,13 @@ impl CollectionScreen {
         Rect::new(MARGIN_X, HEADER_TOP - self.scroll.pos, ART_W, ART_H)
     }
 
+    /// Favorites has no artwork of its own and its page title already names it. The neutral
+    /// collection mark would read as a stray icon before the grid appears, so this page draws no
+    /// header art at all; every ordinary collection keeps its tile.
+    fn shows_header_art(&self, _collection: &Collection) -> bool {
+        !self.id.is_favorites()
+    }
+
     fn draw_header(&self, p: Painter, collection: &Collection, focused: bool,
         measure: &dyn crate::ui::machine::Measure) {
         let dy = -self.scroll.pos;
@@ -437,13 +473,15 @@ impl CollectionScreen {
         let p = p.alpha(alpha);
         let art = self.art_rect();
         let name = if collection.title.is_empty() { &collection.id.name } else { &collection.title };
-        if collection.header_ready() && collection.thumb.is_empty() {
-            // No artwork of its own (an empty collection has no composite either): the neutral
-            // tile the Library grid draws for the same collection — its mark and its name.
-            crate::ui::collection_tile::draw(p, art, art, theme::CARD_RING_RAD, name);
-        } else {
-            widgets::card(p, art, Art::Thumb { sid: collection.id.sid, key: &collection.thumb, res: ART_RES },
-                theme::CARD_RING_RAD, false, 1.0, 0.0);
+        if self.shows_header_art(collection) {
+            if collection.header_ready() && collection.thumb.is_empty() {
+                // No artwork of its own (an empty collection has no composite either): the neutral
+                // tile the Library grid draws for the same collection — its mark and its name.
+                crate::ui::collection_tile::draw(p, art, art, theme::CARD_RING_RAD, name);
+            } else {
+                widgets::card(p, art, Art::Thumb { sid: collection.id.sid, key: &collection.thumb, res: ART_RES },
+                    theme::CARD_RING_RAD, false, 1.0, 0.0);
+            }
         }
         if collection.status == CollectionStatus::Ready {
             card_row::draw_heading(p, crate::i18n::msg::browse_collection_items(), order_note(collection),
@@ -646,13 +684,23 @@ impl<H: ContentLike + CollectionLike> Machine<H> for CollectionScreen {
                 }
                 fx.invalidate(Provenance::Input); Handled::Yes
             }
+            ScreenEvent::Activate(elem) if !self.id.is_favorites()
+                && *elem == crate::screens::registry::HEADER_CRUMB => {
+                fx.push(crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back))); Handled::Yes
+            }
             ScreenEvent::Activate(elem) if *elem == RETRY_ELEM => {
                 self.request_store(PAGE_SIZE, fx); Handled::Yes
             }
             ScreenEvent::Activate(elem) if *elem == HEADER_ELEM => {
                 self.activate_header(cx, fx); Handled::Yes
             }
+            ScreenEvent::Activate(elem) if self.id.is_favorites()
+                && *elem >= crate::ui::dispatch::STRIP_BASE => self.activate_strip(*elem, fx),
             ScreenEvent::PressCommit(_) => {
+                if let Some(key) = cx.focus.current.filter(|key| self.id.is_favorites()
+                    && key.elem >= crate::ui::dispatch::STRIP_BASE) {
+                    return self.activate_strip(key.elem, fx);
+                }
                 if let Some(item) = self.focused_item(cx.focus.current, cx) {
                     fx.push(crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Push(
                         ContentArg::Detail { sid: item.sid, rk: item.rk.clone() }))));
@@ -732,6 +780,10 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
         } else {
             Self::status_overlay(None, f.cx.tick.ms, f.measure).draw_measured(&Env::inert(), p, f.measure);
         }
+        if !self.id.is_favorites() {
+            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
+        }
     }
     fn render(&self) -> RenderStrategy { RenderStrategy::Page }
     fn focus_source(&self) -> FocusSource { FocusSource::Engine }
@@ -780,6 +832,96 @@ mod tests {
         Cx { views: view, tick: Tick::default(), measure: &FixtureMeasure,
             press: PressRead::default(), focus: FocusRead { current: focus, ..Default::default() },
             owner: InputOwner::Entry(EntryId(9)) }
+    }
+
+    #[test]
+    fn an_ordinary_collection_has_a_visible_back_control_but_favorites_does_not() {
+        let (mut store, mut screen) = seeded();
+        let context = cx(store.view(), None);
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        crate::gfx::without_frame_clear(|| Screen::<CollectionHost>::draw(&mut screen, &mut frame));
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+            .expect("an ordinary collection publishes its visible Back control");
+        assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
+            [origin.x, origin.y, origin.w, origin.h]);
+        let out = step(&mut screen, ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB), &context);
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back)))));
+
+        let favorites = CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favorites");
+        store.edit_for_test(|collection| collection.id = favorites.clone());
+        screen = CollectionScreen::new(EntryId(9), favorites);
+        screen.sync(store.view().current().unwrap(), &FixtureMeasure);
+        let context = cx(store.view(), None);
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        crate::gfx::without_frame_clear(|| Screen::<CollectionHost>::draw(&mut screen, &mut frame));
+        assert!(!frame.stops().iter().any(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB),
+            "Favorites is a tab root and keeps its account chip instead");
+    }
+
+    #[test]
+    fn favorites_link_the_shared_strip_but_an_ordinary_collection_does_not() {
+        let (mut store, mut screen) = seeded();
+        let mut ordinary = Vec::new();
+        <CollectionScreen as Screen<CollectionHost>>::links(&screen, &mut ordinary);
+        assert!(!ordinary.iter().any(|link| link.from == STRIP || link.to == STRIP),
+            "an ordinary collection has no shared strip to reach");
+
+        let favorites = CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favorites");
+        store.edit_for_test(|collection| collection.id = favorites.clone());
+        screen = CollectionScreen::new(EntryId(9), favorites);
+        screen.sync(store.view().current().unwrap(), &FixtureMeasure);
+        let mut links = Vec::new();
+        <CollectionScreen as Screen<CollectionHost>>::links(&screen, &mut links);
+        assert!(links.iter().any(|link| link.from == STRIP && link.dir == Dir::Down && link.to == GRID_GROUP),
+            "the remote can move from Favorites' pill into its grid");
+        assert!(links.iter().any(|link| link.from == GRID_GROUP && link.dir == Dir::Up && link.to == STRIP),
+            "the remote can move back from the grid to the shared strip");
+    }
+
+    #[test]
+    fn favorites_activate_the_shared_strip_but_an_ordinary_collection_does_not() {
+        let (mut store, mut screen) = seeded();
+        let ordinary = step(&mut screen, ScreenEvent::Activate(crate::ui::dispatch::STRIP_BASE + 3),
+            &cx(store.view(), None));
+        assert!(ordinary.is_empty(), "an ordinary collection has no Search pill to activate");
+
+        let favorites = CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favorites");
+        store.edit_for_test(|collection| collection.id = favorites.clone());
+        screen = CollectionScreen::new(EntryId(9), favorites);
+        screen.sync(store.view().current().unwrap(), &FixtureMeasure);
+        let out = step(&mut screen, ScreenEvent::Activate(crate::ui::dispatch::STRIP_BASE + 3),
+            &cx(store.view(), None));
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Library(LibraryReq::Tab(HomeTab::Search))))),
+            "OK on Favorites' Search pill opens Search");
+        let focused_search = Some(crate::ui::machine::FocusKey {
+            entry: EntryId(9), elem: crate::ui::dispatch::STRIP_BASE + 3,
+        });
+        let out = step(&mut screen, ScreenEvent::PressCommit(crate::ui::machine::PressId(1)),
+            &cx(store.view(), focused_search));
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Library(LibraryReq::Tab(HomeTab::Search))))),
+            "a committed press on Favorites' Search pill opens Search too");
+        let out = step(&mut screen, ScreenEvent::Activate(crate::ui::dispatch::STRIP_BASE + 7),
+            &cx(store.view(), None));
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Loop(super::super::registry::LoopReq::AccountSettings)))),
+            "Favorites' Settings gear opens the same Settings flow as the account menu");
+    }
+
+    #[test]
+    fn favorites_draw_no_header_art_but_an_ordinary_collection_does() {
+        let (mut store, ordinary) = seeded();
+        assert!(ordinary.shows_header_art(store.view().current().unwrap()),
+            "an ordinary collection keeps its neutral tile");
+
+        let favorites = CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favorites");
+        store.edit_for_test(|collection| collection.id = favorites.clone());
+        let screen = CollectionScreen::new(EntryId(9), favorites);
+        assert!(!screen.shows_header_art(store.view().current().unwrap()),
+            "Favorites names itself and must not draw the collection mark");
     }
 
     #[test]

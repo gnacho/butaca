@@ -665,8 +665,15 @@ impl Bridge {
         let route = d.top_arg().cloned().unwrap_or(AppArg::Home);
         let route = &route;
         let search = *route == AppArg::Search;
-        if matches!(route, AppArg::Home | AppArg::Library) || search {
-            d.nav.tabs.strip_fallback = Some(if search { crate::ui::dispatch::STRIP_BASE + 3 } else { crate::screens::home::STRIP_HOME_ELEM });
+        let favorites = matches!(route, AppArg::Content(ContentArg::Collection(id)) if id.is_favorites());
+        if matches!(route, AppArg::Home | AppArg::Library) || search || favorites {
+            d.nav.tabs.strip_fallback = Some(if search {
+                crate::ui::dispatch::STRIP_BASE + 3
+            } else if favorites {
+                crate::ui::dispatch::STRIP_BASE + 6
+            } else {
+                crate::screens::home::STRIP_HOME_ELEM
+            });
             if let Some(io) = &self.home_io {
                 refresh_chrome(&mut self.chrome, &self.measure, self.directory.view(),
                     Some((&io.profile, &io.preferences)));
@@ -675,7 +682,12 @@ impl Bridge {
             }
             self.chrome_selection = if *route == AppArg::Library {
                 self.directory.view().current().map(|i| self.chrome.library_selection(self.directory.view().sections()[i].kind)).unwrap_or(0)
-            } else if search { self.chrome.search_selection() } else { 0 };
+            } else if search {
+                self.chrome.search_selection()
+            } else if favorites {
+                crate::app::chrome::pill_of(self.directory.view(), crate::app::chrome::Pill::Favorites)
+                    .unwrap_or(0) as u32
+            } else { 0 };
             let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
             self.chrome.members(selected, Self::home_focus(d), self.strip.scroll_pos(), &mut d.nav.tabs.strip);
         } else {
@@ -1144,16 +1156,15 @@ impl Rig<AppHost> for Bridge {
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
         let chrome = self.chrome.read(self.strip.chip_expand_pos());
         self.strip.draw(chrome.labels, p, glass.tab_band_mut());
-        crate::ui::widgets::profile_chip_with(
-            p,
-            chrome.profile,
-            chrome.chip_expand,
-            glass.tab_face(),
-        );
+        let gear = crate::ui::widgets::CircleButton::new(std::ptr::null())
+            .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
+            .icon(crate::ui::icons::Icon::Settings)
+            .focused(self.strip.gear_focused());
+        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p);
     }
-    /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — the account menu's chip lift borrows
-    /// the SAME captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher
-    /// adds this frame's material from `GlassPlan`; neither value crosses through a static.
+    /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — a scrim lift borrows the SAME
+    /// captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher adds this
+    /// frame's material from `GlassPlan`; neither value crosses through a static.
     fn scrim_chrome_read(&self) -> Option<crate::ui::widgets::ChromeRead<'_>> {
         Some(self.chrome.read(self.strip.chip_expand_pos()))
     }
@@ -1784,7 +1795,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
         let position = home.grid_position::<AppHost>(focus, &cx);
         let (row, col) = position.map(|(r, c)| (r as i64, c as i64)).unwrap_or((-1, -1));
         let hf = match rig.chrome.focus(focus) {
-            crate::ui::widgets::TopFocus::Chip => -1,
+            crate::ui::widgets::TopFocus::Chip | crate::ui::widgets::TopFocus::Gear => -1,
             crate::ui::widgets::TopFocus::Pill(i) => -(i as i64 + 2),
             crate::ui::widgets::TopFocus::Away => focus.filter(|key| key.elem < 2).map_or(-1, |key| key.elem as i64),
         };
@@ -1824,6 +1835,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
         let top = rig.chrome.focus(focus);
         let (zone, row, col, recent, card) = match top {
             crate::ui::widgets::TopFocus::Chip => ("Chip", -1i64, -1i64, -1i64, false),
+            crate::ui::widgets::TopFocus::Gear => ("Gear", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Pill(_) => ("Strip", -1i64, -1i64, -1i64, false),
             crate::ui::widgets::TopFocus::Away => search.probe(focus),
         };
@@ -2403,6 +2415,9 @@ fn pill_of_arg(arg: &AppArg, directory: crate::stores::browse::DirectoryView<'_>
     match arg {
         AppArg::Home => pill_of(directory, Pill::Home),
         AppArg::Search => pill_of(directory, Pill::Search),
+        AppArg::Content(ContentArg::Collection(id)) if id.is_favorites() => {
+            pill_of(directory, Pill::Favorites)
+        }
         AppArg::Library => {
             let kind = directory.current().map(|i| directory.sections()[i].kind)?;
             pill_of(directory, Pill::Section(kind))

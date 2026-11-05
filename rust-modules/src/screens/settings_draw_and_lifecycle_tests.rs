@@ -178,7 +178,7 @@ fn every_root_detail_line_fits_a_known_good_width() {
         }
     }
     assert_eq!(
-        checked, 2,
-        "expected detail lines on Select server and Quick Connect, got {checked}"
+        checked, 5,
+        "expected detail lines on the two server doors, two preference rows and Sign out, got {checked}"
     );
 }

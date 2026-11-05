@@ -230,6 +230,10 @@ impl SearchScreen {
     }
 
     fn activate<H: SearchLike>(&mut self, elem: u32, held: bool, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
+        if elem == crate::ui::dispatch::STRIP_BASE + 7 {
+            fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return Handled::Yes;
+        }
         if let Some(tab) = elem.checked_sub(crate::ui::dispatch::STRIP_BASE) {
             let request = match tab {
                 0 => SearchReq::Tab(HomeTab::Home), 1 => SearchReq::Tab(HomeTab::Movies),

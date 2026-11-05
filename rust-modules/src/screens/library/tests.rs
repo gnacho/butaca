@@ -1237,6 +1237,19 @@ fn the_page_glyph_and_the_librarys_live_tab_strip_never_overlap() {
     assert_eq!(glyph.h, StatusOverlay::GLYPH_SIZE, "without a live strip the glyph keeps its natural, unshrunk size");
 }
 
+#[test]
+fn global_home_shelves_never_enter_a_library_section() {
+    assert!(!shelf_allowed_for_section("home.continue", Some("jf.latest.movies")),
+        "Home's whole-server deck is not a Movies shelf");
+    assert!(!shelf_allowed_for_section("jf.nextup", Some("jf.latest.shows")),
+        "Home's Next Up is not a Shows shelf");
+    assert!(shelf_allowed_for_section("jf.latest.movies", Some("jf.latest.movies")));
+    assert!(!shelf_allowed_for_section("jf.latest.shows", Some("jf.latest.movies")),
+        "another view's latest shelf stays out");
+    assert!(shelf_allowed_for_section("s0", Some("jf.latest.movies")),
+        "free-form ids used by test seeds keep working");
+}
+
 mod type_tests { include!("type_tests.rs"); }
 
 mod art_admission_tests { include!("art_admission_tests.rs"); }

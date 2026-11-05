@@ -162,7 +162,7 @@ impl Backdrop {
     fn new() -> Self {
         Self {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            grid_target: [theme::SURFACE_APP; 4],
+            grid_target: AmbientWash::blue(AmbientWash::BLUE_W),
             art: Spring::at(0.0),
             outgoing_art: Spring::at(0.0),
             tex: (0, 0.0, 0.0),
@@ -184,13 +184,10 @@ impl Backdrop {
             h.map(|h| crate::ui::widgets::resolve_tex_wh_on(h.item.sid, &h.item.art, 1280, 720, 0))
                 .unwrap_or((0, 0.0, 0.0))
         };
-        if snap < HERO_ART_CULL {
-            self.tex = resolve(hero);
-            self.outgoing_tex = resolve(outgoing);
-        } else {
-            self.tex = (0, 0.0, 0.0);
-            self.outgoing_tex = (0, 0.0, 0.0);
-        }
+        // Keep the current hero texture after the dive: the shelves draw it attenuated instead of
+        // dropping the backdrop on the floor. The outgoing hero is still only a transition layer.
+        self.tex = resolve(hero);
+        self.outgoing_tex = resolve(outgoing);
 
         let changed = match (self.keyed.as_ref(), selected) {
             (Some((a, x)), Some((b, y))) => a != b || x != y,
@@ -214,7 +211,7 @@ impl Backdrop {
             self.outgoing_art.step(1.0, AmbientWash::K, dt);
         }
         if let Some(item) = grid_item.filter(|m| m.has_blur) {
-            self.grid_target = AmbientWash::keyed(item.blur, PageGround::CARD_W);
+            self.grid_target = AmbientWash::blue_keyed(item.blur, PageGround::CARD_W);
         }
         self.wash.step(
             wash_corners(hero.map(|h| h.item), self.grid_target, snap),
@@ -265,6 +262,17 @@ impl Backdrop {
                 backdrop_art(p, self.tex, env.sp, in_x, incoming_a);
             } else {
                 backdrop_art(p, self.tex, env.sp, 0.0, incoming_a);
+            }
+        }
+        if !folded && slide.is_none() && env.sp >= HERO_ART_CULL {
+            let alpha = shelf_art_alpha(self.tex.0, env.sp, incoming_a);
+            if alpha > 0.01 {
+                p.tex(
+                    self.tex.0,
+                    Rect::new(0.0, 0.0, SCR_W, SCR_H).cover(self.tex.1, self.tex.2),
+                    0.0,
+                    theme::with_a(theme::TINT_WHITE, alpha),
+                );
             }
         }
         if !folded && env.hero_a > 0.01 {
@@ -987,6 +995,10 @@ impl HomeScreen {
     }
 
     fn activate<H: HomeLike>(&mut self, elem: u32, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
+        if elem == crate::ui::dispatch::STRIP_BASE + 7 {
+            fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::AccountSettings)));
+            return;
+        }
         if let Some(req) = Self::request_for_strip(elem) {
             fx.push(Fx::App(AppFx::Home(req)));
             return;
@@ -2271,9 +2283,12 @@ fn shelf_top_banded(row: usize, band_row: Option<usize>) -> f32 {
 fn wash_corners(hero: Option<&CatalogMovie>, grid: [[f32; 4]; 4], snap: f32) -> [[f32; 4]; 4] {
     let hero = hero
         .filter(|m| m.has_blur)
-        .map(|m| AmbientWash::keyed(m.blur, HERO_WASH_W))
-        .unwrap_or([theme::SURFACE_APP; 4]);
+        .map(|m| AmbientWash::blue_keyed(m.blur, HERO_WASH_W))
+        .unwrap_or_else(|| AmbientWash::blue(HERO_WASH_W));
     let t = snap.clamp(0.0, 1.0);
+    // A focused tile with no envelope of its own must not erase the backdrop the page already
+    // had. Keep the hero's attenuated wash in that case; a real tile wash still takes over.
+    let grid = if grid == [theme::SURFACE_APP; 4] { hero } else { grid };
     std::array::from_fn(|i| theme::mix(hero[i], grid[i], t))
 }
 fn wash_hidden(snap: f32, art: f32, outgoing: Option<f32>) -> bool {
@@ -2289,6 +2304,10 @@ fn reveal(tex: u32, spring: &Spring) -> f32 {
 fn art_rect(tex: (u32, f32, f32), snap: f32, dx: f32) -> Rect {
     Rect::new(dx, -snap * (SCR_H - 120.0), SCR_W, SCR_H).cover(tex.1, tex.2)
 }
+fn shelf_art_alpha(tex: u32, snap: f32, reveal: f32) -> f32 {
+    if tex == 0 || snap < HERO_ART_CULL { 0.0 } else { reveal * 0.16 }
+}
+
 fn backdrop_art(p: Painter, tex: (u32, f32, f32), snap: f32, dx: f32, alpha: f32) {
     if tex.0 == 0 || alpha <= 0.01 || !on_axis(dx, SCR_W, SCR_W, 0.0) {
         return;

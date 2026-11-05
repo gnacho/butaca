@@ -857,6 +857,12 @@ fn autoplay_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
+crate::dev::latched_flag! { fn search_scene_armed = "search"; }
+
+fn auto_search_back_enabled(grid_tried: bool, search_scene: bool) -> bool {
+    grid_tried && search_scene
+}
+
 fn grid_library_search_heroidx_arm(app: &mut App, _fr: &mut Frame) {
     if !app.scenarios.grid_tried && _fr.now.wrapping_sub(app.t0) > 400 {
         app.scenarios.grid_tried = true;
@@ -897,7 +903,7 @@ fn grid_library_search_heroidx_arm(app: &mut App, _fr: &mut Frame) {
     // One Back closes the panel and does not leave Search: the gesture a viewer makes to look at
     // the results. Fired once, after the mount had time to open the panel.
     static SEARCH_BACK_SENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if app.scenarios.grid_tried
+    if auto_search_back_enabled(app.scenarios.grid_tried, search_scene_armed())
         && matches!(app.route(), AppArg::Search)
         && !SEARCH_BACK_SENT.load(std::sync::atomic::Ordering::Relaxed)
         && script_step_due(_fr.now, app.t0, 1600)
@@ -2353,4 +2359,16 @@ pub(crate) fn app_init_value() -> Option<Result<serde_json::Value, &'static str>
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn app_init_value() -> Option<Result<serde_json::Value, &'static str>> {
     None
+}
+
+#[cfg(test)]
+mod auto_search_back_tests {
+    #[test]
+    fn only_a_search_capture_closes_the_keyboard_on_a_timer() {
+        assert!(!super::auto_search_back_enabled(false, true), "the grid has not mounted yet");
+        assert!(!super::auto_search_back_enabled(true, false),
+            "an ordinary Search visit, including a debug build on the TV, keeps its keyboard");
+        assert!(super::auto_search_back_enabled(true, true),
+            "the screenshot scene still dismisses the caret so its capture can settle");
+    }
 }

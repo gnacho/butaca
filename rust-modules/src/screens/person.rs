@@ -1573,6 +1573,10 @@ impl<H: ContentLike + PersonLike> Machine<H> for PersonScreen {
                 fx.invalidate(Provenance::Input);
                 Handled::Yes
             }
+            ScreenEvent::Activate(e) if *e == crate::screens::registry::HEADER_CRUMB => {
+                fx.push(crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back)));
+                Handled::Yes
+            }
             ScreenEvent::Activate(e) => {
                 match self.person(cx).and_then(|p| self.locate(p, *e)) {
                     Some(Located::Header) => self.activate_header(cx, fx),
@@ -1671,6 +1675,8 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
         let cur = f.focus.current.map(|k| k.elem);
         let env = Env::inert();
         let Some(person) = self.person(f.cx) else {
+            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
             return;
         };
         self.amb.draw(p, Rect::FULL);
@@ -1678,6 +1684,7 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
         let live = self.live_flow(person, cur);
         col.draw(&live, &env, p, f.measure);
         self.draw_shelf_state(p, &env, person);
+        crate::ui::widgets::draw_back_control(p);
 
         self.record_stops(f, person, cur);
     }
@@ -1767,6 +1774,7 @@ impl PersonScreen {
                 );
             }
         }
+        crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
         let _ = cur;
     }
 }
@@ -3110,6 +3118,94 @@ mod tests {
             &st.fx,
             crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back))
         )));
+        store.run(PersonCmd::Close);
+    }
+
+    #[test]
+    fn the_loaded_back_control_paints_above_the_opaque_wash_and_content() {
+        let _serial = crate::testlock::serial();
+        let (mut store, mut s) = seed(2, 1);
+        let measure = FixtureMeasure;
+        let context = cx(&measure, store.view());
+        let mut out = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let mut fx = Effects::new(
+            &mut out,
+            crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(0)),
+            &mut present,
+        );
+        Machine::<PersonHost>::step(
+            &mut s,
+            &ScreenEvent::Tick(Tick { ms: 16, dt_us: 16_667 }),
+            &context,
+            &mut fx,
+        );
+        drop(fx);
+        assert!(!s.amb.is_flat(), "the loaded page must exercise a covering blue wash");
+
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::recording());
+        let ops = crate::ui::draw_census::capture(|| {
+            crate::gfx::without_frame_clear(|| Screen::<PersonHost>::draw(&mut s, &mut frame));
+        });
+        let wash = ops.iter().position(|(tag, rect)| {
+            *tag == 16 && [rect.x, rect.y, rect.w, rect.h] == [0.0, 0.0, SCR_W, SCR_H]
+        }).expect("the loaded draw paints its opaque ambient wash");
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        let back = ops.iter().rposition(|(tag, rect)| {
+            *tag == 10 && [rect.x, rect.y, rect.w, rect.h] == [origin.x, origin.y, origin.w, origin.h]
+        }).expect("the loaded draw paints the shared Back disc");
+        assert!(back > wash, "the opaque wash must not paint over Back: {ops:?}");
+        assert_eq!(back, ops.len() - 1, "no later page content may cover Back: {ops:?}");
+        store.run(PersonCmd::Close);
+    }
+
+    #[test]
+    fn the_visible_back_control_is_available_before_the_person_lands() {
+        let _serial = crate::testlock::serial();
+        let store = crate::stores::person::PersonStore::default();
+        let mut s = PersonScreen::new(EntryId(9), ServerId::UNSET, "pending".into(), String::new(), "Pending".into(), String::new());
+        let measure = FixtureMeasure;
+        let context = cx(&measure, store.view());
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        crate::gfx::without_frame_clear(|| Screen::<PersonHost>::draw(&mut s, &mut frame));
+        let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+            .expect("the loading state keeps a way back");
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
+            [origin.x, origin.y, origin.w, origin.h]);
+        let mut out = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let mut fx = Effects::new(&mut out, crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(0)), &mut present);
+        let handled = Machine::<PersonHost>::step(&mut s,
+            &ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB), &context, &mut fx);
+        assert_eq!(handled, Handled::Yes);
+        assert!(out.iter().any(|event| matches!(event.fx,
+            crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back)))));
+    }
+
+    #[test]
+    fn the_visible_back_control_registers_and_navigates() {
+        let _serial = crate::testlock::serial();
+        let (mut store, mut s) = seed(1, 0);
+        let measure = FixtureMeasure;
+        let context = cx(&measure, store.view());
+        let person = s.person(&context).expect("seeded person");
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
+        s.record_stops(&mut frame, &person, None);
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+            .expect("Person publishes its visible Back control");
+        assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
+            [origin.x, origin.y, origin.w, origin.h]);
+
+        let mut out = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let mut fx = Effects::new(&mut out, crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(0)), &mut present);
+        let handled = Machine::<PersonHost>::step(&mut s,
+            &ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB), &context, &mut fx);
+        assert_eq!(handled, Handled::Yes);
+        assert!(out.iter().any(|st| matches!(st.fx,
+            crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back)))));
         store.run(PersonCmd::Close);
     }
 

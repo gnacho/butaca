@@ -1,9 +1,0 @@
-{
-  "expected": "0x0c4cf6034607e0f2",
-  "first_frame": 1,
-  "from_state_fp": 5212864836643027146,
-  "got": "0xced5b5f971bce22f",
-  "preceding_event_kinds": [],
-  "reason": "The strip gained its Favorites pill (#121), so Home, Library and Search draw one more destination at stable id 6. The repaint is the whole change: every state, effect, result and landing count is unchanged.",
-  "to_state_fp": 5212864836643027146
-}

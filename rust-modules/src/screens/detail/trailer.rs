@@ -349,6 +349,11 @@ impl Transport {
         target
     }
 
+    /// Is the transport visible enough for its Back control to be a pointer target?
+    pub(super) fn visible(&self) -> bool {
+        self.alpha > 0.01
+    }
+
     /// Is the linger still running? Read by the page's own tests instead of the deadline, which
     /// says nothing without the clock reading it was taken from.
     #[cfg(test)]

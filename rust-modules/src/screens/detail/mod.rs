@@ -1647,6 +1647,16 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                 }
                 Handled::Yes
             }
+            ScreenEvent::Activate(elem) if *elem == crate::screens::registry::HEADER_CRUMB => {
+                if self.collapse_full_trailer(fx) {
+                    return Handled::Yes;
+                }
+                if self.collapse_background_preview(fx) {
+                    return Handled::Yes;
+                }
+                self.content(fx, ContentReq::Back);
+                Handled::Yes
+            }
             ScreenEvent::Activate(elem) => {
                 self.activate(*elem, cx, fx);
                 Handled::Yes
@@ -2041,6 +2051,9 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
             crate::player::preview::paused(),
             measure,
         );
+        if !self.full_trailer() {
+            crate::ui::widgets::draw_back_control(p.alpha(self.preview_chrome));
+        }
 
         self.record_stops(f);
         // **This page draws no panel at all any more.** All three of its own — *Also available*,
@@ -2583,6 +2596,9 @@ impl DetailScreen {
                 },
             );
         }
+        if !self.full_trailer() || self.trailer_ctl.visible() {
+            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
+        }
     }
 }
 
@@ -3030,9 +3046,9 @@ impl DetailScreen {
                 dt,
             );
             let target = if d.has_blur {
-                AmbientWash::keyed(d.blur, [AmbientWash::GROUND_W; 4])
+                AmbientWash::blue_keyed(d.blur, [AmbientWash::GROUND_W; 4])
             } else {
-                [theme::SURFACE_APP; 4]
+                AmbientWash::blue([AmbientWash::GROUND_W; 4])
             };
             self.ground.step(target, AmbientWash::K, dt);
         }

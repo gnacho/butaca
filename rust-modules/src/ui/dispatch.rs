@@ -1496,6 +1496,14 @@ where
                 f.page_alpha = s.motion.appear;
                 f.underlay = Some(field);
                 backdrop::draw_span("surf", || inst.screen.draw(&mut f));
+                if inst.screen.back_chrome() == super::screen::BackChrome::Shared {
+                    crate::ui::widgets::draw_back_control(f.painter.alpha(f.page_alpha));
+                    crate::ui::widgets::back_control_stop(
+                        &mut f,
+                        s.entry.id,
+                        H::Elem::of_index(super::table_screen::CRUMB_ELEM),
+                    );
+                }
                 report.drawn.push(inst.id);
                 stops.extend(f.into_stops());
                 // (b) is a count of THIS SURFACE's own backing renders, asked of the surface —
@@ -1818,6 +1826,19 @@ where
                 // to `ui::idle` and not to this gate (the Library notes no `Motion` at all). Held
                 // for the body — a guard, so the early return below cannot leak the scope.
                 let _own = is_surface.then(crate::ui::popover::own_motion);
+                let is_owner = matches!(addressed.owner, InputOwner::Entry(e) if nav.instance_of(e) == Some(id));
+                let shared_surface_back = is_owner
+                    && matches!(ev, ScreenEvent::Activate(elem) if elem.index() == Some(super::table_screen::CRUMB_ELEM))
+                    && nav.entry_of_instance(id).is_some_and(|entry| {
+                        nav.is_surface(entry)
+                            && nav.entry(entry).and_then(|e| e.inst.as_ref())
+                                .is_some_and(|i| i.screen.back_chrome() == super::screen::BackChrome::Shared)
+                    });
+                if shared_surface_back {
+                    self.pending_back = true;
+                    present.set_scope(super::present::Scope::Page);
+                    return;
+                }
                 let Some(inst) = nav.instance_mut(id) else {
                     present.set_scope(super::present::Scope::Page);
                     report.dropped_deliveries += 1;
@@ -1836,7 +1857,6 @@ where
                 // `after_step` re-delivered as a synthetic one (see that arm). The detection is
                 // deliberately blind to `at_edge` and to the wcode, so the two roads cannot
                 // diverge.
-                let is_owner = matches!(addressed.owner, InputOwner::Entry(e) if nav.instance_of(e) == Some(id));
                 if back && handled == Handled::No && is_owner {
                     self.pending_back = true;
                 }

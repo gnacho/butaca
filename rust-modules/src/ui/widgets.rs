@@ -2215,6 +2215,14 @@ pub(crate) const CHIP_FRAME: Rect = Rect::new(
     CHIP_D,
 );
 
+/// The Settings gear mirrors the profile chip at the right safe-area edge.
+pub(crate) const SETTINGS_GEAR_FRAME: Rect = Rect::new(
+    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - TAB_TRACK_PAD - CHIP_D,
+    TOP_BAR_Y,
+    CHIP_D,
+    CHIP_D,
+);
+
 /// **The focused capsule's rect — the ONE expression, drawn and priced from the same place.**
 ///
 /// [`profile_chip_with`] draws this and [`CHIP_CAP_MAX_R`] prices it, and until 2026-08-21 they were two
@@ -2253,6 +2261,8 @@ pub(crate) enum TopFocus {
     Away,
     /// the profile chip
     Chip,
+    /// the Settings gear at the bar's right edge
+    Gear,
     /// a pill of the strip, by index (0 = Home)
     Pill(usize),
 }
@@ -2522,37 +2532,6 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
             );
         }
     }
-}
-
-/// [`profile_chip_with`], re-drawn over the account menu's scrim — the `Scrim::lift` contract
-/// (`ui::screen::Scrim`, drawn by `ModalStack::draw_scrims`), for the one surface in the app that
-/// hangs off a piece of shared CHROME rather than off a card.
-///
-/// It lives HERE, beside the chip itself, for the reason the chip does: the control is drawn
-/// verbatim by Home, the Library and Search, and the menu can be opened from any of the three.
-/// It was Home's own `redraw_profile_chip` while Home was the only screen
-/// whose chip could be pressed, which would have lifted the HOME chip's spring over whichever page
-/// the user was actually on — and there is only one chip, so there is only one lift.
-///
-/// On `nav::chrome_alpha` and not `page_alpha`, because that is the alpha the chip is drawn on: the
-/// top band holds still while pages swap under it. A lift on the wrong alpha would make the chip
-/// flicker through a route change that nothing else on the bar reacts to.
-///
-/// [`crate::ui::screen::ScrimLiftRead`] is `Scrim::lift`'s own argument (spec phase 12,
-/// PX-WIDGETS). Its `ChromeRead` borrows the captured profile, labels and unfurl from
-/// `Rig::scrim_chrome_read`; its material is the face the same frame's `GlassPlan` received from
-/// normal strip paint. This bare `fn` therefore redraws the exact owner publication without a
-/// static or a draw-time session/vocabulary read.
-///
-/// [`Opener`]: crate::ui::popover::Opener
-pub(crate) fn redraw_profile_chip(read: crate::ui::screen::ScrimLiftRead<'_>) {
-    let Some(chrome) = read.chrome else { return };
-    crate::ui::guard(|| profile_chip_with(
-        Painter::root().alpha(crate::ui::nav::chrome_alpha()),
-        chrome.profile,
-        chrome.chip_expand,
-        read.bar_material,
-    ));
 }
 
 // ---- CircleButton: circular disc + centered glyph, same keyed/unkeyed ControlStyle family as
@@ -2843,6 +2822,49 @@ impl View for CircleButton {
     }
 }
 
+/// The shared top-left Back control for a non-root page or a visible playback HUD.
+///
+/// It deliberately reuses the account chip's frame and the circle-button family. Root tab pages
+/// keep the chip instead, so the two controls never compete for the same spot. The control is
+/// pointer-only: the remote's established Back key remains the D-pad path and the page restores
+/// focus through the ordinary navigation return state.
+pub(crate) fn draw_back_control(p: Painter) {
+    let button = CircleButton::new(std::ptr::null())
+        .frame(CHIP_FRAME)
+        .icon(crate::ui::icons::Icon::ChevronLeft)
+        .ground(ControlGround::Unkeyed);
+    button.draw(&Env::inert(), p);
+}
+
+/// Register the visible Back control without adding an unreachable element to the D-pad model.
+pub(crate) fn back_control_stop<H: crate::ui::machine::Host>(
+    f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    entry: crate::ui::machine::EntryId,
+    elem: H::Elem,
+) {
+    back_control_stop_at(f, entry, elem, CHIP_FRAME);
+}
+
+/// The pointer-only Back stop at an existing crumb's measured rectangle.
+pub(crate) fn back_control_stop_at<H: crate::ui::machine::Host>(
+    f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    entry: crate::ui::machine::EntryId,
+    elem: H::Elem,
+    rect: Rect,
+) {
+    f.stop(
+        f.painter,
+        crate::ui::screen::Stop {
+            key: crate::ui::machine::FocusKey { entry, elem },
+            rect,
+            rest_rect: rect,
+            clip: Rect::FULL,
+            hover: crate::ui::screen::Hover::Ignore,
+            activate: crate::ui::screen::Activate::Direct,
+        },
+    );
+}
+
 // ---- PageDots: page indicators; active dot elongated ----
 pub struct PageDots {
     pub count: usize,
@@ -3107,13 +3129,35 @@ impl AmbientWash {
     /// the docs above) rather than a loop each screen writes, so "no artwork" is the app's own flat
     /// ground on every page **by construction** — `w = 0` returns exactly the surface. Colours that
     /// came from ARTWORK go through [`keyed`](Self::keyed), which caps them first.
-    pub(crate) fn target(src: [[f32; 4]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
-        std::array::from_fn(|i| theme::mix(theme::SURFACE_APP, src[i], w[i]))
+    pub(crate) const fn target(src: [[f32; 4]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
+        [
+            theme::mix(theme::SURFACE_APP, src[0], w[0]),
+            theme::mix(theme::SURFACE_APP, src[1], w[1]),
+            theme::mix(theme::SURFACE_APP, src[2], w[2]),
+            theme::mix(theme::SURFACE_APP, src[3], w[3]),
+        ]
+    }
+
+    /// The shared blue envelope at a four-corner strength. No runtime blur is involved: the
+    /// existing bilinear ambient pass supplies the soft edges for one deterministic draw.
+    pub(crate) const BLUE_W: [f32; 4] = theme::AMBIENT_BLUE_W;
+
+    /// [`target`](Self::target) for the artwork-less blue ground.
+    pub(crate) const fn blue(w: [f32; 4]) -> [[f32; 4]; 4] {
+        Self::target(theme::WASH_BLUE_CORNERS, w)
+    }
+
+    /// An artwork-keyed wash carrying the shared blue atmosphere. The original keyed target
+    /// remains dominant, so the artwork's own colours still identify the focused item.
+    pub(crate) fn blue_keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
+        let keyed = Self::keyed(blur, w);
+        let blue = Self::blue(w);
+        std::array::from_fn(|i| theme::mix(keyed[i], blue[i], theme::AMBIENT_BLUE_MIX))
     }
 
     /// [`target`](Self::target) for corners taken from an item's `UltraBlurColors` envelope
     /// (`CatalogMovie::blur` / `metadata::Detail::blur`), each held under [`GROUND_LUMA`] first. Every
-    /// artwork-keyed wash goes through here; a palette token (the resting warm tint) does not need
+    /// artwork-keyed wash goes through here; a palette token does not need
     /// it, because we chose that value.
     pub(crate) fn keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
         std::array::from_fn(|i| Self::keyed_one(blur[i], w[i]))
@@ -3413,26 +3457,22 @@ impl PageGround {
         0.08,
     ];
 
-    /// The faint warm tint a page's HEADER leans when no focused card hands the ground colours —
-    /// strongest top-left, where the page's title sits.
-    pub(crate) const HEADER_W: [f32; 4] = [0.10, 0.06, 0.02, 0.03];
-
     /// A header-and-cards page's ground target: `focused`'s `UltraBlurColors` along
-    /// [`CARD_W`](Self::CARD_W) when it carries any, else the warm [`HEADER_W`](Self::HEADER_W)
-    /// tint. The Person and Collection pages share it.
+    /// [`CARD_W`](Self::CARD_W) when it carries any, else the shared blue fallback. The Person
+    /// and Collection pages share it.
     pub(crate) fn page_target(focused: Option<&crate::catalog::CatalogMovie>) -> [[f32; 4]; 4] {
         match focused.filter(|m| m.has_blur) {
-            Some(m) => AmbientWash::keyed(m.blur, Self::CARD_W),
-            None => AmbientWash::target([theme::WASH_WARM; 4], Self::HEADER_W),
+            Some(m) => AmbientWash::blue_keyed(m.blur, Self::CARD_W),
+            None => AmbientWash::blue(AmbientWash::BLUE_W),
         }
     }
 
-    /// A ground resting on the app's own surface — what a screen mounts with, and what it stays
+    /// A ground resting on the app's own surface, dissolving toward the shared blue fallback
     /// until something focused hands it colours.
     pub(crate) const fn new() -> Self {
         PageGround {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            target: [theme::SURFACE_APP; 4],
+            target: AmbientWash::blue(AmbientWash::BLUE_W),
         }
     }
 
@@ -3443,7 +3483,7 @@ impl PageGround {
     /// Called once per frame from a screen's update, before anything reads the ground.
     pub(crate) fn key(&mut self, src: Option<[[f32; 3]; 4]>, w: [f32; 4], dt: f32) {
         if let Some(b) = src {
-            self.target = AmbientWash::keyed(b, w);
+            self.target = AmbientWash::blue_keyed(b, w);
         }
         self.wash.step(self.target, AmbientWash::K, dt);
     }
@@ -5398,6 +5438,8 @@ pub(crate) struct StripRender {
     /// Home↔Library↔Search route flip rather than restart on the far side. It lived in `home.rs`
     /// while Home was the only screen the chip could be focused on.
     chip_expand: crate::ui::Spring,
+    /// Whether the Settings gear owns the remote this frame. Presentation only, never logical state.
+    gear_focused: bool,
 }
 
 impl StripRender {
@@ -5406,6 +5448,7 @@ impl StripRender {
             tab_scroll: crate::ui::Spring::at(0.0),
             top_strip: TabStrip::new(),
             chip_expand: crate::ui::Spring::at(0.0),
+            gear_focused: false,
         }
     }
 
@@ -5416,9 +5459,13 @@ impl StripRender {
     }
 
     /// This frame's chip unfurl amount. `Bridge::scrim_chrome_read` includes it in the borrowed
-    /// [`ChromeRead`] passed to the bare-`fn` lift — see [`redraw_profile_chip`].
+    /// [`ChromeRead`] passed to a bare-`fn` scrim lift.
     pub(crate) fn chip_expand_pos(&self) -> f32 {
         self.chip_expand.pos
+    }
+
+    pub(crate) fn gear_focused(&self) -> bool {
+        self.gear_focused
     }
 
 }
@@ -6298,6 +6345,7 @@ fn tab_scroll_target(widths: &[f32], idx: usize, cur: f32) -> f32 {
 /// pending tab off its own `navigation_presentation()` before calling this).
 impl StripRender {
     pub(crate) fn update(&mut self, data: TabLabels<'_>, selected: c_int, focus: TopFocus, dt: f32) {
+        self.gear_focused = matches!(focus, TopFocus::Gear);
         let focused = focus.pill();
         // The chip is the bar's other stop, so its unfurl is stepped here rather than by whichever
         // screen happens to own the focus this frame — the same reason the capsules and the track's

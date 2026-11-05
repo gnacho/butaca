@@ -274,7 +274,14 @@ fn parse(s: &str) -> Option<Caps> {
     let audio: Vec<&str> = DP_AUDIO_CODECS
         .split(',')
         .filter(|c| table_audio.iter().any(|t| t == c))
-        .filter(|c| *c != "dts" || audio_channels.contains_key("dts"))
+        // DTS is not direct-played even when the table lists it (#260). The measured webOS
+        // 5.5/o20 set DOES carry a DTS row with a channel bound, and Starfish still refuses the
+        // Load with `audio/x-dts` (ok=0, no loadCompleted, the title dies at 0 s), while the
+        // same build direct-plays E-AC3. The table is the platform's generic claim, not a
+        // promise the pipeline honours. Dropping the codec here makes the server transcode the
+        // AUDIO only, so the video keeps its direct-play path and the refusal cannot happen.
+        // `DP_AUDIO_CODECS` is untouched: forced mode still feeds what our demuxer can supply.
+        .filter(|c| *c != "dts")
         .collect();
     let audio = if audio.is_empty() {
         // Every webOS SoC decodes AAC; a table naming none of the three is evidence about our
@@ -451,13 +458,16 @@ mod tests {
         let frac = parse(r#"{"videoCodecs":[{"name":"H.264","maxWidth":1920,"maxHeight":1088,"maxFrameRate":59.94}]}"#).unwrap();
         assert_eq!(frac.h264_row, (1920, 1088, 60));
         // FLAC/MPEG are in the table but not in the pipeline's decode set; the subset keeps
-        // DP_AUDIO_CODECS's own order, not the table's.
-        assert_eq!(c.audio, "aac,ac3,eac3,dts");
+        // DP_AUDIO_CODECS's own order, not the table's. DTS is absent even though this table
+        // carries its row: the pipeline refuses it (#260).
+        assert_eq!(c.audio, "aac,ac3,eac3");
     }
 
     #[test]
-    fn dts_requires_an_explicit_device_row() {
-        assert!(parse(REAL).unwrap().audio_has("dts"));
+    fn dts_is_never_direct_played_even_with_a_device_row() {
+        // #260: a table row is the platform's generic claim, and the measured set still refuses
+        // `audio/x-dts`. So neither the real table, the fallback, nor a DTS-less table admits it.
+        assert!(!parse(REAL).unwrap().audio_has("dts"));
         assert!(!Caps::assumed().audio_has("dts"));
         assert!(!parse(&REAL.replace("DTS", "WMA")).unwrap().audio_has("dts"));
     }
@@ -465,9 +475,7 @@ mod tests {
     #[test]
     fn audio_limits_retain_and_merge_the_devices_channel_bounds() {
         let caps = parse(REAL).unwrap();
-        assert!(caps.audio_supports("dts", 6));
-        assert!(!caps.audio_supports("dts", 8));
-        assert!(!caps.audio_supports("dts", 0));
+        assert!(!caps.audio_supports("dts", 6), "DTS is out of the direct-play set (#260)");
         assert!(caps.audio_supports("aac", 2));
         assert!(caps.audio_supports("aac", 6));
         assert!(!caps.audio_supports("aac", 8));

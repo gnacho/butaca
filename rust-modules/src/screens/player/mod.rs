@@ -281,7 +281,7 @@ impl PlayerScreen {
         Focusable::<H>::groups(self, f.cx, &mut groups);
         for g in groups.iter().filter(|g| self.group_drawn(g.id, hud_drawn)) {
             // The repair alert's buttons are ordinary pressable controls (hover parks focus, the
-            // press dips and commits on release); the transport's are `Direct` — see `draw`.
+            // press dips and commits on release); the transport's are `Direct` - see `draw`.
             let (hover, activate) = if g.id == GROUP_REPAIR {
                 (Hover::Focus, Activate::Press)
             } else {
@@ -302,6 +302,9 @@ impl PlayerScreen {
                     },
                 );
             }
+        }
+        if hud_drawn && !player_hud::readout_owns_frame(self.busy) {
+            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
         }
     }
 
@@ -703,6 +706,10 @@ impl PlayerScreen {
         self.hud.extend(now, input::HUD_LINGER_MS);
         self.publish();
         match elem {
+            e if e == crate::screens::registry::HEADER_CRUMB => {
+                Self::ask(fx, PlayerReq::Exit);
+                Handled::Yes
+            }
             e if (ELEM_FAILURE_BASE..ELEM_FAILURE_END).contains(&e) => {
                 // the same gate `group_drawn` registers the row behind: a row that is not drawn
                 // is not clickable
@@ -1689,8 +1696,8 @@ mod step_ladder_tests {
 
     /// The census's other half: a control the frame does NOT draw registers no stop, so a click
     /// there reaches the picture (play/pause) rather than a blind action. A hidden HUD registers
-    /// nothing; with an Info card or Chapters strip over the middle (`transport == false`) only
-    /// the tabs remain.
+    /// nothing; with an Info card or Chapters strip over the middle (`transport == false`) the
+    /// tabs and the visible Back control remain.
     #[test]
     fn a_control_the_frame_does_not_draw_registers_no_stop() {
         use crate::ui::player_hud::ELEM_TAB_BASE;
@@ -1699,7 +1706,7 @@ mod step_ladder_tests {
         for (transport, hud_drawn, want) in [
             (true, false, vec![]),
             (false, false, vec![]),
-            (false, true, vec![ELEM_TAB_BASE]),
+            (false, true, vec![ELEM_TAB_BASE, crate::screens::registry::HEADER_CRUMB]),
         ] {
             let mut page = PlayerScreen::new(ENTRY);
             page.transport = transport;
@@ -1878,6 +1885,27 @@ mod step_ladder_tests {
             assert_eq!(handled, Handled::Yes);
             assert_eq!(reqs, vec![PlayerReq::Transport(want)], "wcode {wcode}");
         }
+    }
+
+    /// The visible Back control is a pointer-only stop in the same top-left frame as the root
+    /// account chip. It uses the existing player exit request and never joins the D-pad ring.
+    #[test]
+    fn the_visible_back_control_is_clickable_and_exits() {
+        use crate::ui::screen::DrawFrame;
+        let _g = crate::testlock::serial();
+        let mut page = PlayerScreen::new(ENTRY);
+        page.transport = true;
+        let cx = cx();
+        let mut f = DrawFrame::new(&cx, crate::ui::Painter::root());
+        page.record_stops(&mut f, true);
+        let stop = f.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
+            .expect("the visible Back control registers a pointer stop");
+        let frame = crate::ui::widgets::CHIP_FRAME;
+        assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h], [frame.x, frame.y, frame.w, frame.h]);
+        assert!(matches!(stop.hover, crate::ui::screen::Hover::Ignore));
+        let (handled, reqs) = click(&mut page, crate::screens::registry::HEADER_CRUMB);
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(reqs, vec![PlayerReq::Exit]);
     }
 
     /// STOP and a plain BACK both ask to leave the player — port of the Stop arm and `key_back`'s

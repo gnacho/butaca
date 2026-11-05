@@ -729,6 +729,10 @@ mod db8_policy_tests {
     /// pure path arithmetic), so a host test can prove the shared assembly directly.
     #[test]
     fn arm_candidate_assembly_puts_the_canonical_wrapper_first() {
+        // `path()` is NOT pure across a parallel run: it reads the process-shared persistence
+        // root, which any sibling may have redirected. The arithmetic is pure, the root is not,
+        // so this test takes the same lock every redirector already holds (#264).
+        let _serial = crate::testlock::serial();
         let mut candidates = vec![PathBuf::from("/some/legacy/auth.json")];
         insert_arm_canonical_wrapper(&mut candidates);
         assert_eq!(candidates[0], path());

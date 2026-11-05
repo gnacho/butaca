@@ -381,8 +381,11 @@ ensure_tar() {
     rm -f "$cand"
     echo "ffmpeg: fetching $VERSION"
     # Same retry policy build-libass.py gives its tarballs: CI proved the release hosts can
-  # drop a connection for minutes (#150, #151), and one blind fetch fails the whole job.
-  curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 \
+    # drop a connection for minutes (#150, #151), and one blind fetch fails the whole job.
+    # `--retry` alone does NOT cover a reset connection: curl only retries what it calls
+    # transient, and exit 35/56 is not on that list, which is how a single reset took Simulator
+    # CI down twice in a row (#265). `--retry-all-errors` is what makes the count real.
+  curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 \
     "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz" -o "$cand"
   fi
   mv "$cand" "$TAR"
