@@ -1675,8 +1675,8 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
         let cur = f.focus.current.map(|k| k.elem);
         let env = Env::inert();
         crate::ui::widgets::draw_back_control(p);
-        crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
         let Some(person) = self.person(f.cx) else {
+            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
             return;
         };
         self.amb.draw(p, Rect::FULL);
@@ -1773,6 +1773,7 @@ impl PersonScreen {
                 );
             }
         }
+        crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
         let _ = cur;
     }
 }
