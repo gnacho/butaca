@@ -1674,8 +1674,8 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
         let p = f.painter.alpha(f.page_alpha);
         let cur = f.focus.current.map(|k| k.elem);
         let env = Env::inert();
-        crate::ui::widgets::draw_back_control(p);
         let Some(person) = self.person(f.cx) else {
+            crate::ui::widgets::draw_back_control(p);
             crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
             return;
         };
@@ -1684,6 +1684,7 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
         let live = self.live_flow(person, cur);
         col.draw(&live, &env, p, f.measure);
         self.draw_shelf_state(p, &env, person);
+        crate::ui::widgets::draw_back_control(p);
 
         self.record_stops(f, person, cur);
     }
@@ -3117,6 +3118,44 @@ mod tests {
             &st.fx,
             crate::ui::machine::Fx::App(AppFx::Content(ContentReq::Back))
         )));
+        store.run(PersonCmd::Close);
+    }
+
+    #[test]
+    fn the_loaded_back_control_paints_above_the_opaque_wash_and_content() {
+        let _serial = crate::testlock::serial();
+        let (mut store, mut s) = seed(2, 1);
+        let measure = FixtureMeasure;
+        let context = cx(&measure, store.view());
+        let mut out = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let mut fx = Effects::new(
+            &mut out,
+            crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(0)),
+            &mut present,
+        );
+        Machine::<PersonHost>::step(
+            &mut s,
+            &ScreenEvent::Tick(Tick { ms: 16, dt_us: 16_667 }),
+            &context,
+            &mut fx,
+        );
+        drop(fx);
+        assert!(!s.amb.is_flat(), "the loaded page must exercise a covering blue wash");
+
+        let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::recording());
+        let ops = crate::ui::draw_census::capture(|| {
+            crate::gfx::without_frame_clear(|| Screen::<PersonHost>::draw(&mut s, &mut frame));
+        });
+        let wash = ops.iter().position(|(tag, rect)| {
+            *tag == 16 && [rect.x, rect.y, rect.w, rect.h] == [0.0, 0.0, SCR_W, SCR_H]
+        }).expect("the loaded draw paints its opaque ambient wash");
+        let origin = crate::ui::widgets::CHIP_FRAME;
+        let back = ops.iter().rposition(|(tag, rect)| {
+            *tag == 10 && [rect.x, rect.y, rect.w, rect.h] == [origin.x, origin.y, origin.w, origin.h]
+        }).expect("the loaded draw paints the shared Back disc");
+        assert!(back > wash, "the opaque wash must not paint over Back: {ops:?}");
+        assert_eq!(back, ops.len() - 1, "no later page content may cover Back: {ops:?}");
         store.run(PersonCmd::Close);
     }
 
