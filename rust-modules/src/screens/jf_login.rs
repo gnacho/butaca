@@ -382,7 +382,12 @@ impl JfLoginScreen {
     /// Enter is normalized to `Key::Ok`; consuming it here prevents the table's activation path
     /// from reopening the field after the keyboard is dismissed.
     fn close_editing_on_key(&mut self, key: crate::ui::machine::Key) -> bool {
-        key == crate::ui::machine::Key::Ok && self.end_editing()
+        // BACK closes the edit too: without it the key fell into the text-edit arm below, which
+        // consumed the event forever, so the add-server form could never be left with the remote
+        // once a field was open (#259). The pop itself belongs to the NEXT back, the one that
+        // arrives with no edit in flight.
+        matches!(key, crate::ui::machine::Key::Ok | crate::ui::machine::Key::Back)
+            && self.end_editing()
     }
 }
 
@@ -933,6 +938,22 @@ mod tests {
         screen.editing = Some(F_USER);
         assert!(!screen.close_editing_on_key(Key::Down));
         assert_eq!(screen.editing, Some(F_USER), "navigation keys do not dismiss editing");
+    }
+
+    #[test]
+    fn back_closes_text_editing_so_the_next_back_can_pop() {
+        use crate::ui::machine::Key;
+
+        // #259: with a field open, BACK used to be eaten by the text-edit arm and the add-server
+        // form could not be left at all. BACK ends the edit, and only the NEXT one pops.
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        screen.table.sel = F_SERVER as i32;
+        screen.editing = Some(F_SERVER);
+
+        assert!(screen.close_editing_on_key(Key::Back));
+        assert_eq!(screen.editing, None);
+        assert_eq!(screen.table.sel, F_SERVER as i32, "focus stays on the field it edited");
+        assert!(!screen.close_editing_on_key(Key::Back), "the next BACK is the screen's pop, not a second edit close");
     }
 
     #[test]
