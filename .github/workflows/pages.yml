@@ -61,7 +61,6 @@ jobs:
           cp site/credits.html _site/credits.html
           cp site/styles.css _site/styles.css
           cp site/site.js _site/site.js
-          cp site/CNAME _site/CNAME
           cp site/robots.txt _site/robots.txt
           cp site/sitemap.xml _site/sitemap.xml
           cp site/404.html _site/404.html

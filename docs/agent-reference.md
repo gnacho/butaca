@@ -602,7 +602,7 @@ which the linking section explains is load-bearing rather than tidy.
 - `docs/install-and-verify.md` — the invariant half a release note used to repeat every time:
   which asset is which, both install routes and why the Homebrew Channel wins, how to check the
   sha256 per platform, and what the app writes, reads and reaches on your television.
-- `site/` — the landing page (`index.html`/`styles.css`/`site.js`/`CNAME`); `.github/workflows/
+- `site/` — the landing page (`index.html`/`styles.css`/`site.js`); `.github/workflows/
   pages.yml` stages its screenshots, logo and fonts from their existing README/app locations
   rather than copying them into `site/`. The close-up stills `site/media/closeup-*.jpg` and the
   link-preview card `site/media/og-card.jpg` are `make screenshots` outputs (`ui-sim` skill,
