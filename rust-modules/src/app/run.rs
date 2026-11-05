@@ -540,7 +540,7 @@ unsafe fn present_and_swap(
         {
             #[cfg(feature = "threadcheck")]
             let _present_scope = crate::task::watchdog::present_scope();
-            #[cfg(feature = "hostsim")]
+            #[cfg(all(feature = "hostsim", not(target_os = "emscripten")))]
             crate::surface::present_supersampled();
             SDL_GL_SwapWindow(app.win);
         }
