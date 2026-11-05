@@ -275,16 +275,7 @@ fn triplet(pkg: &str) -> (u64, u64, u64) {
     (int(major), int(minor), int(patch))
 }
 
-/// Build `src/svg.c` (the nanosvg rasterizer) for the host.
-///
-/// On the television the Makefile compiles this alongside `main.c` and `starfish.c` and links all
-/// three with the staticlib. The simulator has no Makefile step, so it does the one piece it still
-/// needs — `svg.c` is portable C with no webOS in it, and the icon set is rasterized from SVG at
-/// runtime, so without it the UI links but has no icons.
-///
-/// Shelling out to the C compiler rather than taking the `cc` crate as a build-dependency: this is
-/// one translation unit with two include paths, and the crate's dependency list is deliberately
-/// short — a build-dep would be fetched for the ARM build too, which never runs this function.
+/// Compile the Emscripten HTTP bridge and pass its object file to the linker.
 fn compile_emscripten_http() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -318,6 +309,16 @@ fn compile_emscripten_http() {
     println!("cargo:rustc-link-arg={}", out.display());
 }
 
+/// Build `src/svg.c` (the nanosvg rasterizer) for the host.
+///
+/// On the television the Makefile compiles this alongside `main.c` and `starfish.c` and links all
+/// three with the staticlib. The simulator has no Makefile step, so it does the one piece it still
+/// needs — `svg.c` is portable C with no webOS in it, and the icon set is rasterized from SVG at
+/// runtime, so without it the UI links but has no icons.
+///
+/// Shelling out to the C compiler rather than taking the `cc` crate as a build-dependency: this is
+/// one translation unit with two include paths, and the crate's dependency list is deliberately
+/// short — a build-dep would be fetched for the ARM build too, which never runs this function.
 fn compile_svg() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
