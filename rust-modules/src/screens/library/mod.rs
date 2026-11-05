@@ -190,6 +190,16 @@ pub(crate) struct LibraryScreen {
     plaintext_alert: super::plaintext_question::PlaintextAlert,
 }
 
+fn shelf_allowed_for_section(id: &str, wanted_latest: Option<&str>) -> bool {
+    // These two hubs belong to Home's whole-server view. A section publishes only its own latest
+    // shelf and the All grid, not Home's Continue Watching or Next Up. Keep accepting the
+    // free-form ids used by test seeds, and reject a different view's `jf.latest.*` as before.
+    if id == "home.continue" || id == "jf.nextup" {
+        return false;
+    }
+    !id.starts_with("jf.latest.") || Some(id) == wanted_latest
+}
+
 impl LibraryScreen {
     pub(crate) fn new(entry: EntryId, instance: InstanceId, kind: SecKind) -> Self {
         let layout = Layout::new(false, &[], 0, false);
@@ -385,9 +395,7 @@ impl LibraryScreen {
                 let wanted = crate::jellyfin::browse::view_for_key(section.key)
                     .map(|guid| format!("jf.latest.{guid}"));
                 for (index, shelf) in hubs.shelves().iter().enumerate() {
-                    // Catalog shelves carry a `jf.latest.<view id>` id: keep only this section's.
-                    // Continue Watching has no view, and test seeds use free-form ids.
-                    if shelf.id.starts_with("jf.latest.") && Some(shelf.id.as_str()) != wanted.as_deref() { continue; }
+                    if !shelf_allowed_for_section(&shelf.id, wanted.as_deref()) { continue; }
                     if self.shelves.len() >= MAX_SHELVES { break; }
                     let group = GroupId(self.keys.register(
                         LibraryIdentity::Control { section: section.clone(), kind: "shelf-group".into(), key: shelf.id.clone() },
