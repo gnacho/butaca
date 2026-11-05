@@ -1,6 +1,6 @@
 # Desktop Browser Port Plan (Emscripten + SDL + WebGL)
 
-**Status: port in progress; no browser build or runtime is verified yet.** This document scopes a desktop-browser target for Butaca, not the webOS browser, and does not claim that the full application builds under Emscripten. The official Emscripten 6.0.13 SDK is installed user-locally and pinned by `tools/emsdk-pin`; the current milestone is a build-and-runtime spike.
+**Status: port in progress; smoke test passed, Butaca UI not yet verified.** This document scopes a desktop-browser target for Butaca, not the webOS browser, and does not claim that the full application builds under Emscripten. The official Emscripten 6.0.13 SDK is installed user-locally and pinned by `tools/emsdk-pin`; the SDL/GLES2 WebGL 1 smoke harness has passed in headless Chromium, and the current milestone is the full app link/runtime spike.
 
 ## Goal and non-goals
 
@@ -102,7 +102,7 @@ Decide supported desktop browsers/OSes, whether playback is required, authentica
 
 Install/pin Emscripten in a reproducible developer/CI environment. The repository pin is `tools/emsdk-pin`; run `tools/setup-emsdk.sh`, then source the printed `emsdk_env.sh` path. This pins SDK release 6.0.13 and the emsdk bootstrap revision, installs under the user's data directory, and avoids system package changes. Emscripten's official downloads guide recommends emsdk; its build guide documents `--use-port=sdl2`, with SDL_ttf enabled via the version-matched port setting. Add an isolated experimental target configuration; do not alter default Make targets. Build a minimal SDL window + WebGL context first, then compile the current Rust crate/binary with `--features hostsim` and the Emscripten target. This tests whether `hostsim` is a viable feature boundary while isolating Emscripten-specific GL/window choices behind target cfgs. Adapt `build.rs` for Emscripten SDL/SDL_ttf ports and `emcc` compilation of `src/svg.c`. Record every failure by dependency/module and classify whether it is build-system-only, target-gatable, or needs an implementation.
 
-The minimal SDL/WebGL 1 smoke source and build entry point are `tests/emscripten/sdl_webgl_smoke.c` and `tests/emscripten/build-smoke.sh`; they are a toolchain/runtime probe, not a substitute for building Butaca.
+The minimal SDL/WebGL 1 smoke source and build entry point are `tests/emscripten/sdl_webgl_smoke.c` and `tests/emscripten/build-smoke.sh`; that harness built and passed under headless Chromium, creating an SDL ES2/WebGL 1 context, compiling GLSL ES 1.00 shaders, and drawing through a VBO. It is a toolchain/runtime probe, not a substitute for running Butaca. The full Rust library also passes `cargo check --lib --no-default-features --features hostsim --target wasm32-unknown-emscripten`; the default developer features are not the browser config because they include Mali profiling and native pthread-abort diagnostics.
 
 **Exit:** documented successful minimal SDL/WebGL shell and a truthful compile/link blocker inventory for the app. A partial successful object build is not a full app build.
 
@@ -157,4 +157,4 @@ No person-week estimate is responsible before Phase 1 and playback scope are res
 - `rust-modules/src/lib.rs`: current module graph and target-specific gates.
 - `tools/emsdk-pin`, `tools/setup-emsdk.sh`: pinned, user-local Emscripten SDK bootstrap.
 - `tests/emscripten/sdl_webgl_smoke.c`, `tests/emscripten/build-smoke.sh`: minimal WebGL 1 SDL/GLES shader and VBO runtime probe.
-- Official toolchain references: [Emscripten SDK downloads](https://emscripten.org/docs/getting_started/downloads.html), [building projects and ports](https://emscripten.org/docs/compiling/Building-Projects.html), and [OpenGL support](https://emscripten.org/docs/porting/multimedia_and_graphics/OpenGL-support.html).
+- Official toolchain references: [Emscripten SDK downloads](https://emscripten.org/docs/getting_started/downloads.html), [building projects and ports](https://emscripten.org/docs/compiling/Building-Projects.html), [OpenGL support](https://emscripten.org/docs/porting/multimedia_and_graphics/OpenGL-support.html), [dynamic linking](https://emscripten.org/docs/compiling/Dynamic-Linking.html), and [pthreads](https://emscripten.org/docs/porting/pthreads.html). Emscripten's docs require main/side module setup for `dlopen`, and pthread deployments require `-pthread` plus COOP/COEP headers.
