@@ -1744,7 +1744,7 @@ mod tests {
     /// stops used to sit within ~15 8-bit codes of it in both hue AND luminance). Measured as raw
     /// mean per-channel distance (display-encoded, not WCAG-linearized) rather than luminance
     /// alone: WCAG luminance compresses the shadow end sharply, so a corner that is UNMISTAKABLY
-    /// darker at the near-black end (this fallback's own `ATMOS_CHARCOAL`) can read as luminance-
+    /// darker at the near-black end can read as luminance-
     /// close to the surface while an 8-bit-code comparison — closer to how banding-free darks
     /// actually read on a panel — shows it plainly is not.
     #[test]

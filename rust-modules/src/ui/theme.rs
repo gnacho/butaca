@@ -286,9 +286,8 @@ pub mod logo {
 /// It was the mockup's warm "Snow" `#e9e6e0` until the 2026-08-13 palette sync, alongside a second,
 /// cooler control white for the "primary" CTA (`FILL_PRIMARY`/`INK_ON_PRIMARY`, and
 /// `ControlStyle::Primary` with them). At ten feet nobody could tell the two whites apart, so the
-/// pair collapsed onto this one. Both survivors of that collapse are elsewhere and neither is a
-/// control: the warm off-white is [`WASH_WARM`], a page ground; the cool plate is
-/// [`SURFACE_QR_PLATE`], a scan surface.
+/// pair collapsed onto this one. The cool plate survives elsewhere as [`SURFACE_QR_PLATE`], a
+/// scan surface rather than a control.
 pub const ACCENT: [f32; 4] = COOL_0;
 /// Near-black ink/glyphs drawn over [`ACCENT`].
 pub const ACCENT_INK: [f32; 4] = NEUTRAL_950;
