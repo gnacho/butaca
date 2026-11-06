@@ -1,7 +1,7 @@
 # Butaca Privacy Policy
 
-Applies to Butaca 0.7.0, the Jellyfin build published from this repository. Last updated
-3 November 2026.
+Applies to Butaca 0.8.0, the Jellyfin build published from this repository. Last updated
+6 November 2026.
 
 This page describes the package you install: a client for a Jellyfin server on a rooted LG webOS
 television. It is the only build this repository produces.
@@ -46,6 +46,10 @@ not the app's. Butaca's author receives none of those requests.
   names are rewritten, while media titles, search terms and subtitle text are never written at all.
   Item identifiers do remain, because they are what makes a playback bug diagnosable. Someone with
   access to the same server could map one back to an item, so think before posting a log publicly.
+- **`/tmp/butaca-diag.log`**, a short snapshot of the app's storage stage, created mode `0640` so
+  a Developer Mode shell can read it while debugging. It carries a stage, error codes and
+  timestamps, and no token, account name, server address or media title. The television clears it
+  when it restarts.
 
 Those files are the whole of it. A release build compiles out the development trigger surface, the
 remote-control FIFO and the capture listener, and a crash writes no core file.
