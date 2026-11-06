@@ -304,10 +304,23 @@ pub(crate) fn append_server(url: &str, user: &str, token: &str, device_id: &str)
 /// Remove the active server from the list and return what remains (the first survivor becomes the
 /// new active pointer). The caller decides whether to [`save_servers`] the remainder or
 /// [`erase_config`] an empty list.
-pub(crate) fn remove_active() -> Option<ServerList> {
-    let mut list = load_servers()?;
+///
+/// A list that will not load counts as a list with nothing left in it, never as "nothing to do".
+/// The session can be live with no readable file behind it: a Developer Mode install whose jail
+/// refuses writes to `/media/developer` signs in, logs "config NOT saved", and runs. When this
+/// answered `None` there, Sign out returned early, left the client installed, and did nothing on
+/// screen.
+pub(crate) fn remove_active() -> ServerList {
+    remaining_after_disconnect(load_servers())
+}
+
+/// The pure half of [`remove_active`]: what a disconnect leaves of whatever list was loaded.
+fn remaining_after_disconnect(loaded: Option<ServerList>) -> ServerList {
+    let Some(mut list) = loaded else {
+        return ServerList { servers: Vec::new(), active: 0 };
+    };
     remove_active_from(&mut list);
-    Some(list)
+    list
 }
 
 /// The pure append step: push an entry and point `active` at it.
@@ -538,5 +551,20 @@ mod tests {
         assert_eq!(list.servers[0].user, "a");
         assert_eq!(list.servers[1].user, "c");
         assert_eq!(list.active, 0, "the first survivor becomes the active pointer");
+    }
+
+    /// Signed in with no readable config (a Developer Mode jail that refused the write) is still
+    /// signed in, and signing out of it must land on the sign-in gate, not be a no-op.
+    #[test]
+    fn disconnect_without_a_loadable_list_leaves_nothing_configured() {
+        let remaining = remaining_after_disconnect(None);
+        assert!(
+            remaining.servers.is_empty(),
+            "no list on disk means no server survives the sign-out"
+        );
+        assert_eq!(remaining.active, 0);
+        let mut one = ServerList { servers: vec![entry("http://10.0.0.2:8096", "a")], active: 0 };
+        one = remaining_after_disconnect(Some(one));
+        assert!(one.servers.is_empty(), "the only server signed out leaves none");
     }
 }
