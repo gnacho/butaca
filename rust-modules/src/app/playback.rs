@@ -789,7 +789,7 @@ pub(crate) fn activate_ctrl_row(
                 }
             }
         }
-        ControlSlot::Discs => false,
+        ControlSlot::Discs { .. } => false,
     }
 }
 
@@ -1030,17 +1030,46 @@ pub(crate) unsafe fn activate_player_row(
             pages,
             bridge,
         );
-    } else if btn == crate::ui::player_hud::BTN_MORE {
-        // …so the discs are what row 1 holds — the complement of the arm above, and the row's only
-        // other occupant. OK on a control disc PRESENTS its panel on this page's own stack.
-        super::bridge::open_player_overlay(ps, bridge.metadata_view(), pages, crate::screens::player::overlay::OverlayKind::More { quality: false });
-    } else {
-        super::bridge::open_player_overlay(
-            ps,
-            bridge.metadata_view(),
-            pages,
-            crate::screens::player::overlay::OverlayKind::Tracks { tab: if btn == 0 { 1 } else { 0 } },
-        );
+    } else if let crate::ui::player_hud::ControlSlot::Discs { next } = ctrl {
+        // Which disc this is, from the row's OWN table (`disc_action`), not from an index written
+        // again here: the row is six discs wide now, one of them conditional, and two copies of
+        // that order is how OK on "Stop" ends up opening the subtitle menu.
+        use crate::ui::player_hud::DiscAction;
+        match crate::ui::player_hud::disc_action(btn, next) {
+            Some(DiscAction::PlayPause) => {
+                // The disc is the transport toggle. `set_transport_paused` is the same door the
+                // PAUSE and PLAY keys use, so the three inputs cannot disagree about what the
+                // current state is.
+                set_transport_paused(pa, !paused());
+            }
+            Some(DiscAction::Stop) => {
+                // Leaves the item. `finish_playback` is the path Skip Credits takes on a `final`
+                // segment and the one EOS takes: it stops the engine, posts the stopped timeline
+                // (which is what commits the watched state) and pops the player.
+                let _ = finish_playback(ps, pa, refresh_hubs_at, pages, bridge);
+            }
+            Some(DiscAction::Next) => {
+                play_up_next(ps, pa, HUD_LINGER_MS, pages, bridge);
+            }
+            Some(DiscAction::Subtitles) => super::bridge::open_player_overlay(
+                ps,
+                bridge.metadata_view(),
+                pages,
+                crate::screens::player::overlay::OverlayKind::Tracks { tab: 1 },
+            ),
+            Some(DiscAction::Audio) => super::bridge::open_player_overlay(
+                ps,
+                bridge.metadata_view(),
+                pages,
+                crate::screens::player::overlay::OverlayKind::Tracks { tab: 0 },
+            ),
+            Some(DiscAction::More) | None => super::bridge::open_player_overlay(
+                ps,
+                bridge.metadata_view(),
+                pages,
+                crate::screens::player::overlay::OverlayKind::More { quality: false },
+            ),
+        }
     }
     if let Some(player) = super::bridge::player_mut(pages) {
         player.hud.extend(now, HUD_LINGER_MS);

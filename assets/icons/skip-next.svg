@@ -1,0 +1,15 @@
+<!-- A play triangle with a bar on its RIGHT — SKIP TO NEXT. Worn by the player transport's
+     control row on a series that has another episode queued.
+
+     The mirror of `play-start.svg`, which is the same triangle with its bar on the LEFT ("from the
+     beginning"). They are two different promises on two different surfaces: play-start restarts the
+     item you are on, this one leaves it for the next. Mirroring rather than re-drawing keeps the
+     bar's width and radius identical to that file's, so the pair reads as one family.
+
+     Geometry: triangle spans y 5..19 (the transport band Pause/Rewind/FastForward share) with its
+     apex at x=16. The bar is 2.9 wide at x 17.6..20.5, 1.6 units of air clear of the apex — the
+     same gap `play-start.svg` keeps on the other side, which is what stops the two elements
+     fusing into one silhouette. Two <path> ELEMENTS rather than one path's subpaths, permitted
+     for `Icon::Rewind`'s reason: they do not touch, so no join exists for the alpha composite to
+     crease along. -->
+<svg viewBox="0 0 24 24" fill="#ffffff"><path d="M4.5 5l11.5 7-11.5 7z"/><rect x="17.6" y="5" width="2.9" height="14" rx="1.45"/></svg>

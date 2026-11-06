@@ -365,8 +365,13 @@ pub(crate) const CTRL_Y: f32 = BTN_Y;
 /// track and `…` panels were aligned to the same 80 (`track_menu`/`more_menu`). All three moved onto
 /// `MARGIN_X` together on 2026-08-23 — they are one right edge by design, so they take one number.
 pub(crate) const CTRL_RIGHT: f32 = SCR_W - crate::ui::consts::MARGIN_X;
-/// how many control discs the row holds: Subtitles, Audio, More
-const BTN_N: i32 = 3;
+/// How many control discs the row can hold: Play/Pause, Stop, Skip to next episode, Subtitles,
+/// Audio, More.
+///
+/// **The row is not a fixed size any more.** A movie, or the last episode of a series, has nowhere
+/// to skip to, so it draws five; [`ControlSlot::Discs { next: false }`] carries that as data and
+/// [`disc_count`]/[`disc_action`] are the one place the resulting index order is written down.
+const BTN_N: i32 = 6;
 
 /// The CONTROL ROW's focus pop — one spring per item ([`crate::ui::widgets::CtlPop`]), so the
 /// control being left shrinks while the arriving one grows instead of both snapping.
@@ -496,11 +501,66 @@ impl TransportRow {
 }
 
 /// Index of the `…` overflow disc within the row — the LAST one. Exported because `app.rs` routes
-/// its OK and its click, and a second literal `2` over there is exactly the drift `ControlSlot`
-/// was introduced to stop.
+/// its OK and its click, and a second literal over there is exactly the drift `ControlSlot` was
+/// introduced to stop.
 pub(crate) const BTN_MORE: i32 = BTN_N - 1;
-/// width the disc row occupies, the floor for anything replacing it
-pub(crate) const CTRL_ROW_W: f32 = 3.0 * BTN_S + 2.0 * BTN_GAP;
+
+/// **What one disc in the transport row DOES**, left to right.
+///
+/// The row used to be three fixed discs whose meaning was their index, written twice: once in the
+/// draw (`TransportButton`'s `which`) and once in the OK handler. Six discs with one of them
+/// conditional make that duplication a bug factory, so the order lives here and nowhere else:
+/// [`disc_action`] is what the draw, the hit map, the focus cursor and `app::playback` all read.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum DiscAction {
+    /// Toggles the transport: Play when paused, Pause when playing. The mark follows the state.
+    PlayPause,
+    /// Leaves the item (back to wherever the player was entered from).
+    Stop,
+    /// Starts the next episode. Only ever present when the queue has a successor.
+    Next,
+    Subtitles,
+    Audio,
+    More,
+}
+
+/// How many discs this row holds: six on a series with another episode queued, five otherwise.
+pub(crate) const fn disc_count(next: bool) -> i32 {
+    if next {
+        BTN_N
+    } else {
+        BTN_N - 1
+    }
+}
+
+/// Which action disc `idx` performs. `next` shifts the whole row by one, because the skip disc is
+/// drawn FIRST: the three controls that leave or start playback sit together at the left of the
+/// row, and the three that open a panel keep the right edge they have always had.
+pub(crate) fn disc_action(idx: i32, next: bool) -> Option<DiscAction> {
+    const WITH_NEXT: [DiscAction; 6] = [
+        DiscAction::PlayPause,
+        DiscAction::Stop,
+        DiscAction::Next,
+        DiscAction::Subtitles,
+        DiscAction::Audio,
+        DiscAction::More,
+    ];
+    const NO_NEXT: [DiscAction; 5] = [
+        DiscAction::PlayPause,
+        DiscAction::Stop,
+        DiscAction::Subtitles,
+        DiscAction::Audio,
+        DiscAction::More,
+    ];
+    if idx < 0 {
+        return None;
+    }
+    let table: &[DiscAction] = if next { &WITH_NEXT } else { &NO_NEXT };
+    table.get(idx as usize).copied()
+}
+
+/// width the disc row occupies at its widest, the floor for anything replacing it
+pub(crate) const CTRL_ROW_W: f32 = BTN_N as f32 * BTN_S + (BTN_N as f32 - 1.0) * BTN_GAP;
 
 /// The shared control-row slot for anything that STANDS IN for the disc pair: right-aligned to the
 /// discs' own edge, and never narrower than the pair it replaces so the row does not visibly shrink
@@ -543,8 +603,13 @@ fn ctrl_slot_measure(label: &str, measure: &dyn crate::ui::machine::Measure) -> 
 /// separate if-chains, with nothing to keep them agreeing and nothing to test.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ControlSlot {
-    /// the ordinary Subtitles + Audio pair
-    Discs,
+    /// The ordinary transport row — Play/Pause, Stop, [Skip to next], Subtitles, Audio, More.
+    ///
+    /// `next` is whether the skip disc is in the row: only a series with another episode queued
+    /// has one. It is DATA on the occupant rather than a sixth disc drawn dead on a movie, because
+    /// the item count is what the focus cursor, the hit map and the element registry all read, and
+    /// a disc nobody can press would still take a focus stop.
+    Discs { next: bool },
     /// a marker segment is under the playhead
     Skip(crate::screens::player::skip_pill::Prompt),
     /// …and the show has another episode queued, which outranks skipping the credits. Carries the
@@ -557,7 +622,7 @@ impl ControlSlot {
     /// a hand-written `btn = 0` pin beside a `clamp(0, 1)`.
     pub(crate) fn items(self) -> c_int {
         match self {
-            ControlSlot::Discs => BTN_N,
+            ControlSlot::Discs { next } => disc_count(next),
             // Watch Credits + Next Episode — the one stand-in with a pair
             ControlSlot::UpNext(_) => 2,
             ControlSlot::Skip(_) => 1,
@@ -575,7 +640,7 @@ impl ControlSlot {
     }
     /// whether the Subtitles/Audio discs are the current occupant
     pub(crate) fn is_discs(self) -> bool {
-        matches!(self, ControlSlot::Discs)
+        matches!(self, ControlSlot::Discs { .. })
     }
     /// Which SEGMENT this row is offering, if any — the row's identity for "have I already offered
     /// this?". Deliberately not the `ControlSlot` itself: `active_marker` is gated on `is_playing`,
@@ -584,7 +649,7 @@ impl ControlSlot {
     /// slot, it was — and every flicker re-raised the HUD over an intro the user was just watching.
     pub(crate) fn offer(self) -> Option<(crate::metadata::MarkerKind, i64)> {
         match self {
-            ControlSlot::Discs => None,
+            ControlSlot::Discs { .. } => None,
             ControlSlot::Skip(pr) => Some((pr.marker.kind, pr.marker.start_ms)),
             ControlSlot::UpNext(m) => Some((m.kind, m.start_ms)),
         }
@@ -601,7 +666,7 @@ impl ControlSlot {
             return None;
         }
         Some(match self {
-            ControlSlot::Discs => disc_hit_rect(idx),
+            ControlSlot::Discs { .. } => disc_hit_rect(idx),
             ControlSlot::Skip(pr) => {
                 let w = ctrl_slot_w(row, pr.label(), measure);
                 Rect::new(CTRL_RIGHT - w, CTRL_Y, w, CTRL_H)
@@ -629,7 +694,7 @@ pub(crate) fn slot_for(marker: Option<crate::metadata::Marker>, has_next: bool) 
                 ControlSlot::Skip(pr)
             }
         }
-        None => ControlSlot::Discs,
+        None => ControlSlot::Discs { next: has_next },
     }
 }
 
@@ -656,7 +721,9 @@ pub(crate) fn slot(ps: &crate::route::PlaybackSession, meta: crate::metadata::Me
 /// card is held and fires on the frame the overlay closes, rather than being lost.
 ///
 /// It exists because the row swapping from a Skip pill back to the discs leaves focus on the row
-/// with `btn` still 0, so the next OK opens the SUBTITLES menu instead of toggling pause.
+/// with `btn` still 0. Since #320 that lands on the Play/Pause disc rather than on Subtitles, so
+/// the next OK toggles the transport instead of opening a panel — a better outcome, but still a
+/// silent change of what the ring is pointing at, which is what this edge is here to undo.
 ///
 /// **It is an EDGE, not a steady state**, and that is the whole reason it is a named function with
 /// a test. Written inline as `is_discs() && focused` it is also true on every frame of a user who
@@ -769,12 +836,14 @@ pub(crate) fn busy(ps: &crate::route::PlaybackSession) -> Busy {
 
 // ---- the transport STATE READ-OUT (the glyph slot just past the elapsed clock) ---------------
 //
-// One slot, one glyph, four states. It is a READ-OUT and not an action toggle — there is no
-// transport button row in this app and a standing owner decision forbids adding one, so nothing
-// here is focusable, hit-tested or in `BTN_N`. The glyphs are the design system's transport
-// family (`Icon::Rewind` / `Icon::Pause` / `Icon::FastForward`, all in one 14-unit band, with
-// `Icon::Play` swapping in for `Pause`), which is what keeps the slot from shifting optical
-// weight as the state flips under a running clock.
+// One slot, one glyph, four states. It is a READ-OUT and not an action toggle, and it stays one
+// now that the control row has transport discs (#320): the disc beside it IS the toggle, so a
+// second focusable face here would be the same action twice on one screen. The read-out answers a
+// different question — "what is the transport doing right now", including the two states no button
+// has (rewind / fast-forward under a scrub) — which is why it was not folded into the disc. The
+// glyphs are the design system's transport family (`Icon::Rewind` / `Icon::Pause` /
+// `Icon::FastForward`, all in one 14-unit band, with `Icon::Play` swapping in for `Pause`), which is
+// what keeps the slot from shifting optical weight as the state flips under a running clock.
 
 /// How long [`TransportMark::Play`] stands after a resume — "a couple of seconds", per the owner:
 /// the mark answers *did that press land*, and a play glyph held for the whole film would be
@@ -1186,7 +1255,7 @@ fn draw_failed_readout(
     FailureReadout::now(ps).draw(p, focus, measure);
 }
 
-/// x of control button `idx`, left to right: 0 = Subtitles, 1 = Audio, 2 = More.
+/// x of control button `idx`, left to right — see [`disc_action`] for what each one does.
 ///
 /// The row is RIGHT-anchored — the LAST disc's edge is `CTRL_RIGHT` — so adding a button pushes
 /// the existing ones left instead of moving the row's right margin, which is what keeps the discs
@@ -1195,8 +1264,8 @@ fn btn_x(idx: i32) -> f32 {
     CTRL_RIGHT - BTN_S - (BTN_N - 1 - idx) as f32 * (BTN_S + BTN_GAP)
 }
 
-/// which control button a pointer at (cx,cy) is over: 0 = Subtitles, 1 = Audio, 2 = More, or None.
-/// The single source of truth for the button rects, shared with draw_hud.
+/// which control button a pointer at (cx,cy) is over, as its index in the row, or None. The single
+/// source of truth for the button rects, shared with draw_hud.
 ///
 /// `slot` is passed in rather than re-derived: while a stand-in owns the row the discs are not on
 /// screen, and a click in that band must not open a track menu the user cannot see.
@@ -1204,7 +1273,7 @@ pub(crate) fn icon_hit(slot: ControlSlot, cx: f32, cy: f32) -> Option<i32> {
     if !slot.is_discs() || cy < BTN_Y || cy > BTN_Y + BTN_S {
         return None;
     }
-    (0..BTN_N).find(|&idx| {
+    (0..slot.items()).find(|&idx| {
         let x = btn_x(idx);
         cx >= x && cx <= x + BTN_S
     })
@@ -1552,8 +1621,9 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
     }
     // transport state indicator just past the elapsed clock — the four-state READ-OUT resolved by
     // [`transport_mark`] (rewind / pause / fast-forward / play, plus the narrowed spinner), and
-    // NOTHING while playing steadily. A read-out, not an action toggle: nothing here is focusable
-    // or hit-tested, and the control row stays the three discs it has always been.
+    // NOTHING while playing steadily. Still a read-out and still not focusable now that the control
+    // row carries Play/Pause and Stop (#320): the disc is the toggle, this says what the transport
+    // is doing — including the two states no button has.
     // Gated on `busy`, not on `loading()`: with `loading()` the transport lit the same spinner the
     // centred read-out was already showing, for the whole of every load AND every seek. Centered on
     // the clock's line box; drops to the clock's LEFT when the right side is against the remaining
@@ -1705,10 +1775,29 @@ pub(crate) fn draw_hud(
             ControlSlot::Skip(pr) => {
                 crate::screens::player::skip_pill::draw(row, p, pr, focus == 1, measure);
             }
-            ControlSlot::Discs => {
-                for i in 0..BTN_N {
+            ControlSlot::Discs { next } => {
+                // The Play/Pause disc's mark follows the live transport state. Read once, here, so
+                // the six discs cannot disagree about it: the row is one sample of the session, not
+                // six.
+                let paused = crate::player::TX.paused.load(Relaxed);
+                for i in 0..disc_count(next) {
                     let pop = row.scale(i);
+                    let icon = match disc_action(i, next) {
+                        Some(DiscAction::PlayPause) => {
+                            if paused {
+                                crate::ui::icons::Icon::Play
+                            } else {
+                                crate::ui::icons::Icon::Pause
+                            }
+                        }
+                        Some(DiscAction::Stop) => crate::ui::icons::Icon::Stop,
+                        Some(DiscAction::Next) => crate::ui::icons::Icon::SkipNext,
+                        Some(DiscAction::Subtitles) => crate::ui::icons::Icon::Cc,
+                        Some(DiscAction::Audio) => crate::ui::icons::Icon::Audio,
+                        Some(DiscAction::More) | None => crate::ui::icons::Icon::More,
+                    };
                     TransportButton::new(i, Rect::new(btn_x(i), BTN_Y, BTN_S, BTN_S))
+                        .icon(icon)
                         .focused(focus == 1 && btn == i)
                         // The whole control row stands on the VIDEO PLANE — see `ControlGround`. It is
                         // the HUD's own bottom ramp (drawn at the top of this function) that makes the
@@ -1838,16 +1927,53 @@ mod tests {
     /// a third disc — the `…` overflow — because the previous shape hard-coded two positions and a
     /// `(0..2)` scan, and a third button that draws but cannot be clicked is exactly the kind of
     /// half-wired control this file's `ControlSlot` note exists to prevent.
+    ///
+    /// Both widths are walked: a movie's five discs and a series' six. The count is the row's own
+    /// (`ControlSlot::items`), so a hit map that scanned a constant would pass on the wide row and
+    /// silently answer past the last disc on the narrow one.
     #[test]
     fn every_disc_hit_tests_back_to_itself() {
         let cy = BTN_Y + BTN_S * 0.5;
-        for i in 0..BTN_N {
-            let cx = btn_x(i) + BTN_S * 0.5;
-            assert_eq!(
-                icon_hit(ControlSlot::Discs, cx, cy),
-                Some(i),
-                "disc {i} centre"
-            );
+        for next in [false, true] {
+            let slot = ControlSlot::Discs { next };
+            for i in 0..slot.items() {
+                let cx = btn_x(i) + BTN_S * 0.5;
+                assert_eq!(icon_hit(slot, cx, cy), Some(i), "disc {i} centre, next={next}");
+            }
+        }
+    }
+
+    /// **The row's order, which three surfaces read**: the draw, the hit map and the OK handler.
+    /// Play/Pause is first because it is the one disc a viewer reaches for without looking, the
+    /// skip disc sits beside it, and the three that open a panel keep the right edge they had
+    /// before the transport controls arrived.
+    #[test]
+    fn the_disc_row_puts_the_transport_controls_first_and_keeps_the_panel_discs_right() {
+        use DiscAction::*;
+        assert_eq!(disc_count(false), 5);
+        assert_eq!(disc_count(true), 6);
+        assert_eq!(
+            (0..disc_count(false)).map(|i| disc_action(i, false).unwrap()).collect::<Vec<_>>(),
+            vec![PlayPause, Stop, Subtitles, Audio, More],
+            "a movie: no disc to skip to"
+        );
+        assert_eq!(
+            (0..disc_count(true)).map(|i| disc_action(i, true).unwrap()).collect::<Vec<_>>(),
+            vec![PlayPause, Stop, Next, Subtitles, Audio, More],
+            "a series with another episode queued"
+        );
+        // Past the last disc there is no action, on either width — the OK handler falls through to
+        // a no-op rather than acting on an index the row never drew.
+        assert_eq!(disc_action(5, false), None);
+        assert_eq!(disc_action(6, true), None);
+        assert_eq!(disc_action(-1, true), None);
+        // The panel discs are the LAST three whatever the width, which is what keeps them on
+        // `CTRL_RIGHT`: the row is right-anchored, so an insertion on the right would move them.
+        for next in [false, true] {
+            let n = disc_count(next);
+            assert_eq!(disc_action(n - 1, next), Some(More));
+            assert_eq!(disc_action(n - 2, next), Some(Audio));
+            assert_eq!(disc_action(n - 3, next), Some(Subtitles));
         }
     }
 
@@ -1883,19 +2009,19 @@ mod tests {
     fn gaps_and_the_row_ends_belong_to_no_disc() {
         let cy = BTN_Y + BTN_S * 0.5;
         assert_eq!(
-            icon_hit(ControlSlot::Discs, btn_x(0) - 1.0, cy),
+            icon_hit(ControlSlot::Discs { next: false }, btn_x(0) - 1.0, cy),
             None,
             "left of the row"
         );
         assert_eq!(
-            icon_hit(ControlSlot::Discs, CTRL_RIGHT + 1.0, cy),
+            icon_hit(ControlSlot::Discs { next: false }, CTRL_RIGHT + 1.0, cy),
             None,
             "right of the row"
         );
-        for i in 1..BTN_N {
+        for i in 1..disc_count(false) {
             let mid = btn_x(i) - BTN_GAP * 0.5;
             assert_eq!(
-                icon_hit(ControlSlot::Discs, mid, cy),
+                icon_hit(ControlSlot::Discs { next: false }, mid, cy),
                 None,
                 "gap before disc {i}"
             );
@@ -1903,12 +2029,12 @@ mod tests {
         // and the band itself is bounded vertically
         let cx = btn_x(0) + BTN_S * 0.5;
         assert_eq!(
-            icon_hit(ControlSlot::Discs, cx, BTN_Y - 1.0),
+            icon_hit(ControlSlot::Discs { next: false }, cx, BTN_Y - 1.0),
             None,
             "above the row"
         );
         assert_eq!(
-            icon_hit(ControlSlot::Discs, cx, BTN_Y + BTN_S + 1.0),
+            icon_hit(ControlSlot::Discs { next: false }, cx, BTN_Y + BTN_S + 1.0),
             None,
             "below the row"
         );
