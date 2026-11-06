@@ -1077,7 +1077,12 @@ pub const TAB_TRACK_BOT: [f32; 4] = scrim_black(TAB_TRACK_A_BOT);
 /// frame it sits here on a dark backdrop and walks up the table only as far as the ground makes it,
 /// which on a bright hero measured .562 and on most heroes is this floor. The ink never moves,
 /// which is what the row's hierarchy is made of.
-pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.20);
+///
+/// **#297 moved this floor .20 → .18, and the contract moved with it**: `track_alpha_for` still
+/// walks up from this stop until the idle labels clear `TRACK_INK_CONTRAST`, so what changed is
+/// only how much of the artwork a DARK page shows through, which is the ask. The pinned exposure
+/// in `widgets_tab_capsule_motion_tests` moved 1.86 → 1.77 as a consequence.
+pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.18);
 /// **The material's LIGHT FLOOR — the amount of itself the glass shows where the page shows
 /// nothing.** Two numbers, both measured against the real thing rather than chosen.
 ///
@@ -1101,8 +1106,9 @@ pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.20);
 /// surface. This is one surface still: same ink, same solve, same scrim, with a floor under how
 /// dark the glass itself is allowed to get.
 pub const TAB_GLASS_LIFT_FLOOR: f32 = 0.045;
-/// The glass track's bottom stop — see [`TAB_GLASS_TOP`].
-pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.36);
+/// The glass track's bottom stop — see [`TAB_GLASS_TOP`]. The authored spread stays 0.16
+/// (`tab_glass_stops` derives its taper from it), so the floor's move carries the bottom with it.
+pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.34);
 /// The track material's two weights, exposed as alphas because the focused **profile chip** wears
 /// the same material and FADES it in with its unfurl (`scrim_black(A * e)`) — one material and one
 /// pair of weights whether it is painted at full strength or on the way in, which is what keeps the
