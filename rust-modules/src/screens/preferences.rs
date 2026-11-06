@@ -672,8 +672,10 @@ mod tests {
         // The write is the storage worker's, so the tick loop waits for it rather than assuming
         // it finished inside a fixed number of frames.
         let tick = Tick { ms: 16, dt_us: 16_000 };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while page.pending_recent.is_some() && std::time::Instant::now() < deadline {
+        for _ in 0..1000 {
+            if page.pending_recent.is_none() {
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(2));
             with_fx(|fx| { page.step(&ScreenEvent::Tick(tick), &context(last as u32), fx); });
         }
