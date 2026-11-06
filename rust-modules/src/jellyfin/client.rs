@@ -176,6 +176,7 @@ impl JfClient {
         username: &str,
         password: &str,
     ) -> Result<AuthOk, AuthError> {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
         let body = serde_json::json!({
             "Username": username,
             "Pw": password,
@@ -231,6 +232,7 @@ impl JfClient {
     /// credential, not a user token. `None` on transport failure, a non-2xx (401 = Quick Connect
     /// disabled on the server), or unparseable JSON.
     pub(crate) fn quick_connect_initiate(&self) -> Option<QuickConnectResult> {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
         let id = self.identity_header();
         let reply = http::request(
             &self.origin,
@@ -260,6 +262,7 @@ impl JfClient {
     /// it rides in the query because this route authenticates on the secret alone. `None` on
     /// transport failure, non-2xx (404 = unknown secret), or unparseable JSON.
     pub(crate) fn quick_connect_state(&self, secret: &str) -> Option<QuickConnectResult> {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
         let id = self.identity_header();
         let path = format!("/QuickConnect/Connect?secret={secret}");
         let reply = http::request(&self.origin, &path, http::Method::Get, &[id.as_str()], None)?;
@@ -288,6 +291,7 @@ impl JfClient {
     /// (not authorized, unknown secret, disabled) folds into `Unauthorized` so the flow can fall
     /// back to the password form without inventing a fourth failure word.
     pub(crate) fn authenticate_with_quick_connect(&self, secret: &str) -> Result<AuthOk, AuthError> {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
         let body = serde_json::json!({ "Secret": secret });
         let id = self.identity_header();
         let reply = match http::request_post_json(
@@ -338,6 +342,7 @@ impl JfClient {
     /// compares the reported version against the floor. A malformed or absent version answers
     /// false, which falls back to the password login rather than gambling on a route that 404s.
     pub(crate) fn quick_connect_supported(&self) -> bool {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
         let Some(reply) = http::request(
             &self.origin,
             "/System/Info/Public",
@@ -364,6 +369,7 @@ impl JfClient {
     /// answered — a refusal clears it, so no later `views()` fires credentials the server has
     /// already rejected. This is the whole reason a password no longer has to live on disk.
     pub(crate) fn adopt_token(&self, token: &str) -> Result<TokenUser, AuthError> {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
         let install = |user_id: &str, user_name: &str| {
             *self.token.write().unwrap_or_else(|e| e.into_inner()) = Some(TokenState {
                 token: token.to_string(),
