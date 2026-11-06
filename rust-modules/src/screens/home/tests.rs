@@ -498,11 +498,11 @@ fn drawn_card_geometry_includes_press_but_its_rest_anchor_does_not() {
         let mut context = cx(snapshot.view(), Some(key));
         context.press.scale = press;
         let placed = Focusable::<TestHost>::place(&s, &key.elem, &context, At::Drawn).unwrap();
-        assert!((placed.rect.w - CARD_W * s.grid.shelves[0].scale(0) * press).abs() < 0.01);
-        assert!((placed.rest_rect.w - CARD_W * RowStyle::HOME.focus_scale).abs() < 0.01);
+        assert!((placed.rect.w - s.row_card(0).0 * s.grid.shelves[0].scale(0) * press).abs() < 0.01);
+        assert!((placed.rest_rect.w - s.row_card(0).0 * s.row_style(0).focus_scale).abs() < 0.01);
         context.press = PressRead::default();
         let opener = s.focused_rect(Some(key), &context, At::Drawn).unwrap();
-        assert!((opener.w - CARD_W * s.grid.shelves[0].scale(0)).abs() < 0.01);
+        assert!((opener.w - s.row_card(0).0 * s.grid.shelves[0].scale(0)).abs() < 0.01);
     }
 }
 
@@ -865,7 +865,7 @@ fn heading_top(row: usize, focus_row: usize, scroll: f32) -> f32 {
     )
 }
 fn settled_scroll(rows: usize, focus_row: usize, current: f32) -> f32 {
-    let (lo, hi) = row_reveal_band(shelf_top_settled(focus_row, focus_row));
+    let (lo, hi) = row_reveal_band(shelf_top_settled(focus_row, focus_row), CARD_H);
     card_row::reveal(current, lo, hi, grid_max_scroll(rows))
 }
 fn from_below(rows: usize) -> f32 {
@@ -915,9 +915,9 @@ fn every_settled_row_keeps_its_focused_label_block_above_the_overscan_bottom() {
 
 #[test]
 fn the_grids_resting_top_is_the_highest_a_shelf_may_settle() {
-    assert_eq!(row_reveal_band(0.0).1, 0.0);
+    assert_eq!(row_reveal_band(0.0, CARD_H).1, 0.0);
     assert_eq!(
-        row_reveal_band(shelf_top_settled(3, 3)).1,
+        row_reveal_band(shelf_top_settled(3, 3), CARD_H).1,
         shelf_top_settled(3, 3)
     );
     assert!(heading_top(0, 0, 0.0) - top_band_bottom() >= theme::space::XS);
@@ -2104,4 +2104,38 @@ fn a_shelf_heading_on_screen_is_drawn_while_its_cards_are_still_below_the_edge()
     // …and a shelf whose heading has not reached the edge yet is still culled.
     s.grid.shelves[0].base_y = SCR_H + TITLE_DY + 4.0;
     assert!(!drawn(&s), "a shelf entirely below the screen draws nothing");
+}
+
+/// The mockup's wide row, as a property of the row and not of the painter: Continue Watching is
+/// the one hub that trades posters for 16:9 stills, and its stride is shorter because its art is.
+#[test]
+fn continue_watching_is_the_one_landscape_row() {
+    let _guard = crate::testlock::serial();
+    let mut state = crate::catalog::CatalogState::default();
+    let adapter = std::sync::Arc::new(crate::catalog::CatalogAdapter::default());
+    crate::catalog::seed_for_test(&mut state, &adapter, 3, crate::catalog::HubState::Ready);
+    let snapshot = crate::catalog::hubs_snapshot(&state);
+    let s = screen(snapshot.view());
+    let cw = s
+        .rows
+        .iter()
+        .position(|r| r.identity == HomeHubIdentity::ContinueWatching)
+        .expect("the demo library seeds Continue Watching");
+    assert!(s.row_landscape(cw));
+    assert_eq!(s.row_card(cw), (RowStyle::EPISODE.w, RowStyle::EPISODE.h));
+    assert!(
+        s.row_pitch(cw) < card_row::ROW_PITCH_FIXED,
+        "a landscape row is shorter than a poster row"
+    );
+    let poster = s
+        .rows
+        .iter()
+        .position(|r| r.identity != HomeHubIdentity::ContinueWatching)
+        .unwrap_or(usize::MAX);
+    assert!(!s.row_landscape(poster));
+    assert_eq!(s.row_card(poster), (CARD_W, CARD_H));
+    assert!(
+        s.shelf_offset(cw + 1) < 0.0,
+        "the rows below a landscape row start higher"
+    );
 }
