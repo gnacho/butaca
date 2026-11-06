@@ -145,6 +145,10 @@ fn account_key_for(owner: Option<i64>, account_token: &str) -> String {
     if account_token.is_empty() {
         return String::new();
     }
+    // The `plex-tv:` prefix is a STORED key, not a label: it is how a consent row is found again
+    // on the next boot. Renaming it would leave every existing row unreachable — the app would
+    // re-ask for a grant the user already gave, on a set that never changed — so it is only worth
+    // touching together with a migration that rewrites the rows.
     owner.map_or_else(|| legacy_account_key(account_token), |id| format!("plex-tv:{id}"))
 }
 

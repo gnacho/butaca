@@ -1,4 +1,7 @@
 //! `StallGuard` arming and abort decisions for a server-paced HLS transfer.
+//!
+//! The masters below carry `X-Plex-Token` because it is the only credential parameter the HLS
+//! capture accepts (`hls::is_token_pair`); the server sends `api_key`, which is issue #310.
 
 use super::*;
 #[allow(unused_imports)]

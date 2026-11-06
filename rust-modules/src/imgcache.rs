@@ -50,6 +50,12 @@ pub(crate) struct Snapshot {
 
 /// Every transcode option participates, except the outer authentication token. Namespace is
 /// the stable server machine identifier (or server origin when discovery has no identifier).
+///
+/// Both the parameter name filtered here and the avatar prefix in [`is_avatar`] belong to the
+/// endpoint this cache was built for, and the whole READING half of the cache is frozen (no
+/// caller since the wire went). They are left exactly as they are on purpose: the pending task is
+/// "the art cache goes", which deletes the half, and rewriting its keys first would be work done
+/// twice on code nothing reads.
 #[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn classify(server_namespace: &str, built_key: &str) -> Option<DiskKey> {
     let (path, query) = built_key.split_once('?')?;

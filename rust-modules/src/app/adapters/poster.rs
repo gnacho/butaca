@@ -1317,9 +1317,9 @@ impl ArtFail {
 /// is 16, so the extra dimension is one `u32` of bits per slot.
 ///
 /// **What is deliberately NOT in the line: the key.** It is a server image path ending in an
-/// `api_key` query that carries the access token (see [`poster_key`]), and `crate::redact_tokens`'
-/// own doc states the policy that backstop exists to make redundant. No call site formats a URL
-/// into a log line in the first place. The server is named by its registry SLOT NUMBER, and by
+/// `api_key` query that carries the access token (see [`poster_key`]). No call site formats a URL
+/// into a log line in the first place: that policy is what the log's scrub pass exists to make
+/// redundant. The server is named by its registry SLOT NUMBER, and by
 /// nothing else: not the address, not the machine identifier, not the friendly name (which
 /// defaults to the owner's hostname). `app/diagnostics.rs`'s module doc argues the whole rule for
 /// the on-screen read-out.

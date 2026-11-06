@@ -1,5 +1,8 @@
 use super::*;
 
+// These fixtures spell the transcode endpoint and the avatar host this cache was written against.
+// They are frozen with the reading half they exercise (see `imgcache::classify`); the pending task
+// is the deletion of that half, not a rewrite of its fixtures.
 const AVATAR: &str = "/photo/:/transcode?width=300&height=300&minSize=1&url=https%3A%2F%2Fplex.tv%2Fusers%2F0123abcd%2Favatar%3Fc%3D1700000000&X-Plex-Token=tok";
 const POSTER: &str = "/photo/:/transcode?width=250&height=375&minSize=1&url=%2Flibrary%2Fmetadata%2F42%2Fthumb%2F1&X-Plex-Token=t";
 

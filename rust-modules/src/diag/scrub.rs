@@ -41,9 +41,10 @@ const CREDENTIAL_HEADERS: [&str; 5] = [
     "proxy-authorization:",
 ];
 
-/// Query parameters whose value is a secret. The access-token parameter is here too even though
-/// [`crate::redact_tokens`] already caught it on the way in — this pass must be correct on its own,
-/// because it is also what protects a record written by a future call site that bypasses the log.
+/// Query parameters whose value is a secret. `x-plex-token=` is the parameter the retired client
+/// appended; it stays because this table has to be correct on its own for ANY line — the same
+/// reason the header table above keeps `x-plex-token:` — and because an install upgraded from
+/// 0.7.x still holds one of those tokens in its session file.
 const CREDENTIAL_PARAMS: [&str; 6] = [
     "x-plex-token=",
     "token=",
@@ -82,8 +83,7 @@ pub(crate) fn scrub_local(line: &str) -> String {
 
 /// [`scrub_local`], against a caller-supplied identity list — the testable half.
 pub(crate) fn scrub_local_with(line: &str, ids: &[String]) -> String {
-    let s = crate::redact_tokens(line).into_owned();
-    let s = scrub_headers(&s);
+    let s = scrub_headers(line);
     let s = scrub_params(&s);
     let s = scrub_authority(&s);
     let s = scrub_host_kv(&s);
@@ -97,8 +97,7 @@ pub(crate) fn scrub_local_with(line: &str, ids: &[String]) -> String {
 /// APP knows about this household (see [`identities`]); everything else here is a pure rewrite.
 #[cfg(feature = "lab-diagnostics")]
 pub(crate) fn scrub_with(line: &str, ids: &[String]) -> Scrubbed {
-    let s = crate::redact_tokens(line).into_owned();
-    let s = scrub_headers(&s);
+    let s = scrub_headers(line);
     let s = scrub_params(&s);
     let s = scrub_authority(&s);
     let s = scrub_host_kv(&s);
@@ -329,11 +328,12 @@ fn scrub_identities(s: &str, ids: &[String]) -> String {
 /// What is left here is the generic shape a future call site can still leak through, which is
 /// worth catching centrally because it is cheap and mechanical:
 ///
-/// * **catalog GUIDs**: a metadata GUID names the WORK, globally and stably. It is the
-///   single most identifying token that can appear in this log, and it arrives from the server
-///   rather than being typed at a call site, so a new site can pick one up without meaning to.
 /// * **`q='…'`** — the search-field convention. Kept as a shape rather than trusting `search.rs`
 ///   to stay disciplined forever.
+///
+/// A catalog GUID used to be rewritten too, matched by the scheme the retired client put in front
+/// of one. A Jellyfin id is a bare hex string with no scheme, so there is no shape left to match
+/// on and the clause went with the wire rather than being re-pointed at a guess.
 ///
 /// **`rk=` is deliberately NOT touched here, and that is the local/remote split doing its job.**
 /// A ratingKey is server-local, this file is 0600, and it is the primary handle for triaging a
@@ -341,32 +341,7 @@ fn scrub_identities(s: &str, ids: &[String]) -> String {
 /// ratingKeys instead of titles"*. It is stripped on the way OUT instead, by [`scrub_remote_ids`],
 /// because a ratingKey plus a server identity is viewing history.
 fn scrub_viewing(s: &str) -> String {
-    let s = replace_guids(s);
-    replace_quoted_value(&s, "q='", '\'', "<query>")
-}
-
-/// A catalog GUID is replaced by a placeholder: the scheme survives because "we were resolving a
-/// guid here" is the diagnostic, the identifier does not.
-fn replace_guids(s: &str) -> String {
-    const KEY: &str = "plex://";
-    if !s.contains(KEY) {
-        return s.to_string();
-    }
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(at) = rest.find(KEY) {
-        out.push_str(&rest[..at]);
-        out.push_str("plex://<guid>");
-        let after = &rest[at + KEY.len()..];
-        // a guid runs to the first whitespace or quote — the same terminator set the log's other
-        // value-shaped fields use
-        let end = after
-            .find(|c: char| c.is_whitespace() || c == '\'' || c == '"')
-            .unwrap_or(after.len());
-        rest = &after[end..];
-    }
-    out.push_str(rest);
-    out
+    replace_quoted_value(s, "q='", '\'', "<query>")
 }
 
 /// `key…value<close>` → `key<placeholder><close>`, for a value delimited by a known closer.
@@ -474,8 +449,8 @@ fn scrub_headers(s: &str) -> String {
 }
 
 /// `?token=abc&x=1` → `?token=<redacted>&x=1`. The value ends at the next `&` or whitespace, so
-/// the diagnostic half of the line survives — the reasoning `redact_tokens` gives for the same
-/// choice: truncating from the parameter onward hides the fields that made the line worth logging.
+/// the diagnostic half of the line survives: truncating from the parameter onward would hide the
+/// fields that made the line worth logging.
 fn scrub_params(s: &str) -> String {
     let mut out = s.to_string();
     loop {
@@ -602,6 +577,12 @@ mod tests {
             !kept("cookie: a=b").contains("a=b"),
             "matched case-insensitively"
         );
+        // The retired client's own header name: an upgraded install can still put one on a line,
+        // and the table must hold without help from the wire that used to send it.
+        assert!(
+            !kept("hdr X-Plex-Token: legacyvalue").contains("legacyvalue"),
+            "the retired header name is still a credential header"
+        );
     }
 
     /// Query parameters this app never logs today, and would leak if it started.
@@ -627,11 +608,11 @@ mod tests {
     /// reached `butaca-events.log` unredacted this way. Reproduces the exact shape.
     #[test]
     fn a_dns_failure_does_not_leak_the_bare_hostname() {
-        let out = kept("stream: GET /identity DNS FAILED host=plex.main.example.net");
+        let out = kept("stream: GET /identity DNS FAILED host=jf.home.example.net");
         assert!(
-            !out.contains("plex.main.example.net")
+            !out.contains("jf.home.example.net")
                 && !out.contains("example.net")
-                && !out.contains("plex.main"),
+                && !out.contains("jf.home"),
             "the hostname survived: {out}"
         );
         assert!(
@@ -646,7 +627,7 @@ mod tests {
     #[test]
     fn a_bare_host_kv_is_redacted_but_a_hex_dump_reusing_the_key_is_not() {
         assert_eq!(
-            kept("net: nowan — refused name host=plex.main.example.net"),
+            kept("net: nowan — refused name host=jf.home.example.net"),
             "net: nowan — refused name host=<host>"
         );
         assert_eq!(
@@ -659,9 +640,9 @@ mod tests {
     /// a server host is a household's location. The path is the diagnostic half and stays.
     #[test]
     fn a_host_is_replaced_and_the_path_is_kept() {
-        let out = kept("open https://10-0-0-2.abc123.plex.direct:32400/library/sections?x=1");
+        let out = kept("open https://10-0-0-2.abc123.jf.example.net:32400/library/sections?x=1");
         assert!(
-            !out.contains("plex.direct") && !out.contains("10-0-0-2"),
+            !out.contains("jf.example.net") && !out.contains("10-0-0-2"),
             "{out}"
         );
         assert!(out.contains("/library/sections"), "{out}");
@@ -864,17 +845,14 @@ mod tests {
 
     // ---- viewing identity: the class `scrub` was never built to catch ---------------------------
 
-    /// **The generic shapes the backstop owns**, quoted from the call sites that produce them:
-    ///
-    /// * `viewstate.rs:524` / `metadata.rs:2102`: a metadata GUID names the WORK, globally and
-    ///   stably
-    /// * `search.rs` — the `q='…'` convention
+    /// **The generic shape the backstop owns**, quoted from the call site that produces it:
+    /// `search.rs`'s `q='…'` convention.
     ///
     /// This is LG's "Content Viewing Information" category, which the app's Data Safety
     /// declaration has to be able to answer **Not collected** to. None of the other four passes
     /// touches it: they hunt credentials, hosts, bare addresses and names taken from the SESSION,
-    /// and a metadata GUID is none of those. Every case passes an EMPTY identity list, the state
-    /// the app is in for the whole of boot.
+    /// and a search string typed into the field is none of those. Every case passes an EMPTY
+    /// identity list, the state the app is in for the whole of boot.
     ///
     /// **`rk=` is deliberately not banned.** A ratingKey is server-local, this file is 0600, and it
     /// is the primary handle for triaging a playback bug — `distribution.md`'s own remediation for
@@ -884,14 +862,6 @@ mod tests {
     #[test]
     fn the_generic_viewing_identity_shapes_are_neutralised() {
         let cases: &[(&str, &str)] = &[
-            (
-                "viewstate: fanout plex://episode/5d9c085e6afb3d server 3f2a: holds 2",
-                "5d9c085e6afb3d",
-            ),
-            (
-                "altsrc: asked 3 source(s) for plex://movie/5d7768 -> 2 copy(ies)",
-                "5d7768",
-            ),
             ("search: q='breaking bad' state=Results", "breaking bad"),
             ("search: q='unterminated at end of line", "unterminated"),
         ];
@@ -909,19 +879,11 @@ mod tests {
     /// passes the test above and destroys the file it is protecting.
     #[test]
     fn the_diagnostic_half_of_those_lines_survives() {
-        let out = scrub_local_with(
-            "viewstate: fanout plex://episode/5d9c08 server 3f2a: holds 2",
-            &[],
-        );
+        let out = scrub_local_with("search: q='breaking bad' state=Results", &[]);
         assert!(
-            out.starts_with("viewstate: fanout plex://"),
+            out.starts_with("search: q="),
             "the SHAPE says what happened: {out}"
         );
-        assert!(
-            out.contains("holds 2"),
-            "the outcome is the diagnostic: {out}"
-        );
-        let out = scrub_local_with("search: q='breaking bad' state=Results", &[]);
         assert!(
             out.contains("state=Results"),
             "the state machine is the diagnostic: {out}"

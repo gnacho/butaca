@@ -620,7 +620,7 @@ mod tests {
         assert_eq!(s, "1804");
 
         let mut s = String::new();
-        push_rk(&mut s, "/library/metadata/1804?X-Plex-Token=SECRETVALUE");
+        push_rk(&mut s, "/library/metadata/1804?api_key=SECRETVALUE");
         assert!(
             !s.contains('/') && !s.contains('?') && !s.contains('='),
             "a URL survived as {s:?}"

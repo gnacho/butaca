@@ -207,6 +207,11 @@ enum Credential {
 
 fn credential_carried(path: &str, headers: &[&str]) -> Credential {
     let lower = path.to_ascii_lowercase();
+    // The retired client's parameter. Nothing in the app produces it any more, and it stays
+    // because this classifier is the last thing between a credential and a plaintext hop: it has
+    // to be right for a shape it is HANDED, not only for the shapes the current call sites build.
+    // `Credential::Legacy` is not Plex-specific anyway, it is "any credential that is not
+    // Jellyfin's", which is why a bare `Authorization` below lands there too.
     if lower.contains("x-plex-token=") {
         return Credential::Legacy;
     }
@@ -708,8 +713,8 @@ mod tests {
     #[test]
     fn store_policy_refuses_credentials_over_plaintext_http() {
         let http = Origin::http("127.0.0.1", 32400);
-        let https = Origin::parse("https://127-0-0-1.hash.plex.direct:32400").unwrap();
-        let token_path = "/identity?X-Plex-Token=secret";
+        let https = Origin::parse("https://jellyfin.home.example.net:32400").unwrap();
+        let token_path = "/identity?api_key=secret";
 
         assert!(!credential_transport_allowed_by_policy(
             &http,

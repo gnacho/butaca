@@ -174,7 +174,7 @@ impl HttpStream {
 /// `app::diagnostics` applies to the diagnostics panel. The endpoint on its own is what makes a line
 /// diagnosable ("which request failed") and it carries no secret.
 ///
-/// `crate::redact_tokens` catches a line that gets this wrong on the way out; the policy is that
+/// The log's scrub pass catches a line that gets this wrong on the way out; the policy is that
 /// nothing built here needs it.
 fn log_endpoint(path: &str) -> &str {
     match path.find('?') {

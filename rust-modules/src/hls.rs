@@ -27,6 +27,14 @@ pub(crate) struct InheritedAuth {
     token_pair: String,
 }
 
+/// The credential parameter this capture recognises.
+///
+/// It is the name the retired client appended, and it is still here because it is the ONE name
+/// the capture accepts: every fixture below builds its master with it for that reason. A Jellyfin
+/// transcode URL carries `api_key` instead (see `jellyfin::client::transcode_url`), so a
+/// transcoded master cannot be captured today. That is a defect of this parser and not a remnant
+/// to delete, so #308 left it alone: issue #310 owns the fix, and it will re-point these fixtures
+/// when it lands.
 fn is_token_pair(pair: &str) -> bool {
     pair.split_once('=')
         .is_some_and(|(name, _)| name.eq_ignore_ascii_case("X-Plex-Token"))
@@ -1049,6 +1057,9 @@ fn path_without_query(path: &str) -> &str {
 mod tests {
     use super::*;
 
+    // Every master below carries `X-Plex-Token` because that is the only credential parameter
+    // `is_token_pair` accepts. The server sends `api_key` (issue #310), so these fixtures encode
+    // the parser rather than the wire; the fix re-points them.
     fn source(path: &str) -> Resource {
         Resource::new(Origin::http("192.0.2.10", 32400), path).unwrap()
     }
