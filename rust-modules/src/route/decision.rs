@@ -4730,6 +4730,25 @@ pub(crate) fn set_up_next_window_s(seconds: i64) -> bool {
     saved
 }
 
+/// **Whether the Library leads with the section's Recently Added shelf** — opt-in, off by
+/// default (#297). A process-wide atomic beside the other preferences the Library reads while
+/// building its document: the filter runs per landing, and a lock in that path would be a lock in
+/// a screen's sync.
+static SHOW_RECENTLY_ADDED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn show_recently_added() -> bool {
+    SHOW_RECENTLY_ADDED.load(Ordering::Relaxed)
+}
+
+/// Restore the persisted preference without writing it back, exactly as
+/// [`restore_up_next_policy`]. The `#[cfg(test)]` lock guard is that function's: the atomic is a
+/// process global read without a lock, so a test writing it mid another test's read flakes.
+pub(crate) fn restore_show_recently_added(on: bool) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the recently-added preference (restore_show_recently_added)");
+    SHOW_RECENTLY_ADDED.store(on, Ordering::Relaxed);
+}
+
 /// **What each series was last watched with**, held as the process copy the resolve worker reads.
 ///
 /// A `Mutex<Vec<_>>` rather than a session read for the reason every preference here has a process

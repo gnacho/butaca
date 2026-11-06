@@ -534,6 +534,19 @@ pub struct Session {
     /// segment (credits detection is a server feature). Skipped on write while at its default.
     #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
     pub(crate) up_next_window_s: Option<i64>,
+    /// **Whether the Library shows the section's Recently Added shelf** above its grid. Off by
+    /// default: the owner asked for the shelf to stop leading Movies and TV Shows, and for the
+    /// shelf to be an opt-in setting instead. Install-wide like the playback preferences beside
+    /// it, and skipped on write while off so a session persisted before the field existed
+    /// round-trips byte-identical.
+    ///
+    /// **Deliberately absent from the controlled-replay initial-state digest** (`auth::owner`'s
+    /// `write_persisted`): that digest's shape may not move while the committed fixtures cannot be
+    /// re-recorded (`tests/fixtures/replay/README.md`). Nothing in the replay domain opens a
+    /// Library, and absence means off, which is what those recordings describe — so the omission
+    /// is stated here rather than left to be noticed.
+    #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
+    pub(crate) show_recently_added: bool,
     /// **Automatically Sign In** — skip the boot who's-watching picker and enter as
     /// [`Session::user`]. Install-wide, not per profile: the boot gate reads it before anyone is
     /// seated this run. Absence is **off**, which is today's picker. Enabling it from Settings
@@ -636,6 +649,9 @@ struct CanonicalSessionPreferences {
     up_next_policy: UpNextPolicy,
     #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
     up_next_window_s: Option<i64>,
+    /// #297: the Library's opt-in Recently Added shelf. Absent means off.
+    #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
+    show_recently_added: bool,
     #[serde(default, deserialize_with = "de_soft_bool")]
     auto_sign_in: bool,
     #[serde(default, deserialize_with = "de_soft_vec")]
@@ -680,6 +696,7 @@ impl Default for CanonicalSessionPreferences {
             subtitle_background: 0,
             up_next_policy: UpNextPolicy::default(),
             up_next_window_s: None,
+            show_recently_added: false,
             auto_sign_in: false,
             last_library: Vec::new(),
             library_sorts: Vec::new(),
@@ -731,6 +748,7 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         subtitle_background: session.subtitle_background,
         up_next_policy: session.up_next_policy,
         up_next_window_s: session.up_next_window_s,
+        show_recently_added: session.show_recently_added,
         auto_sign_in: session.auto_sign_in,
         last_library: session.last_library.clone(),
         library_sorts: session.library_sorts.clone(),
@@ -804,6 +822,7 @@ pub(crate) fn join_canonical(
         subtitle_background: preferences.subtitle_background,
         up_next_policy: preferences.up_next_policy,
         up_next_window_s: preferences.up_next_window_s,
+        show_recently_added: preferences.show_recently_added,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -837,6 +856,7 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         subtitle_background: preferences.subtitle_background,
         up_next_policy: preferences.up_next_policy,
         up_next_window_s: preferences.up_next_window_s,
+        show_recently_added: preferences.show_recently_added,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -1807,6 +1827,12 @@ fn is_zero(v: &i64) -> bool {
     *v == 0
 }
 
+/// A boolean preference's skip condition: absence already means `false` (see
+/// [`Session::show_recently_added`]).
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
 /// The subtitle appearance steps read the same way as `de_soft_i64`: a value this build cannot
 /// interpret degrades to the built-in look rather than making the enclosing [`Session`] disappear.
 fn de_soft_u8<'de, D>(d: D) -> Result<u8, D::Error>
@@ -1948,6 +1974,18 @@ impl Session {
     pub(crate) fn with_up_next_window_s(&self, seconds: i64) -> Self {
         let mut next = self.clone();
         next.up_next_window_s = (seconds != UP_NEXT_WINDOW_DEFAULT_S).then_some(seconds);
+        next
+    }
+
+    /// Whether the Library leads with the section's Recently Added shelf. Off unless the viewer
+    /// opted in from Settings.
+    pub(crate) fn show_recently_added(&self) -> bool {
+        self.show_recently_added
+    }
+
+    pub(crate) fn with_show_recently_added(&self, on: bool) -> Self {
+        let mut next = self.clone();
+        next.show_recently_added = on;
         next
     }
 
