@@ -200,6 +200,37 @@ fn shelf_allowed_for_section(id: &str, wanted_latest: Option<&str>) -> bool {
     !id.starts_with("jf.latest.") || Some(id) == wanted_latest
 }
 
+/// **What a section publishes as a shelf, for THIS viewer** (#297): Home's whole-server rows stay
+/// out, another view's Latest stays out, and this view's own Latest/Recently-Added shelf is
+/// OPT-IN — off by default, and live the moment Settings flips the process copy.
+fn shelf_visible(id: &str, wanted_latest: Option<&str>, recently_added: bool) -> bool {
+    shelf_allowed_for_section(id, wanted_latest) && (recently_added || !id.starts_with("jf.latest."))
+}
+
+/// Do the document's built shelves already name `hubs` under this preference? The rebuild trigger
+/// for #297's live toggle: the publication object does not move when only the SETTING moved, so
+/// without this comparison the cached document would keep the shelf until the next fetch. Pure, so
+/// a preference flip with no server news is testable without a store.
+fn shelves_match<'a>(
+    built: impl IntoIterator<Item = &'a str>,
+    hubs: &[crate::browse::section_hubs::Shelf],
+    wanted_latest: Option<&str>,
+    recently_added: bool,
+) -> bool {
+    let mut have = built.into_iter();
+    for shelf in hubs
+        .iter()
+        .filter(|shelf| shelf_visible(&shelf.id, wanted_latest, recently_added))
+        .take(MAX_SHELVES)
+    {
+        match have.next() {
+            Some(id) if id == shelf.id => {}
+            _ => return false,
+        }
+    }
+    have.next().is_none()
+}
+
 impl LibraryScreen {
     pub(crate) fn new(entry: EntryId, instance: InstanceId, kind: SecKind) -> Self {
         let layout = Layout::new(false, &[], 0, false);
@@ -388,14 +419,25 @@ impl LibraryScreen {
         }
         let hubs = H::section_hubs(cx);
         let publication = hubs.id().zip(hubs.revision());
-        if self.shelf_publication != publication {
+        // #297: the section's own Latest/Recently-Added shelf is opt-in. The filter reads
+        // `route::show_recently_added` (a process copy, not a field of this screen), so toggling it
+        // in Settings lands on the next frame with no re-fetch. `shelves_match` is what makes the
+        // change LIVE: the publication object is identical either side of a preference flip.
+        let wanted = identity
+            .as_ref()
+            .and_then(|id| crate::jellyfin::browse::view_for_key(id.key))
+            .map(|guid| format!("jf.latest.{guid}"));
+        let recent = crate::route::show_recently_added();
+        let visible = |id: &str| shelf_visible(id, wanted.as_deref(), recent);
+        if self.shelf_publication != publication
+            || !shelves_match(self.shelves.iter().map(|shelf| shelf.id.as_str()), hubs.shelves(),
+                wanted.as_deref(), recent)
+        {
             let mut old = std::mem::take(&mut self.shelves);
             if let Some(section) = &identity {
                 // `section.key` is the synthetic view key, the hub id carries the Jellyfin GUID.
-                let wanted = crate::jellyfin::browse::view_for_key(section.key)
-                    .map(|guid| format!("jf.latest.{guid}"));
                 for (index, shelf) in hubs.shelves().iter().enumerate() {
-                    if !shelf_allowed_for_section(&shelf.id, wanted.as_deref()) { continue; }
+                    if !visible(&shelf.id) { continue; }
                     if self.shelves.len() >= MAX_SHELVES { break; }
                     let group = GroupId(self.keys.register(
                         LibraryIdentity::Control { section: section.clone(), kind: "shelf-group".into(), key: shelf.id.clone() },

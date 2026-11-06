@@ -36,7 +36,8 @@ fn the_root_reconnects_preferences_and_sign_out() {
     ]);
     assert_eq!(root.table.sections.len(), 3, "server doors, preferences, then the destructive action");
     assert_eq!(root.table.sections[0].rows.len(), 2, "select and quick connect");
-    assert_eq!(root.table.sections[1].rows.len(), 1, "playback stays reachable, interface rows do not");
+    assert_eq!(root.table.sections[1].rows.len(), 1,
+        "playback stays reachable and the Recently Added switch lives on that page");
     assert_eq!(root.table.sections[2].rows.len(), 1, "sign out stays last");
 }
 

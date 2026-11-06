@@ -5526,14 +5526,14 @@ impl Default for StripRender {
 ///
 /// Through this module's own `track_alpha_for`/`contrast` and `theme`'s tokens, for a neutral chip
 /// ground at L\* 92 with the track's worst tap at or below L\* 50 (where the solve rests on its
-/// floor, `theme::TAB_GLASS_TOP`'s .20):
+/// floor, `theme::TAB_GLASS_TOP`'s .18):
 ///
 /// | what the chip's name sits on | face | `TEXT_PRIMARY` contrast |
 /// |---|---|---|
 /// | the flat capsule this replaced (`TAB_TRACK_A_TOP` .72) | L\* 27.5 | **9.74:1** |
-/// | the band's face, solved for a dark track | L\* 75.4 | **1.86:1** |
+/// | the band's face, solved for a dark track | L\* 77.1 | **1.77:1** |
 ///
-/// At L\* 80 it is 2.54:1. Nothing in the app darkens the top band before this — `home`'s
+/// At L\* 80 it is 2.42:1. Nothing in the app darkens the top band before this — `home`'s
 /// atmospheric ramp starts at `HERO_BASE_SCRIM_Y0` (367) and the hero wedge at `HERO_SCRIM_TOP`
 /// (162) — so those are raw backdrop pixels, and `gfx::sample_ground`'s own note records a census
 /// finding a MEDIAN 26.8 L\* span across five taps of the track alone, a third of heroes over 40.
@@ -5700,17 +5700,18 @@ fn track_density_step(dt: f32, d: &mut TrackDensity) {
 /// values are returned and the draw is byte-identical.
 ///
 /// **That spread is 0.16, not the 0.08 this paragraph claimed until a judging panel checked it** —
-/// the tokens are [`theme::TAB_GLASS_TOP`]'s .20 and [`theme::TAB_GLASS_BOT`]'s .36. (They were .34
+/// the tokens are [`theme::TAB_GLASS_TOP`]'s .18 and [`theme::TAB_GLASS_BOT`]'s .34. (They were .34
 /// and .50 when this was written, and both this paragraph and the one below went on quoting the old
 /// pair after the tokens moved. The SPREAD is what the arithmetic here needs, and it survived the
-/// move at 0.16 — which is exactly why nothing broke and nobody noticed.) It matters because the
+/// move at 0.16 — which is exactly why nothing broke and nobody noticed. It survived #297's move to
+/// .18/.34 for the same reason.) It matters because the
 /// bottom stop is `a + spread` and nothing bounds it at
 /// [`theme::TAB_TRACK_A_TOP`]: a solve of .633 draws .793, past the point where there is anything
 /// left to see through, which is what makes a heavy bar read as paint rather than as glass.
 ///
 /// It exists because the shipped values are the one thing in this material nobody had graded. The
 /// flat track is `scrim_black(0.72..0.82)` and is sized to make the pills legible over ARBITRARY
-/// artwork; the glass track roughly halves that — [`theme::TAB_GLASS_TOP`]/`BOT`, .20/.36 — on the
+/// artwork; the glass track roughly halves that — [`theme::TAB_GLASS_TOP`]/`BOT`, .18/.34 — on the
 /// argument that a real backdrop behind it does the work the flat material had to do alone. It does
 /// not, and [`theme::TAB_GLASS_TOP`] holds the contrast table that says why: a blur removes DETAIL,
 /// not brightness, so the first density at which the tertiary labels clear 3:1 over white artwork is

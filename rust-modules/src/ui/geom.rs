@@ -148,6 +148,37 @@ pub struct Table<'a> {
     pub entry: EntryId,
 }
 
+impl Table<'_> {
+    /// **The grid walk's target row**, or `None` for an edge. UP/DOWN step one visual BAND and
+    /// keep the column (a short next band gives way to its nearest column, so the cursor never
+    /// vanishes at a section boundary); LEFT/RIGHT cross the current band one cell. `None` is
+    /// what lets `TablePart`'s edge rules answer — LEFT at the first column is BACK, RIGHT at the
+    /// last is the screen's own rule 8.
+    fn grid_target(&self, here: i32, dir: Dir) -> Option<i32> {
+        let cells = self.table.grid_cells();
+        let &(band, col, _) = cells.iter().find(|(_, _, gi)| *gi == here)?;
+        let in_band = |band: usize, col: usize| {
+            cells
+                .iter()
+                .filter(|(b, _, _)| *b == band)
+                .min_by_key(|(_, c, _)| c.abs_diff(col))
+                .map(|(_, _, gi)| *gi)
+        };
+        match dir {
+            Dir::Up => band.checked_sub(1).and_then(|b| in_band(b, col)),
+            Dir::Down => in_band(band + 1, col),
+            Dir::Left => cells
+                .iter()
+                .find(|(b, c, _)| *b == band && *c + 1 == col)
+                .map(|(_, _, gi)| *gi),
+            Dir::Right => cells
+                .iter()
+                .find(|(b, c, _)| *b == band && *c == col + 1)
+                .map(|(_, _, gi)| *gi),
+        }
+    }
+}
+
 impl<H: Host> Focusable<H> for Table<'_>
 where
     H::Elem: IndexElem,
@@ -155,7 +186,13 @@ where
     fn groups(&self, _cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
         out.push(GroupSpec {
             id: self.group,
-            kind: GroupKind::Column,
+            // A grid's cells are still one group: `neighbour` below is what walks them, and the
+            // kind is the model the engine and the tooling read (`Row`/`Column`/`Grid`).
+            kind: if self.table.cols() > 1 {
+                GroupKind::Grid { cols: self.table.cols(), holes: &[] }
+            } else {
+                GroupKind::Column
+            },
             seat: Seat::Remembered,
             reachable: AxisMask::BOTH,
             edge: [EdgeRule::Geometric; 4],
@@ -171,6 +208,12 @@ where
         let Some(i) = k.elem.index() else {
             return Step::Edge;
         };
+        if self.table.cols() > 1 {
+            return match self.grid_target(i as i32, dir) {
+                Some(j) => Step::Move(key(self.entry, j as usize)),
+                None => Step::Edge,
+            };
+        }
         let delta = match dir {
             Dir::Up => -1,
             Dir::Down => 1,
@@ -196,14 +239,19 @@ where
         key(self.entry, self.table.settle(i).max(0) as usize)
     }
     fn seat(&self, _g: GroupId, from: Placed, _cx: &Cx<'_, H>) -> FocusKey<H::Elem> {
+        let cx = from.rect.x + from.rect.w * 0.5;
         let cy = from.rect.y + from.rect.h * 0.5;
+        let grid = self.table.cols() > 1;
         let mut best = (f32::MAX, 0i32);
         for i in 0..self.table.n_rows() {
             if let Some(r) = self.table.row_frame(self.frame, i) {
                 if self.table.next_selectable(i, 0) != Some(i) {
                     continue;
                 }
-                let d = (r.y + r.h * 0.5 - cy).abs();
+                // A grid seats on the cell nearest in BOTH axes; a column never had a second
+                // axis to consider, and its ranking is unchanged.
+                let dx = if grid { (r.x + r.w * 0.5 - cx).abs() } else { 0.0 };
+                let d = (r.y + r.h * 0.5 - cy).abs() + dx * 0.5;
                 if d < best.0 {
                     best = (d, i);
                 }
@@ -415,6 +463,41 @@ mod tests {
     }
 
     const E: EntryId = EntryId(3);
+
+    /// **#297's grid walk.** UP/DOWN step a visual band keeping the column, LEFT/RIGHT cross the
+    /// current band, and the ends are `Edge` so `TablePart`'s rules answer (LEFT at column 0 is
+    /// BACK, RIGHT at the last column is the screen's). A short band gives way to its nearest
+    /// column, so a section with an odd number of rows cannot swallow the cursor.
+    #[test]
+    fn a_two_column_grid_walks_bands_vertically_and_cells_across() {
+        use crate::ui::table::{Row, Section, TableView};
+        let (m, v) = (FixtureMeasure, FixtureView::default());
+        let c = cx(&m, &v);
+        let mut rows = TableView::new();
+        rows.grid(2);
+        rows.set_sections(
+            vec![Section::new("g")
+                .row(Row::new("a"))
+                .row(Row::new("b"))
+                .row(Row::new("c"))
+                .row(Row::new("d"))
+                .row(Row::new("e"))],
+            0,
+            false,
+        );
+        let table = Table { table: &rows, frame: Rect::FULL, group: GroupId(0), entry: E };
+        let key = |i: u32| FocusKey { entry: E, elem: i };
+        let step = |from: u32, dir| Focusable::<FixtureHost>::neighbour(&table, key(from), dir, &c);
+        let moved = |s: Step<u32>, want: u32| matches!(s, Step::Move(k) if k.elem == want);
+        assert!(moved(step(0, Dir::Down), 2), "DOWN keeps the left column");
+        assert!(moved(step(1, Dir::Down), 3), "DOWN keeps the right column");
+        assert!(moved(step(0, Dir::Right), 1), "RIGHT crosses the band");
+        assert!(moved(step(1, Dir::Left), 0), "LEFT crosses back");
+        assert!(matches!(step(0, Dir::Left), Step::Edge), "LEFT at column 0 is BACK");
+        assert!(matches!(step(1, Dir::Right), Step::Edge), "RIGHT at the last column is the screen's");
+        assert!(moved(step(2, Dir::Down), 4), "the last band's lone left cell is reached");
+        assert!(moved(step(3, Dir::Down), 4), "a short band gives way to its nearest column");
+    }
 
     #[test]
     fn table_ownership_rejects_foreign_full_u32_keys() {

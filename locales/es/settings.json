@@ -132,6 +132,8 @@
   "settings.profiles.failed": "No se puede cambiar de perfil",
   "settings.playback.section": "Reproducción",
   "settings.preferences.section": "Preferencias",
+  "settings.library.recently_added": "Mostrar añadidos recientemente",
+  "settings.library.recently_added.detail": "Encabeza Películas y Series con lo nuevo.",
   "settings.playback.title": "Vídeo y reproducción",
   "settings.playback.detail": "Calidad predeterminada y reproducción directa.",
   "settings.audio.title": "Audio y subtítulos",

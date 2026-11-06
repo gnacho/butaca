@@ -931,6 +931,12 @@ impl Mounter<InnerHost> for RouteSurface {
 // the root page
 // ---------------------------------------------------------------------------------------------
 
+/// The Settings root's centred column width (#297). Wide enough for two comfortable rows side by
+/// side at the shared `HEADLINE`/`CAPTION` pair, narrow enough that the block still reads as one
+/// column rather than as a page-wide table with a hole in the middle (the owner's report on the
+/// mockup's single left column).
+const SETTINGS_CENTER_W: f32 = 1616.0;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Action {
     SelectServer,
@@ -939,9 +945,10 @@ enum Action {
     SignOut,
 }
 
-/// The Settings root: the server doors, the playback controls and the way out. Interface
-/// preferences are deliberately absent: the mockup keeps this surface about the media and the
-/// account, not about the app's own language, legal notices or credits.
+/// The Settings root: the server doors, the playback controls and the way out, as a centred
+/// two-column grid. Language, legal notices and credits are still deliberately absent: this
+/// surface is about the media and the account, not the app's legal copy. The viewer's own
+/// preferences (the Recently Added switch) live one level in, on *Video & playback*.
 pub(crate) struct RootPage {
     entry: EntryId,
     table: TableView,
@@ -949,6 +956,9 @@ pub(crate) struct RootPage {
     state: RootState,
 }
 
+/// The root's LOGICAL state: the selected row. The Recently Added switch is not here because it
+/// is not on this page (it lives on *Video & playback*), and adding a byte here would change the
+/// state hash of every frame in the committed `6-settings-family` replay.
 struct RootState {
     sel: i32,
 }
@@ -974,6 +984,12 @@ impl RootPage {
         s
     }
 
+    /// The root's one layout: a centred column, title block and cards in the same measure. Focus,
+    /// paint and the tick's frame height all read it, so they cannot drift apart.
+    fn layout() -> RouteLayout {
+        RouteLayout::centered(SETTINGS_CENTER_W)
+    }
+
     fn rebuild(&mut self, sel: i32, _directory: crate::stores::browse::DirectoryView<'_>) {
         let servers = Section::new(crate::i18n::msg::settings_servers_section())
             .row(
@@ -997,20 +1013,26 @@ impl RootPage {
                 .detail(crate::i18n::msg::settings_servers_disconnect_detail())
                 .destructive(true),
         );
+        // **The READING order is the element order** — row-major, section by section — so the
+        // owner's action vector, the focus keys and the pointer stops stay one list whichever way
+        // the grid lays the cells out. "Select server" is cell 0 of band 0 (top-left), which is
+        // where the replay's first press lands.
         self.rows = vec![
             Action::SelectServer, Action::QuickConnect,
             Action::Playback, Action::SignOut,
         ];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
+        self.table.grid(2);
         self.table.set_sections(vec![servers, preferences, sign_out], sel, false);
         self.table.list_focused = true;
     }
 
     fn view(&self) -> TableScreen<'_> {
+        let layout = Self::layout();
         TableScreen::new(
             Header::new(
-                RouteLayout::screen(),
+                layout,
                 None,
                 crate::i18n::msg::settings_title(),
                 crate::i18n::msg::settings_root_jellyfin_copy(),
@@ -1019,6 +1041,7 @@ impl RootPage {
             GroupId(0),
             self.entry,
         )
+        .with_frame(layout.content)
     }
 
     fn activate(&mut self, row: i32, _directory: crate::stores::browse::DirectoryView<'_>,
@@ -1054,7 +1077,7 @@ impl Machine<InnerHost> for RootPage {
                 Handled::Yes
             }
             ScreenEvent::Tick(t) => {
-                self.table.update(t.dt(), RouteLayout::screen().sectioned_table().h);
+                self.table.update(t.dt(), Self::layout().content.h);
                 Handled::Yes
             }
             ScreenEvent::FocusMoved { to, .. } => {

@@ -770,6 +770,34 @@ impl RouteLayout {
         }
     }
 
+    /// **A CENTRED content column** — the Settings root's shape (#297): the title block and the
+    /// cards under it share ONE column, horizontally centred in the safe frame, instead of the
+    /// two-column narrative|content split every other route uses. That split left a single
+    /// left-aligned column of settings rows with half the panel empty beside it; the owner's
+    /// report was exactly that it "queda muy descentrado".
+    ///
+    /// The narrative band is sized from its own flow (crumb + one HERO title + three LABEL copy
+    /// lines) rather than a naked height, so a translated title or a wrapping sentence moves the
+    /// cards down instead of drawing over them. `width` is the column's measure, clamped to the
+    /// safe frame; the table's own frame is [`Self::content`].
+    pub(crate) fn centered(width: f32) -> Self {
+        let w = width.min(SAFE.w);
+        let x = SAFE.x + (SAFE.w - w) * 0.5;
+        let top = SAFE.y + TOP_INSET;
+        let bottom = SAFE.y + SAFE.h;
+        let head = CRUMB_BAND
+            + theme::space::SM
+            + theme::size::HERO as f32
+            + theme::space::MD
+            + 3.0 * (theme::size::LABEL as f32 + theme::space::XS)
+            + theme::space::LG;
+        let narrative = Rect::new(x, top, w, head);
+        let action = Rect::new(x, top + head, w, ACTION_H);
+        let content_top = top + head + theme::space::LG;
+        let content = Rect::new(x, content_top, w, (bottom - content_top).max(0.0));
+        Self { narrative, content, action }
+    }
+
     /// Allocate enough narrative width for an unbreakable title word at HERO size, while
     /// preserving the caller's minimum content width. Short titles keep the preferred measure.
     /// This is shared layout: tabs, rows, focus and paint must all consume the returned columns.
@@ -1036,6 +1064,23 @@ fn ground_reads_host(opacity: f32, captured: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// #297: the centred shape is ONE column — title block and cards share it — horizontally
+    /// centred in the safe frame, with the cards below the narrative and inside the frame.
+    #[test]
+    fn a_centred_layout_stacks_the_cards_under_a_centred_title_block() {
+        let l = super::RouteLayout::centered(1600.0);
+        let safe = super::SAFE;
+        assert!((l.narrative.x + l.narrative.w * 0.5 - (safe.x + safe.w * 0.5)).abs() < 1e-4,
+            "the block is not centred");
+        assert_eq!(l.narrative.x, l.content.x);
+        assert_eq!(l.narrative.w, l.content.w);
+        assert!(l.content.y > l.narrative.y + l.narrative.h, "the cards start below the title block");
+        assert!(l.content.y + l.content.h <= safe.y + safe.h + 1e-4);
+        // an over-wide measure is clamped to the safe frame rather than leaving it
+        let clamped = super::RouteLayout::centered(safe.w + 500.0);
+        assert_eq!((clamped.narrative.x, clamped.narrative.w), (safe.x, safe.w));
+    }
+
     /// `ModalStack::draw_scrims_on`'s rule, for a route ground: the host is read on the frame that
     /// captured it (whose GPU work is waited out before anything presents) or once the ground is
     /// seen — never on a held, invisible frame that captured nothing.

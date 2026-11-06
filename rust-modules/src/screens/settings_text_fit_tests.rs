@@ -34,6 +34,27 @@ fn every_language_row_fits_its_column_in_every_language() {
     assert!(out.is_empty(), "rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
 }
 
+/// **#297: the root is a two-column grid, so a row is elided to a CELL, not to the page.** The
+/// details and labels here are the same rungs every other row uses; what changed is the budget,
+/// and a translation that ends in "…" on the television is exactly what this file exists to
+/// catch. Measured at the root's own centred frame so a retune of the column moves the test.
+#[test]
+fn every_root_row_fits_its_grid_cell_in_every_language() {
+    let frame_w = RootPage::layout().content.w;
+    let mut out = Vec::new();
+    for language in LANGUAGES {
+        let _guard = language_on_this_thread_for_test(language);
+        let root = RootPage::new(EntryId(0), crate::stores::browse::DirectoryView::empty_for_test());
+        out.extend(
+            root.table
+                .elided_rows(frame_w, &ShippedMeasure, HEADROOM)
+                .into_iter()
+                .map(|e| format!("{} root: {e}", language.tag())),
+        );
+    }
+    assert!(out.is_empty(), "root rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
+}
+
 /// Owner report (Belarusian UI): a long VALUE squeezed the primary label of the Video Playback
 /// page's Direct Play row — the label column was whatever the unelided value left over. The row's
 /// label is the primary read and keeps its natural width; the value gives way first, ending in
@@ -67,6 +88,35 @@ fn a_long_value_elides_before_the_settings_label_it_trails() {
     }
     assert!(out.is_empty(), "labels a long value squeezed into an ellipsis:\n  {}", out.join("\n  "));
     assert!(squeezed_values > 0, "the premise: Belarusian's Force value does not fit beside its label");
+}
+
+/// **#297: the Recently Added switch lives on *Video & playback*, not on the root.** Its rows use
+/// the route content column, so its translated label and detail must fit there.
+#[test]
+fn the_recently_added_row_fits_the_playback_column_in_every_language() {
+    let frame_w = RouteLayout::screen().sectioned_table().w;
+    let mut out = Vec::new();
+    for language in LANGUAGES {
+        let _guard = language_on_this_thread_for_test(language);
+        let mut table = TableView::new();
+        table.compact = false;
+        table.set_sections(
+            vec![Section::new("").row(
+                Row::new(msg::settings_library_recently_added())
+                    .detail(msg::settings_library_recently_added_detail())
+                    .toggle(false),
+            )],
+            0,
+            false,
+        );
+        out.extend(
+            table
+                .elided_rows(frame_w, &ShippedMeasure, HEADROOM)
+                .into_iter()
+                .map(|e| format!("{} recently-added: {e}", language.tag())),
+        );
+    }
+    assert!(out.is_empty(), "the switch's row would end in an ellipsis:\n  {}", out.join("\n  "));
 }
 
 /// The measure itself: whole pixels per glyph from each shipped face's own metrics, and a longer

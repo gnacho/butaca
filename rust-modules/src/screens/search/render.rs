@@ -206,9 +206,13 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         if screen.editing { theme::ACCENT } else { theme::HAIRLINE },
         0.0,
     );
+    // **One vertical centre for the field's ink, keyboard up or down.** The box does not move
+    // when the keyboard appears, and the magnifier, the run and the caret all hang from this
+    // line, so none of them can ride high in the 96px box in one state and centred in the other.
+    let centre = field_centre(rect);
     let icon = Rect::new(
         rect.x + FIELD_PAD,
-        rect.y + (rect.h - FIELD_ICON) / 2.0,
+        centre - FIELD_ICON * 0.5,
         FIELD_ICON,
         FIELD_ICON,
     );
@@ -233,7 +237,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         Label::new(data.run.as_ptr(), FIELD_TEXT, ink)
             .bold()
             .draw(p, Rect::new(text_x + run_dx, rect.y, text_w, rect.h));
-        let text_y = crate::text::text_vcenter_y(FIELD_TEXT, 1, rect.cy());
+        let text_y = crate::text::text_vcenter_y(FIELD_TEXT, 1, centre);
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
@@ -511,6 +515,13 @@ fn elide(
         measure.width(&cstring(s), size, bold)
     })
 }
+/// The field box's ink centre: where the magnifier's box, the query run's cap band and the caret
+/// band all agree, with the on-screen keyboard up or down. The box itself is static
+/// (`layout::FIELD`); the keyboard only shortens the empty-state band below it.
+fn field_centre(rect: Rect) -> f32 {
+    rect.cy()
+}
+
 fn run_layout(run: f32, caret: f32, width: f32, editing: bool) -> (f32, f32) {
     let available = (width - if editing { CARET_W + CARET_GAP } else { 0.0 }).max(0.0);
     let overflow = (caret - available).max(0.0).min((run - available).max(0.0));
@@ -832,6 +843,32 @@ mod tests {
         assert_eq!(descent_pad(80.0, 87.0, 17.0, 70.0), 3.5);
         assert_eq!(descent_pad(80.0, 40.0, 17.0, 20.0), 0.0);
         assert_eq!(descent_pad(80.0, 10.0, 17.0, 70.0), 0.0);
+    }
+
+    /// #297: the magnifier, the run and the caret share the BOX's vertical centre, so raising the
+    /// on-screen keyboard (which shortens the empty band, never the field) cannot leave one of the
+    /// three riding high in the 96px box. This is the arithmetic of `render::field`, not a
+    /// screenshot, and it covers both states because the field's rect is the same in both.
+    #[test]
+    fn the_field_magnifier_text_and_caret_share_the_boxs_centre() {
+        let rect = Rect::new(layout::FIELD.x, layout::FIELD.y, layout::FIELD.w, layout::FIELD.h);
+        let centre = field_centre(rect);
+        assert_eq!(centre, rect.cy());
+        // the magnifier's own box
+        let icon_y = centre - FIELD_ICON * 0.5;
+        assert!((icon_y + FIELD_ICON * 0.5 - centre).abs() < 1e-4);
+        // the run's cap band, and the caret band that hangs off the same `text_y`
+        let (cap_top, cap_base) = crate::text::text_cap_band(FIELD_TEXT, 1);
+        let text_y = crate::text::text_vcenter_y(FIELD_TEXT, 1, centre);
+        assert!((text_y + (cap_top + cap_base) * 0.5 - centre).abs() < 1e-4);
+        // the run itself is drawn by `Label`'s default Middle alignment, whose centre is this one
+        assert!((rect.y + rect.h * 0.5 - centre).abs() < 1e-4);
+        // and the moved box still leaves the document head room above CONTENT_TOP
+        assert!(layout::FIELD.y + layout::FIELD.h + 16.0 <= layout::CONTENT_TOP,
+            "the field ends at {} against content at {}",
+            layout::FIELD.y + layout::FIELD.h, layout::CONTENT_TOP);
+        // with the on-screen keyboard raised the whole box is above it
+        assert!(layout::FIELD.y + layout::FIELD.h < SCR_H - layout::KEYBOARD_H);
     }
 
     #[test]

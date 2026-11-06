@@ -1250,6 +1250,45 @@ fn global_home_shelves_never_enter_a_library_section() {
         "free-form ids used by test seeds keep working");
 }
 
+/// #297: the section's own Recently Added shelf is opt-in, and the DECISION is pure — the screen
+/// feeds it `route::show_recently_added()`, so this is the whole rule without a store.
+#[test]
+fn the_sections_own_latest_shelf_is_opt_in() {
+    let wanted = Some("jf.latest.movies");
+    assert!(!shelf_visible("jf.latest.movies", wanted, false), "off by default");
+    assert!(shelf_visible("jf.latest.movies", wanted, true), "on shows it");
+    assert!(!shelf_visible("jf.latest.shows", wanted, true),
+        "another view's latest is never this section's shelf");
+    assert!(shelf_visible("movie.inprogress.1", wanted, false),
+        "ordinary shelves are unaffected by the switch");
+    assert!(!shelf_visible("home.continue", wanted, true), "Home's deck stays out");
+}
+
+/// #297: a preference flip alone must rebuild the document, because the publication object does
+/// not move when only the SETTING moved. This is the live half of the setting, as the comparison
+/// `sync` makes before trusting its cached shelves.
+#[test]
+fn a_preference_flip_rebuilds_even_when_the_publication_did_not_move() {
+    let hubs = vec![
+        crate::browse::section_hubs::Shelf {
+            id: "jf.latest.movies".into(), key: String::new(), total: 0,
+            title: String::new(), is_continue: false, landscape: false, items: Vec::new(),
+        },
+        crate::browse::section_hubs::Shelf {
+            id: "movie.inprogress.1".into(), key: String::new(), total: 0,
+            title: String::new(), is_continue: true, landscape: false, items: Vec::new(),
+        },
+    ];
+    let wanted = Some("jf.latest.movies");
+    assert!(shelves_match(["movie.inprogress.1"], &hubs, wanted, false),
+        "off and already built without the shelf: nothing to rebuild");
+    assert!(!shelves_match(["movie.inprogress.1"], &hubs, wanted, true),
+        "turning it ON must rebuild");
+    assert!(shelves_match(["jf.latest.movies", "movie.inprogress.1"], &hubs, wanted, true));
+    assert!(!shelves_match(["jf.latest.movies", "movie.inprogress.1"], &hubs, wanted, false),
+        "turning it OFF must rebuild");
+}
+
 mod type_tests { include!("type_tests.rs"); }
 
 mod art_admission_tests { include!("art_admission_tests.rs"); }
