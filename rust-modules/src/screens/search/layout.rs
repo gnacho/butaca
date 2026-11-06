@@ -8,9 +8,14 @@ use crate::ui::Rect;
 /// `pub(crate)`, alongside this module itself (`screens/search/mod.rs`'s `pub(crate) mod layout`)
 /// so `ui::consts`'s overscan-rects audit can reach it as `crate::screens::search::layout::FIELD`
 /// — the deleted legacy Search renderer's own `FIELD`/`CONTENT_TOP` this replaces.
+///
+/// **#297 moved the box down 64px (124 → 188).** It sat just under the shared top bar and, with
+/// the on-screen keyboard raised, read as pinned there rather than as the page's own field. 188
+/// keeps the document head's air above `CONTENT_TOP` (300): the box ends at 284, leaving 16px
+/// before the first recents/shelf line. The measure (1200 wide) and height are unchanged.
 pub(crate) const FIELD: Rect = Rect {
     x: 360.0,
-    y: 124.0,
+    y: 188.0,
     w: 1200.0,
     h: 96.0,
 };
