@@ -686,30 +686,31 @@ impl HomeScreen {
         let sty = self.row_style(row);
         (sty.w, sty.h)
     }
-    /// One row's vertical stride: the shared pitch, shortened by whatever the row's art gives up.
-    fn row_pitch(&self, row: usize) -> f32 {
-        card_row::ROW_PITCH_FIXED - (CARD_H - self.row_style(row).h)
+    /// **The vertical stride stays the poster row's even for the wide row.** The replay gate
+    /// pins Home's own layout in the state hash, so the wide cards are drawn inside the band a
+    /// poster row already owns — bottom-aligned with it — rather than re-flowing the page.
+    #[cfg(test)]
+    fn row_pitch(&self, _row: usize) -> f32 {
+        card_row::ROW_PITCH_FIXED
+    }
+    /// How far a row's art sits below its band's top: a shorter tile is bottom-aligned so its
+    /// label lands on the same line as every poster row's.
+    fn row_card_dy(&self, row: usize) -> f32 {
+        CARD_DY + (CARD_H - self.row_style(row).h)
     }
     fn row_card_x(&self, row: usize, col: usize, scroll: f32) -> f32 {
         let sty = self.row_style(row);
         MARGIN_X + col as f32 * (sty.w + sty.gap) - scroll
     }
-    /// How far the rows BELOW `row` have drifted from the uniform pitch.
-    fn shelf_offset(&self, row: usize) -> f32 {
-        (0..row)
-            .map(|r| self.row_pitch(r) - card_row::ROW_PITCH_FIXED)
-            .sum()
-    }
     fn shelf_top_settled(&self, row: usize, focus_row: usize) -> f32 {
         self.shelf_top_banded(row, Some(focus_row))
     }
     fn shelf_top_banded(&self, row: usize, band_row: Option<usize>) -> f32 {
-        card_row::settled_top(row, band_row, card_row::ROW_PITCH_FIXED) + self.shelf_offset(row)
+        card_row::settled_top(row, band_row, card_row::ROW_PITCH_FIXED)
     }
     fn grid_max_scroll(&self) -> f32 {
         let n = self.rows.len().max(1);
-        let h = card_row::settled_top(n, Some(n - 1), card_row::ROW_PITCH_FIXED)
-            + self.shelf_offset(n);
+        let h = card_row::settled_top(n, Some(n - 1), card_row::ROW_PITCH_FIXED);
         (h - (SCR_H - CONTENT_Y) + 60.0).max(0.0)
     }
 
@@ -725,9 +726,8 @@ impl HomeScreen {
         let top = PEEK_Y + (GRID_TOP_Y - PEEK_Y) * self.snap.pos;
         let mut flow = 0.0;
         for row in 0..MAX_HUBS {
-            let pitch = self.row_pitch(row);
             self.grid.shelves[row].base_y = top + flow - self.grid.scroll_y.pos * self.snap.pos;
-            flow += pitch + self.grid.shelves[row].under_band();
+            flow += card_row::ROW_PITCH_FIXED + self.grid.shelves[row].under_band();
         }
     }
 
@@ -1377,7 +1377,7 @@ impl HomeScreen {
         let (w, h) = self.row_card(row);
         let rect = Rect::new(
             self.row_card_x(row, col, self.grid.eff_scroll(row, self.snap.pos)),
-            self.grid.shelves[row].base_y + CARD_DY,
+            self.grid.shelves[row].base_y + self.row_card_dy(row),
             w,
             h,
         )

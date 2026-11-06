@@ -2123,10 +2123,12 @@ fn continue_watching_is_the_one_landscape_row() {
         .expect("the demo library seeds Continue Watching");
     assert!(s.row_landscape(cw));
     assert_eq!(s.row_card(cw), (RowStyle::EPISODE.w, RowStyle::EPISODE.h));
-    assert!(
-        s.row_pitch(cw) < card_row::ROW_PITCH_FIXED,
-        "a landscape row is shorter than a poster row"
+    assert_eq!(
+        s.row_pitch(cw),
+        card_row::ROW_PITCH_FIXED,
+        "the wide row keeps the poster stride; only its art is shorter"
     );
+    assert!(s.row_card_dy(cw) > CARD_DY, "the shorter art sits on the band's foot");
     let poster = s
         .rows
         .iter()
@@ -2134,8 +2136,9 @@ fn continue_watching_is_the_one_landscape_row() {
         .unwrap_or(usize::MAX);
     assert!(!s.row_landscape(poster));
     assert_eq!(s.row_card(poster), (CARD_W, CARD_H));
-    assert!(
-        s.shelf_offset(cw + 1) < 0.0,
-        "the rows below a landscape row start higher"
+    assert_eq!(
+        s.row_pitch(cw + 1),
+        card_row::ROW_PITCH_FIXED,
+        "the rows below a landscape row do not re-flow"
     );
 }

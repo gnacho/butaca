@@ -2451,9 +2451,9 @@ impl DetailScreen {
         let (controls, n) = hero::hero_ctls(set);
         let last = hero::hero_btn_rect_at(set, n.saturating_sub(1), y, widths);
         let row = [
-            crate::ui::detail_layout::HERO_TEXT_X,
+            crate::ui::consts::MARGIN_X,
             y - self.scroll.pos,
-            last.x + last.w - crate::ui::detail_layout::HERO_TEXT_X,
+            last.x + last.w - crate::ui::consts::MARGIN_X,
             hero::CD,
         ];
         let picture = crate::player::preview::view().picture;
