@@ -1,12 +1,20 @@
 # Butaca
 
-An unofficial Jellyfin client that runs natively on LG webOS televisions. Not a web page: the interface is
-drawn straight on the GPU and video goes to the television's own decoder. No Chromium, no
-JavaScript, no web view.
+A Jellyfin client for LG webOS televisions, and nothing else. It speaks Jellyfin, it runs natively on the set, and it is written in Rust: the interface is drawn straight on the GPU and video goes to the television's own decoder. No Chromium, no JavaScript, no web view.
 
-Almost all of it is Rust. It is in daily use on a 2019 LG set.
+What it does not do is as deliberate as what it does: **no telemetry**, no account with its author, and **no Plex client code**. It is built on the playback engine of the earlier plx-native client, rewritten end to end for Jellyfin — everything above that engine is Jellyfin's, which is why Jellyfin-only work has no Plex design to fight.
+
+It is in daily use on a 2019 LG set.
 
 Get started with the [installation guide](docs/install-and-verify.md).
+
+## Jellyfin, and only Jellyfin
+
+**One server type.** There is no Plex sign-in, no Plex library and no Plex request path: the app boots against a Jellyfin address and everything it asks for is Jellyfin's API.
+
+**No telemetry, and you can check it.** There is no account service, no analytics and no crash-reporting endpoint compiled into the package. `strings` on the shipped binary settles it, and every release audit records what that scan found. Local logs stay on the television and are scrubbed before they are written — the details are in [PRIVACY.md](PRIVACY.md).
+
+**One engine, rewritten for Jellyfin.** The playback engine comes from the earlier native plx-native client (GPL-3.0) and this project continues it; everything above it — the server layer, every screen, the input model — is Jellyfin's. What remains of the retired wire are defensive strings that strip legacy `X-Plex-Token` values out of logs, cache keys and redirects. That is compatibility, not a client.
 
 ## Why native
 
@@ -162,7 +170,9 @@ test loop, and says which hardware is most useful to hear about. Security issues
 
 The playback engine underneath comes from the earlier native webOS client for the retired wire,
 written by Gleb Linnik, and this project continues that code; everything above the engine, from
-the Jellyfin side to the interface as it is now, is built here. The GPL notices and copyright
+the Jellyfin side to the interface as it is now, is built here. Because that boundary is where it
+is, Jellyfin-only work does not touch the engine: new server capabilities, new screens and new
+playback decisions are Jellyfin's to make. The GPL notices and copyright
 holders are kept as the licence requires. The retired account flows are gone, and there is no
 `jellyfin` cargo feature to toggle any more: the Jellyfin wiring is what every package published
 from this repository is built from.
