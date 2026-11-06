@@ -33,6 +33,14 @@ HOSTPATH='(^|[^A-Za-z0-9/_.-])/(Users|home)/[a-z]'
 # invoked through PATH), so it rides in FFmpeg's recorded configure string. It is identical on every
 # CI runner, which is precisely why releases must be built by CI.
 ALLOWED='webos-ndk|/home/runner/'
+# Jellyfin's own REST endpoints ride in the binary as format strings, and "/Users/" is both a
+# desktop build path AND that API's prefix. `ci/check-package.py` has exempted those shapes since
+# the Jellyfin pivot; this copy of the scan did not, so v0.8.0's release run failed here on
+# "/Users/Me" — the self route its boot probe asks for — after every other gate had passed. The
+# two scanners have to agree, and the anchored list is the one check-package already uses: the
+# template form and AuthenticateByName, plus "/Users/Me" ONLY as the whole path, so a build under
+# an account literally named Me would still fail on "/Users/Me/<anything>".
+ALLOWED_PATH='^/Users/(AuthenticateByName|\{)|^/Users/Me$'
 
 # Extract each PATH individually rather than filtering whole lines. FFmpeg records its entire
 # configure invocation as one long string, so the offending `--prefix=/Users/<me>/...` sits on the
@@ -49,7 +57,7 @@ scan_paths() { # $1 = file
   hits=$(strings -a "$1" 2>/dev/null \
     | grep -aoE '(^|[^A-Za-z0-9/_.-])/(Users|home)/[A-Za-z0-9_./+-]+' \
     | sed -E 's#^[^/]##' \
-    | grep -avE "$ALLOWED" | sort -u | head -3)
+    | grep -avE "$ALLOWED" | grep -avE "$ALLOWED_PATH" | sort -u | head -3)
   [ -z "$hits" ] && return 0
   printf '%s\n' "$hits" | sed 's/^/          /'
   return 1
