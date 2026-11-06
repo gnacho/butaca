@@ -395,7 +395,7 @@ pub(crate) struct HeroWidths {
 /// measured widths. Ported verbatim from `ui/detail.rs::hero_btn_rect_at`.
 pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -> Rect {
     let (v, n) = hero_ctls(set);
-    let mut x = crate::ui::consts::MARGIN_X;
+    let mut x = crate::ui::detail_layout::HERO_TEXT_X;
     let mut w = cw.pill;
     for (k, c) in v[..n].iter().enumerate() {
         w = match c {
@@ -740,12 +740,12 @@ pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui
     };
     let fit = facts_fit(
         !credit.is_empty(),
-        FACTS_R - crate::ui::consts::MARGIN_X,
+        FACTS_R - crate::ui::detail_layout::HERO_TEXT_X,
         width,
     );
     let elided;
     let date = if fit.elide {
-        let budget = (FACTS_R - crate::ui::consts::MARGIN_X - play_mode_w(d, true, measure)).max(0.0);
+        let budget = (FACTS_R - crate::ui::detail_layout::HERO_TEXT_X - play_mode_w(d, true, measure)).max(0.0);
         elided = crate::text::elide_by(&date, budget, false, |t| {
             measure.width_str(t, theme::size::CAPTION, false)
         });
@@ -762,7 +762,7 @@ pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui
                 .map(|text| {
                     p.text(
                         text.as_ptr(),
-                        crate::ui::consts::MARGIN_X + dx,
+                        crate::ui::detail_layout::HERO_TEXT_X + dx,
                         y,
                         size,
                         color,
@@ -772,7 +772,7 @@ pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui
                 })
                 .unwrap_or(0.0)
         },
-        |dx, after| draw_play_mode(p, d, crate::ui::consts::MARGIN_X + dx, y, after, measure),
+        |dx, after| draw_play_mode(p, d, crate::ui::detail_layout::HERO_TEXT_X + dx, y, after, measure),
     );
 }
 

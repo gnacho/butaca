@@ -4,6 +4,19 @@ use super::{consts::{MARGIN_X, MARGIN_Y, SCR_H}, theme, widgets};
 use super::{consts::SCR_W, Rect};
 
 pub(crate) const HERO_TEXT_W: f32 = 943.0;
+/// The hero's poster column: 280 wide at 2:3, the mockup's own size, standing in the left margin
+/// while the copy moves right of it. A second column is the whole point — the wide backdrop stays,
+/// and the poster is what makes the page read as an item rather than a still.
+pub(crate) const POSTER_W: f32 = 280.0;
+pub(crate) const POSTER_H: f32 = 420.0;
+pub(crate) const POSTER_GAP: f32 = 24.0;
+/// The poster's top edge: the title's baseline band starts 200px above `TITLE_BOTTOM`, so the
+/// poster's head lines up with it and its foot lands on the action row.
+pub(crate) const POSTER_Y: f32 = TITLE_BOTTOM - 200.0;
+/// Where the hero's copy column begins, right of the poster. Every left-anchored row of the hero
+/// (title logo, kicker, identity, ratings, synopsis, facts, actions) starts here, so the poster
+/// never shares ink with the text.
+pub(crate) const HERO_TEXT_X: f32 = MARGIN_X + POSTER_W + POSTER_GAP;
 pub(crate) const TITLE_BOTTOM: f32 = 566.0;
 pub(crate) const PEOPLE_W: f32 = 560.0;
 pub(crate) const PEOPLE_LEAD: f32 = 32.0;
@@ -117,7 +130,8 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
     let tall = theme::logo::COMPACT_H_MAX;
     out.push(("detail pinned compact title (tallest logo)",
         Rect::new(MARGIN_X, COMPACT_TITLE_BOT - tall, SCR_W - 2.0 * MARGIN_X, tall)));
-    out.push(("detail hero text column", Rect::new(MARGIN_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0)));
+    out.push(("detail hero text column", Rect::new(HERO_TEXT_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0)));
+    out.push(("detail hero poster", Rect::new(MARGIN_X, POSTER_Y, POSTER_W, POSTER_H)));
     out.push(("detail people column (right edge)", Rect::new(SCR_W - MARGIN_X - PEOPLE_W, 700.0, PEOPLE_W, 100.0)));
     out.push(("detail below-hero flow, at rest", Rect::new(MARGIN_X, TOP_MARGIN, SCR_W - 2.0 * MARGIN_X, 100.0)));
 }
@@ -271,7 +285,7 @@ mod tests {
     fn overscan_rects_keep_the_legacy_detail_regions() {
         let mut got = Vec::new();
         overscan_rects(&mut got);
-        assert_eq!(got.len(), 4);
+        assert_eq!(got.len(), 5);
 
         let want = [
             (
@@ -285,7 +299,11 @@ mod tests {
             ),
             (
                 "detail hero text column",
-                Rect::new(MARGIN_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0),
+                Rect::new(HERO_TEXT_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0),
+            ),
+            (
+                "detail hero poster",
+                Rect::new(MARGIN_X, POSTER_Y, POSTER_W, POSTER_H),
             ),
             (
                 "detail people column (right edge)",
@@ -300,5 +318,23 @@ mod tests {
             assert_eq!(got.0, want.0);
             assert_eq!((got.1.x, got.1.y, got.1.w, got.1.h), (want.1.x, want.1.y, want.1.w, want.1.h));
         }
+    }
+
+    /// The mockup's second column: a 2:3 poster in the left margin and the copy right of it. The
+    /// numbers are a contract, not a mood — the copy's own rows all start at `HERO_TEXT_X`, so the
+    /// two columns can never share ink, and the text column still ends inside the safe area.
+    #[test]
+    fn the_poster_column_sits_beside_the_copy_and_never_over_it() {
+        assert_eq!(HERO_TEXT_X, MARGIN_X + POSTER_W + POSTER_GAP);
+        assert!((POSTER_W / POSTER_H - 2.0 / 3.0).abs() < 1e-6, "the poster is 2:3");
+        assert!(MARGIN_X + POSTER_W < HERO_TEXT_X, "the two columns are apart");
+        assert!(
+            HERO_TEXT_X + HERO_TEXT_W <= SCR_W - MARGIN_X,
+            "the copy stays inside the safe area"
+        );
+        assert!(
+            POSTER_Y >= MARGIN_Y,
+            "the poster starts below the overscan margin"
+        );
     }
 }
