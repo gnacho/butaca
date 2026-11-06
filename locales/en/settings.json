@@ -532,6 +532,14 @@
     "value": "Preferences",
     "description": "Settings, consent or sign-in UI: settings.preferences.section"
   },
+  "settings.library.recently_added": {
+    "value": "Show recently added",
+    "description": "Settings, consent or sign-in UI: the switch that leads a library with its recently added shelf."
+  },
+  "settings.library.recently_added.detail": {
+    "value": "Lead Movies and TV Shows with new arrivals.",
+    "description": "Settings, consent or sign-in UI: the show-recently-added switch's detail line."
+  },
   "settings.playback.title": {
     "value": "Video & playback",
     "description": "Settings, consent or sign-in UI: settings.playback.title"

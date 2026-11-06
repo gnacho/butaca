@@ -178,7 +178,8 @@ fn every_root_detail_line_fits_a_known_good_width() {
         }
     }
     assert_eq!(
-        checked, 4,
-        "expected detail lines on the two server doors, the playback row and Sign out, got {checked}"
+        checked, 5,
+        "expected detail lines on the two server doors, the playback row, the recently-added \
+         switch and Sign out, got {checked}"
     );
 }

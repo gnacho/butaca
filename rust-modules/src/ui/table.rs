@@ -366,6 +366,12 @@ pub struct TableView {
     pub compact: bool,
     /// see [`TableView::tall_rows`]
     tall: bool,
+    /// How many cells one VISUAL row holds — 1 (the default) is the classic list every other
+    /// caller draws. `2` pairs consecutive rows into two columns inside each `Section`, which is
+    /// what Settings' root asks for (#297). Rows keep their reading order: the element index is
+    /// still row-major, so an owner's action vector, its focus keys and its pointer stops are the
+    /// same list either way; only the geometry changes.
+    cols: usize,
     /// Semantic ink for section labels. Ambient routes can raise this role for contrast without
     /// replacing the shared table header renderer or changing row/detail hierarchy.
     pub header_ink: [f32; 4],
@@ -381,7 +387,7 @@ impl TableView {
     /// The owner records its row data separately. These fields determine layout, the selected
     /// face and subsequent motion; no text/texture cache or renderer pointer is traversed.
     pub(crate) fn write_motion(&self, c: &mut crate::ui::machine::Canon) {
-        let Self { sections: _, sel, list_focused, compact, tall, header_ink, hl_top, hl_bot, scroll } = self;
+        let Self { sections: _, sel, list_focused, compact, tall, cols: _, header_ink, hl_top, hl_bot, scroll } = self;
         c.u32(*sel as u32).bool(*list_focused).bool(*compact).bool(*tall);
         for component in header_ink { c.f32(*component); }
         for spring in [hl_top, hl_bot, scroll] { c.f32(spring.pos).f32(spring.vel); }
@@ -403,6 +409,80 @@ impl TableView {
             ROW_H_TALL
         }
     }
+
+    /// **Pair consecutive rows into `cols` columns**, a grid inside every section's row block.
+    ///
+    /// One component, not a Settings-only copy: the cells are the same pills, the same ink and
+    /// the same focus face, and `draw`, `hit_row`, `row_frame`, the pill and the focus walk all
+    /// read this one field. Section headers still span the full frame. `1` restores the list.
+    pub fn grid(&mut self, cols: usize) {
+        self.cols = cols.max(1);
+    }
+
+    pub(crate) fn cols(&self) -> usize {
+        self.cols.max(1)
+    }
+
+    /// One cell's width inside a `frame_w`-wide table. `frame_w` for the classic list (the gutter
+    /// is `2 * SIDE` in both shapes, so `1` column is the width every caller always had).
+    pub(crate) fn cell_width(&self, frame_w: f32) -> f32 {
+        let cols = self.cols() as f32;
+        ((frame_w - 2.0 * SIDE - (cols - 1.0) * theme::space::MD) / cols).max(0.0)
+    }
+
+    /// The width to hand [`Self::row_columns`]/[`Self::label_width`] for one cell — the row's TEXT
+    /// budget, which is not the pill's rect: the classic table has always measured against the
+    /// whole frame (the `SIDE` gutters included), and a grid keeps that relationship by handing a
+    /// cell's width with the gutters it excludes added back. Keeping the two apart is what stops a
+    /// grid retune from silently shrinking every single-column list's labels.
+    pub(crate) fn cell_budget_w(&self, frame_w: f32) -> f32 {
+        if self.cols() == 1 {
+            frame_w
+        } else {
+            self.cell_width(frame_w) + 2.0 * SIDE
+        }
+    }
+
+    /// Cell `col`'s left edge inside `frame` — the one formula the draw, the hit test and the
+    /// focus projection share.
+    fn cell_x(&self, frame: Rect, col: usize) -> f32 {
+        frame.x + SIDE + col as f32 * (self.cell_width(frame.w) + theme::space::MD)
+    }
+
+    /// Which column global row `target` occupies (row-major, restarting at 0 in each section).
+    fn col_of(&self, target: i32) -> usize {
+        let cols = self.cols();
+        let mut n = 0i32;
+        for sec in &self.sections {
+            for i in 0..sec.rows.len() {
+                if n == target {
+                    return i % cols;
+                }
+                n += 1;
+            }
+        }
+        0
+    }
+
+    /// Every cell of a grid table as `(visual band, column, global row index)`, bands numbered
+    /// monotonically across sections (so the first band of the next section really is the next
+    /// band). Separators are skipped. `ui::geom::Table`'s grid walk is the only caller.
+    pub(crate) fn grid_cells(&self) -> Vec<(usize, usize, i32)> {
+        let cols = self.cols();
+        let mut out = Vec::new();
+        let mut band = 0usize;
+        let mut gi = 0i32;
+        for sec in &self.sections {
+            for (i, row) in sec.rows.iter().enumerate() {
+                if !row.sep {
+                    out.push((band + i / cols, i % cols, gi));
+                }
+                gi += 1;
+            }
+            band += sec.rows.len().div_ceil(cols);
+        }
+        out
+    }
     pub const fn new() -> Self {
         Self {
             sections: Vec::new(),
@@ -410,6 +490,7 @@ impl TableView {
             list_focused: true,
             compact: false,
             tall: false,
+            cols: 1,
             header_ink: theme::TEXT_TERTIARY,
             hl_top: Spring::at(0.0),
             hl_bot: Spring::at(0.0),
@@ -438,13 +519,13 @@ impl TableView {
         let top0 = frame.y + TOP_PAD;
         let scroll = self.scroll.pos;
         let mut out = None;
-        self.walk(|cy, gi, _| {
+        self.walk(|cy, gi, _, col| {
             if gi != i || gi < 0 || self.rows_at(gi).sep {
                 return;
             }
             let sy = top0 + cy - scroll;
             let h = self.rows_at(gi).height_in(self.tall_row_h());
-            out = Some(Rect::new(frame.x + SIDE, sy, frame.w - 2.0 * SIDE, h));
+            out = Some(Rect::new(self.cell_x(frame, col), sy, self.cell_width(frame.w), h));
         });
         out
     }
@@ -480,12 +561,18 @@ impl TableView {
         let top0 = frame.y + TOP_PAD;
         let scroll = self.scroll.pos;
         let mut hit = None;
-        self.walk(|cy, gi, _| {
+        self.walk(|cy, gi, _, col| {
             if gi < 0 || self.rows_at(gi).sep {
                 return; // headers and grouping hairlines are not click targets
             }
             let sy = top0 + cy - scroll;
-            if my >= sy && my <= sy + self.rows_at(gi).height_in(self.tall_row_h()) {
+            let x = self.cell_x(frame, col);
+            let w = self.cell_width(frame.w);
+            if my >= sy
+                && my <= sy + self.rows_at(gi).height_in(self.tall_row_h())
+                && mx >= x
+                && mx <= x + w
+            {
                 hit = Some(gi);
             }
         });
@@ -601,7 +688,7 @@ impl TableView {
         let (size, bold) = self.label_style();
         let mut out = Vec::new();
         for row in self.sections.iter().flat_map(|s| s.rows.iter()).filter(|r| !r.sep) {
-            let budget = self.label_width(row, frame_w, measure) * headroom;
+            let budget = self.label_width(row, self.cell_budget_w(frame_w), measure) * headroom;
             for (text, size, bold) in [(&row.label, size, bold), (&row.detail, theme::size::CAPTION, false)] {
                 let w = measure.width_str(text, size, bold);
                 if w > budget {
@@ -630,7 +717,9 @@ impl TableView {
         width
     }
 
-    /// The same label budget used by rendering and intrinsic-width checks.
+    /// The same label budget used by rendering and intrinsic-width checks. `frame_w` is the width
+    /// of the ROW's own box: the table's frame for a one-column list, one CELL's width for a grid
+    /// (the draw passes `cell_width`).
     pub(crate) fn label_width(&self, row: &Row, frame_w: f32, measure: &dyn crate::ui::machine::Measure) -> f32 {
         self.row_columns(row, frame_w, measure).label_w
     }
@@ -724,9 +813,14 @@ impl TableView {
         self.sel = cur;
     }
 
-    /// walk the visual layout top-to-bottom, invoking `f(content_y, global_row_index_or_-1, sec)`
-    /// once per header (gi = -1) and once per row (gi >= 0). Cheap; the lists are short.
-    fn walk(&self, mut f: impl FnMut(f32, i32, usize)) {
+    /// walk the visual layout top-to-bottom, invoking
+    /// `f(content_y, global_row_index_or_-1, sec, column)` once per header (gi = -1, column 0) and
+    /// once per ROW CELL (gi >= 0). Rows of one visual band share a `content_y`; the band is as
+    /// tall as its tallest cell, so a [ROW_H] beside a two-line [ROW_H_TALL] cannot overlap the
+    /// next band. With one column this is the walk this widget always had. Cheap; the lists are
+    /// short.
+    fn walk(&self, mut f: impl FnMut(f32, i32, usize, usize)) {
+        let cols = self.cols();
         let mut y = 0.0f32;
         let mut gi = 0i32;
         for (si, sec) in self.sections.iter().enumerate() {
@@ -734,20 +828,30 @@ impl TableView {
                 y += DIV_H;
             }
             if !sec.header.is_empty() {
-                f(y, -1, si);
+                f(y, -1, si, 0);
                 y += HDR_H;
             }
-            for row in &sec.rows {
-                f(y, gi, si);
-                y += row.height_in(self.tall_row_h());
-                gi += 1;
+            let mut i = 0;
+            while i < sec.rows.len() {
+                let band = (0..cols)
+                    .filter_map(|c| sec.rows.get(i + c))
+                    .map(|row| row.height_in(self.tall_row_h()))
+                    .fold(0.0f32, f32::max);
+                for c in 0..cols {
+                    if sec.rows.get(i + c).is_some() {
+                        f(y, gi, si, c);
+                        gi += 1;
+                    }
+                }
+                y += band;
+                i += cols;
             }
         }
     }
 
     fn row_top(&self, target: i32) -> f32 {
         let mut out = 0.0;
-        self.walk(|y, gi, _| {
+        self.walk(|y, gi, _, _| {
             if gi == target {
                 out = y;
             }
@@ -767,10 +871,26 @@ impl TableView {
         ROW_H
     }
     fn content_h(&self) -> f32 {
-        let mut h = 0.0;
-        self.walk(|y, _, _| h = y); // last item's top
-                                    // add the last row's height
-        h + self.row_height(self.n_rows() - 1)
+        let cols = self.cols();
+        let mut y = 0.0f32;
+        for (si, sec) in self.sections.iter().enumerate() {
+            if si > 0 {
+                y += DIV_H;
+            }
+            if !sec.header.is_empty() {
+                y += HDR_H;
+            }
+            let mut i = 0;
+            while i < sec.rows.len() {
+                // one visual band is as tall as its tallest cell
+                y += (0..cols)
+                    .filter_map(|c| sec.rows.get(i + c))
+                    .map(|row| row.height_in(self.tall_row_h()))
+                    .fold(0.0f32, f32::max);
+                i += cols;
+            }
+        }
+        y
     }
 
     /// `frame_h` is the SAME rect height passed to [`Self::draw`]/[`Self::hit_row`] — this
@@ -860,18 +980,21 @@ impl TableView {
         let white = theme::TEXT_PRIMARY;
         let dimc = theme::TEXT_TERTIARY; // was #8a8a8e; unified onto the tertiary grey
         let ink = crate::ui::ACCENT_INK; // text/glyph over the light pill
-        let content_x = frame.x + SIDE + CONTENT_PAD;
-        let text_right = frame.x + frame.w - SIDE - CONTENT_PAD;
+        let cell_w = self.cell_width(frame.w);
+        let cell_text_w = self.cell_budget_w(frame.w);
 
         // ---- sliding pill (under the rows) — warm off-white; top/bottom edges morph independently ----
         // It follows its GROUP's dim: the focused row of an unreachable server must not be the one
         // bright thing in a panel that is telling you the server is unreachable.
         let py0 = top0 + self.hl_top.pos - scroll;
         let py1 = top0 + self.hl_bot.pos - scroll;
+        // The pill is the selected CELL: a grid changes its x with the column (the y edges still
+        // morph between bands), because a capsule spanning both columns would say the whole row
+        // is one control.
         let pill = Rect::new(
-            frame.x + SIDE,
+            self.cell_x(frame, self.col_of(self.sel)),
             py0,
-            frame.w - 2.0 * SIDE,
+            cell_w,
             (py1 - py0).max(1.0),
         );
         if self.list_focused && pill.y + pill.h > vis_top && pill.y < vis_bot {
@@ -884,23 +1007,31 @@ impl TableView {
         }
 
         // ---- headers + rows ----
-        self.walk(|cy, gi, si| {
+        self.walk(|cy, gi, si, col| {
             // ONE alpha over the whole group (see `Section::dim`) — pushed here, at the top of the
             // walk, so header, accessory, rows, marks and read-outs can never dim out of step.
             let p = self.group_painter(p, si);
             let sy = top0 + cy - scroll;
+            // A header spans the frame; a row cell owns its column's box (identical to the
+            // whole frame when there is one column). Every row-local expression below hangs off
+            // these two, which is what keeps the grid from growing a second layout.
+            let cell_x = self.cell_x(frame, col);
+            let content_x = cell_x + CONTENT_PAD;
+            let text_right = cell_x + cell_w - CONTENT_PAD;
             if gi == -1 {
                 // panel/section header (+ hairline divider above later sections); scissor-clipped to `frame`
                 if sy + HDR_H > vis_top && sy < vis_bot {
                     // fades out at the bottom edge before its caps are cut (`bottom_edge_alpha`)
                     let p = p.alpha(edge_alpha(sy + HDR_H - HDR_INK_PAD, vis_bot, HDR_INK_PAD));
                     let sec = &self.sections[si];
+                    let hair_x = frame.x + SIDE + CONTENT_PAD;
+                    let hair_w = frame.w - 2.0 * (SIDE + CONTENT_PAD);
                     if si > 0 {
                         p.rect(
                             Rect::new(
-                                content_x,
+                                hair_x,
                                 sy - DIV_H * 0.5,
-                                frame.w - 2.0 * (SIDE + CONTENT_PAD),
+                                hair_w,
                                 2.0,
                             ),
                             0.0,
@@ -922,9 +1053,9 @@ impl TableView {
                     let cap_y = sy + HEADER_CAP_INSET;
                     let (cap_top, baseline) = crate::text::text_cap_band(hsz, 0);
                     let header_band = Rect::new(
-                        content_x,
+                        hair_x,
                         cap_y,
-                        (text_right - content_x).max(0.0),
+                        hair_w,
                         baseline - cap_top,
                     );
                     if let Ok(cs) = CString::new(sec.header.to_uppercase()) {
@@ -971,7 +1102,7 @@ impl TableView {
                     Rect::new(
                         content_x,
                         sy + h * 0.5 - 1.0,
-                        frame.w - 2.0 * (SIDE + CONTENT_PAD),
+                        (text_right - content_x).max(0.0),
                         2.0,
                     ),
                     0.0,
@@ -1063,7 +1194,7 @@ impl TableView {
                 let ink = row_value_ink(row, focused);
                 // the value gives way before the label (`row_columns`): elided to its column
                 let vsz = theme::size::LABEL;
-                let value_w = self.row_columns(row, frame.w, measure).value_w;
+                let value_w = self.row_columns(row, cell_text_w, measure).value_w;
                 let v = crate::text::elide_by(v, value_w, false, |t| {
                     measure.width_str(t, vsz, VALUE_BOLD != 0)
                 });
@@ -1108,7 +1239,7 @@ impl TableView {
             } else {
                 (theme::size::HEADLINE, 1)
             };
-            let text_w = self.label_width(row, frame.w, measure);
+            let text_w = self.label_width(row, cell_text_w, measure);
             let lbl = crate::text::elide_by(&row.label, text_w, false, |t| {
                 measure.width_str(t, lsz, lbold != 0)
             });
@@ -1375,6 +1506,38 @@ mod tests {
         assert!(!t.row_opens(2));
         assert!(!t.row_opens(-1), "and an out-of-range ask answers no rather than panicking");
         assert!(!t.row_opens(99));
+    }
+
+    /// **#297: the two-column grid is one component.** Cells pair up inside a section, keep the
+    /// reading order, share a band's top edge, and the hit test resolves the CELL under the
+    /// pointer rather than the last row of the band.
+    #[test]
+    fn a_two_column_grid_pairs_cells_and_hits_each_one() {
+        let mut t = TableView::new();
+        t.grid(2);
+        t.set_sections(
+            vec![Section::new("G")
+                .row(Row::new("a"))
+                .row(Row::new("b"))
+                .row(Row::new("c"))],
+            0,
+            false,
+        );
+        let frame = Rect::new(0.0, 0.0, 1320.0, 600.0);
+        let a = t.row_frame(frame, 0).expect("cell a");
+        let b = t.row_frame(frame, 1).expect("cell b");
+        let c = t.row_frame(frame, 2).expect("cell c");
+        assert_eq!(a.y, b.y, "a pair shares one band");
+        assert!(b.x > a.x + a.w, "the second column starts after the first");
+        assert!(c.y > a.y, "the third row starts a new band");
+        assert!((a.w - b.w).abs() < 1e-4, "both cells share one width");
+        assert_eq!(a.w, t.cell_width(frame.w));
+        assert_eq!(t.hit_row(frame, a.x + 4.0, a.y + 4.0), Some(0));
+        assert_eq!(t.hit_row(frame, b.x + 4.0, b.y + 4.0), Some(1), "the pointer picks its own cell");
+        assert_eq!(t.hit_row(frame, c.x + 4.0, c.y + 4.0), Some(2));
+        // The reading order is still the element order: the grid changes geometry, not identity.
+        assert_eq!(t.n_rows(), 3);
+        assert_eq!(t.cols(), 2);
     }
 
     #[test]

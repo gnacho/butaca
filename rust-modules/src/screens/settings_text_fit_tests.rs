@@ -34,6 +34,27 @@ fn every_language_row_fits_its_column_in_every_language() {
     assert!(out.is_empty(), "rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
 }
 
+/// **#297: the root is a two-column grid, so a row is elided to a CELL, not to the page.** The
+/// details and labels here are the same rungs every other row uses; what changed is the budget,
+/// and a translation that ends in "…" on the television is exactly what this file exists to
+/// catch. Measured at the root's own centred frame so a retune of the column moves the test.
+#[test]
+fn every_root_row_fits_its_grid_cell_in_every_language() {
+    let frame_w = RootPage::layout().content.w;
+    let mut out = Vec::new();
+    for language in LANGUAGES {
+        let _guard = language_on_this_thread_for_test(language);
+        let root = RootPage::new(EntryId(0), crate::stores::browse::DirectoryView::empty_for_test());
+        out.extend(
+            root.table
+                .elided_rows(frame_w, &ShippedMeasure, HEADROOM)
+                .into_iter()
+                .map(|e| format!("{} root: {e}", language.tag())),
+        );
+    }
+    assert!(out.is_empty(), "root rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
+}
+
 /// Owner report (Belarusian UI): a long VALUE squeezed the primary label of the Video Playback
 /// page's Direct Play row — the label column was whatever the unelided value left over. The row's
 /// label is the primary read and keeps its natural width; the value gives way first, ending in
