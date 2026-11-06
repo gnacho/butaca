@@ -600,6 +600,18 @@ pub(super) fn activate_server_owned(
 /// from where a `&mut PlayerAdapter` is the proof it is still held: the ACB/Starfish seam takes
 /// `&MainThread` (which is `!Send`, so `task::spawn` rejects any closure that captured one), and
 /// the native session slot takes the adapter itself. See `task::MainThread` and `player::adapter`.
+/// Restore the persisted subtitle appearance into `route`'s process globals.
+///
+/// These three steps are written by Settings and read by the ASS composer
+/// (`route::subtitle_style_overrides`). They are the only install preferences whose write path
+/// existed with no read path: the file carried them, and a restart drew the factory appearance
+/// again (#319). Kept as its own function so the boot wiring is what a test grades.
+pub(crate) fn restore_subtitle_appearance(session: &crate::server::session::Session) {
+    crate::route::restore_subtitle_scale_step(session.subtitle_scale());
+    crate::route::restore_subtitle_position_step(session.subtitle_position());
+    crate::route::restore_subtitle_background_step(session.subtitle_background());
+}
+
 pub(crate) unsafe fn boot(
     mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight,
@@ -896,6 +908,7 @@ pub(crate) unsafe fn construct(
     crate::route::restore_up_next_window_s(session.up_next_window_s());
     crate::route::restore_show_recently_added(session.show_recently_added());
     crate::route::restore_series_tracks(session.series_tracks.as_slice());
+    restore_subtitle_appearance(&session);
     // The subtitle tone rides the same file and the same moment: a preference, restored once.
     crate::player::restore_subtitle_tone(session.subtitle_tone());
     crate::player::restore_audio_enhancements(session.audio_enhancements());
@@ -1557,3 +1570,7 @@ pub(crate) unsafe fn construct(
     if controlled { log(&format!("bootstrap: root-request tree={:016x}", app.pages.state_hash())); }
     Ok(app)
 }
+
+#[cfg(test)]
+#[path = "boot_preference_tests.rs"]
+mod preference_tests;
