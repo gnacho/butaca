@@ -2234,7 +2234,7 @@ impl DetailScreen {
         let t = self.preview_logo.pos;
         let lerp = |a: f32, b: f32| a + (b - a) * t;
         let band = Rect::new(
-            lerp(crate::ui::consts::MARGIN_X, crate::ui::detail_layout::PREVIEW_LOGO_X),
+            lerp(crate::ui::detail_layout::HERO_TEXT_X, crate::ui::detail_layout::PREVIEW_LOGO_X),
             lerp(TITLE_BOTTOM - hero_band, crate::ui::detail_layout::PREVIEW_LOGO_Y),
             lerp(HERO_TEXT_W, crate::ui::detail_layout::PREVIEW_LOGO_MAX_W),
             lerp(hero_band, compact_band),
@@ -2251,6 +2251,39 @@ impl DetailScreen {
         let logo_alpha = p.alpha(
             self.preview_chrome * preview_logo_scroll_alpha(self.scroll.pos, hero_extent, t),
         );
+        if let Some(m) = self.selected() {
+            crate::ui::card_row::draw_tile(
+                logo_alpha,
+                crate::ui::widgets::Art::Poster(Some(m)),
+                Rect::new(
+                    crate::ui::consts::MARGIN_X,
+                    crate::ui::detail_layout::POSTER_Y,
+                    crate::ui::detail_layout::POSTER_W,
+                    crate::ui::detail_layout::POSTER_H,
+                ),
+                1.0,
+                &crate::ui::card_row::RowStyle::HOME,
+                None,
+            );
+        }
+        if let Some(d) = d {
+            if d.kind != "episode" {
+                let kicker = std::ffi::CString::new(if d.is_show {
+                    crate::i18n::msg::browse_kind_tv_show()
+                } else {
+                    crate::i18n::msg::browse_kind_movie()
+                })
+                .unwrap_or_default();
+                let kicker_h = crate::text::text_height(theme::size::CAPTION, 1);
+                crate::ui::label::Label::new(kicker.as_ptr(), theme::size::CAPTION, theme::KICKER_INK)
+                    .draw(logo_alpha, Rect::new(
+                        crate::ui::detail_layout::HERO_TEXT_X,
+                        band.y - kicker_h - theme::space::SM,
+                        crate::ui::detail_layout::HERO_TEXT_W,
+                        0.0,
+                    ));
+            }
+        }
         HeroLogo::new(self.sid, &rk, title, LogoRung::lerp(LogoRung::Hero, LogoRung::Compact, t))
             .draw(logo_alpha, band, cx.measure);
 
@@ -2271,7 +2304,7 @@ impl DetailScreen {
         if !synopsis.is_empty() {
             synopsis_view.draw(
                 synopsis_alpha,
-                Rect::new(crate::ui::consts::MARGIN_X, chain.syn_y, HERO_TEXT_W, 0.0),
+                Rect::new(crate::ui::detail_layout::HERO_TEXT_X, chain.syn_y, HERO_TEXT_W, 0.0),
             );
         }
         if let Some(d) = d {
@@ -2312,22 +2345,21 @@ impl DetailScreen {
             }
         } else {
             parts.push(if d.is_show { crate::i18n::msg::browse_kind_tv_show() } else { crate::i18n::msg::browse_kind_movie() });
-            parts.extend(d.genres.iter().take(2).map(String::as_str));
         }
         if !d.rating.is_empty() {
             parts.push(&d.rating);
         }
-        let mut x = crate::ui::consts::MARGIN_X
+        let mut x = crate::ui::detail_layout::HERO_TEXT_X
             + crate::ui::widgets::dotted_run(
                 p,
                 &parts,
-                crate::ui::consts::MARGIN_X,
+                crate::ui::detail_layout::HERO_TEXT_X,
                 y,
                 theme::size::BODY,
                 theme::TEXT_SECONDARY,
                 theme::space::SM,
             );
-        if x > crate::ui::consts::MARGIN_X {
+        if x > crate::ui::detail_layout::HERO_TEXT_X {
             x += theme::space::SM;
         }
         let (top, base) = crate::text::text_cap_band(theme::size::BODY, 0);
@@ -2353,6 +2385,15 @@ impl DetailScreen {
                     + theme::space::XS;
             }
         }
+        // The mockup's genre chips: the same outlined capsule the state badges wear, so one row
+        // says what the item is and how it plays in a single visual vocabulary.
+        for genre in d.genres.iter().take(3) {
+            if x + measure.width_str(genre, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
+                break;
+            }
+            x += crate::ui::widgets::keyline_chip(p, x, cy, genre, theme::TEXT_SECONDARY, measure)
+                + theme::space::XS;
+        }
     }
 
     fn draw_ratings(
@@ -2364,7 +2405,7 @@ impl DetailScreen {
     ) {
         let (top, base) = crate::text::text_cap_band(theme::size::LABEL, 1);
         let cy = y + (top + base) * 0.5;
-        let mut x = crate::ui::consts::MARGIN_X;
+        let mut x = crate::ui::detail_layout::HERO_TEXT_X;
         let mut i = 0;
         while i < d.ratings.len() {
             let provider = d.ratings[i].art.provider();

@@ -671,6 +671,49 @@ impl HomeScreen {
         self.hub(view, row)?.items.get(col)
     }
 
+    /// **Continue Watching is the mockup's one LANDSCAPE row**: 16:9 stills with the resume bar
+    /// and the watched mark, not posters. Every other hub keeps the shared poster row, so the
+    /// page still reads as one shelf stack.
+    fn row_landscape(&self, row: usize) -> bool {
+        self.rows
+            .get(row)
+            .is_some_and(|r| r.identity == HomeHubIdentity::ContinueWatching)
+    }
+    fn row_style(&self, row: usize) -> &'static RowStyle {
+        if self.row_landscape(row) { &RowStyle::EPISODE } else { &RowStyle::HOME }
+    }
+    fn row_card(&self, row: usize) -> (f32, f32) {
+        let sty = self.row_style(row);
+        (sty.w, sty.h)
+    }
+    /// **The vertical stride stays the poster row's even for the wide row.** The replay gate
+    /// pins Home's own layout in the state hash, so the wide cards are drawn inside the band a
+    /// poster row already owns — bottom-aligned with it — rather than re-flowing the page.
+    #[cfg(test)]
+    fn row_pitch(&self, _row: usize) -> f32 {
+        card_row::ROW_PITCH_FIXED
+    }
+    /// How far a row's art sits below its band's top: a shorter tile is bottom-aligned so its
+    /// label lands on the same line as every poster row's.
+    fn row_card_dy(&self, row: usize) -> f32 {
+        CARD_DY + (CARD_H - self.row_style(row).h)
+    }
+    fn row_card_x(&self, row: usize, col: usize, scroll: f32) -> f32 {
+        let sty = self.row_style(row);
+        MARGIN_X + col as f32 * (sty.w + sty.gap) - scroll
+    }
+    fn shelf_top_settled(&self, row: usize, focus_row: usize) -> f32 {
+        self.shelf_top_banded(row, Some(focus_row))
+    }
+    fn shelf_top_banded(&self, row: usize, band_row: Option<usize>) -> f32 {
+        card_row::settled_top(row, band_row, card_row::ROW_PITCH_FIXED)
+    }
+    fn grid_max_scroll(&self) -> f32 {
+        let n = self.rows.len().max(1);
+        let h = card_row::settled_top(n, Some(n - 1), card_row::ROW_PITCH_FIXED);
+        (h - (SCR_H - CONTENT_Y) + 60.0).max(0.0)
+    }
+
     fn env(&self, dt: f32) -> Env {
         let mut env = Env::inert();
         env.dt = dt;
@@ -702,12 +745,12 @@ impl HomeScreen {
         }
         let revealed = focused.map(|(row, _)| (row, Some(row)));
         if let Some((row, band_row)) = revealed.filter(|(r, _)| *r < self.rows.len()) {
-            let (lo, hi) = row_reveal_band(shelf_top_banded(row, band_row));
+            let (lo, hi) = row_reveal_band(self.shelf_top_banded(row, band_row), self.row_card(row).1);
             self.grid.scroll_target = card_row::reveal(
                 self.grid.scroll_y.pos,
                 lo,
                 hi,
-                grid_max_scroll(self.rows.len()),
+                self.grid_max_scroll(),
             );
         }
         self.grid
@@ -1249,7 +1292,7 @@ impl HomeScreen {
             // label band. Culling by the card rect alone left a heading already on screen undrawn
             // until the first card pixel crossed the bottom edge, so it popped in mid-scroll.
             let top = heading_y(row_y, self.grid.shelves[row].lift());
-            let bottom = row_y + CARD_H + self.grid.shelves[row].under_band();
+            let bottom = row_y + self.row_card(row).1 + self.grid.shelves[row].under_band();
             if !on_axis(top, bottom - top, SCR_H, 0.0) {
                 continue;
             }
@@ -1268,19 +1311,17 @@ impl HomeScreen {
                 if focused == Some((row, col)) && env.sp > 0.5 {
                     continue;
                 }
-                let x = card_x(col, self.grid.eff_scroll(row, env.sp));
-                if !on_axis(x, CARD_W, SCR_W, GLOW_PAD) {
+                let x = self.row_card_x(row, col, self.grid.eff_scroll(row, env.sp));
+                if !on_axis(x, self.row_card(row).0, SCR_W, GLOW_PAD) {
                     continue;
                 }
                 let (rect, scale) = self.drawn_card_geometry(row, col, 1.0);
-                card_row::draw_tile(
-                    p,
-                    Art::Poster(Some(item)),
-                    rect,
-                    scale,
-                    &RowStyle::HOME,
-                    item.resume_frac(),
-                );
+                let art = if self.row_landscape(row) {
+                    Art::Still(Some(item))
+                } else {
+                    Art::Poster(Some(item))
+                };
+                card_row::draw_tile(p, art, rect, scale, self.row_style(row), item.resume_frac());
             }
         }
         self.draw_focused_cell(view, env, p, press_scale, focused, measure);
@@ -1316,12 +1357,13 @@ impl HomeScreen {
         // The grid draws at `scroll_x * snap` ([`Grid::eff_scroll`]), so the lag it still owes does too.
         let lag = self.grid.shelves[row].settle_lag(count, col, &RowStyle::HOME) * self.snap.pos;
         let label = label.revealed(self.grid.shelves[row].band_reveal()).settling(lag);
+        let art = if cw { Art::Still(Some(item)) } else { Art::Poster(Some(item)) };
         card_row::draw_focused(
             p,
-            Art::Poster(Some(item)),
+            art,
             rect,
             scale,
-            &RowStyle::HOME,
+            self.row_style(row),
             item.resume_frac(),
             &label,
             measure,
@@ -1332,11 +1374,12 @@ impl HomeScreen {
     fn drawn_card_geometry(&self, row: usize, col: usize, press_scale: f32) -> (Rect, f32) {
         let scale = self.grid.shelves[row].scale(col)
             * if press_scale > 0.0 { press_scale } else { 1.0 };
+        let (w, h) = self.row_card(row);
         let rect = Rect::new(
-            card_x(col, self.grid.eff_scroll(row, self.snap.pos)),
-            self.grid.shelves[row].base_y + CARD_DY,
-            CARD_W,
-            CARD_H,
+            self.row_card_x(row, col, self.grid.eff_scroll(row, self.snap.pos)),
+            self.grid.shelves[row].base_y + self.row_card_dy(row),
+            w,
+            h,
         )
         .scaled(scale);
         (rect, scale)
@@ -1612,7 +1655,7 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
         });
         let band_row = self.band_row(cx.focus.current, 0);
         for (row, projection) in self.rows.iter().enumerate() {
-            let top = GRID_TOP_Y + shelf_top_banded(row, band_row) - self.grid.scroll_target;
+            let top = GRID_TOP_Y + self.shelf_top_banded(row, band_row) - self.grid.scroll_target;
             out.push(GroupSpec {
                 id: projection.group,
                 kind: GroupKind::Row { wrap: false },
@@ -1628,7 +1671,7 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
                     MARGIN_X,
                     top + CARD_DY,
                     SCR_W - 2.0 * MARGIN_X,
-                    CARD_H + card_row::UNDER_LABEL_H,
+                    self.row_style(row).h + card_row::UNDER_LABEL_H,
                 ),
                 len: projection.elems.len(),
                 elem: ElemKind::Card,
@@ -1728,14 +1771,15 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
                             .focused_grid(cx.focus.current)
                             .map(|(r, _)| r)
                             .unwrap_or(row);
-                        GRID_TOP_Y + shelf_top_settled(row, focus_row) - self.grid.scroll_target
+                        GRID_TOP_Y + self.shelf_top_settled(row, focus_row) - self.grid.scroll_target
                     }
                 };
+                let (cw, ch) = self.row_card(row);
                 let base = Rect::new(
-                    card_x(col, self.grid.eff_scroll(row, snap)),
+                    self.row_card_x(row, col, self.grid.eff_scroll(row, snap)),
                     y + CARD_DY,
-                    CARD_W,
-                    CARD_H,
+                    cw,
+                    ch,
                 );
                 let scale = match at {
                     At::Drawn => shelf.scale(col),
@@ -1824,11 +1868,12 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
                 elem: HERO_PLAY_ELEM,
             };
         };
+        let sty = self.row_style(row_index);
         let col = card_row::column_near_x(
             from.rect.cx(),
             MARGIN_X,
-            CARD_W + GAP,
-            CARD_W,
+            sty.w + sty.gap,
+            sty.w,
             self.grid.shelves[row_index].scroll_x(),
             row.elems.len(),
             from.index.unwrap_or(0) as usize,
@@ -1963,14 +2008,15 @@ impl<H: HomeLike> Machine<H> for HomeScreen {
                     if let Some(Located::Item(row, col)) = to_loc {
                         // The saved viewport is a preference, not an assertion about today's
                         // catalog order. Minimally reveal the reconciled item before first draw.
-                        let shelf = &mut self.grid.shelves[row];
                         let count = self.rows[row].elems.len();
+                        let sty = *self.row_style(row);
+                        let shelf = &mut self.grid.shelves[row];
                         let scroll = card_row::scroll_into_view(shelf.scroll_x(), col, count,
-                            CARD_W, GAP, SCR_W - 2.0 * MARGIN_X);
-                        shelf.restore_scroll(scroll, count, &RowStyle::HOME);
-                        let (lo, hi) = row_reveal_band(shelf_top_settled(row, row));
+                            sty.w, sty.gap, SCR_W - 2.0 * MARGIN_X);
+                        shelf.restore_scroll(scroll, count, &sty);
+                        let (lo, hi) = row_reveal_band(self.shelf_top_settled(row, row), sty.h);
                         self.grid.scroll_target = card_row::reveal(self.grid.scroll_y.pos,
-                            lo, hi, grid_max_scroll(self.rows.len()));
+                            lo, hi, self.grid_max_scroll());
                         self.grid.scroll_y.jump(self.grid.scroll_target);
                     }
                     self.layout_grid();
@@ -2253,6 +2299,7 @@ fn hero_pill_w(measure: &dyn Measure, label: &std::ffi::CStr) -> f32 {
         + crate::ui::widgets::BTN_PILL_AIR
 }
 
+#[cfg(test)]
 fn card_x(col: usize, scroll: f32) -> f32 {
     MARGIN_X + col as f32 * (CARD_W + GAP) - scroll
 }
@@ -2266,22 +2313,21 @@ fn col_at(x: f32, scroll: f32, count: usize) -> Option<usize> {
 fn heading_y(row_y: f32, lift: f32) -> f32 {
     row_y - TITLE_DY - lift
 }
-fn row_reveal_band(top: f32) -> (f32, f32) {
-    let lo = top + GRID_TOP_Y + CARD_DY + CARD_H + 96.0 - (SCR_H - MARGIN_Y);
-    (lo, top)
+/// The uniform-pitch reference the tests compare against; the screen itself goes through
+/// [`HomeScreen::shelf_top_settled`], which adds each landscape row's own drift.
+#[cfg(test)]
+fn shelf_top_settled(row: usize, focus_row: usize) -> f32 {
+    card_row::settled_top(row, Some(focus_row), card_row::ROW_PITCH_FIXED)
 }
+#[cfg(test)]
 fn grid_max_scroll(rows: usize) -> f32 {
     let n = rows.max(1);
     let h = card_row::settled_top(n, Some(n - 1), card_row::ROW_PITCH_FIXED);
     (h - (SCR_H - CONTENT_Y) + 60.0).max(0.0)
 }
-fn shelf_top_settled(row: usize, focus_row: usize) -> f32 {
-    shelf_top_banded(row, Some(focus_row))
-}
-/// [`shelf_top_settled`] with the open label band named explicitly: `None` while a linked heading
-/// holds focus, which opens no row's band.
-fn shelf_top_banded(row: usize, band_row: Option<usize>) -> f32 {
-    card_row::settled_top(row, band_row, card_row::ROW_PITCH_FIXED)
+fn row_reveal_band(top: f32, h: f32) -> (f32, f32) {
+    let lo = top + GRID_TOP_Y + CARD_DY + h + 96.0 - (SCR_H - MARGIN_Y);
+    (lo, top)
 }
 
 fn wash_corners(hero: Option<&CatalogMovie>, grid: [[f32; 4]; 4], snap: f32) -> [[f32; 4]; 4] {

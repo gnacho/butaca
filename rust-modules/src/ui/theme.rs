@@ -105,6 +105,9 @@ const GREEN_500: [f32; 4] = rgb8(0x2f, 0xae, 0x5b);
 
 // ── Text ────────────────────────────────────────────────────────────────────
 /// Primary reading text / high-emphasis title. Collapses the 3-4 near-whites.
+/// The hero's kicker ink: the mockup's gold, one job only. Not [`ACCENT`], which is the focus
+/// fill and the control plate — a label painted in the fill colour would read as a control.
+pub const KICKER_INK: [f32; 4] = WARM_GOLD;
 pub const TEXT_PRIMARY: [f32; 4] = WARM_0;
 /// Section headings ("Related", "Cast & Crew", About headings) — a touch below primary.
 pub const TEXT_HEADING: [f32; 4] = WARM_0;
