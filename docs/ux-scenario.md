@@ -338,10 +338,11 @@ apply to that item; for an in-progress movie on the deck:
 ![Settings](screenshots/ux-settings.jpg)
 
 The **gear** at the right edge of the shared bar. It opens the Settings root as a centred block of
-titled groups, two entries per line: **Select server**, **Quick connect**, **Video & playback**,
-**Show recently added** and **Disconnect**. The last one is marked destructive and uses the same
-disconnect flow as the server picker. *Show recently added* is off by default: while it is off, a
-library opens on its Continue Watching / All grid without the section's Recently Added shelf.
+titled groups, two entries per line: **Select server**, **Quick connect**, **Video & playback** and
+**Disconnect**. The last one is marked destructive and uses the same disconnect flow as the server
+picker. *Video & playback* holds the app's playback defaults and, at the tail of its list, the
+**Show recently added** switch, off by default: while it is off, a library opens without the
+section's Recently Added shelf.
 
 The old account chip at the top left is gone. Its account menu is retired: settings, server choice
 and signing out all live behind the gear, so there is no second entry point to keep in step.

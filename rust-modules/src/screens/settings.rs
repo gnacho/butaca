@@ -943,28 +943,22 @@ enum Action {
     QuickConnect,
     Playback,
     SignOut,
-    /// Lead Movies and TV Shows with their recently added shelf (#297).
-    ShowRecentlyAdded,
 }
 
-/// The Settings root: the server doors, the playback controls, the viewer's preferences and the
-/// way out, as a centred two-column grid. Language, legal notices and credits are still
-/// deliberately absent: this surface is about the media and the account, not the app's legal copy.
+/// The Settings root: the server doors, the playback controls and the way out, as a centred
+/// two-column grid. Language, legal notices and credits are still deliberately absent: this
+/// surface is about the media and the account, not the app's legal copy. The viewer's own
+/// preferences (the Recently Added switch) live one level in, on *Video & playback*.
 pub(crate) struct RootPage {
     entry: EntryId,
     table: TableView,
     rows: Vec<Action>,
     state: RootState,
-    /// The recently-added switch's optimistic value until its write lands — the same pattern the
-    /// retired Plex root used for its own toggles.
-    pending_recent: Option<(bool, crate::storage_worker::TypedTicket<bool>)>,
 }
 
-/// The root's LOGICAL state. The recently-added switch is deliberately NOT in it: adding a byte
-/// here would change the state hash of every frame in the committed `6-settings-family` replay,
-/// whose fixtures cannot be re-recorded. The switch is an install-wide preference read from the
-/// process copy (`route::show_recently_added`), so it is visible to the draw and to the Library
-/// without being a second copy of the screen's own cursor.
+/// The root's LOGICAL state: the selected row. The Recently Added switch is not here because it
+/// is not on this page (it lives on *Video & playback*), and adding a byte here would change the
+/// state hash of every frame in the committed `6-settings-family` replay.
 struct RootState {
     sel: i32,
 }
@@ -985,7 +979,6 @@ impl RootPage {
             table: TableView::new(),
             rows: Vec::new(),
             state: RootState { sel: 0 },
-            pending_recent: None,
         };
         s.rebuild(0, directory);
         s
@@ -998,10 +991,6 @@ impl RootPage {
     }
 
     fn rebuild(&mut self, sel: i32, _directory: crate::stores::browse::DirectoryView<'_>) {
-        let recent = self
-            .pending_recent
-            .as_ref()
-            .map_or_else(crate::route::show_recently_added, |(on, _)| *on);
         let servers = Section::new(crate::i18n::msg::settings_servers_section())
             .row(
                 Row::new(crate::i18n::msg::settings_servers_select())
@@ -1018,11 +1007,6 @@ impl RootPage {
                 Row::new(crate::i18n::msg::settings_playback_title())
                     .detail(crate::i18n::msg::settings_playback_detail())
                     .chevron(true),
-            )
-            .row(
-                Row::new(crate::i18n::msg::settings_library_recently_added())
-                    .detail(crate::i18n::msg::settings_library_recently_added_detail())
-                    .toggle(recent),
             );
         let sign_out = Section::new("").row(
             Row::new(crate::i18n::msg::settings_servers_disconnect())
@@ -1035,8 +1019,7 @@ impl RootPage {
         // where the replay's first press lands.
         self.rows = vec![
             Action::SelectServer, Action::QuickConnect,
-            Action::Playback, Action::ShowRecentlyAdded,
-            Action::SignOut,
+            Action::Playback, Action::SignOut,
         ];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
@@ -1075,19 +1058,6 @@ impl RootPage {
             Action::SignOut => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
             }
-            Action::ShowRecentlyAdded => {
-                // Flip against the OPTIMISTIC value, not the process copy: a second press before
-                // the first write lands must not compute the same target and become a no-op.
-                let current = self.pending_recent.as_ref()
-                    .map_or_else(crate::route::show_recently_added, |(on, _)| *on);
-                let on = !current;
-                if let Ok(ticket) = crate::server::session::queue_update_ticket(move |current| {
-                    (current.show_recently_added() != on).then(|| current.with_show_recently_added(on))
-                }) {
-                    self.pending_recent = Some((on, ticket));
-                }
-                self.rebuild(self.table.sel, _directory);
-            }
         }
     }
 }
@@ -1107,18 +1077,6 @@ impl Machine<InnerHost> for RootPage {
                 Handled::Yes
             }
             ScreenEvent::Tick(t) => {
-                // #297: the switch's write landed. Publish the file's own answer into the process
-                // copy the Library reads, then rebuild so the switch's own face agrees.
-                if self.pending_recent.as_ref().is_some_and(|(_, ticket)| {
-                    !matches!(ticket.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty))
-                }) {
-                    if let Some(snapshot) = crate::server::session::peek_settled() {
-                        crate::route::restore_show_recently_added(snapshot.show_recently_added());
-                        self.pending_recent = None;
-                        self.rebuild(self.table.sel, cx.views);
-                        fx.invalidate(crate::ui::present::Provenance::Input);
-                    }
-                }
                 self.table.update(t.dt(), Self::layout().content.h);
                 Handled::Yes
             }

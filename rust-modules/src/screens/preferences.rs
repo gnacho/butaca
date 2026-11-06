@@ -41,7 +41,7 @@ impl Field {
 enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::server::session::UpNextPolicy), Window(i64),
     SubtitleSize(u8), SubtitlePosition(u8), SubtitleBackground(u8) }
 #[derive(Clone)]
-enum Action { Open(Field), Pick(Value) }
+enum Action { Open(Field), Pick(Value), ToggleRecentlyAdded }
 struct State {
     kind: Kind, picker: Option<Field>, selected: i32, busy: bool, status: String,
     quality: Quality, direct_play: DirectPlayMode, values: Vec<String>,
@@ -79,6 +79,10 @@ pub(crate) struct PreferencesPage {
     parent_row: i32,
     copy: String,
     pending: Option<Pending>,
+    /// The "Show recently added" switch's optimistic value until its write lands (#297). Kept
+    /// outside [`State`] on purpose: this page's logical state is a recorded shape, and the
+    /// setting is an install-wide preference with a process copy of its own.
+    pending_recent: Option<(bool, crate::storage_worker::TypedTicket<bool>)>,
     alert: DecisionPrompt,
 }
 impl PreferencesPage {
@@ -89,6 +93,7 @@ impl PreferencesPage {
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(),
                 values: Vec::new(), confirming: false, affirmative: false, alert_scroll: 0 },
             parent_row: 0, copy: String::new(), pending: None,
+            pending_recent: None,
             alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, crate::i18n::msg::settings_cancel_c(), crate::i18n::msg::settings_playback_enable_force_c()) };
         s.rebuild(0);
         s
@@ -256,6 +261,29 @@ impl PreferencesPage {
             }
             section = section.row(row); list_values.push(value); list_actions.push(Action::Open(field));
         }
+        // #297: the Library's opt-in Recently Added shelf. A SWITCH, not a picker: it flips in
+        // place, wears no chevron (so RIGHT does not enter it), and its row lives here rather
+        // than on the Settings root because the controlled replay opens this page but never
+        // records it.
+        let recent = self
+            .pending_recent
+            .as_ref()
+            .map_or_else(crate::route::show_recently_added, |(on, _)| *on);
+        section = section.row(
+            Row::new(crate::i18n::msg::settings_library_recently_added())
+                .detail(crate::i18n::msg::settings_library_recently_added_detail())
+                .toggle(recent)
+                .dim(self.state.busy),
+        );
+        list_values.push(
+            if recent {
+                crate::i18n::msg::widgets_toggle_on()
+            } else {
+                crate::i18n::msg::widgets_toggle_off()
+            }
+            .into(),
+        );
+        list_actions.push(Action::ToggleRecentlyAdded);
         let list_sel = if self.state.picker.is_some() { self.parent_row } else { selected };
         for table in [&mut self.table, &mut self.picker_table] {
             table.compact = false; table.header_ink = theme::TEXT_READING; table.list_focused = true;
@@ -296,6 +324,23 @@ impl PreferencesPage {
                     return;
                 }
                 self.commit(value, fx); self.close_picker(fx);
+            }
+            Action::ToggleRecentlyAdded => {
+                // Flip the process copy this page shows (the same value the Library reads) and
+                // queue the durable write; the switch's face follows `pending_recent` until it
+                // lands, and the whole page is `busy` so a second press cannot race it.
+                let current = self
+                    .pending_recent
+                    .as_ref()
+                    .map_or_else(crate::route::show_recently_added, |(on, _)| *on);
+                let on = !current;
+                if let Ok(ticket) = crate::server::session::queue_update_ticket(move |current| {
+                    (current.show_recently_added() != on).then(|| current.with_show_recently_added(on))
+                }) {
+                    self.pending_recent = Some((on, ticket));
+                    self.state.busy = true;
+                }
+                self.rebuild(self.active().sel);
             }
         }
         fx.invalidate(crate::ui::present::Provenance::Input);
@@ -367,7 +412,29 @@ impl Machine<InnerHost> for PreferencesPage {
             ScreenEvent::Tick(t) => {
                 self.alert.update(t.dt());
                 let had_rows = self.active().n_rows() > 0;
-                if self.poll() || self.state.quality != crate::route::quality()
+                // #297: the recently-added switch's write landed. Publish the file's own answer
+                // into the process copy the Library reads before the page rebuilds its face.
+                let mut recent_landed = false;
+                let recent_receipt = self.pending_recent.as_ref().and_then(|(_, ticket)| {
+                    match ticket.try_recv() {
+                        Ok(saved) => Some(saved),
+                        Err(mpsc::TryRecvError::Disconnected) => Some(false),
+                        Err(mpsc::TryRecvError::Empty) => None,
+                    }
+                });
+                if let Some(saved) = recent_receipt {
+                    if let Some(snapshot) = crate::server::session::peek_settled() {
+                        crate::route::restore_show_recently_added(snapshot.show_recently_added());
+                    }
+                    self.pending_recent = None;
+                    self.state.busy = false;
+                    if !saved {
+                        self.state.status = crate::i18n::msg::settings_playback_save_failed().into();
+                    }
+                    recent_landed = true;
+                }
+                if self.poll() || recent_landed
+                    || self.state.quality != crate::route::quality()
                     || self.state.direct_play != crate::route::direct_play_mode() {
                     self.rebuild(self.active().sel);
                     // An empty loading table had no engine seat. Give its first landing (or
@@ -393,7 +460,12 @@ impl Machine<InnerHost> for PreferencesPage {
                 self.close_picker(fx); Handled::Yes
             }
             ScreenEvent::Input(InputEvent { kind: InputKind::Key { key: Key::Right, at_edge: true, .. }, .. }) if self.state.picker.is_none() => {
-                if let Some(key) = cx.focus.current { self.activate(key.elem as usize, fx); } Handled::Yes
+                if let Some(key) = cx.focus.current {
+                    // Only a chevron row ENTERS something; a switch changes in place, so RIGHT is
+                    // inert on it exactly as it is on the Settings root.
+                    if self.active().row_opens(key.elem as i32) { self.activate(key.elem as usize, fx); }
+                }
+                Handled::Yes
             }
             _ => Handled::No,
         }
@@ -572,5 +644,44 @@ mod tests {
         assert_eq!(page.state.picker, None);
         assert_eq!(page.table.sel, 1);
         assert!(page.pending.is_none());
+    }
+
+    /// #297: the Library's opt-in Recently Added shelf is a switch at the tail of *Video &
+    /// playback* — the Settings root stays four rows. Its face reads the process copy and its
+    /// press arms a durable write, then the page publishes the file's own answer.
+    #[test]
+    fn the_recently_added_switch_flips_in_place_and_publishes_its_write() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("prefs-recently-added");
+        crate::route::restore_show_recently_added(false);
+        let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
+        let last = page.table.n_rows() - 1;
+        let row = &page.table.sections[0].rows[last as usize];
+        assert_eq!(row.label, crate::i18n::msg::settings_library_recently_added());
+        assert_eq!(row.toggle, Some(false), "off by default");
+        assert!(matches!(page.actions[last as usize], Action::ToggleRecentlyAdded));
+        assert!(row.ticon.is_none(), "a switch opens nothing, so RIGHT is inert on it");
+
+        with_fx(|fx| page.activate(last as usize, fx));
+        assert!(page.pending_recent.is_some(), "the press arms the durable write");
+        assert!(page.state.busy, "the page shows the save in flight");
+        let row = &page.table.sections[0].rows[last as usize];
+        assert_eq!(row.toggle, Some(true), "optimistic face");
+
+        // …and the landing publishes the file's answer into the process copy the Library reads.
+        // The write is the storage worker's, so the tick loop waits for it rather than assuming
+        // it finished inside a fixed number of frames.
+        let tick = Tick { ms: 16, dt_us: 16_000 };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while page.pending_recent.is_some() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            with_fx(|fx| { page.step(&ScreenEvent::Tick(tick), &context(last as u32), fx); });
+        }
+        assert!(page.pending_recent.is_none(), "the write landed");
+        assert!(!page.state.busy);
+        assert!(crate::route::show_recently_added(), "the file says on and the process copy follows");
+        let row = &page.table.sections[0].rows[last as usize];
+        assert_eq!(row.toggle, Some(true));
+        crate::route::restore_show_recently_added(false);
     }
 }

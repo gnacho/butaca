@@ -32,12 +32,12 @@ fn the_root_reconnects_preferences_and_sign_out() {
     let root = RootPage::new(EntryId(0), cx(None).views);
     assert_eq!(root.rows, vec![
         Action::SelectServer, Action::QuickConnect,
-        Action::Playback, Action::ShowRecentlyAdded, Action::SignOut,
+        Action::Playback, Action::SignOut,
     ]);
     assert_eq!(root.table.sections.len(), 3, "server doors, preferences, then the destructive action");
     assert_eq!(root.table.sections[0].rows.len(), 2, "select and quick connect");
-    assert_eq!(root.table.sections[1].rows.len(), 2,
-        "playback stays reachable beside the recently-added switch; interface rows do not");
+    assert_eq!(root.table.sections[1].rows.len(), 1,
+        "playback stays reachable and the Recently Added switch lives on that page");
     assert_eq!(root.table.sections[2].rows.len(), 1, "sign out stays last");
 }
 
@@ -163,14 +163,6 @@ fn preference_rows_push_their_existing_pages_and_sign_out_disconnects() {
     let mut present = Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Instance(InstanceId(0)), &mut present);
     root.activate(3, cx(None).views, &mut fx);
-    assert!(root.pending_recent.is_some(), "row 3 is the recently-added switch and it arms a write");
-    assert!(!out.iter().any(|st| matches!(st.fx, Fx::Nav(_))), "a switch opens no page");
-
-    let mut root = RootPage::new(EntryId(0), cx(None).views);
-    let mut out = Vec::new();
-    let mut present = Present::new();
-    let mut fx = Effects::new(&mut out, MachineId::Instance(InstanceId(0)), &mut present);
-    root.activate(4, cx(None).views, &mut fx);
     assert!(out.iter().any(|st| matches!(st.fx, Fx::App(AppFx::Loop(LoopReq::JfDisconnectServer)))),
         "the last row uses the existing disconnect flow");
     assert!(!out.iter().any(|st| matches!(st.fx, Fx::Nav(_))));
