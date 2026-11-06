@@ -111,14 +111,17 @@ Set up LG Developer Mode and connect with webOS Dev Manager, then choose:
 - **Install Butaca directly:** add only Butaca to the set, and install future `.ipk` updates from
   your computer.
 - **Install Homebrew Channel first:** get an app catalogue on the television, then install Butaca
-  and its updates with the remote.
+  and its updates with the remote once it is listed there.
 
 Then open it, type the address of your Jellyfin server, and sign in with the account you already
 use there. The guide covers what happens to the password you type: it is used once, and what the
 app keeps is a token the server can revoke.
 
-**Already have Homebrew Channel?** Find
-[Butaca in its catalogue](https://repo.webosbrew.org/apps/com.butaca/) and select **Install**.
+**Already have Homebrew Channel?** Butaca has been submitted to its catalogue and is waiting for
+review, so it is not listed yet. Until it is, install the `.ipk` from
+[the latest release](https://github.com/gnacho/butaca/releases/latest) with a tool such as
+[dev-manager-desktop](https://github.com/webosbrew/dev-manager-desktop). The submission is
+[webosbrew/apps-repo#332](https://github.com/webosbrew/apps-repo/pull/332).
 
 For manual `.ipk` downloads, [verify the release checksum](docs/install-and-verify.md#verifying-the-package)
 before installing. Homebrew Channel verifies catalogue downloads for you.

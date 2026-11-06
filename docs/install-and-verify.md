@@ -6,9 +6,9 @@ It runs as a client for a **Jellyfin** server: you supply the address of your se
 
 ## Already have Homebrew Channel?
 
-Open **Homebrew Channel** on your TV, find [**Butaca**](https://repo.webosbrew.org/apps/com.butaca/), and select **Install**. Then [open Butaca and sign in](#4-open-butaca-and-sign-in).
+Butaca has been submitted to the Homebrew Channel catalogue and is waiting for review, so it is **not listed yet**. Until it is, install the `.ipk` from the [latest release](https://github.com/gnacho/butaca/releases/latest) with [dev-manager-desktop](https://github.com/webosbrew/dev-manager-desktop), or follow the Developer Mode steps below.
 
-You can skip the Developer Mode and computer setup below. If your existing Homebrew Channel installation uses Developer Mode, keep renewing that session as usual.
+The submission is [webosbrew/apps-repo#332](https://github.com/webosbrew/apps-repo/pull/332). Once it is listed, finding **Butaca** in Homebrew Channel and selecting **Install** will be all you need, and you can skip the Developer Mode and computer setup below. If your existing Homebrew Channel installation uses Developer Mode, keep renewing that session as usual.
 
 ## Before you start
 
