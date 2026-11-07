@@ -14,7 +14,7 @@ Get started with the [installation guide](docs/install-and-verify.md).
 
 **No telemetry, and you can check it.** There is no account service, no analytics and no crash-reporting endpoint compiled into the package. `strings` on the shipped binary settles it, and every release audit records what that scan found. Local logs stay on the television and are scrubbed before they are written — the details are in [PRIVACY.md](PRIVACY.md).
 
-**One engine, rewritten for Jellyfin.** The playback engine comes from the earlier native plx-native client (GPL-3.0) and this project continues it; everything above it — the server layer, every screen, the input model — is Jellyfin's. What remains of the retired wire are defensive strings that strip legacy `X-Plex-Token` values out of logs, cache keys and redirects. That is compatibility, not a client.
+**One engine, rewritten for Jellyfin.** The playback engine comes from the earlier native plx-native client (GPL-3.0) and this project continues it; everything above it — the server layer, every screen, the input model — is Jellyfin's. What remains of the retired wire is the defensive half: strings that keep a legacy `X-Plex-Token` out of logs, cache keys, redirects and the plaintext-transport check, plus the names an install upgraded from 0.7.x still carries — the old session field, its consent key, and the parameter the HLS capture looks for. That is compatibility, not a client.
 
 ## Why native
 

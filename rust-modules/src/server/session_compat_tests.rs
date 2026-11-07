@@ -350,3 +350,38 @@ fn the_session_file_carries_no_subtitle_offset() {
         public.preferences
     );
 }
+
+/// **The 0.7.x account token: the field was called `plex_tv_token` then.**
+///
+/// Renamed when the account service behind it was retired (#223). The alias on
+/// [`UserRef::account_token`] is the only thing that keeps an upgraded television's credential
+/// alive across that rename: without it the field is absent, `de_soft_nonempty_string` leaves it
+/// `None`, and every account-service read that needs it is skipped until the user switches
+/// profile online again. Nothing else in the tree mentions the old name, so this fixture is the
+/// whole guard.
+///
+/// Written as literal 0.7.x-shaped JSON, not by serialising today's struct: the thing under test
+/// is that today's struct is not what wrote those bytes.
+#[test]
+fn a_session_file_written_before_the_account_token_was_renamed_still_carries_it() {
+    let v070 = r#"{"client_id":"cid-1",
+        "server":{"name":"Mac mini","machine_id":"aaaa1111","address":"192.168.0.10",
+                  "port":32400,"token":"tok-own"},
+        "user":{"id":7,"uuid":"u-7","title":"Ana","thumb":"","token":"tok-user",
+                "plex_tv_token":"acct-legacy"},
+        "sources":[]}"#;
+    let s: Session = serde_json::from_str(v070).expect("a 0.7.x session file still parses");
+
+    assert_eq!(
+        s.user.account_token.as_deref(),
+        Some("acct-legacy"),
+        "the old field name must land in the new one"
+    );
+    // …and the rename costs nothing else: the file still reaches Home.
+    assert!(s.can_go_local(), "a 0.7.x session must still boot to Home");
+
+    // The new spelling is what a current build writes, and it reads back as itself.
+    let current = serde_json::to_string(&s).expect("serialize");
+    assert!(current.contains("\"account_token\""));
+    assert!(!current.contains("plex_tv_token"), "the old name is never written");
+}

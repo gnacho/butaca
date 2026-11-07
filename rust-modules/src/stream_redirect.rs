@@ -9,11 +9,11 @@
 //! through `curlio` (which follows any further hops itself, under its own `CURLOPT_MAXREDIRS` and
 //! no-downgrade `CURLOPT_REDIR_PROTOCOLS`).
 //!
-//! Credentials: the ORIGINAL request's credential header block and its access-token query pair
-//! ride a hop only when the hop's scheme+host+port equal the ORIGINAL origin's. A cross-origin
-//! hop is requested exactly as its `Location` spells it — a presigned URL carries its own
-//! authority, and the access token must never reach a third party. A `Range` is not a credential
-//! and rides every hop. Log lines carry an origin and a query-less path, never a query.
+//! Credentials: the ORIGINAL request's credential header block rides a hop only when the hop's
+//! scheme+host+port equal the ORIGINAL origin's. A cross-origin hop is requested exactly as its
+//! `Location` spells it — a presigned URL carries its own authority, and the access token must
+//! never reach a third party. A `Range` is not a credential and rides every hop. Log lines carry
+//! an origin and a query-less path, never a query.
 //!
 //! **Every plaintext hop that would carry a credential asks the credential authority first**
 //! (`crate::http::credential_transport_allowed`, i.e. `grant`) — the first request, every
@@ -112,7 +112,6 @@ pub(crate) fn open_following(
     req: &Request,
     checkpoint: &mut dyn Checkpoint,
 ) -> Result<Opened, FollowError> {
-    let token = token_pair(req.path);
     let mut cur = Target {
         origin: req.origin.clone(),
         path: req.path.to_owned(),
@@ -173,7 +172,7 @@ pub(crate) fn open_following(
             Err(e) => return Err(FollowError::Open(e)),
         };
         let next = hs_redirect_location(hs).and_then(|loc| resolve_location(&cur, &loc));
-        let Some(mut next) = next else {
+        let Some(next) = next else {
             crate::log(&format!(
                 "stream: redirect {status} from {}{} has no usable Location",
                 cur.origin.log_form(),
@@ -200,11 +199,6 @@ pub(crate) fn open_following(
             ));
             return Err(FollowError::LeftOrigin);
         }
-        if same {
-            if let Some(pair) = token {
-                next.path = with_query_pair(&next.path, pair);
-            }
-        }
         crate::log(&format!(
             "stream: redirect {status} -> {}{} hop={hop} same_origin={same}",
             next.origin.log_form(),
@@ -222,33 +216,6 @@ fn header_lines(block: &str) -> Vec<&str> {
 /// Same scheme, host (ASCII case-insensitive) and port.
 pub(crate) fn same_origin(a: &Origin, b: &Origin) -> bool {
     a.scheme() == b.scheme() && a.port() == b.port() && a.host().eq_ignore_ascii_case(b.host())
-}
-
-/// The access-token pair of a path's query, if it has one.
-fn token_pair(path: &str) -> Option<&str> {
-    let (_, query) = path.split_once('?')?;
-    query
-        .split('&')
-        .find(|p| p.len() > 13 && p[..13].eq_ignore_ascii_case("X-Plex-Token="))
-}
-
-/// `path` with `pair` appended to its query, unless a parameter of that name is already there.
-fn with_query_pair(path: &str, pair: &str) -> String {
-    let name = pair.split('=').next().unwrap_or(pair);
-    let present = path.split_once('?').is_some_and(|(_, q)| {
-        q.split('&').any(|p| {
-            p.split('=')
-                .next()
-                .is_some_and(|n| n.eq_ignore_ascii_case(name))
-        })
-    });
-    if present {
-        path.to_owned()
-    } else if path.contains('?') {
-        format!("{path}&{pair}")
-    } else {
-        format!("{path}?{pair}")
-    }
 }
 
 /// Resolve a `Location` against the target that answered it (RFC 3986 §5.2, restricted to what
@@ -399,7 +366,7 @@ mod tests {
             Scheme::Http,
             "192.168.1.10",
             32400,
-            "/library/parts/1/file.mp4?X-Plex-Token=tok",
+            "/library/parts/1/file.mp4?api_key=tok",
         )
     }
 
@@ -484,28 +451,6 @@ mod tests {
     }
 
     #[test]
-    fn the_token_is_carried_only_as_a_query_pair_that_is_not_already_there() {
-        assert_eq!(
-            token_pair("/a?x=1&X-Plex-Token=tok"),
-            Some("X-Plex-Token=tok")
-        );
-        assert_eq!(token_pair("/a?x=1"), None);
-        assert_eq!(token_pair("/a"), None);
-        assert_eq!(
-            with_query_pair("/b", "X-Plex-Token=tok"),
-            "/b?X-Plex-Token=tok"
-        );
-        assert_eq!(
-            with_query_pair("/b?y=2", "X-Plex-Token=tok"),
-            "/b?y=2&X-Plex-Token=tok"
-        );
-        assert_eq!(
-            with_query_pair("/b?x-plex-token=other", "X-Plex-Token=tok"),
-            "/b?x-plex-token=other"
-        );
-    }
-
-    #[test]
     fn a_tls_origin_is_handed_back_without_dialling() {
         let origin = Origin::new(Scheme::Https, "127.0.0.1", 1);
         let mut hs = super::super::http_stream_boxed();
@@ -563,6 +508,8 @@ mod tests {
         let req = Request {
             origin: &origin,
             path: "/p",
+            // The header NAME is arbitrary here: the rule under test is "a credential header goes
+            // to the origin that owns it and no further", whatever the header is called.
             credentials: Some("X-Plex-Token: secret\r\n"),
             range_from: Some(7),
             deadline: None,

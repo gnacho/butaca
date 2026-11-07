@@ -1,5 +1,9 @@
 //! Media opens that meet an HTTP redirect.
 //!
+//! The HLS cases below carry `X-Plex-Token` in their URLs because that is the only credential
+//! parameter the capture recognises (`hls::is_token_pair`). The server sends `api_key`; issue #310
+//! owns that mismatch and will re-point these fixtures with it.
+//!
 //! Field report (debug build of a788b27a): a remote trailer's Part URL answered
 //! `302`, the socket open reported `ff: http_open FAILED status=302`, and the demuxer saw no
 //! access units. The server redirects those parts to a presigned CDN URL on ANOTHER origin, usually
@@ -163,8 +167,14 @@ fn progressive_open(port: u16, path: &str) -> Result<(String, i64), String> {
     outcome
 }
 
+/// A same-origin hop lands on the `Location` as it is spelled.
+///
+/// The credential used to be re-appended to the hop as a query pair, and that carrier only ever
+/// recognised the retired parameter, so it could not fire for a Jellyfin URL (`api_key`). #308
+/// removed the carrier rather than re-point it, because which parameter authenticates a redirect
+/// is a behaviour change and belongs to #310. The header block still rides a same-origin hop.
 #[test]
-fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
+fn an_hls_open_follows_an_absolute_same_origin_302() {
     let _serial = crate::testlock::serial();
     let catalog = Scripted::start(|head, port| {
         if request_line(head).starts_with("GET /start") {
@@ -178,14 +188,14 @@ fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
     let (outcome, _hs) = hls_open_plain(catalog.port, "/start?X-Plex-Token=tok");
     assert_eq!(
         outcome,
-        Ok(("/final/seg.ts?X-Plex-Token=tok".to_string(), 4)),
+        Ok(("/final/seg.ts".to_string(), 4)),
         "the open must land on the Location, and a later reopen must use it"
     );
     let heads = catalog.heads();
     assert_eq!(heads.len(), 2, "one redirect, one final GET: {heads:?}");
     assert!(
-        request_line(&heads[1]).starts_with("GET /final/seg.ts?X-Plex-Token=tok "),
-        "a same-origin hop keeps the credential: {}",
+        request_line(&heads[1]).starts_with("GET /final/seg.ts "),
+        "the hop asks for exactly the Location's path: {}",
         request_line(&heads[1])
     );
 }
@@ -315,12 +325,11 @@ fn a_progressive_open_follows_a_302() {
     };
     crate::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
+    // The Location is relative and carries no credential; see the HLS case above for why nothing
+    // re-appends one (issue #310 owns that decision for `api_key`).
     assert_eq!(
         outcome,
-        Some((
-            "/services/iva/assets/1/video.mp4?X-Plex-Token=tok".to_string(),
-            8
-        ))
+        Some(("/services/iva/assets/1/video.mp4".to_string(), 8))
     );
 }
 
