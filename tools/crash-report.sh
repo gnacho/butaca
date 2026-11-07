@@ -23,7 +23,9 @@
 #
 # TWO LOGS, and the difference matters after a relaunch:
 #   <runtime root>/butaca-crash.log   append-only, SURVIVES the relaunch  <- read this one
-#   <runtime root>/butaca-events.log  truncated at every launch           <- already gone
+#   <runtime root>/butaca-events.log  truncated at every launch           <- gone, but its
+#                                     history survives: the last 4 runs are kept as
+#                                     <app dir>-logs/butaca-events.{1..4}.log (#331)
 # The NAMES are the same for both installs; only the root differs — `/tmp` for the stable
 # install, `/tmp/<app id>` for a flavoured one. Ask for the one you mean with
 # `make -s print-rundir FLAVOR=<f>`; this script derives CRASHLOG/STDERRLOG from it below.

@@ -132,6 +132,11 @@ mod tests {
 
     /// The point of the module: an unofficial client must not present as a first-party one.
     /// The vendor's documented naming pattern for its OWN apps is what this test refuses.
+    ///
+    /// The two strings live here and nowhere else in the tree: they are the pattern, not a name
+    /// the app uses. Nothing produces them today, which is the point — the guard is what stops the
+    /// pattern coming back in a rename or a copy-paste, so it stays after the client it described
+    /// is gone.
     #[test]
     fn identity_never_claims_a_first_party_name() {
         for s in [

@@ -40,8 +40,13 @@ not the app's. Butaca's author receives none of those requests.
 - **The artwork cache.** Posters, backdrops and episode images fetched from your server are kept as
   bounded files beside the app, so the interface does not download them again on every launch.
 - **The local logs**: `/tmp/butaca-events.log`, `/tmp/butaca-stderr.log` and
-  `/tmp/butaca-crash.log`. The first two are truncated at each launch and the crash log is
-  append-only so it survives a restart. Every line is scrubbed **before it is written**: tokens,
+  `/tmp/butaca-crash.log`. The event log starts empty at each launch, but the run that is about to
+  be replaced is copied first into the app's own persistent directory
+  (`/media/developer/<app id>-logs` or `/media/internal/.<app id>-logs`, whichever the television
+  lets the app write), where the last **4** runs are kept at **4 MiB each**, oldest dropped first,
+  and each copy is created 0600 like the original. Without that copy a crash survives a reboot but
+  the log that explains it does not: `/tmp` is emptied on restart. The stderr capture is truncated
+  at each launch and the crash log is append-only, so both already survive a relaunch. Every line is scrubbed **before it is written**: tokens,
   header and query credentials, hostnames, bare addresses, search queries, and your server and user
   names are rewritten, while media titles, search terms and subtitle text are never written at all.
   Item identifiers do remain, because they are what makes a playback bug diagnosable. Someone with

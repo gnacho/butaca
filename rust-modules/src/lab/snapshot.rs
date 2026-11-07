@@ -25,8 +25,8 @@
 //! # Defence in depth: [`scrub`]
 //!
 //! Ring records are ordinary log lines, and the log's own policy — *no call site formats a URL into
-//! a line* — has been violated before (`crate::redact_tokens`'s doc carries that history: one
-//! `-> {url}` in `route::retranscode`, reached by an ordinary audio-track switch, live for months).
+//! a line* — has been violated before (one `-> {url}` in `route::retranscode`, reached by an
+//! ordinary audio-track switch, live for months).
 //! So every record passes a second, broader pass on the way out. It is deliberately not the same
 //! function as the log's: that one is a hot-path backstop for one parameter name, this one is a
 //! wider sweep that runs once per upload on a worker thread and can afford to be thorough.

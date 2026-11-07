@@ -29,7 +29,7 @@
 //!    built from `Diag`, `webos::Info` and `devcaps::Caps` — numbers, bools, enums and short
 //!    platform strings — under the same no-URL / no-credential / no-identity rule `app::diagnostics`
 //!    states at length, and every ring record passes [`snapshot::scrub`] on the way out on top of
-//!    the `redact_tokens` it already passed on the way in. See [`snapshot`].
+//!    the local scrub pass it already went through on the way in. See [`snapshot`].
 //!
 //! # What it deliberately is not
 //!
@@ -103,7 +103,7 @@ pub(crate) fn command_done(_id: u32, _ok: bool) {
     control::finish(_id, _ok);
 }
 
-/// The log tap. Called by `crate::log` for every line, after `redact_tokens`.
+/// The log tap. Called by `crate::log` for every line, after the local scrub pass.
 ///
 /// Takes `&str` rather than the `Cow` so the caller's borrow is unambiguous, and copies: the ring
 /// outlives the caller's frame by construction.

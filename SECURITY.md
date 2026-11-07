@@ -27,7 +27,8 @@ looking at:
   release build** by dropping the `devtriggers` cargo feature, and `ci/check-elf.sh` measures that
   on the shipped bytes rather than asserting it. A release binary that still carries any of it is a
   valid report, and a serious one.
-- **The event log.** `butaca-events.log` is created 0600 and every line goes through
+- **The event log and its history.** `butaca-events.log` is created 0600, its archived copies are
+  created 0600 as well (`rust-modules/src/log_history.rs`), and every line goes through
   `diag::scrub::scrub_local` before the write. A line that reaches it carrying a credential, an
   access token, a `plex.direct` hostname, a household name or anything about what is being
   watched is a valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant to hold.

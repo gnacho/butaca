@@ -1724,6 +1724,11 @@ pub struct UserRef {
     pub token: String,
     /// The switched profile's account-service credential. Old, damaged, or empty values simply
     /// disable optional account-service reads until the next successful online switch.
+    /// The field was called `plex_tv_token` until the wire behind it was retired. The alias is the
+    /// only reason a television upgraded from 0.7.x keeps this credential without a fresh profile
+    /// switch, so it stays as long as a 0.7.x file can still be on a set — and
+    /// `a_session_file_written_before_the_account_token_was_renamed_still_carries_it` is what
+    /// fails if someone drops it.
     #[serde(default, deserialize_with = "de_soft_nonempty_string", skip_serializing_if = "Option::is_none")]
     #[serde(alias = "plex_tv_token")]
     pub account_token: Option<String>,

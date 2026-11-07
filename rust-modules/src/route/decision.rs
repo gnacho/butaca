@@ -2361,6 +2361,8 @@ impl HlsAbrControl {
         let encoder_session = next_encoder_session(&self.logical_session);
         if !self.fixture_base.is_empty() {
             return Ok(PrimedHls {
+                // The credential parameter is the one `hls::is_token_pair` accepts; the server
+                // sends `api_key` (issue #310).
                 url: format!(
                     "{}/{}/master.m3u8?offset={}.{:06}&api_key=fixture-only",
                     self.fixture_base.trim_end_matches('/'),
@@ -2709,6 +2711,7 @@ pub(crate) fn arm_auto_fixture(
     // starvation horizon to fire on a reserve that was visibly FILLING.
     let rung = crate::abr::Rung::P480;
     let base = hls_base.trim_end_matches('/');
+    // See above: the capture only accepts this parameter name (issue #310).
     let url = format!(
         "{base}/{}/master.m3u8?api_key=<plex-token>",
         rung.kbps()
@@ -2871,6 +2874,7 @@ fn install_auto_hls(
     };
     if !fixture_base.is_empty() {
         let encoder = format!("auto-fixture-{}", rung.kbps());
+        // See above: the capture only accepts this parameter name (issue #310).
         let url = format!(
             "{}/{}/master.m3u8?api_key=fixture-only",
             fixture_base.trim_end_matches('/'),
