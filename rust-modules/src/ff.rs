@@ -2541,6 +2541,22 @@ fn avio_stopped(s: &mut AvioState) -> c_int {
     AVERROR_IO
 }
 
+/// Name the branch that ended the stream.
+///
+/// Every way out of `read_cb` is a bare `AVERROR_EOF`, and libavformat reads that as a clean end
+/// of media: the demuxer reports the end, the engine pushes EOS and the player stops exactly as
+/// if the item had finished. On the device that produced a stop with no error line anywhere, at
+/// 11 s of a 22 minute episode, with the transport healthy and 10 MB still queued (#327). The
+/// log could not tell a real end from an aborted lane or a spent reserve, so the next one has to
+/// say which branch it was and print the three numbers that separate them: how far the transfer
+/// got, how large it claimed to be, and where the playhead was.
+fn log_eof(why: &str, off: i64, size: i64, body: u64) {
+    crate::player::log(&format!(
+        "ff: eof why={why} off={off} size={size} body={body} pos={}ms",
+        crate::player::playpos_ns() / 1_000_000
+    ));
+}
+
 extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
     unsafe {
         let s = &mut *(op as *mut AvioState);
@@ -2549,6 +2565,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             // interrupt the read — the demux thread services it itself between two av_read_frame
             // calls (see the read loop), so there is nothing to unblock and nothing to race.
             if crate::aq::aq_is_aborted(s.aq) {
+                log_eof("aborted-before-read", s.off, s.size, s.body_bytes);
                 s.latch_abort();
                 s.clear_bounce();
                 return AVERROR_EOF;
@@ -2574,6 +2591,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             }
             let rebuffering = SHARED.hls_rebuffering.load(Ordering::Acquire);
             if s.reserve_deadline.expire_if_due(rebuffering) {
+                log_eof("reserve-spent", s.off, s.size, s.body_bytes);
                 return AVERROR_EOF;
             }
             let reserve_snapshot = s.reserve_deadline.active(rebuffering);
@@ -2595,6 +2613,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                 Some(acquisition) => acquisition,
                 None => &mut unarmed,
             };
+            let probe = (s.off, s.size, s.body_bytes);
             let r = match &mut s.src {
                 Src::Socket { hs, .. } => crate::stream::http_read_until(
                     *hs,
@@ -2610,7 +2629,10 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                     live_deadline,
                     checkpoint,
                 ),
-                Src::Idle => return AVERROR_EOF,
+                Src::Idle => {
+                    log_eof("source-idle", probe.0, probe.1, probe.2);
+                    return AVERROR_EOF;
+                }
             };
             let wake =
                 if r == crate::stream::HTTP_READ_DEADLINE || r == crate::curlio::READ_DEADLINE {
@@ -2638,6 +2660,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             // surfaces as socket EOF or curl failure; classify from the owning AU abort flag
             // before either transport result can become an active-stream error.
             if crate::aq::aq_is_aborted(s.aq) {
+                log_eof("aborted-after-read", probe.0, probe.1, probe.2);
                 s.latch_abort();
                 return AVERROR_EOF;
             }
@@ -2658,7 +2681,10 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             }
             if let Some(wake) = wake {
                 match classify_hls_deadline(wake) {
-                    Some(HlsExit::PrimeExpired) => return AVERROR_EOF,
+                    Some(HlsExit::PrimeExpired) => {
+                        log_eof("hls-prime-expired", probe.0, probe.1, probe.2);
+                        return AVERROR_EOF;
+                    }
                     Some(_) => {
                         s.io_failed = true;
                         return AVERROR_IO;
@@ -2701,6 +2727,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                 if let Some(acquisition) = &mut s.acquisition {
                     acquisition.note_body(s.size, s.off, true);
                 }
+                log_eof("transport-end", s.off, s.size, s.body_bytes);
                 return AVERROR_EOF;
             }
             if let Some(watchdog) = &mut s.transport_watchdog {
