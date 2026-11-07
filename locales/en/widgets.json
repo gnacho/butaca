@@ -940,16 +940,9 @@
     "value": "Change quality",
     "description": "Failed-playback button: opens the quality ladder; picking a rung retries at it."
   },
-    "widgets.tracks.ends": {
+  "widgets.tracks.ends": {
     "value": "Ends",
     "description": "Label or formatted fact in the media track information sheet or track selector."
-  },
-"widgets.preplay.ends": {
-    "value": "ends {time}",
-    "args": {
-      "time": "str"
-    },
-    "description": "The wall-clock time a film would finish, shown beside its facts in the pre-playback window. {time} is a 24-hour clock time such as 23:40."
   },
   "widgets.preplay.overview": {
     "value": "Overview",

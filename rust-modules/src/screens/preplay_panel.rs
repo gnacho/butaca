@@ -301,14 +301,12 @@ pub(crate) fn fact_rows(d: &Detail, audio: usize, now_min: i32) -> Vec<crate::sc
             crate::i18n::msg::widgets_tracks_duration(),
             Some(crate::ui::fmt::clock(d.dur_ms)),
         );
-        // The one fact a person plans around. Its run is SIZED from a fixed sample (see the module
-        // doc), which is why the string is built here rather than measured at the draw: the clock
-        // moves, and a live clock in a measurement key would miss on every replay.
+        // The one fact a person plans around. Its run is drawn into a fixed-width cell rather
+        // than measured from the string (see the module doc): the clock moves, and a live clock
+        // in a measurement key would miss on every replay of the same recording.
         push(
             crate::i18n::msg::widgets_tracks_ends(),
-            Some(crate::i18n::msg::widgets_preplay_ends(&crate::ui::fmt::ends_at(
-                now_min, d.dur_ms,
-            ))),
+            Some(crate::ui::fmt::ends_at(now_min, d.dur_ms)),
         );
     }
     push(
@@ -1076,7 +1074,7 @@ mod tests {
         assert_eq!(get("Container"), Some("MKV"));
         assert_eq!(get("Size"), Some("32.28 GB"));
         assert_eq!(get("Duration"), Some("2:40:10"));
-        assert_eq!(get("Ends"), Some("ends 23:45"));
+        assert_eq!(get("Ends"), Some("23:45"));
         // …and choosing the other audio track changes the codec fact, not the film.
         let other = fact_rows(&d, 0, 21 * 60 + 5);
         assert_eq!(

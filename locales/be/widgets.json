@@ -237,7 +237,6 @@
   "widgets.region.latin_america": "Лацінская Амерыка",
   "widgets.failure.play_auto": "Уключыць «Аўтаматычна» і прайграць",
   "widgets.failure.change_quality": "Змяніць якасць",
-    "widgets.tracks.ends": "Сканчэнне",
-"widgets.preplay.ends": "скончыцца {time}",
+  "widgets.tracks.ends": "Сканчэнне",
   "widgets.preplay.overview": "Агляд"
 }

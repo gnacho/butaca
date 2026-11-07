@@ -232,7 +232,6 @@
   "widgets.region.latin_america": "Latinoamérica",
   "widgets.failure.play_auto": "Cambiar a Automático y reproducir",
   "widgets.failure.change_quality": "Cambiar calidad",
-    "widgets.tracks.ends": "Termina",
-"widgets.preplay.ends": "termina {time}",
+  "widgets.tracks.ends": "Termina",
   "widgets.preplay.overview": "Sinopsis"
 }
