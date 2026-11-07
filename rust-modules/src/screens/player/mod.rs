@@ -888,8 +888,21 @@ impl PlayerScreen {
             // by `PlayerOverlayScreen::key` before this screen ever sees the press, since the
             // overlay is a SURFACE and owns input while it is up) both perform the same ritual
             // `key_back`/the Stop arm did.
-            Key::Stop | Key::Back => {
+            // BACK leaves the playback ONLY when nothing is on top of it. A surface over the
+            // page owns the dismissal: `PlayerOverlayScreen::key` answers `Key::Back` with its own
+            // `dismiss`, and if that press still reaches this arm (the surface is gone by the time
+            // it runs, or the two are delivered in the same frame) leaving the film would throw
+            // away the playback the viewer was watching, and the position with it (#357).
+            //
+            // STOP is NOT guarded: it is a deliberate stop, not a "get me out of this layer".
+            Key::Stop => {
                 if edge == Edge::Down {
+                    Self::ask(fx, PlayerReq::Exit);
+                }
+                Handled::Yes
+            }
+            Key::Back => {
+                if edge == Edge::Down && self.hud_policy == HudPolicy::Normal {
                     Self::ask(fx, PlayerReq::Exit);
                 }
                 Handled::Yes
@@ -1968,6 +1981,28 @@ mod step_ladder_tests {
             assert_eq!(handled, Handled::Yes);
             assert_eq!(reqs, vec![PlayerReq::Exit], "wcode {wcode}");
         }
+    }
+
+    /// #357: with a surface over the page, BACK dismisses that surface and the film keeps
+    /// playing. Only a BACK on a bare player leaves the playback.
+    #[test]
+    fn back_over_a_surface_does_not_leave_the_playback() {
+        let _g = crate::testlock::serial();
+        for policy in [HudPolicy::Lifted, HudPolicy::Hidden] {
+            let mut page = PlayerScreen::new(ENTRY);
+            page.set_hud_policy(policy);
+            let (handled, reqs) = press(&mut page, 0, WCODE_BACK, Edge::Down);
+            assert_eq!(handled, Handled::Yes, "the press is consumed either way");
+            assert!(
+                !reqs.iter().any(|r| matches!(r, PlayerReq::Exit)),
+                "{policy:?}: BACK must not leave the playback, got {reqs:?}"
+            );
+        }
+        // …and STOP still stops, because it is not a "get me out of this layer".
+        let mut page = PlayerScreen::new(ENTRY);
+        page.set_hud_policy(HudPolicy::Lifted);
+        let (_, reqs) = press(&mut page, 0, WCODE_STOP, Edge::Down);
+        assert!(reqs.iter().any(|r| matches!(r, PlayerReq::Exit)), "{reqs:?}");
     }
 
     /// Port of `key_player_updown`: from the scrubber, UP walks to the control row and DOWN to the
