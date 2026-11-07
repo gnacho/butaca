@@ -2763,7 +2763,7 @@ fn rating_mark(art: crate::metadata::RatingArt) -> &'static [crate::ui::widgets:
         A::TomatoRotten => ROTTEN,
         A::PopcornUpright => CROWD_UP,
         A::PopcornSpilled => CROWD_DOWN,
-        A::Imdb | A::Tmdb => &[],
+        A::Imdb | A::Tmdb | A::Community => &[],
     }
 }
 

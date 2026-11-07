@@ -314,7 +314,9 @@ pub(crate) fn pretty_date(iso: &str, year: i64) -> String {
 /// would read as a 9.1% score, so the badge's number is put back into the provider's own units here.
 pub(crate) fn rating_score(art: crate::metadata::RatingArt, value: f64) -> String {
     match art {
-        crate::metadata::RatingArt::Imdb => crate::i18n::current().decimal((value * 10.0).round() as i64, 1),
+        crate::metadata::RatingArt::Imdb | crate::metadata::RatingArt::Community => {
+            crate::i18n::current().decimal((value * 10.0).round() as i64, 1)
+        }
         _ => percent((value * 10.0).round().clamp(0.0, 100.0) as i64),
     }
 }
@@ -378,7 +380,7 @@ pub(crate) fn bytes(bytes: i64, scales: (i16, i16, i16)) -> String {
 /// read against the 69% beside it, and it is the reason the two can share a row at all.
 pub(crate) fn rating_suffix(art: crate::metadata::RatingArt) -> &'static str {
     match art {
-        crate::metadata::RatingArt::Imdb => "/10",
+        crate::metadata::RatingArt::Imdb | crate::metadata::RatingArt::Community => "/10",
         _ => "",
     }
 }

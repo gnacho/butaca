@@ -1122,6 +1122,12 @@ pub(crate) enum RatingArt {
     PopcornSpilled,
     Imdb,
     Tmdb,
+    /// **The server's own community score** — the one number Jellyfin serves for an item
+    /// (`CommunityRating`, 0-10). Which site it came from depends on the server's metadata
+    /// order and the payload never says, so this art deliberately names NO provider: it is
+    /// shown under a generic caption rather than attributed to IMDb or TMDB by guess (issue
+    /// #317).
+    Community,
 }
 
 impl RatingArt {
@@ -1145,6 +1151,7 @@ impl RatingArt {
             | RatingArt::PopcornUpright
             | RatingArt::PopcornSpilled => "ROTTEN TOMATOES",
             RatingArt::Tmdb => "TMDB",
+            RatingArt::Community => "SCORE",
         }
     }
 }
