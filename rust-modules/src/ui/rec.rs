@@ -974,7 +974,9 @@ impl TableMeasure {
         #[cfg(test)]
         self.queries.borrow_mut().push(key.clone());
         if let Some(bits)=self.table.borrow().get(&key) { return f32::from_bits(*bits); }
-        if let Some(source)=self.fill {
+        // Only a strict query learns. A speculative probe answers zero in a strict replay, so
+        // filling it here would make the fill run behave differently from the run it is feeding.
+        if let Some(source)=self.fill.filter(|_| strict) {
             let answer=live(source);
             let bits=answer.to_bits();
             self.table.borrow_mut().insert(key.clone(),bits);
@@ -1060,15 +1062,29 @@ impl Measurements {
     pub(crate) fn record(source: &'static dyn Measure) -> Self {
         Self::Record { source, capture:Default::default() }
     }
-    pub(crate) fn prepare(&mut self, replay: Option<&HashMap<MetricKey,u32>>, fill: bool) {
+    /// Installs the table the replay answers from.
+    ///
+    /// `fill` carries the measure to learn a missing key from, and is `None` for a strict replay.
+    /// It is a parameter rather than the `Live` source because a replay starts in `Pending`: the
+    /// controlled bridge deliberately has no live measure to answer from, and that state has to be
+    /// able to learn a key too, or a fixture could never be filled (#333).
+    pub(crate) fn prepare(&mut self, replay: Option<&HashMap<MetricKey,u32>>,
+        fill: Option<&'static dyn Measure>) {
         match self {
             Self::Live(source)=>*self=match replay {
-                Some(table) if fill=>Self::Replay(TableMeasure::filling(table.clone(),*source)),
-                Some(table)=>Self::Replay(TableMeasure::new(table.clone())),
+                Some(table)=>match fill {
+                    Some(fill)=>Self::Replay(TableMeasure::filling(table.clone(),fill)),
+                    None=>Self::Replay(TableMeasure::new(table.clone())),
+                },
                 None=>Self::record(*source),
             },
             Self::Pending(failed) if !failed.get()=>{
-                if let Some(table)=replay { *self=Self::Replay(TableMeasure::new(table.clone())); }
+                if let Some(table)=replay {
+                    *self=Self::Replay(match fill {
+                        Some(fill)=>TableMeasure::filling(table.clone(),fill),
+                        None=>TableMeasure::new(table.clone()),
+                    });
+                }
             },
             _=>{},
         }
@@ -1725,7 +1741,7 @@ mod tests {
         assert!(m.drain().is_err());
         let mut pending=Measurements::Pending(Default::default());
         pending.cap_h(28);
-        pending.prepare(Some(&HashMap::new()),false);
+        pending.prepare(Some(&HashMap::new()),None);
         assert!(pending.drain().is_err(),"late attachment must not erase an early query fault");
     }
 

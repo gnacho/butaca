@@ -290,7 +290,9 @@ impl Bridge {
     #[cfg(test)]
     pub(crate) fn measurement_queries(&self)->Vec<crate::ui::rec::MetricKey> { self.measure.queries() }
     pub(crate) fn prepare_measurements(&mut self, replay: Option<&std::collections::HashMap<crate::ui::rec::MetricKey,u32>>, fill: bool) {
-        self.measure.prepare(replay, fill);
+        // A `static`, not a temporary: the table keeps the source for the whole replay.
+        static TTF: crate::text::TtfMeasure = crate::text::TtfMeasure;
+        self.measure.prepare(replay, fill.then_some(&TTF as &'static dyn crate::ui::machine::Measure));
     }
     pub(crate) fn take_measurements(&self) -> Result<Vec<(crate::ui::rec::MetricKey,u32)>, &'static str> {
         self.measure.drain()
