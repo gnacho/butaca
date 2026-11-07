@@ -2000,9 +2000,7 @@ fn jellyfin_switch_server(app: &mut App, i: usize) {
 /// survivor is signed in and made active (the same switch path); with none the config is erased
 /// and the app lands on the sign-in gate.
 fn jellyfin_disconnect_server(app: &mut App) {
-    let Some(remaining) = crate::jellyfin::boot::remove_active() else {
-        return;
-    };
+    let remaining = crate::jellyfin::boot::remove_active();
     crate::jellyfin::uninstall();
     crate::jellyfin::signin::reset();
     if remaining.servers.is_empty() {
