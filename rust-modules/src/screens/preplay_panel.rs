@@ -712,15 +712,18 @@ impl PrePlaybackScreen {
         };
         p.rrect(rect, ACT_H * 0.5, ACT_H * 0.5, fill);
         let ty = crate::text::text_vcenter_y(theme::size::LABEL, 1, rect.y + rect.h * 0.5);
-        if let Ok(cs) = CString::new(action) {
+        let label = crate::text::elide_by(action, rect.w - theme::space::MD * 2.0, false, |t| {
+            measure.width_str(t, theme::size::LABEL, true)
+        });
+        if let Ok(cs) = CString::new(label) {
             p.text(
                 cs.as_ptr(),
-                rect.x + theme::space::MD,
+                rect.x + rect.w * 0.5,
                 ty,
                 theme::size::LABEL,
                 ink,
                 1,
-                0,
+                1,
             );
         }
     }
