@@ -238,7 +238,12 @@ impl PreferencesPage {
         self.state.alert_scroll = self.alert.scroll_target_bits();
         self.state.values.clear(); self.actions.clear();
         // The field list is rebuilt at every level: it is the parent a picker slides over.
+        // #322: the subtitle look is a group of its own, not a tail of the playback rows. The
+        // SECTIONS change and the ROW ORDER does not: the recorded replay presses this page by
+        // position, so regrouping must not move a single stop. The first group keeps its empty
+        // header (the page title already names it); only the subtitle group needs a word.
         let mut section = Section::new("");
+        let mut subtitles = Section::new(crate::i18n::msg::settings_audio_subtitles());
         let fields: Vec<Field> = match self.state.kind {
             // The window configures a card that "Do not offer" never draws, so the row goes with it.
             Kind::Playback => {
@@ -259,7 +264,17 @@ impl PreferencesPage {
             if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
                 row = row.detail(crate::i18n::msg::settings_playback_overridden());
             }
-            section = section.row(row); list_values.push(value); list_actions.push(Action::Open(field));
+            section = if matches!(
+                field,
+                Field::SubtitleSize | Field::SubtitlePosition | Field::SubtitleBackground
+            ) {
+                subtitles = subtitles.row(row);
+                section
+            } else {
+                section.row(row)
+            };
+            list_values.push(value);
+            list_actions.push(Action::Open(field));
         }
         // #297: the Library's opt-in Recently Added shelf. A SWITCH, not a picker: it flips in
         // place, wears no chevron (so RIGHT does not enter it), and its row lives here rather
@@ -288,7 +303,7 @@ impl PreferencesPage {
         for table in [&mut self.table, &mut self.picker_table] {
             table.compact = false; table.header_ink = theme::TEXT_READING; table.list_focused = true;
         }
-        self.table.set_sections(vec![section], list_sel, false);
+        self.table.set_sections(vec![section, subtitles], list_sel, false);
         if let Some(field) = self.state.picker {
             let current = self.current_value(field);
             let mut section = Section::new("");
@@ -655,8 +670,10 @@ mod tests {
         let _session = crate::server::session::TempSession::new("prefs-recently-added");
         crate::route::restore_show_recently_added(false);
         let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
-        let last = page.table.n_rows() - 1;
-        let row = &page.table.sections[0].rows[last as usize];
+        // #322 split the rows into groups, so the switch is the last ACTION, not the last row of
+        // the first section.
+        let last = page.actions.len() as i32 - 1;
+        let row = page.table.sections.iter().flat_map(|s| s.rows.iter()).find(|r| r.label == crate::i18n::msg::settings_library_recently_added()).expect("the switch is in the table");
         assert_eq!(row.label, crate::i18n::msg::settings_library_recently_added());
         assert_eq!(row.toggle, Some(false), "off by default");
         assert!(matches!(page.actions[last as usize], Action::ToggleRecentlyAdded));
@@ -665,7 +682,7 @@ mod tests {
         with_fx(|fx| page.activate(last as usize, fx));
         assert!(page.pending_recent.is_some(), "the press arms the durable write");
         assert!(page.state.busy, "the page shows the save in flight");
-        let row = &page.table.sections[0].rows[last as usize];
+        let row = page.table.sections.iter().flat_map(|s| s.rows.iter()).find(|r| r.label == crate::i18n::msg::settings_library_recently_added()).expect("the switch is in the table");
         assert_eq!(row.toggle, Some(true), "optimistic face");
 
         // …and the landing publishes the file's answer into the process copy the Library reads.
@@ -682,8 +699,64 @@ mod tests {
         assert!(page.pending_recent.is_none(), "the write landed");
         assert!(!page.state.busy);
         assert!(crate::route::show_recently_added(), "the file says on and the process copy follows");
-        let row = &page.table.sections[0].rows[last as usize];
+        let row = page.table.sections.iter().flat_map(|s| s.rows.iter()).find(|r| r.label == crate::i18n::msg::settings_library_recently_added()).expect("the switch is in the table");
         assert_eq!(row.toggle, Some(true));
         crate::route::restore_show_recently_added(false);
+    }
+
+    /// #322: the subtitle look stops being the tail of a long list of playback knobs and gets a
+    /// group of its own, with a word on it. The ROW ORDER is what the recorded replay presses by
+    /// position, so the split is not allowed to move a single stop: the flattened rows must still
+    /// read playback first, subtitles second, and the Library switch last.
+    #[test]
+    fn the_subtitle_look_gets_its_own_group_and_no_row_moves() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("prefs-subtitle-group");
+        let page = PreferencesPage::new(EntryId(0), Kind::Playback);
+        let headers: Vec<&str> = page
+            .table
+            .sections
+            .iter()
+            .map(|s| s.header.as_str())
+            .collect();
+        assert_eq!(
+            headers,
+            vec!["", crate::i18n::msg::settings_audio_subtitles()],
+            "the playback group needs no word (the page title has one), the subtitle group does"
+        );
+        let labels: Vec<&str> = page
+            .table
+            .sections
+            .iter()
+            .flat_map(|s| s.rows.iter())
+            .map(|r| r.label.as_str())
+            .collect();
+        let subtitle = crate::i18n::msg::settings_playback_subtitle_size();
+        let at = labels
+            .iter()
+            .position(|l| *l == subtitle)
+            .expect("the subtitle group is on the page");
+        assert!(
+            at > 0,
+            "the subtitle rows come after the playback rows, never before"
+        );
+        for label in labels[..at].iter() {
+            assert!(
+                !label.starts_with("Subtitle "),
+                "a subtitle row stayed behind in the playback group: {label}"
+            );
+        }
+        for label in labels[at..].iter() {
+            assert!(
+                label.starts_with("Subtitle ")
+                    || *label == crate::i18n::msg::settings_library_recently_added(),
+                "a playback row fell into the subtitle group: {label}"
+            );
+        }
+        assert_eq!(
+            page.actions.len(),
+            labels.len(),
+            "one action per row, so a press still lands on the row it names"
+        );
     }
 }
