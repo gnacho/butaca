@@ -1555,6 +1555,17 @@ pub(crate) unsafe fn construct(
             app.loop_t = ms;
             app.last_input = ms;
         }
+    } else if let Some(deferred) = deferred {
+        // The minted client id reaches disk on the LIVE path too. Until this arm existed only the
+        // controlled constructor applied the deferred capture, so a real install kept the id in
+        // memory and never wrote the session file: every preference write is a read-modify-write
+        // that refuses an empty `client_id`, which is why a picked subtitle size was never
+        // remembered (#358). A refusal here is a lost race, not a boot failure — the same
+        // distinction `apply_deferred_capture` makes for the controlled path.
+        match deferred.apply() {
+            Ok(()) => log("bootstrap: session persistence applied"),
+            Err(reason) => log(&format!("bootstrap: session persistence refused — {reason}")),
+        }
     }
     // **ROOT THE TREE AT THE BOOT PAGE.** The `route` chosen above used to be a field of `App`
     // that `bridge::sync_page` mirrored onto the container on the loop's first frame; there is no
