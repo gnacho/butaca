@@ -119,7 +119,12 @@ def append_metrics(fixture, rows):
     return added
 
 
-def run_fixture(binary, assets, fixture, mode, output, timeout):
+def run_fixture_raw(binary, assets, fixture, mode, output, timeout):
+    """One replay, returning `(log, returncode)` even when it refuses.
+
+    `--rebase-shape` has to read a REFUSAL to learn what this build's state shape is, so the
+    failure cannot be raised away here; `run_fixture` keeps the strict contract for the gate.
+    """
     runtime = Path(tempfile.mkdtemp(prefix=fixture.name + '-' + mode.replace('+', '-') + '-',
                                    dir=output))
     (runtime / 'butaca-recplay').write_text('v1\n' + mode + '\n' + str(fixture))
@@ -133,13 +138,74 @@ def run_fixture(binary, assets, fixture, mode, output, timeout):
         except subprocess.TimeoutExpired as error:
             raise ValueError(f'{fixture.name}/{mode}: timeout; evidence {runtime}') from error
     log = runtime / 'butaca-events.log'
-    text = log.read_text() if log.exists() else ''
+    return (log.read_text() if log.exists() else ''), process.returncode
+
+
+def run_fixture(binary, assets, fixture, mode, output, timeout):
+    text, returncode = run_fixture_raw(binary, assets, fixture, mode, output, timeout)
     try:
-        summary = verdict(text, process.returncode, expected_counts(fixture))
+        summary = verdict(text, returncode, expected_counts(fixture))
     except ValueError as error:
-        raise ValueError(f'{fixture.name}/{mode}: {error}; evidence {runtime}') from error
+        raise ValueError(f'{fixture.name}/{mode}: {error}') from error
     print(f'{fixture.name}/{mode}: {summary}', flush=True)
     return text
+
+
+SHAPE_REFUSAL = re.compile(
+    r"recording state shape (0x[0-9a-fA-F]+), this build's is (0x[0-9a-fA-F]+)")
+MODES = ('targets', 'resolve')
+
+
+def rebase_shape(binary, assets, fixtures, output, timeout, reason):
+    """Re-derive a fixture's `state_fp` from this build, and PROVE it with the replay.
+
+    `state_fp` is a guard: a recording whose state layout differs must not be graded, because its
+    frames would not be comparable. It is also a single number, so it cannot tell an ADDITIVE
+    change (a new screen's shape appended, or an argument enum that grew a variant nothing on the
+    recorded route uses) from a real one. The replay can: if the frames still grade SAME in both
+    modes, then nothing the recording touches moved, which is a stronger statement than the hash.
+
+    So: rewrite the number, replay strictly, and keep the rewrite only if it holds. Anything else
+    is refused and the manifest is restored byte for byte, so a wrong rebase leaves no trace.
+    """
+    rebased, clean = [], []
+    for fixture in fixtures:
+        manifest = fixture / 'manifest.json'
+        original = manifest.read_text()
+        data = json.loads(original)
+        text, returncode = run_fixture_raw(binary, assets, fixture, 'resolve', output, timeout)
+        hit = SHAPE_REFUSAL.search(text)
+        if not hit:
+            # No shape refusal: either it already replays, or it fails for a reason this mode
+            # must not paper over. Let the strict path say which.
+            run_fixture(binary, assets, fixture, 'resolve', output, timeout)
+            clean.append(fixture.name)
+            continue
+        if data.get('anchor') and not reason:
+            raise ValueError(f'{fixture.name}: an anchor rebaseline needs --reason')
+        theirs, ours = hit.group(1), hit.group(2)
+        data['state_fp'] = int(ours, 16)
+        data['shape_history'] = list(data.get('shape_history') or []) + [
+            {'from': theirs, 'to': ours, 'reason': reason or ''}]
+        manifest.write_text(json.dumps(data, indent=1, sort_keys=True) + '\n')
+        try:
+            for mode in MODES:
+                text, returncode = run_fixture_raw(binary, assets, fixture, mode, output, timeout)
+                try:
+                    summary = verdict(text, returncode, expected_counts(fixture))
+                except ValueError as error:
+                    raise ValueError(f'{fixture.name}/{mode}: {error}') from error
+                print(f'{fixture.name}/{mode}: {summary} (rebaselined)', flush=True)
+        except Exception:
+            manifest.write_text(original)
+            print(f'{fixture.name}: rebase REFUSED, manifest restored', flush=True)
+            raise
+        rebased.append(f'{fixture.name} {theirs} -> {ours}')
+    for name in clean:
+        print(f'{name}: already current, untouched', flush=True)
+    for line in rebased:
+        print(f'rebaselined {line}', flush=True)
+    return len(rebased)
 
 
 def main():
@@ -153,6 +219,11 @@ def main():
     parser.add_argument('--fill', action='store_true',
                         help='learn the measurements a fixture is missing and write them into it, '
                              'then replay it strictly to prove the fill is right')
+    parser.add_argument('--rebase-shape', action='store_true',
+                        help='re-derive a fixture state_fp from this build and keep the rewrite '
+                             'only if the strict replay still grades SAME in both modes')
+    parser.add_argument('--reason', default='',
+                        help='why the state shape moved; required for an anchor')
     args = parser.parse_args()
     try:
         fixtures = discover(args.fixtures.resolve())
@@ -162,6 +233,15 @@ def main():
         parser.error('--timeout must be positive')
     output = args.output or Path(tempfile.mkdtemp(prefix='butaca-replay-gate-'))
     output.mkdir(parents=True, exist_ok=True)
+    if args.rebase_shape:
+        try:
+            moved = rebase_shape(args.sim.resolve(), args.assets.resolve(), fixtures,
+                                 output.resolve(), args.timeout, args.reason)
+        except (ValueError, OSError) as error:
+            print(f'FAIL: {error}', file=sys.stderr, flush=True)
+            return 1
+        print(f'{moved} fixture(s) rebaselined', flush=True)
+        return 0
     failures = []
     for fixture in fixtures:
         if args.fill:
