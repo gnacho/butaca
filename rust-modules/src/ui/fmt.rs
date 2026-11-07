@@ -65,6 +65,45 @@ pub(crate) fn time_left(remaining_ms: i64) -> String {
     }
 }
 
+/// **The wall clock**, minutes past midnight in the television's own timezone, or `None` when the
+/// platform cannot resolve it. `localtime_r` rather than a UTC subtraction, exactly as the idle
+/// screen's clock and the top bar's are: a living-room clock that ignores the household's offset is
+/// simply wrong.
+///
+/// It is read LIVE, and that is why [`ends_at`]'s caller must size its run from a fixed sample
+/// rather than from the string it draws: a recording's measurement keys ARE the text, so a live
+/// clock in a key would miss on every replay of the same recording.
+pub(crate) fn wall_minutes() -> Option<i32> {
+    let mut now: libc::time_t = 0;
+    // SAFETY: `time` writes a caller-owned value and reads no memory of ours.
+    if unsafe { libc::time(&mut now) } == -1 {
+        return None;
+    }
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: `localtime_r` fills the caller-owned `tm` from `now`.
+    if unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+        // No zone data: the epoch's own UTC hour and minute are the honest fallback, the same one
+        // `ui::idle_screen` takes.
+        return Some((now.rem_euclid(86_400) / 60) as i32);
+    }
+    Some(tm.tm_hour as i32 * 60 + tm.tm_min as i32)
+}
+
+/// `"23:40"` from minutes past midnight, wrapping past midnight — a WALL CLOCK, not a duration, so
+/// [`clock`] (which counts elapsed time and drops the hour's leading zero) is the wrong formatter.
+pub(crate) fn wall_clock(minutes: i32) -> String {
+    let m = minutes.rem_euclid(24 * 60);
+    format!("{:02}:{:02}", m / 60, m % 60)
+}
+
+/// The wall-clock time a film of `dur_ms` starting at `now_min` (minutes past midnight) would end:
+/// `"ends 23:40"`'s own time. The duration is rounded DOWN to whole minutes, which is what a person
+/// plans with, and the sum wraps, so a film started at 23:00 for two hours ends `01:00`.
+pub(crate) fn ends_at(now_min: i32, dur_ms: i64) -> String {
+    let mins = i64::from(now_min) + dur_ms.max(0) / 60_000;
+    wall_clock((mins.rem_euclid(24 * 60)) as i32)
+}
+
 /// Playback clock — "1:23:45" past the hour, else "3:45" (scrubber clocks, chapter stamps).
 pub(crate) fn clock(ms: i64) -> String {
     let s = (ms / 1000).max(0);
@@ -383,4 +422,19 @@ pub(crate) fn rating_suffix(art: crate::metadata::RatingArt) -> &'static str {
         crate::metadata::RatingArt::Imdb | crate::metadata::RatingArt::Community => "/10",
         _ => "",
     }
+}
+
+#[cfg(test)]
+#[test]
+fn the_wall_clock_wraps_and_pads_where_a_duration_would_not() {
+    assert_eq!(wall_clock(0), "00:00");
+    assert_eq!(wall_clock(23 * 60 + 40), "23:40");
+    assert_eq!(wall_clock(24 * 60), "00:00", "midnight is the next day's zero");
+    assert_eq!(wall_clock(-1), "23:59", "and so is a minute before it");
+    // A 2h10 film started at 23:05 ends tomorrow, and says so as a clock, not as 25:15.
+    assert_eq!(ends_at(23 * 60 + 5, 130 * 60_000), "01:15");
+    assert_eq!(ends_at(20 * 60, 9_610_336), "22:40");
+    // A duration that is not a whole minute rounds DOWN: nobody plans around 40 seconds.
+    assert_eq!(ends_at(0, 59_999), "00:00");
+    assert_eq!(ends_at(0, -5), "00:00", "a negative length is not a time in the past");
 }

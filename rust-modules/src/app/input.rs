@@ -573,10 +573,10 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
             // (`ContentReq::Play` in `app::content`), so this takes the same hold-until-released
             // path rather than calling `request_play`/`start_playback_with` directly.
             if !super::content::clear_engine_for_play(ps, pa, super::bridge::player(pages).is_some()) {
-                super::content::hold_feature(intent, 0, None);
+                super::content::hold_feature(intent, 0, crate::route::StartTracks::NONE, None);
                 return;
             }
-            if !super::content::request_play_intent(ps, bridge.metadata_mut(), &intent) {
+            if !super::content::request_play_intent(ps, bridge.metadata_mut(), &intent, crate::route::StartTracks::NONE) {
                 return;
             }
             super::playback::start_playback_with(

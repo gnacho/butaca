@@ -3541,7 +3541,7 @@ impl DetailScreen {
             Some(Located::Extras(_)) => {
                 let Some(d) = self.detail(meta) else { return };
                 let Some(play) = extras::play(d, local) else { return };
-                self.content(fx, ContentReq::Play { play, resume_ns: 0 });
+                self.content(fx, ContentReq::Play { play, resume_ns: 0, tracks: crate::route::StartTracks::NONE });
             }
             Some(Located::Cast(_)) => {
                 let action = self
@@ -3607,7 +3607,7 @@ impl DetailScreen {
                     title: title.to_string(),
                     context: crate::metadata::TRAILER_CONTEXT.into(),
                 };
-                self.content(fx, ContentReq::Play { play, resume_ns: 0 });
+                self.content(fx, ContentReq::Play { play, resume_ns: 0, tracks: crate::route::StartTracks::NONE });
             }
             hero::HeroCtl::Alt => {
                 let set = self.hero_set(meta);
@@ -3690,6 +3690,17 @@ impl DetailScreen {
                     fx,
                 ),
             }
+        } else if self.selected().is_none() && d.has_own_file() {
+            // **The pre-playback window, not the film** (issue #367, under #355). The item this
+            // page holds is the item the press would start, so the window can show its own facts
+            // and offer its own tracks; the window's OK is what plays. An item with an
+            // ALTERNATIVE SOURCE selected plays directly — that copy's tracks are not the ones
+            // this page landed, and a window offering another file's list would be lying.
+            self.content(
+                fx,
+                ContentReq::Panel(ContentPanel::PrePlayback { restart: from_start }),
+            );
+            true
         } else {
             let play = self.selected().map_or_else(
                 || PlayIntent::Item {
@@ -3704,7 +3715,7 @@ impl DetailScreen {
                 |m| PlayIntent::Movie(m.clone()),
             );
             let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
-            self.content(fx, ContentReq::Play { play, resume_ns });
+            self.content(fx, ContentReq::Play { play, resume_ns, tracks: crate::route::StartTracks::NONE });
             true
         }
     }
@@ -3777,7 +3788,7 @@ impl DetailScreen {
             title,
             context,
         };
-        self.content(fx, ContentReq::Play { play, resume_ns });
+        self.content(fx, ContentReq::Play { play, resume_ns, tracks: crate::route::StartTracks::NONE });
         true
     }
 

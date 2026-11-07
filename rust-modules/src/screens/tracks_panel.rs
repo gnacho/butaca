@@ -344,6 +344,23 @@ pub(crate) fn has_atmos(s: &Stream) -> bool {
 /// the server's current pick for this part, i.e. the track that will be used — and it closes the
 /// line because it is the only clause about US rather than about the file.
 pub(crate) fn audio_detail(s: &Stream) -> String {
+    let mut line = audio_choice(s);
+    if s.selected {
+        if line.is_empty() {
+            line = crate::i18n::msg::widgets_tracks_playing().to_string();
+        } else {
+            line.push_str(" \u{b7} ");
+            line.push_str(crate::i18n::msg::widgets_tracks_playing());
+        }
+    }
+    line
+}
+
+/// One audio track as a CHOICE: `"EAC3 5.1 + Atmos · 768 kbps"` — every clause [`audio_detail`]
+/// composes except its `playing` tail, because a picker states the option and the cursor states
+/// the state. `screens::preplay_panel` draws its rows from this, so the window and the inspector
+/// cannot spell one track two ways.
+pub(crate) fn audio_choice(s: &Stream) -> String {
     let mut head = s.codec.to_uppercase();
     let layout = fmt_layout(&s.layout, s.channels);
     if !layout.is_empty() {
@@ -366,9 +383,6 @@ pub(crate) fn audio_detail(s: &Stream) -> String {
     }
     if let Some(b) = fmt_bitrate(s.bitrate) {
         parts.push(b);
-    }
-    if s.selected {
-        parts.push(crate::i18n::msg::widgets_tracks_playing().to_string());
     }
     parts.join(" \u{b7} ")
 }
@@ -406,45 +420,12 @@ pub(crate) fn audio_rows(audio: &[Stream]) -> Vec<TrackRow> {
 /// tell them apart; a forced track never merges into a full one. First-seen order is preserved,
 /// which is the server's order, so the list still reads in container sequence.
 pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
-    use crate::metadata::track_label;
     // (key, name, detail-head, count) — a Vec rather than a map so first-seen order survives; a
     // subtitle list is a handful of entries, so the linear scan is not worth a hash.
     let mut out: Vec<(String, String, String, usize)> = Vec::new();
     for s in subs {
-        let name = if s.lang.trim().is_empty() {
-            crate::i18n::msg::widgets_tracks_unknown().to_string()
-        } else {
-            s.lang.clone()
-        };
-        // The shared parser (`metadata::track_label`, §1): the SAME kind/source split the
-        // Subtitles menu draws, instead of this panel re-deriving its own "Forced"/"SDH" tags
-        // from the raw flags and the raw `s.title` (which double-counted a title that only
-        // repeated its own kind word, e.g. "Форс. iTunes" used to read `FORCED · Форс. iTunes`).
-        let label = track_label::parse(&s.title, &name, s.forced, s.sdh);
-        let mut head = s.codec.to_uppercase();
-        // Both flags can be set on one track (a forced SDH file): show both, as this panel always
-        // has; the parsed kind only ADDS a flag the title spelled out.
-        let (forced, sdh) = track_label::flags(&label, s.forced, s.sdh);
-        for (on, tag) in [
-            (forced, crate::i18n::msg::widgets_tracks_forced()),
-            (sdh, crate::i18n::msg::widgets_badge_sdh()),
-            (s.external, crate::i18n::msg::widgets_tracks_external()),
-        ] {
-            if on {
-                head = if head.is_empty() {
-                    tag.to_string()
-                } else {
-                    format!("{head} \u{b7} {tag}")
-                };
-            }
-        }
-        if !label.source.trim().is_empty() && !label.source.eq_ignore_ascii_case(&name) {
-            head = if head.is_empty() {
-                label.source.clone()
-            } else {
-                format!("{head} \u{b7} {}", label.source.trim())
-            };
-        }
+        let name = subtitle_name(s);
+        let head = subtitle_head(s, &name);
         let key = format!("{}\u{0}{}", name, head);
         match out.iter_mut().find(|e| e.0 == key) {
             Some(e) => e.3 += 1,
@@ -462,6 +443,62 @@ pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
             TrackRow { name, detail }
         })
         .collect()
+}
+
+/// One subtitle track as a CHOICE line: `"English · SUBRIP · Forced"`. The same name and head the
+/// grouped list composes, for ONE track and with no count — a picker lists the tracks a viewer may
+/// choose between, it does not summarise them. `screens::preplay_panel` draws its rows from this.
+pub(crate) fn subtitle_choice(s: &Stream) -> String {
+    let name = subtitle_name(s);
+    let head = subtitle_head(s, &name);
+    if head.is_empty() {
+        name
+    } else {
+        format!("{name} \u{b7} {head}")
+    }
+}
+
+/// A track's display name: the server's own language string, or the app's word for "it did not
+/// say".
+fn subtitle_name(s: &Stream) -> String {
+    if s.lang.trim().is_empty() {
+        crate::i18n::msg::widgets_tracks_unknown().to_string()
+    } else {
+        s.lang.clone()
+    }
+}
+
+/// The distinguishing half of a subtitle line: codec, then the three flags a viewer picks between,
+/// then the title's own source. ONE function for the grouped list and the single-track choice, so
+/// a forced track cannot read "Forced" in the inspector and nothing in the picker.
+fn subtitle_head(s: &Stream, name: &str) -> String {
+    use crate::metadata::track_label;
+    let label = track_label::parse(&s.title, name, s.forced, s.sdh);
+    let mut head = s.codec.to_uppercase();
+    // Both flags can be set on one track (a forced SDH file): show both, as this panel always
+    // has; the parsed kind only ADDS a flag the title spelled out.
+    let (forced, sdh) = track_label::flags(&label, s.forced, s.sdh);
+    for (on, tag) in [
+        (forced, crate::i18n::msg::widgets_tracks_forced()),
+        (sdh, crate::i18n::msg::widgets_badge_sdh()),
+        (s.external, crate::i18n::msg::widgets_tracks_external()),
+    ] {
+        if on {
+            head = if head.is_empty() {
+                tag.to_string()
+            } else {
+                format!("{head} \u{b7} {tag}")
+            };
+        }
+    }
+    if !label.source.trim().is_empty() && !label.source.eq_ignore_ascii_case(name) {
+        head = if head.is_empty() {
+            label.source.clone()
+        } else {
+            format!("{head} \u{b7} {}", label.source.trim())
+        };
+    }
+    head
 }
 
 /// The FILE column.
