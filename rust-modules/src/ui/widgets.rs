@@ -4267,6 +4267,13 @@ impl View for StatusOverlay<'_> {
 pub struct TransportButton {
     pub frame: Rect,
     pub which: i32,
+    /// The glyph, when the caller knows better than the index does.
+    ///
+    /// The row used to be three fixed discs whose mark was a function of their position, so
+    /// `which` was enough. It is not any more: the Play/Pause disc wears a different mark per
+    /// frame, and the Next disc is not drawn at all on a movie. `which` stays because it is the
+    /// row's IDENTITY (what a click and the focus cursor address), not its appearance.
+    pub icon: Option<crate::ui::icons::Icon>,
     pub focused: bool,
     /// WHICH GROUND this disc stands on — see [`ControlGround`]. It defaults to
     /// [`Keyed`](ControlGround::Keyed) like every other control face, even though this family's one
@@ -4284,6 +4291,7 @@ impl TransportButton {
         Self {
             frame,
             which,
+            icon: None,
             focused: false,
             ground: ControlGround::Keyed,
             palette: ControlPalette::default(),
@@ -4292,6 +4300,11 @@ impl TransportButton {
     }
     pub fn focused(mut self, f: bool) -> Self {
         self.focused = f;
+        self
+    }
+    /// Wear this glyph instead of the one this position implies — see [`Self::icon`].
+    pub fn icon(mut self, id: crate::ui::icons::Icon) -> Self {
+        self.icon = Some(id);
         self
     }
     /// Stand this disc on a named [`ControlGround`] — see [`Button::ground`].
@@ -4342,11 +4355,14 @@ impl View for TransportButton {
             self.focused,
             self.ground,
         );
-        let id = match self.which {
-            1 => Icon::Audio,
-            2 => Icon::More,
-            _ => Icon::Cc,
-        };
+        let id = self.icon.unwrap_or(match self.which {
+            1 => Icon::Stop,
+            2 => Icon::SkipNext,
+            3 => Icon::Cc,
+            4 => Icon::Audio,
+            5 => Icon::More,
+            _ => Icon::Play,
+        });
         let s = (r.w * DISC_ICON_RATIO).round();
         let ir = Rect::new(r.x + (r.w - s) * 0.5, r.y + (r.h - s) * 0.5, s, s);
         crate::ui::icons::draw(p, id, ir, ink);

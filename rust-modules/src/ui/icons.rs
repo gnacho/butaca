@@ -93,6 +93,18 @@ pub enum Icon {
     Rewind,
     /// See [`Icon::Rewind`].
     FastForward,
+    /// A filled rounded square — **STOP**, the player transport's third transport control.
+    ///
+    /// A CONTROL, unlike its neighbours [`Icon::Rewind`] and [`Icon::FastForward`]: those are the
+    /// state read-out beside the elapsed clock and the design system forbids making them buttons,
+    /// while this one is pressed. It lives in the transport band (5..19) so it sits optically level
+    /// with [`Icon::Pause`] and [`Icon::SkipNext`] in the same row.
+    Stop,
+    /// A play triangle with a bar on its right — **skip to the next episode**, drawn on a series
+    /// that has one queued. The mirror of [`Icon::PlayStart`], and deliberately not a synonym for
+    /// it: play-start restarts the item you are on, this leaves it. Read [`Icon::PlayStart`] before
+    /// reconciling the pair — the split is by promise, not by taste.
+    SkipNext,
     /// Counter-clockwise circular arrow (↺) — **the detail hero's restart disc, and only that**.
     ///
     /// It is the same ACTION as [`Icon::PlayStart`], which is normally how a second mark gets
@@ -266,7 +278,9 @@ pub(crate) const fn ink_x(id: Icon) -> (f32, f32) {
 /// player HUD's private problem.
 pub(crate) const fn band(id: Icon) -> f32 {
     match id {
-        Icon::Pause | Icon::Rewind | Icon::FastForward => 14.0 / 24.0,
+        Icon::Pause | Icon::Rewind | Icon::FastForward | Icon::Stop | Icon::SkipNext => {
+            14.0 / 24.0
+        }
         Icon::Play => 16.0 / 24.0,
         _ => 1.0,
     }
@@ -291,6 +305,8 @@ fn src(id: Icon) -> &'static str {
         Icon::Pause => include_str!("../../../assets/icons/pause.svg"),
         Icon::Rewind => include_str!("../../../assets/icons/rewind.svg"),
         Icon::FastForward => include_str!("../../../assets/icons/fast-forward.svg"),
+        Icon::Stop => include_str!("../../../assets/icons/stop.svg"),
+        Icon::SkipNext => include_str!("../../../assets/icons/skip-next.svg"),
         Icon::Restart => include_str!("../../../assets/icons/restart.svg"),
         Icon::Trailer => include_str!("../../../assets/icons/trailer.svg"),
         Icon::Info => include_str!("../../../assets/icons/info.svg"),

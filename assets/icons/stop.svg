@@ -1,0 +1,10 @@
+<!-- A filled rounded square — STOP. Worn by the player transport's control row, beside the
+     Play/Pause disc: the transport keys have no on-screen control for this, and the row's other
+     glyphs (Cc / Audio / More) say nothing about leaving the item.
+
+     Geometry: a 14x14 square centred in the 24x24 box (5..19, the transport band that Pause,
+     Rewind and FastForward share), rx 2.4 — the same corner radius per unit as `pause.svg`'s bars,
+     so the mark reads as the same material at 26px. Filled rather than stroked: every other member
+     of the transport family is a solid glyph, and a 2.4-wide outline at this size fills its own
+     counter. -->
+<svg viewBox="0 0 24 24" fill="#ffffff"><rect x="5" y="5" width="14" height="14" rx="2.4"/></svg>
