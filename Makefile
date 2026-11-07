@@ -1440,6 +1440,17 @@ install: ipk tv-lock-require
 	@$(MAKE) --no-print-directory deploy FLAVOR=$(FLAVOR) RELEASE=$(RELEASE) TV=$(TV)
 	@echo "installed and deployed $(APPID)"
 
+# Deploy the package CI built for a commit, on a host that cannot cross-build one.
+#
+# The webOS NDK ships for darwin-arm64, darwin-x86_64 and linux-aarch64 only (see the bootstrap
+# block above), so on x86_64 Linux `make deploy` cannot run: it dies on a missing
+# arm-webos-linux-gnueabi-gcc. CI builds on ubuntu-24.04-arm for that reason, and its .ipk is the
+# payload `make deploy` would have produced from the same commit. This is `make install` with the
+# build replaced by a download, and it re-verifies the sha the television is actually running.
+SHA ?=
+deploy-ci: tv-lock-require
+	tools/deploy-ci.sh "$(TV)" "$(APPID)" "$(or $(SHA),$(shell git rev-parse HEAD))"
+
 # Remove a flavour from the television. Refuses the stable id: uninstalling the app the household
 # watches with is not something a make target should make easy, and appinstalld gives no undo.
 uninstall: tv-lock-require
