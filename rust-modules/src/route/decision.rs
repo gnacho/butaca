@@ -849,6 +849,10 @@ fn commit_in_place_route_projection(ps: &PlaybackSession, quality_contract: bool
 struct TimelineProjection {
     sid: ServerId,
     rating_key: String,
+    /// The `PlaySessionId` the session reports are keyed by — the transcode session when one is
+    /// running, the logical session otherwise, exactly the rule `scrobble_stop` applies to its own
+    /// final report. Captured here so the reporter thread never touches `Session`.
+    session: String,
 }
 
 /// One reporter's authority to sample the playback which spawned it.
@@ -6676,9 +6680,12 @@ pub(crate) fn begin_timeline_reporting(ps: &PlaybackSession) -> Option<TimelineL
     if preview_request(ps) {
         return None;
     }
+    let logical = sess(ps);
+    let transcode = ps.tsession.clone();
     let projection = TimelineProjection {
         sid: cur_sid(ps),
         rating_key: cur_rk(ps),
+        session: if transcode.is_empty() { logical } else { transcode },
     };
     if projection.rating_key.is_empty() || !projection.sid.is_set() {
         return None;
@@ -6695,7 +6702,7 @@ pub(crate) fn begin_timeline_reporting(ps: &PlaybackSession) -> Option<TimelineL
 /// Linearize one worker sample against route replacement and engine teardown. No network work is
 /// done while the mutex is held. `None` permanently invalidates this reporter after its Engine is
 /// retired; transient Applying/Resolving phases skip a hybrid report without borrowing Session.
-fn timeline_snapshot(lease: &TimelineLease) -> Option<()> {
+fn timeline_snapshot(lease: &TimelineLease) -> Option<TimelineProjection> {
     let control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
     if control.engine_epoch != lease.engine_epoch {
         return None;
@@ -6706,7 +6713,7 @@ fn timeline_snapshot(lease: &TimelineLease) -> Option<()> {
     ) {
         return None;
     }
-    control.timeline.as_ref().map(|_| ())
+    control.timeline.clone()
 }
 
 /// POST one periodic timeline update for an exact [`TimelineLease`]. After waiting for the stop
@@ -6720,11 +6727,27 @@ pub(crate) fn report_timeline(lease: &TimelineLease) -> bool {
     // captured an earlier generation and never wait on the stop worker which is joining them.
     TIMELINE_STOP_FENCE.wait(lease.required_stop);
     let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
-    // The wire arm went with the transcoder: this POST was the old `/:/timeline` report, and
-    // the Jellyfin backend reports progress through its own session machinery. What stays is
-    // the gate (a stale Engine's reporter must stay silent across a teardown) and the fence/
-    // effect serialization around it.
-    timeline_snapshot(lease).is_some()
+    // The gate first: a stale Engine's reporter stays silent across a teardown, and a transient
+    // Applying/Resolving phase skips this tick rather than borrowing `Session` for a hybrid report.
+    let Some(projection) = timeline_snapshot(lease) else {
+        return false;
+    };
+    // The wire. `session_progress` opens the session on the FIRST tick of this PlaySessionId and
+    // sends Progress afterwards, which is why the reporter can call it blindly: the distinction
+    // lives in the client, not in a lifecycle this thread does not have. #330 is what its absence
+    // cost — the server logged stops and never a start, so the resume point existed only when the
+    // playback was stopped cleanly.
+    let Some(jc) = (projection.sid == crate::jellyfin::SERVER_ID)
+        .then(crate::jellyfin::client)
+        .flatten()
+    else {
+        // No Jellyfin client (host fixtures, a foreign backend): there is no wire to post to, and
+        // the tick is still a valid sample.
+        return true;
+    };
+    let position_ms = crate::player::playpos_ns() / 1_000_000;
+    let paused = crate::player::preview::paused();
+    jc.session_progress(&projection.rating_key, position_ms, paused, &projection.session)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -6749,3 +6772,84 @@ mod subtitle_style_tests;
 #[path = "track_commit_tests.rs"]
 mod track_commit_tests;
 
+
+#[cfg(test)]
+mod timeline_report_tests {
+    use super::*;
+    use crate::jellyfin::MockServer;
+
+    const AUTH_OK: &str = r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#;
+
+    fn publish(epoch: u64, rating_key: &str, session: &str) {
+        let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
+        control.engine_epoch = epoch;
+        control.phase = ControlPhase::Stable;
+        control.timeline = Some(TimelineProjection {
+            sid: crate::jellyfin::SERVER_ID,
+            rating_key: rating_key.into(),
+            session: session.into(),
+        });
+    }
+
+    fn lease(epoch: u64) -> TimelineLease {
+        TimelineLease {
+            engine_epoch: epoch,
+            required_stop: TIMELINE_STOP_FENCE.announced(),
+        }
+    }
+
+    /// #330: the reporter POSTS. The first tick of a PlaySessionId opens the server session with
+    /// `/Sessions/Playing`, every later one is a Progress — asserted off the wire, because the bug
+    /// this test guards was exactly a report path that returned `true` without sending anything.
+    #[test]
+    fn the_reporter_opens_the_server_session_and_then_reports_progress() {
+        let _serial = crate::testlock::serial();
+        let server = MockServer::start(vec![(200, AUTH_OK), (204, ""), (204, "")]);
+        let client = crate::jellyfin::JfClient::new(
+            crate::origin::Origin::http("127.0.0.1", server.port as i32),
+            "dev-330".into(),
+        );
+        client.authenticate_by_name("demo", "").expect("sign in");
+        crate::jellyfin::install(client);
+        publish(7, "mv-330", "ps-330");
+
+        assert!(report_timeline(&lease(7)), "the first tick is an accepted report");
+        assert!(report_timeline(&lease(7)), "the second tick too");
+
+        crate::jellyfin::uninstall();
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 3, "sign-in plus the two reports: {:?}", reqs);
+        assert!(
+            reqs[1].starts_with("POST /Sessions/Playing HTTP/1.1"),
+            "the FIRST tick opens the session: {}",
+            reqs[1]
+        );
+        assert!(reqs[1].contains("\"ItemId\":\"mv-330\""));
+        assert!(reqs[1].contains("\"PlaySessionId\":\"ps-330\""));
+        assert!(
+            reqs[2].starts_with("POST /Sessions/Playing/Progress HTTP/1.1"),
+            "the second tick is a Progress, not a second open: {}",
+            reqs[2]
+        );
+    }
+
+    /// A stale lease stays silent: it belongs to an Engine that has been replaced, and its tick
+    /// must neither report nor invalidate the current reporter.
+    #[test]
+    fn a_stale_lease_posts_nothing() {
+        let _serial = crate::testlock::serial();
+        let server = MockServer::start(vec![(200, AUTH_OK)]);
+        let client = crate::jellyfin::JfClient::new(
+            crate::origin::Origin::http("127.0.0.1", server.port as i32),
+            "dev-330-stale".into(),
+        );
+        client.authenticate_by_name("demo", "").expect("sign in");
+        crate::jellyfin::install(client);
+        publish(9, "mv-330", "ps-330");
+
+        assert!(!report_timeline(&lease(8)));
+
+        crate::jellyfin::uninstall();
+        assert_eq!(server.finish().len(), 1, "only the sign-in request went out");
+    }
+}
