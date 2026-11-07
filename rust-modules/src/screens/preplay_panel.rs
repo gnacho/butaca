@@ -46,9 +46,11 @@ use std::ffi::CString;
 /// The sheet's frame. Wider than the read-only alerts on purpose: this one holds two columns, and
 /// the left one carries a backdrop and a synopsis.
 const PANEL_W: f32 = 1560.0;
-/// Tall enough for a two-line title, the facts grid, four lines of synopsis and the credits, with
-/// the options column beside them.
-const PANEL_H: f32 = 880.0;
+/// The family's own ceiling: the screen less the glass edge-clear on both sides
+/// (`theme::ALERT_PANEL_RAD`'s argument). The left column spends it on a backdrop beside the
+/// title and the facts, then the prose under them; [`main_synopsis_lines`] is what keeps the
+/// prose inside it rather than a hand-counted line budget.
+const PANEL_H: f32 = SCR_H - 2.0 * EDGE_CLEAR;
 const PAD: f32 = theme::alert::PAD;
 /// The gap between the two columns.
 const COL_GAP: f32 = theme::space::LG;
@@ -57,11 +59,18 @@ const OPTIONS_W: f32 = 380.0;
 /// The left column's width, derived so the two columns and their gap exactly fill the padding box.
 const MAIN_W: f32 = PANEL_W - 2.0 * PAD - COL_GAP - OPTIONS_W;
 
-/// The backdrop band at the head of the main column.
-const ART_H: f32 = 240.0;
+/// The design system's `--glass-edge-clear`, as `screens::about_panel` states it: the sheet never
+/// comes closer than this to any screen edge.
+const EDGE_CLEAR: f32 = 68.0;
+
+/// The backdrop, at the head of the main column and to the LEFT of the title: a 16:9 still at the
+/// size the server scales once for a hero.
+const ART_W: f32 = 420.0;
+const ART_H: f32 = 236.0;
+/// The gap between the backdrop and the title/facts stack beside it.
+const GAP_ART_TEXT: f32 = theme::space::MD;
 /// The title's lead, from the family ladder.
 const TITLE_H: f32 = theme::alert::TITLE_LEAD;
-const GAP_ART_TITLE: f32 = theme::space::MD;
 const GAP_TITLE_FACTS: f32 = theme::space::MD;
 /// One label-over-value pair, from `screens::tracks_panel`'s own rhythm.
 const LABEL_H: f32 = theme::size::CAPTION as f32 * 1.25;
@@ -84,9 +93,9 @@ const ACT_H: f32 = 84.0;
 /// shares.
 const RISE: f32 = crate::ui::popover::Popover::RISE;
 
-/// The longest synopsis the window draws before it is cut: the left column has the credits and the
-/// facts under it, and a synopsis nobody can read in one glance is what the About sheet is for.
-const SYN_LINES: usize = 4;
+/// The most synopsis lines the window ever draws: the left column has the credits under it, and a
+/// synopsis nobody can read in one glance is what the About sheet is for.
+const SYN_LINES_MAX: usize = 4;
 /// The most cast names drawn, and the most crew names after them. A film's cast list runs to
 /// hundreds; the window states who is in it, not the whole call sheet.
 const CAST_MAX: usize = 6;
@@ -316,6 +325,23 @@ pub(crate) fn fact_rows(d: &Detail, audio: usize, now_min: i32) -> Vec<crate::ui
     v
 }
 
+/// How many synopsis lines fit under `room` px, with `credits_h` reserved below it.
+///
+/// **The panel grows to the family's ceiling and this is what keeps the prose inside it.** Every
+/// other block is a constant or a cap, so the budget is arithmetic; it never returns 0, because a
+/// window whose whole left column ends in a heading with nothing under it is worse than one
+/// clipped line. `credits_h` is 0 for an item with no credits, and its gap goes with it.
+pub(crate) fn main_synopsis_lines(room: f32, credits_h: f32, has_credits: bool) -> usize {
+    let reserved = HEAD_H + theme::space::XS + credits_h + if has_credits { SECTION_GAP } else { 0.0 };
+    let body = room - reserved;
+    let lines = (body / SYN_LEAD).floor();
+    if lines >= 1.0 {
+        (lines as usize).min(SYN_LINES_MAX)
+    } else {
+        1
+    }
+}
+
 // ---- the surface -------------------------------------------------------------------------------
 
 /// The fields [`PrePlaybackScreen`] canonicalises, for the recorder's shape pin (§5.4). The cursor
@@ -521,7 +547,13 @@ impl PrePlaybackScreen {
         hint.draw(p, r.x + PANEL_W - PAD - hint.width(measure), cy, measure);
     }
 
-    /// The left column: backdrop, title, facts, genres, synopsis, credits.
+    /// The left column: the backdrop beside the title and the facts, then genres, synopsis and
+    /// credits under them.
+    ///
+    /// The whole column is CLIPPED to its box. Every block below is capped (four synopsis lines,
+    /// two credit lines, six facts), so the arithmetic fits — but a cap is a promise about one
+    /// language's strings, and a translation that wraps one line further must not paint over the
+    /// options column or off the sheet.
     fn paint_main(
         &self,
         p: Painter,
@@ -529,66 +561,62 @@ impl PrePlaybackScreen {
         col: Rect,
         measure: &dyn crate::ui::machine::Measure,
     ) {
+        p.clip(col);
         let mut y = col.y;
 
-        // ---- the backdrop, cover-cropped into the band and scrimmed so the ink above it reads --
-        let band = Rect::new(col.x, y, col.w, ART_H);
-        p.rrect(band, theme::ALERT_PANEL_RAD, theme::ALERT_PANEL_RAD, theme::CONTROL_IDLE_FILL);
-        let (tex, w, h) = if d.art.is_empty() {
-            (0, 0.0, 0.0)
-        } else {
-            widgets::resolve_tex_wh_on(d.sid, &d.art, 1280, 720, 0)
-        };
-        if tex != 0 {
-            p.clip(band);
-            p.tex_uv(
-                tex,
-                crate::gfx::UV_FULL,
-                band.cover(w, h),
-                0.0,
-                theme::with_a(theme::TINT_WHITE, 0.92),
-            );
-            p.clip_clear();
+        // ---- the backdrop, cover-cropped into its own box ------------------------------------
+        //
+        // A HARD rect, not a rounded one: the texture is drawn under a scissor (this renderer has
+        // no rounded-image shader), so a rounded skeleton behind it would show square corners
+        // poking out of the arc.
+        let band = Rect::new(col.x, y, ART_W, ART_H);
+        p.rect(band, 0.0, theme::CONTROL_IDLE_FILL, theme::CONTROL_IDLE_FILL, 0.0);
+        if !d.art.is_empty() {
+            let (tex, w, h) = widgets::resolve_tex_wh_on(d.sid, &d.art, 1280, 720, 0);
+            if tex != 0 {
+                p.clip(band);
+                p.tex_uv(
+                    tex,
+                    crate::gfx::UV_FULL,
+                    band.cover(w, h),
+                    0.0,
+                    theme::with_a(theme::TINT_WHITE, 0.92),
+                );
+                p.clip(col);
+            }
         }
-        // A flat bottom ramp: the band's own picture never fights the title under it.
-        p.rect(
-            Rect::new(band.x, band.y + ART_H * 0.55, band.w, ART_H * 0.45),
-            0.0,
-            theme::scrim(0.0),
-            theme::scrim(0.55),
-            0.0,
-        );
-        y = band.y + band.h + GAP_ART_TITLE;
 
-        // ---- title ---------------------------------------------------------------------------
-        if let Ok(cs) = CString::new(crate::text::elide_by(&d.title, col.w, false, |t| {
+        // ---- title and facts, beside the backdrop --------------------------------------------
+        let text_x = band.x + band.w + GAP_ART_TEXT;
+        let text_w = col.w - ART_W - GAP_ART_TEXT;
+        let mut ty = col.y;
+        if let Ok(cs) = CString::new(crate::text::elide_by(&d.title, text_w, false, |t| {
             measure.width_str(t, theme::size::TITLE, true)
         })) {
             Label::new(cs.as_ptr(), theme::size::TITLE, theme::TEXT_PRIMARY)
                 .bold()
                 .v(VAlign::CapTop)
                 .h(theme::alert::TEXT_ALIGN)
-                .draw(p, Rect::new(col.x, y, col.w, TITLE_H));
+                .draw(p, Rect::new(text_x, ty, text_w, TITLE_H));
         }
-        y += TITLE_H + GAP_TITLE_FACTS;
+        ty += TITLE_H + GAP_TITLE_FACTS;
 
-        // ---- the facts, as a grid of pairs ------------------------------------------------
         let now_min = crate::ui::fmt::wall_minutes().unwrap_or(0);
         let facts = fact_rows(d, self.audio, now_min);
-        let cols = 3usize;
-        let cw = (col.w - COL_GAP * (cols as f32 - 1.0)) / cols as f32;
+        const FACT_COLS: usize = 2;
+        let fcw = (text_w - COL_GAP) / FACT_COLS as f32;
         for (i, pr) in facts.iter().enumerate() {
-            let cx = col.x + (i % cols) as f32 * (cw + COL_GAP);
-            let cy = y + (i / cols) as f32 * (LABEL_H + PAIR_GAP + VALUE_H + ROW_GAP);
-            pair_at(p, pr, cx, cy, cw);
+            let cx = text_x + (i % FACT_COLS) as f32 * (fcw + COL_GAP);
+            let cy = ty + (i / FACT_COLS) as f32 * (LABEL_H + PAIR_GAP + VALUE_H + ROW_GAP);
+            pair_at(p, pr, cx, cy, fcw);
         }
-        let rows = facts.len().div_ceil(cols).max(1);
-        y += rows as f32 * (LABEL_H + PAIR_GAP + VALUE_H + ROW_GAP);
+        let fact_rows_n = facts.len().div_ceil(FACT_COLS).max(1);
+        ty += fact_rows_n as f32 * (LABEL_H + PAIR_GAP + VALUE_H + ROW_GAP);
+        y = ty.max(band.y + band.h) + SECTION_GAP;
 
-        // ---- genres ------------------------------------------------------------------------
+        // ---- genres --------------------------------------------------------------------------
         let genres = genre_line(d);
         if !genres.is_empty() {
-            y += SECTION_GAP;
             if let Ok(cs) = CString::new(crate::text::elide_by(&genres, col.w, false, |t| {
                 measure.width_str(t, theme::size::CAPTION, false)
             })) {
@@ -597,26 +625,33 @@ impl PrePlaybackScreen {
                     .h(theme::alert::TEXT_ALIGN)
                     .draw(p, Rect::new(col.x, y, col.w, GENRE_LEAD));
             }
-            y += GENRE_LEAD;
+            y += GENRE_LEAD + SECTION_GAP;
         }
 
-        // ---- synopsis ----------------------------------------------------------------------
+        // ---- cast and crew, measured FIRST so the synopsis knows what is left -----------------
+        let credits = credits_line(d);
+        let credits_h = if credits.is_empty() {
+            0.0
+        } else {
+            HEAD_H + theme::space::XS + CREDIT_LEAD * 2.0
+        };
+
+        // ---- synopsis ------------------------------------------------------------------------
         if !d.summary.trim().is_empty() {
-            y += SECTION_GAP;
+            let head_h = HEAD_H + theme::space::XS;
+            let lines = main_synopsis_lines(col.y + col.h - y, credits_h, !credits.is_empty());
             head_at(p, crate::i18n::msg::widgets_preplay_overview(), col.x, y, col.w);
-            y += HEAD_H + theme::space::XS;
+            y += head_h;
             let syn = TextView::new(&d.summary, theme::size::LABEL, theme::TEXT_READING)
                 .h(theme::alert::TEXT_ALIGN)
                 .leading(SYN_LEAD)
-                .max_lines(SYN_LINES);
+                .max_lines(lines);
             syn.draw(p, Rect::new(col.x, y, col.w, 0.0));
-            y += syn.measure_h(col.w);
+            y += syn.measure_h(col.w) + SECTION_GAP;
         }
 
-        // ---- cast and crew -----------------------------------------------------------------
-        let credits = credits_line(d);
+        // ---- cast and crew -------------------------------------------------------------------
         if !credits.is_empty() {
-            y += SECTION_GAP;
             head_at(p, crate::i18n::msg::browse_detail_cast(), col.x, y, col.w);
             y += HEAD_H + theme::space::XS;
             let body = TextView::new(&credits, theme::size::CAPTION, theme::TEXT_SECONDARY)
@@ -625,6 +660,7 @@ impl PrePlaybackScreen {
                 .max_lines(2);
             body.draw(p, Rect::new(col.x, y, col.w, 0.0));
         }
+        p.clip_clear();
     }
 
     /// The right column: the two language choices and the primary action.
@@ -1125,6 +1161,23 @@ mod tests {
         assert!(s.move_row(true));
         assert_eq!(s.row, OptionRow::Action);
         assert!(!s.move_row(true), "clamped at the bottom");
+    }
+
+    /// The synopsis is the one block with no fixed height, so its line budget is what keeps the
+    /// column inside the sheet: a full column gets the cap, a tight one gets fewer lines, and a
+    /// column with no room left still gets ONE rather than a heading over nothing.
+    #[test]
+    fn the_synopsis_budget_shrinks_with_the_room_and_never_reaches_zero() {
+        let roomy = main_synopsis_lines(900.0, 0.0, false);
+        assert_eq!(roomy, SYN_LINES_MAX);
+        let tight = main_synopsis_lines(140.0, 0.0, false);
+        assert!(tight < roomy, "less room, fewer lines");
+        assert!(tight >= 1);
+        // Credits below the prose take their own room AND their gap out of the budget.
+        let with_credits = main_synopsis_lines(300.0, 96.0, true);
+        let without = main_synopsis_lines(300.0, 96.0, false);
+        assert!(with_credits <= without, "reserved credits cannot buy lines");
+        assert_eq!(main_synopsis_lines(0.0, 96.0, true), 1, "the floor is one line");
     }
 
     /// The cursor is seeded ONCE: a refresh landing under an open window must not move the
