@@ -224,12 +224,14 @@ pub(crate) fn same_origin(a: &Origin, b: &Origin) -> bool {
     a.scheme() == b.scheme() && a.port() == b.port() && a.host().eq_ignore_ascii_case(b.host())
 }
 
-/// The access-token pair of a path's query, if it has one.
+/// The access-token pair of a path's query, if it has one. The names are [`crate::hls::is_token_name`]'s,
+/// so the two transports cannot disagree about what a credential looks like (#310).
 fn token_pair(path: &str) -> Option<&str> {
     let (_, query) = path.split_once('?')?;
-    query
-        .split('&')
-        .find(|p| p.len() > 13 && p[..13].eq_ignore_ascii_case("X-Plex-Token="))
+    query.split('&').find(|p| {
+        p.split_once('=')
+            .is_some_and(|(name, value)| !value.is_empty() && crate::hls::is_token_name(name))
+    })
 }
 
 /// `path` with `pair` appended to its query, unless a parameter of that name is already there.

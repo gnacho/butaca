@@ -360,16 +360,25 @@ mod webos; // which webOS this set is — nyx's os_info.json, read once at boot 
 /// Cheap by construction: the `find` is a no-op scan for the overwhelming majority of lines, and
 /// the log is written a few times a second at most, never per frame.
 pub(crate) fn redact_tokens(m: &str) -> std::borrow::Cow<'_, str> {
-    const KEY: &str = "X-Plex-Token=";
-    if !m.contains(KEY) {
+    /// The two names a credential can arrive under: the server's `api_key` (#310) and the legacy
+    /// `X-Plex-Token`, still scrubbed because an old URL can sit in a cached route or a log line
+    /// written before the switch. Never redacting the name the server actually uses would leave
+    /// the token in the very file this function exists to keep it out of.
+    const KEYS: [&str; 2] = ["X-Plex-Token=", "api_key="];
+    if !KEYS.iter().any(|key| m.contains(key)) {
         return std::borrow::Cow::Borrowed(m);
     }
     let mut out = String::with_capacity(m.len());
     let mut rest = m;
-    while let Some(at) = rest.find(KEY) {
-        out.push_str(&rest[..at + KEY.len()]);
+    loop {
+        let hit = KEYS
+            .iter()
+            .filter_map(|key| rest.find(key).map(|at| (at, *key)))
+            .min_by_key(|(at, _)| *at);
+        let Some((at, key)) = hit else { break };
+        out.push_str(&rest[..at + key.len()]);
         out.push_str("<redacted>");
-        let after = &rest[at + KEY.len()..];
+        let after = &rest[at + key.len()..];
         // the value ends at the next query separator or any whitespace — whichever comes first
         let end = after
             .find(|c: char| c == '&' || c.is_whitespace())
@@ -505,6 +514,25 @@ mod redact_tests {
         let out = redact_tokens("GET /x?X-Plex-Token=SECRET&audio=3&sub=1 ok");
         assert!(!out.contains("SECRET"));
         assert!(out.contains("audio=3") && out.contains("sub=1") && out.ends_with(" ok"));
+    }
+
+    /// #310: the credential the server actually sends is `api_key`, so the scrubber has to know
+    /// that name too — otherwise the fix for the transcode would have moved the token into the
+    /// event log this function exists to keep it out of.
+    #[test]
+    fn the_servers_own_credential_name_is_scrubbed() {
+        let out = redact_tokens("GET /Videos/1/master.m3u8?api_key=SECRET&audio=3 ok");
+        assert!(!out.contains("SECRET"), "{out}");
+        assert!(out.contains("api_key=<redacted>"), "{out}");
+        assert!(out.ends_with("&audio=3 ok"), "{out}");
+    }
+
+    /// Both names on one line: neither survives, whatever order they arrive in.
+    #[test]
+    fn both_credential_names_are_scrubbed_on_one_line() {
+        let out = redact_tokens("a=?api_key=ONE b=?X-Plex-Token=TWO");
+        assert!(!out.contains("ONE") && !out.contains("TWO"), "{out}");
+        assert_eq!(out.matches("<redacted>").count(), 2);
     }
 
     /// More than one occurrence on one line (two URLs logged together).

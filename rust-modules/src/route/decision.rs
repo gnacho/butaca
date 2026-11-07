@@ -2362,7 +2362,7 @@ impl HlsAbrControl {
         if !self.fixture_base.is_empty() {
             return Ok(PrimedHls {
                 url: format!(
-                    "{}/{}/master.m3u8?offset={}.{:06}&X-Plex-Token=fixture-only",
+                    "{}/{}/master.m3u8?offset={}.{:06}&api_key=fixture-only",
                     self.fixture_base.trim_end_matches('/'),
                     rung.kbps(),
                     offset_micros.max(0) / 1_000_000,
@@ -2710,7 +2710,7 @@ pub(crate) fn arm_auto_fixture(
     let rung = crate::abr::Rung::P480;
     let base = hls_base.trim_end_matches('/');
     let url = format!(
-        "{base}/{}/master.m3u8?X-Plex-Token=<plex-token>",
+        "{base}/{}/master.m3u8?api_key=<plex-token>",
         rung.kbps()
     );
     let encoder = format!("auto-fixture-{}", rung.kbps());
@@ -2872,7 +2872,7 @@ fn install_auto_hls(
     if !fixture_base.is_empty() {
         let encoder = format!("auto-fixture-{}", rung.kbps());
         let url = format!(
-            "{}/{}/master.m3u8?X-Plex-Token=fixture-only",
+            "{}/{}/master.m3u8?api_key=fixture-only",
             fixture_base.trim_end_matches('/'),
             rung.kbps(),
         );

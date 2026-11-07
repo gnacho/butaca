@@ -63,7 +63,9 @@ pub(crate) fn classify(server_namespace: &str, built_key: &str) -> Option<DiskKe
             let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
             (percent_decode(k), percent_decode(v))
         })
-        .filter(|(k, _)| !k.eq_ignore_ascii_case("X-Plex-Token"))
+        // The credential name the server sends is `api_key` (#310); the legacy spelling is
+        // dropped too. Either would otherwise become part of the cache key.
+        .filter(|(k, _)| !crate::hls::is_token_name(k))
         .collect();
     let source_indices: Vec<usize> = params
         .iter()

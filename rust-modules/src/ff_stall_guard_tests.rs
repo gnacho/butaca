@@ -342,7 +342,7 @@ fn the_lookahead_wiring_aborts_through_the_shared_reducer_when_the_guard_is_arme
 
     let master = crate::hls::Resource {
         origin: crate::origin::Origin::http("127.0.0.1", 32400),
-        path: "/master.m3u8?X-Plex-Token=test-token".to_string(),
+        path: "/master.m3u8?api_key=test-token".to_string(),
     };
     let auth = crate::hls::InheritedAuth::capture(&master).expect("fixture token pair");
     let mut cursor = HlsCursor {
@@ -669,7 +669,7 @@ fn segment_on(port: u16) -> (crate::hls::Segment, crate::hls::InheritedAuth) {
     let origin = crate::origin::Origin::http("127.0.0.1", i32::from(port));
     let master = crate::hls::Resource {
         origin: origin.clone(),
-        path: "/video/:/transcode/universal/session/t/base/index.m3u8?X-Plex-Token=test-token"
+        path: "/video/:/transcode/universal/session/t/base/index.m3u8?api_key=test-token"
             .to_string(),
     };
     let auth = crate::hls::InheritedAuth::capture(&master).expect("fixture token pair");
@@ -1208,7 +1208,7 @@ fn a_zero_byte_abort_reaches_the_controller_as_an_abandoned_sample() {
     };
     let master = crate::hls::Resource {
         origin: crate::origin::Origin::http("127.0.0.1", 32400),
-        path: "/master.m3u8?X-Plex-Token=test-token".to_string(),
+        path: "/master.m3u8?api_key=test-token".to_string(),
     };
     let cursor_at = |pending| HlsCursor {
         publishes_duration: true,

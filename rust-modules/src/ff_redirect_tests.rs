@@ -175,16 +175,16 @@ fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
             not_found()
         }
     });
-    let (outcome, _hs) = hls_open_plain(catalog.port, "/start?X-Plex-Token=tok");
+    let (outcome, _hs) = hls_open_plain(catalog.port, "/start?api_key=tok");
     assert_eq!(
         outcome,
-        Ok(("/final/seg.ts?X-Plex-Token=tok".to_string(), 4)),
+        Ok(("/final/seg.ts?api_key=tok".to_string(), 4)),
         "the open must land on the Location, and a later reopen must use it"
     );
     let heads = catalog.heads();
     assert_eq!(heads.len(), 2, "one redirect, one final GET: {heads:?}");
     assert!(
-        request_line(&heads[1]).starts_with("GET /final/seg.ts?X-Plex-Token=tok "),
+        request_line(&heads[1]).starts_with("GET /final/seg.ts?api_key=tok "),
         "a same-origin hop keeps the credential: {}",
         request_line(&heads[1])
     );
@@ -261,7 +261,7 @@ fn a_cross_origin_hop_does_not_forward_the_token() {
             &format!("http://127.0.0.1:{cdn_port}/cdn/v.ts?sig=abc"),
         )
     });
-    let outcome = progressive_open(catalog.port, "/start?X-Plex-Token=tok");
+    let outcome = progressive_open(catalog.port, "/start?api_key=tok");
     assert_eq!(outcome, Ok(("/cdn/v.ts?sig=abc".to_string(), 4)));
     let heads = cdn.heads();
     assert_eq!(heads.len(), 1, "{heads:?}");
@@ -306,7 +306,7 @@ fn a_progressive_open_follows_a_302() {
     let opened = open_plain_progressive(
         &mut *hs,
         &origin,
-        "/library/parts/1/file.mp4?X-Plex-Token=tok",
+        "/library/parts/1/file.mp4?api_key=tok",
         &mut *aq,
     );
     let outcome = match opened {
@@ -318,7 +318,7 @@ fn a_progressive_open_follows_a_302() {
     assert_eq!(
         outcome,
         Some((
-            "/services/iva/assets/1/video.mp4?X-Plex-Token=tok".to_string(),
+            "/services/iva/assets/1/video.mp4?api_key=tok".to_string(),
             8
         ))
     );
@@ -340,7 +340,7 @@ fn an_https_hop_from_the_socket_path_is_routed_to_curl() {
             &format!("https://127.0.0.1:{cdn_port}/cdn/seg.ts?sig=abc"),
         )
     });
-    let outcome = progressive_open(catalog.port, "/start?X-Plex-Token=tok");
+    let outcome = progressive_open(catalog.port, "/start?api_key=tok");
     assert!(
         outcome.is_err(),
         "a plaintext server cannot finish TLS: {outcome:?}"
@@ -379,7 +379,7 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
     let origin = crate::origin::Origin::http("127.0.0.1", catalog.port as i32);
     let cursor = hls_cursor_open(
         &origin,
-        "/old/master.m3u8?X-Plex-Token=tok",
+        "/old/master.m3u8?api_key=tok",
         &mut *aq,
         &mut net,
         false,
@@ -405,7 +405,7 @@ fn an_hls_redirect_off_the_server_origin_is_refused_before_it_is_dialled() {
     let catalog = Scripted::start(move |_head, _port| {
         redirect(302, &format!("http://127.0.0.1:{cdn_port}/cdn/v.ts?sig=abc"))
     });
-    let (outcome, _hs) = hls_open_plain(catalog.port, "/start?X-Plex-Token=tok");
+    let (outcome, _hs) = hls_open_plain(catalog.port, "/start?api_key=tok");
     assert!(outcome.is_err(), "{outcome:?}");
     assert!(cdn.requests().is_empty(), "nothing may reach another origin");
 }
