@@ -493,9 +493,16 @@ jobs:
           # Captured as well as printed: this verdict is the audit's last section, and it is the
           # one thing in the file that needs a LIVE release to establish. The colour codes go —
           # they are for a terminal, not for a markdown code block.
+          #
+          # The status is captured and re-raised, not left to the shell: this runner's bash is
+          # `-eo pipefail`, so a failing verdict aborts the step at the pipeline itself and the
+          # strip below never runs. That is how v0.8.0's audit recorded the escaped output
+          # instead of the verdict. A red step must still leave a readable section behind.
+          status=0
           ci/verify-published.sh "${{ needs.guard.outputs.tag || github.ref_name }}" 2>&1 \
-            | tee /tmp/published.txt
+            | tee /tmp/published.txt || status=$?
           sed -i 's/\x1b\[[0-9;]*m//g' /tmp/published.txt
+          exit "$status"
 
       # The completed audit goes to the LINE the release was cut from — main for an ordinary
       # trunk release, or the same `release/vX.Y` branch `prepare` bumped and tagged for a
