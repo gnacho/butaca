@@ -36,6 +36,10 @@ struct PlaybackRequest {
     /// Background hero preview. No PlayQueue, no timeline, no scrobble, resume at 0, and the
     /// caller must not push the player route.
     preview: bool,
+    /// The pre-playback window's track choice (issue #367), or [`StartTracks::NONE`]. Retained
+    /// with the request so the session can be described whole; a RETRY deliberately ignores it
+    /// (`request_play_inner`), because by then the live selection is the truth.
+    start_tracks: StartTracks,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5119,6 +5123,7 @@ impl ResolveEnv {
     fn snapshot(ps: &PlaybackSession, meta: crate::metadata::MetadataView<'_>, sid: ServerId, rk: &str) -> ResolveEnv {
         ResolveEnv {
             sid,
+            start_tracks: StartTracks::NONE,
             audio_sid: cur_audio_sid(ps),
             sub_sid: cur_sub_sid(ps),
             subtitle_override: None,
@@ -5298,6 +5303,25 @@ pub(crate) fn request_play(
     title: &str,
     ctx: &str,
 ) -> bool {
+    request_play_with_tracks(ps, meta, sid, rk, part, vcodec, acodec, title, ctx, StartTracks::NONE)
+}
+
+/// [`request_play`] with the pre-playback window's track choice (issue #367): the film starts with
+/// the audio and subtitle the viewer named before the picture, instead of with the ladder's own
+/// pick. [`StartTracks::NONE`] is byte-for-byte the call above.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn request_play_with_tracks(
+    ps: &mut PlaybackSession,
+    meta: &mut crate::stores::metadata::MetadataStore,
+    sid: ServerId,
+    rk: &str,
+    part: &str,
+    vcodec: &str,
+    acodec: &str,
+    title: &str,
+    ctx: &str,
+    start: StartTracks,
+) -> bool {
     request_play_inner(
         ps,
         meta,
@@ -5310,6 +5334,7 @@ pub(crate) fn request_play(
             title: title.to_owned(),
             ctx: ctx.to_owned(),
             preview: false,
+            start_tracks: start,
         },
         None,
         false,
@@ -5340,6 +5365,7 @@ pub(crate) fn request_preview(
             title: title.to_owned(),
             ctx: crate::metadata::TRAILER_CONTEXT.to_owned(),
             preview: true,
+            start_tracks: StartTracks::NONE,
         },
         None,
         false,
@@ -5419,6 +5445,15 @@ fn request_play_inner(
     let mut env = ResolveEnv::snapshot(ps, meta.view(), sid, rk);
     env.omit_queue_continuous = crate::metadata::context_omits_queue_continuous(ctx);
     env.set_preview(request.preview);
+    // The pre-playback window's pick (issue #367) belongs to the START of an item and to nothing
+    // else. A retry is the same item already playing: its live selection (the retry context, below)
+    // is the truth by then, and re-applying the window's choice would undo a track switched during
+    // the film.
+    env.start_tracks = if retry.is_some() {
+        StartTracks::NONE
+    } else {
+        request.start_tracks
+    };
     if let Some(retry) = retry {
         apply_retry_enhancement(&mut env, retry);
         // `request_play` resets the live selection because that is correct for a new item.  A

@@ -379,3 +379,39 @@ fn a_remembered_subtitle_the_menu_cannot_name_is_ignored() {
         "an id the menu cannot name is not a subtitle worth turning on"
     );
 }
+
+/// **The pre-playback window's pick has three subtitle states and they are not the same answer**
+/// (issue #367): `-1` leaves the ladder alone, `0` is the viewer's explicit Off, and an id names a
+/// track. Collapsing Off into "no pick" is how a window's Off would bring the file's default
+/// subtitle back on.
+#[test]
+fn a_pre_playback_pick_distinguishes_off_from_no_pick_at_all() {
+    assert_eq!(StartTracks::NONE.audio(), None);
+    assert_eq!(StartTracks::NONE.subtitle(), None);
+    assert_eq!(StartTracks::default(), StartTracks::NONE);
+
+    let off = StartTracks { audio_sid: 3, sub_sid: 0 };
+    assert_eq!(off.audio(), Some(3));
+    assert_eq!(off.subtitle(), Some(0), "an explicit Off is an answer");
+
+    let picked = StartTracks { audio_sid: 0, sub_sid: 7 };
+    assert_eq!(picked.audio(), None);
+    assert_eq!(picked.subtitle(), Some(7));
+}
+
+/// The subtitle a window names is carried by stream id and resolved to the renderer's ordinal; an
+/// id the file does not carry, or one this client cannot draw, is Off rather than a substitute.
+#[test]
+fn a_named_subtitle_resolves_to_the_renderers_ordinal_or_to_off() {
+    let subs = vec![
+        sub(4, 1, "eng", false),
+        sub(5, 2, "eng", false),
+        sub(9, 3, "eng", true),
+    ];
+
+    assert_eq!(chosen_subtitle(&subs, 4), Some((4, 0)));
+    assert_eq!(chosen_subtitle(&subs, 5), Some((5, 1)));
+    assert_eq!(chosen_subtitle(&subs, 9), None, "a sidecar has no container ordinal");
+    assert_eq!(chosen_subtitle(&subs, 77), None, "an id the file does not carry");
+    assert_eq!(chosen_subtitle(&subs, 0), None, "Off");
+}

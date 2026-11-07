@@ -572,6 +572,44 @@ fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<Up
 /// a *function call* — `server::client_opt()` — which is worse, because `Send` cannot see a function
 /// call and a worker that resolves its own server therefore compiles clean and passes every test.
 /// It is captured here, at the request, and every server call the worker makes is `client_for(sid)`.
+/// **The tracks the pre-playback window chose, carried into the resolve that starts the film**
+/// (issue #367). Every other play leaves this out and the ladder picks as it always has.
+///
+/// `audio_sid` is a server stream id — Jellyfin's `Stream.id`, which this client mirrors from the
+/// stream `Index` — so it names the same track the window drew. `sub_sid` has THREE states and they
+/// are deliberately not collapsed: `-1` means "no pick, the ladder decides" (subtitles start off
+/// unless the server or the series says otherwise), `0` means the viewer chose **Off** in the
+/// window, and a positive id names the track to start with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct StartTracks {
+    pub(crate) audio_sid: i64,
+    pub(crate) sub_sid: i64,
+}
+
+impl StartTracks {
+    /// Nothing was chosen: the ladder's own answer stands, exactly as before this type existed.
+    pub(crate) const NONE: Self = Self {
+        audio_sid: 0,
+        sub_sid: -1,
+    };
+
+    /// The audio track the viewer named, if any.
+    pub(crate) fn audio(&self) -> Option<i64> {
+        (self.audio_sid > 0).then_some(self.audio_sid)
+    }
+
+    /// The subtitle answer the viewer gave: `Some(0)` is an explicit Off, `Some(id)` a track.
+    pub(crate) fn subtitle(&self) -> Option<i64> {
+        (self.sub_sid >= 0).then_some(self.sub_sid)
+    }
+}
+
+impl Default for StartTracks {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct ResolveEnv {
     /// WHICH SERVER this playback's item lives on — the scope for every server-local key the
@@ -579,6 +617,13 @@ pub(crate) struct ResolveEnv {
     /// [`Session::cur_sid`]): captured on the main thread with everything else here, because the
     /// resolve worker must not read the current server itself.
     pub sid: ServerId,
+    /// The pre-playback window's explicit track choice (issue #367), or [`StartTracks::NONE`].
+    ///
+    /// A field of its own rather than the `audio_sid`/`sub_sid` pair below: those two are the
+    /// RETRY contract and mean "this item was already playing with these", while this is "this item
+    /// has never played and the viewer picked before the picture". Collapsing them would make a
+    /// retry inherit a window choice it never made, and the window inherit a retry's.
+    pub start_tracks: StartTracks,
     pub audio_sid: i64,
     pub sub_sid: i64,
     /// A retry carries the viewer's explicit Off as well as a positive subtitle id.
@@ -990,8 +1035,26 @@ fn remembered_subtitle(
     Some((subs[hit].id, ord))
 }
 
-pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
-    if mode == DirectPlayMode::Forced {
+/// The subtitle the pre-playback window chose, as `(stream id, render ordinal)` — or `None` for an
+/// explicit Off and for a pick the client renderer cannot draw (a sidecar: it has no container
+/// ordinal, and a transcode is the only way to show it).
+///
+/// The window offers the same tracks this can carry, so the `None` arm is the Off answer rather
+/// than a silent substitution: starting a different subtitle than the one named would be worse than
+/// starting none.
+fn chosen_subtitle(subs: &[crate::metadata::Stream], sid: i64) -> Option<(i64, i32)> {
+    if sid <= 0 {
+        return None;
+    }
+    let i = subs.iter().position(|s| s.id == sid && !s.external)?;
+    let ord = crate::metadata::sub_render_ordinal(subs, i);
+    if ord < 0 || !embedded_subtitle_renderable(&subs[i].codec) {
+        return None;
+    }
+    Some((subs[i].id, ord))
+}
+
+pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {    if mode == DirectPlayMode::Forced {
         crate::devcaps::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
     } else {
         crate::devcaps::is_dp_audio_track(codec, channels)
@@ -1373,10 +1436,24 @@ fn build_stream_jellyfin(
         .playing
         .as_ref()
         .and_then(|p| crate::route::series_tracks(&p.show_rk));
-    let audio_sel = remembered
-        .as_ref()
-        .and_then(|m| remembered_audio(tracks, m))
-        .or_else(|| pick_dp_audio_pref(tracks, acodec, AudioLangPrefs::default()));
+    // **The pre-playback window's pick outranks everything** (issue #367): the viewer named this
+    // track on a surface whose whole point is that the film has not started yet. A pick this TV
+    // cannot decode still wins, and costs a transcode — the alternative is starting with a track
+    // the viewer did not choose.
+    let chosen_audio = env
+        .start_tracks
+        .audio()
+        .and_then(|sid| tracks.iter().position(|s| s.id == sid));
+    let audio_sel = match chosen_audio {
+        Some(i) if audio_direct_plays(DirectPlayMode::Auto, &tracks[i].codec, tracks[i].channels) => {
+            Some((i as i32, tracks[i].codec.to_lowercase(), tracks[i].id))
+        }
+        Some(_) => None,
+        None => remembered
+            .as_ref()
+            .and_then(|m| remembered_audio(tracks, m))
+            .or_else(|| pick_dp_audio_pref(tracks, acodec, AudioLangPrefs::default())),
+    };
     // The demuxer's own container list: the DTO's container name is the same fact the old lane
     // read off a part-key extension (`streamable_container` owns the one list, so the two
     // backends cannot disagree).
@@ -1431,20 +1508,28 @@ fn build_stream_jellyfin(
         // subtitle comes up on a direct play exactly as it did on the wire backend (which read
         // the server's per-part selection instead, this backend has none). `apply_plan` installs
         // it on the main thread, the client renderer takes the embedded-subtitle ordinal.
-        let sub_pick = plan.playing.as_ref().and_then(|p| {
-            let fallback = || {
-                pick_dp_subtitle_account(
-                    &p.subs,
-                    &crate::media::ShowLangPrefs::default(),
-                    "",
-                )
-            };
-            match remembered.as_ref() {
-                // Subtitles off is a choice as much as a language is: this show was watched
-                // with them off, so the file's default does not get to bring them back.
-                Some(m) if m.sub_index == 0 && m.sub_lang.is_empty() => None,
-                Some(m) => remembered_subtitle(&p.subs, m).or_else(fallback),
-                None => fallback(),
+        //
+        // **The pre-playback window answers for this item when it was open** (#367), and its
+        // answer is final in both directions: a named track wins, and an explicit Off is not
+        // overruled by the series memory or the file's own default — the viewer said no on the
+        // frame before the picture.
+        let sub_pick = plan.playing.as_ref().and_then(|p| match env.start_tracks.subtitle() {
+            Some(sid) => chosen_subtitle(&p.subs, sid),
+            None => {
+                let fallback = || {
+                    pick_dp_subtitle_account(
+                        &p.subs,
+                        &crate::media::ShowLangPrefs::default(),
+                        "",
+                    )
+                };
+                match remembered.as_ref() {
+                    // Subtitles off is a choice as much as a language is: this show was watched
+                    // with them off, so the file's default does not get to bring them back.
+                    Some(m) if m.sub_index == 0 && m.sub_lang.is_empty() => None,
+                    Some(m) => remembered_subtitle(&p.subs, m).or_else(fallback),
+                    None => fallback(),
+                }
             }
         });
         if let Some((ssid, ord)) = sub_pick {
@@ -1463,7 +1548,22 @@ fn build_stream_jellyfin(
     // ---- transcode: ask the server to decide with this set's profile -------------------------
     let msid = if part == rk { "" } else { part };
     // the client fills UserId itself — it owns the token state
-    let body = crate::jellyfin::profile::playback_info_body(plan.contract.ceiling, 0);
+    //
+    // **A pre-playback pick is named in the BODY** (#367), the same `MediaSourceId` +
+    // `AudioStreamIndex`/`SubtitleStreamIndex` contract a mid-playback switch uses
+    // (`playback_info_body_for`): without the source id the server answers with the DEFAULTS and
+    // silently ignores the indices. No pick sends exactly the object the resolve path always has.
+    let pick = env.start_tracks;
+    let body = match (pick.audio(), pick.subtitle()) {
+        (None, None) => crate::jellyfin::profile::playback_info_body(plan.contract.ceiling, 0),
+        (audio, sub) => crate::jellyfin::profile::playback_info_body_for(
+            plan.contract.ceiling,
+            0,
+            msid,
+            audio.map(|sid| sid as i32),
+            sub.filter(|sid| *sid > 0).map(|sid| sid as i32),
+        ),
+    };
     let Some(info) = c.playback_info(rk, msid, &body) else {
         return plan; // unreachable/unparseable — url-less plan, resolve_failed tells the page
     };
@@ -1487,6 +1587,15 @@ fn build_stream_jellyfin(
             };
             // The SERVER's session id — the transcode's kill handle and the progress quote.
             plan.tsession = info.play_session_id.clone().unwrap_or_default();
+            // **What the server was told to cut** (#367). `apply_plan` installs `sub_sid` as the
+            // live selection, so the track menu's checkmark and a later re-transcode both keep the
+            // viewer's pick instead of reading 0 as "nothing was chosen".
+            if let Some(sid) = pick.audio() {
+                plan.audio = Some(crate::route::CarriedAudio::named(sid, -1));
+            }
+            if let Some(sid) = pick.subtitle().filter(|sid| *sid > 0) {
+                plan.sub_sid = sid;
+            }
         }
         None => {
             if !source.supports_transcoding {
