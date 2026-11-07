@@ -345,7 +345,8 @@ fn fill_streams(it: &BaseItemDto, d: &mut Detail) {
                     d.vcodec = st.codec.clone().unwrap_or_default();
                     d.width = st.width.unwrap_or(0) as i64;
                     d.height = st.height.unwrap_or(0) as i64;
-                    d.video_resolution = resolution_class(st.height.unwrap_or(0));
+                    d.video_resolution =
+                        resolution_class(st.width.unwrap_or(0), st.height.unwrap_or(0));
                     d.video_fps = st.real_frame_rate.unwrap_or(0.0) as f64;
                     d.aspect_ratio = st
                         .aspect_ratio
@@ -418,7 +419,22 @@ fn dovi_from_range(video_range_type: Option<&str>) -> Dovi {
 
 /// `4k` / `1080` / `720` / `sd` — the hero badge's vocabulary, classified by frame height
 /// exactly as the retired `Media.videoResolution` was (a 1918-pixel-wide scope film is 1080p).
-fn resolution_class(height: i32) -> String {
+fn resolution_class(width: i32, height: i32) -> String {
+    // The class belongs to the SOURCE, and WIDTH is the half that fixes it: a "1080p" master is
+    // 1920 wide whatever it is cropped to, while the height follows the aspect ratio. Reading the
+    // height alone labelled every scope film one class low — a 1920x800 1080p came out 720, and a
+    // 3840x1608 4K came out 1080 (#363).
+    if width > 0 {
+        return match width {
+            w if w >= 3400 => "4k",
+            w if w >= 1700 => "1080",
+            w if w >= 1100 => "720",
+            _ => "sd",
+        }
+        .to_string();
+    }
+    // A stream that does not report a width falls back to the old rule, so nothing that worked
+    // stops working.
     match height {
         h if h >= 2000 => "4k",
         h if h >= 1000 => "1080",
@@ -665,6 +681,20 @@ mod tests {
         assert_eq!(p.audio.len(), 1);
     }
 
+    /// #363: the class is a property of the source, and width is what fixes it. A scope film
+    /// crops its height, so the height alone labelled every one of them a class too low.
+    #[test]
+    fn the_resolution_class_is_read_off_the_width_not_the_cropped_height() {
+        assert_eq!(resolution_class(1920, 800), "1080", "a 1080p scope film is not 720");
+        assert_eq!(resolution_class(3840, 1608), "4k", "a 4K scope film is not 1080");
+        assert_eq!(resolution_class(1280, 720), "720");
+        assert_eq!(resolution_class(720, 480), "sd");
+        // A stream that does not report a width keeps the old answer.
+        assert_eq!(resolution_class(0, 1080), "1080");
+        assert_eq!(resolution_class(0, 720), "720");
+        assert_eq!(resolution_class(0, 0), "sd");
+    }
+
     #[test]
     fn a_leaf_record_maps_the_whole_detail() {
         let it: BaseItemDto = serde_json::from_str(DETAIL_JSON).unwrap();
@@ -700,7 +730,7 @@ mod tests {
         assert_eq!(d.bitrate, 98_280); // bps → kbps
         assert_eq!(d.width, 3840);
         assert_eq!(d.height, 1608);
-        assert_eq!(d.video_resolution, "1080"); // 1608 lines of scope IS 1080p
+        assert_eq!(d.video_resolution, "4k"); // 3840 wide; the 1608 lines are the scope crop (#363)
         assert!((d.video_fps - 24.0).abs() < 0.01);
         assert!((d.aspect_ratio - 2.4).abs() < 0.01);
         assert!(d.hdr);
