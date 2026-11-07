@@ -2934,3 +2934,4 @@
 {"bit":true,"f":389,"t":"present","why":null}
 {"elem":0,"entry":2,"f":389,"group":0,"t":"fo"}
 {"f":389,"hash":11608508423710537061,"t":"st"}
+{"f": 389, "t": "metrics", "q": {"kind": "Cap", "sz": 28}, "bits": 1101004800}
