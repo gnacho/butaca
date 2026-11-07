@@ -18,7 +18,7 @@
 
 use super::client::JfClient;
 use super::dto::{BaseItemDto, MediaSourceDto, PersonDto};
-use crate::metadata::{Cast, Chapter, Detail, Dovi, Episode, Season, Stream};
+use crate::metadata::{Cast, Chapter, Detail, Dovi, Episode, Rating, RatingArt, Season, Stream};
 use crate::registry::ServerId;
 
 /// The whole detail fetch for one item — `metadata::fetch_full`'s Jellyfin arm. `None` is the
@@ -300,7 +300,20 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
         related: Vec::new(),
         chapters: chapters_from_dto(&it.chapters),
         markers: Vec::new(), // the caller arms them per kind (see fetch_full)
-        ratings: Vec::new(), // Jellyfin does not name score sources; an empty row draws nothing
+        // Jellyfin does not name score sources, so the row can only ever hold the one community
+        // score the server serves, under a caption that claims no provider (issue #317). No
+        // rating means no row: an empty row draws nothing.
+        ratings: it
+            .community_rating
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|v| {
+                vec![Rating {
+                    art: RatingArt::Community,
+                    value: f64::from(v),
+                    critic: false,
+                }]
+            })
+            .unwrap_or_default(),
     };
     if !is_show {
         fill_streams(it, &mut d);
@@ -876,5 +889,33 @@ mod tests {
         assert_eq!(m[0].kind, crate::metadata::MarkerKind::Intro);
         assert_eq!((m[0].start_ms, m[0].end_ms), (5_000, 90_000));
         assert_eq!(m[1].kind, crate::metadata::MarkerKind::Credits);
+    }
+
+    /// #317: Jellyfin names no score source, so the one score it does send is shown as itself.
+    /// The row says what the server said (0-10, one decimal) and claims no provider: printing the
+    /// same number under an IMDb and a TMDb logo would be inventing an attribution the payload
+    /// never carried.
+    #[test]
+    fn the_community_rating_is_shown_as_the_one_score_the_server_has() {
+        let with = DETAIL_JSON.replace(
+            "\"OfficialRating\": \"PG\",",
+            "\"OfficialRating\": \"PG\", \"CommunityRating\": 7.4,",
+        );
+        let it: BaseItemDto = serde_json::from_str(&with).unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert_eq!(d.ratings.len(), 1, "one score, not one per provider");
+        assert_eq!(d.ratings[0].art, RatingArt::Community);
+        assert!((d.ratings[0].value - 7.4).abs() < 1e-6, "f32 widened, not re-rounded");
+        assert!(!d.ratings[0].critic);
+        // It is a 0-10 score, so it reads as one and not as a percentage.
+        assert_eq!(crate::ui::fmt::rating_score(d.ratings[0].art, d.ratings[0].value), "7.4");
+        assert_eq!(crate::ui::fmt::rating_suffix(d.ratings[0].art), "/10");
+    }
+
+    #[test]
+    fn an_item_the_server_scored_not_at_all_draws_no_rating_row() {
+        let it: BaseItemDto = serde_json::from_str(DETAIL_JSON).unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert!(d.ratings.is_empty());
     }
 }
