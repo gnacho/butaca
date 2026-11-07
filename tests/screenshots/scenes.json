@@ -77,6 +77,8 @@
     },
     {
       "name": "detail",
+      "free_regions": [[87, 861, 491, 68]],
+      "tolerance_reason": "Measured over three capture pairs at 1920x1080: the row's tint comes back identical, or 6 pixels at |delta| 1, or the whole row at |delta| 3, while every pixel OUTSIDE the row is identical in all three pairs. The row is the only thing on the page not drawn from its own inputs: a keyed control derives its fill from `gfx::sample_ground`, which queues a framebuffer readback of the hero's fading ground and latches the worst tap, so a latch that lands a frame earlier or later shifts the whole row by a level or two together. Nothing in the copy column, the layout, the artwork admission or the text shaping moves: that is what this region excludes, and the rest of the canvas still grades at 1.",
       "state": "The detail page of Tears of Steel (`@tears-of-steel`), part-watched, so its primary action reads Resume.",
       "triggers": {"server": "0", "detail": "@tears-of-steel"},
       "expect": ["detail: sid=0 rk=@tears-of-steel"],
