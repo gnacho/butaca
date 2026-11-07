@@ -27,17 +27,17 @@ pub(crate) struct InheritedAuth {
     token_pair: String,
 }
 
-/// The credential parameter this capture recognises.
-///
-/// It is the name the retired client appended, and it is still here because it is the ONE name
-/// the capture accepts: every fixture below builds its master with it for that reason. A Jellyfin
-/// transcode URL carries `api_key` instead (see `jellyfin::client::transcode_url`), so a
-/// transcoded master cannot be captured today. That is a defect of this parser and not a remnant
-/// to delete, so #308 left it alone: issue #310 owns the fix, and it will re-point these fixtures
-/// when it lands.
+/// The query names that carry a credential: the server's own `api_key`, which every Jellyfin
+/// transcode URL has, and the legacy `X-Plex-Token`, which nothing in the app produces any more
+/// but which a route or a cached URL may still spell. Both are credential names, so a playlist
+/// carrying two of EITHER is still [`Error::MultipleCredentials`] — accepting a second name must
+/// not become a way to slip a second credential past the one-pair rule (#310).
+pub(crate) fn is_token_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("api_key") || name.eq_ignore_ascii_case("X-Plex-Token")
+}
+
 fn is_token_pair(pair: &str) -> bool {
-    pair.split_once('=')
-        .is_some_and(|(name, _)| name.eq_ignore_ascii_case("X-Plex-Token"))
+    pair.split_once('=').is_some_and(|(name, _)| is_token_name(name))
 }
 
 impl fmt::Debug for InheritedAuth {
@@ -56,7 +56,10 @@ impl InheritedAuth {
         let mut found = query.split('&').filter(|pair| is_token_pair(pair));
         let token_pair = found
             .next()
-            .filter(|pair| pair.len() > "X-Plex-Token=".len())
+            .filter(|pair| {
+                pair.split_once('=')
+                    .is_some_and(|(_, value)| !value.is_empty())
+            })
             .ok_or(Error::MissingCredential)?;
         if found.next().is_some() {
             return Err(Error::MultipleCredentials);
@@ -1057,9 +1060,6 @@ fn path_without_query(path: &str) -> &str {
 mod tests {
     use super::*;
 
-    // Every master below carries `X-Plex-Token` because that is the only credential parameter
-    // `is_token_pair` accepts. The server sends `api_key` (issue #310), so these fixtures encode
-    // the parser rather than the wire; the fix re-points them.
     fn source(path: &str) -> Resource {
         Resource::new(Origin::http("192.0.2.10", 32400), path).unwrap()
     }
@@ -1082,7 +1082,7 @@ mod tests {
 
     #[test]
     fn observed_one_variant_master_resolves_quoted_attributes_and_relative_child() {
-        let start = source("/video/:/transcode/universal/start.m3u8?X-Plex-Token=secret");
+        let start = source("/video/:/transcode/universal/start.m3u8?api_key=secret");
         let parsed = parse_master(
             &start,
             "#EXTM3U\r\n#EXT-X-VERSION:4\r\n#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=3538000,RESOLUTION=1280x720,FRAME-RATE=60.000000,CODECS=\"avc1.640028,mp4a.40.2\"\r\nsession/example/base/index.m3u8\r\n",
@@ -1346,7 +1346,7 @@ mod tests {
 
     #[test]
     fn resource_debug_never_prints_a_playlist_query() {
-        let resource = source("/session/index.m3u8?X-Plex-Token=not-for-a-log&part=2");
+        let resource = source("/session/index.m3u8?api_key=not-for-a-log&part=2");
         let debug = format!("{resource:?}");
         assert!(debug.contains("/session/index.m3u8?<query>"));
         assert!(!debug.contains("not-for-a-log"));
@@ -1355,7 +1355,7 @@ mod tests {
 
     #[test]
     fn observed_sanitized_corpus_accepts_legacy_allow_cache() {
-        let master = source("/video/:/transcode/universal/start.m3u8?X-Plex-Token=secret");
+        let master = source("/video/:/transcode/universal/start.m3u8?api_key=secret");
         let master = parse_master(
             &master,
             "#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=575000,RESOLUTION=480x200,FRAME-RATE=24.000\nsession/sanitized/base/index.m3u8\n",
@@ -1433,23 +1433,69 @@ mod tests {
 
     #[test]
     fn transport_inherits_auth_without_exposing_or_replacing_it() {
-        let master = source("/start.m3u8?session=s&X-Plex-Token=top-secret");
+        let master = source("/start.m3u8?session=s&api_key=top-secret");
         let auth = InheritedAuth::capture(&master).unwrap();
         let child = master.resolve("session/index.m3u8?part=2").unwrap();
         assert_eq!(
             auth.request_path(&child).unwrap(),
-            "/session/index.m3u8?part=2&X-Plex-Token=top-secret"
+            "/session/index.m3u8?part=2&api_key=top-secret"
         );
         assert_eq!(format!("{auth:?}"), "InheritedAuth(<redacted>)");
         assert_eq!(
-            auth.request_path(&source("/segment.ts?X-Plex-Token=other")),
+            auth.request_path(&source("/segment.ts?api_key=other")),
             Err(Error::CredentialChanged)
         );
         assert_eq!(
             auth.request_path(&source(
-                "/segment.ts?X-Plex-Token=top-secret&x-plex-token=top-secret"
+                "/segment.ts?api_key=top-secret&x-plex-token=top-secret"
             )),
             Err(Error::MultipleCredentials)
+        );
+    }
+
+    #[test]
+    fn the_credential_is_captured_under_the_name_the_server_sends() {
+        // #310: every Jellyfin transcode URL carries `api_key`; the parser used to accept only the
+        // retired client's name, so a transcode died before its first segment.
+        let master = source("/video/:/transcode/universal/start.m3u8?api_key=server-token");
+        let auth = InheritedAuth::capture(&master).unwrap();
+        assert_eq!(
+            auth.request_path(&source("/session/index.m3u8")),
+            Ok("/session/index.m3u8?api_key=server-token".to_string())
+        );
+    }
+
+    #[test]
+    fn the_legacy_credential_name_still_authenticates() {
+        // Nothing in the app produces it any more, but a route or a cached URL may still spell it,
+        // and dropping the name would turn that into a play that fails closed for no reason.
+        let master = source("/start.m3u8?X-Plex-Token=old-token");
+        let auth = InheritedAuth::capture(&master).unwrap();
+        assert_eq!(
+            auth.request_path(&source("/segment.ts")),
+            Ok("/segment.ts?X-Plex-Token=old-token".to_string())
+        );
+    }
+
+    #[test]
+    fn two_credential_names_are_two_credentials_even_when_the_values_agree() {
+        // Accepting a second NAME must not become a hole in the one-pair rule (#310, decision 3).
+        let master = source("/start.m3u8?api_key=one&X-Plex-Token=two");
+        assert_eq!(
+            InheritedAuth::capture(&master).unwrap_err(),
+            Error::MultipleCredentials
+        );
+    }
+
+    #[test]
+    fn a_credential_with_an_empty_value_is_no_credential() {
+        assert_eq!(
+            InheritedAuth::capture(&source("/start.m3u8?api_key=")).unwrap_err(),
+            Error::MissingCredential
+        );
+        assert_eq!(
+            InheritedAuth::capture(&source("/start.m3u8?session=s&part=2")).unwrap_err(),
+            Error::MissingCredential
         );
     }
 

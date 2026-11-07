@@ -2368,7 +2368,7 @@ impl HlsAbrControl {
                 // The credential parameter is the one `hls::is_token_pair` accepts; the server
                 // sends `api_key` (issue #310).
                 url: format!(
-                    "{}/{}/master.m3u8?offset={}.{:06}&X-Plex-Token=fixture-only",
+                    "{}/{}/master.m3u8?offset={}.{:06}&api_key=fixture-only",
                     self.fixture_base.trim_end_matches('/'),
                     rung.kbps(),
                     offset_micros.max(0) / 1_000_000,
@@ -2717,7 +2717,7 @@ pub(crate) fn arm_auto_fixture(
     let base = hls_base.trim_end_matches('/');
     // See above: the capture only accepts this parameter name (issue #310).
     let url = format!(
-        "{base}/{}/master.m3u8?X-Plex-Token=<plex-token>",
+        "{base}/{}/master.m3u8?api_key=<plex-token>",
         rung.kbps()
     );
     let encoder = format!("auto-fixture-{}", rung.kbps());
@@ -2880,7 +2880,7 @@ fn install_auto_hls(
         let encoder = format!("auto-fixture-{}", rung.kbps());
         // See above: the capture only accepts this parameter name (issue #310).
         let url = format!(
-            "{}/{}/master.m3u8?X-Plex-Token=fixture-only",
+            "{}/{}/master.m3u8?api_key=fixture-only",
             fixture_base.trim_end_matches('/'),
             rung.kbps(),
         );

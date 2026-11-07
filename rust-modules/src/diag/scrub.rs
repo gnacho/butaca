@@ -567,6 +567,18 @@ mod tests {
         assert!(out.contains("start.mkv"), "the diagnostic half survives");
     }
 
+    /// **The name the server actually sends** (#310): a Jellyfin transcode URL carries `api_key`,
+    /// and this is the only pass left that can redact it — `lib.rs`'s narrower backstop went with
+    /// the Plex remnants (#308). If this assertion ever fails, the token is in the file the whole
+    /// support channel asks people to send.
+    #[test]
+    fn the_servers_own_credential_name_is_redacted() {
+        let out = kept("retranscode rk=42 -> http://10.0.0.2:32400/video/:/transcode/universal/start.mkv?api_key=aBcD1234xyzQ&audio=3");
+        assert!(!out.contains("aBcD1234xyzQ"), "the token is gone: {out}");
+        assert!(out.contains("start.mkv"), "the diagnostic half survives");
+        assert!(out.contains("audio=3"), "the parameter after it survives");
+    }
+
     /// A header value is a credential to END OF LINE — half a bearer token is still one.
     #[test]
     fn a_credential_header_is_cut_to_end_of_line() {
