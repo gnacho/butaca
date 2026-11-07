@@ -3499,6 +3499,19 @@ impl DetailScreen {
         self.detail(meta).is_some_and(crate::metadata::Detail::has_own_file)
     }
 
+    /// **Is the pre-playback window what this page's Play opens right now?** (issue #367)
+    ///
+    /// The SAME rule [`Self::play_hero`] applies, in one place so the press and the headless
+    /// trigger cannot drift: a LEAF the page holds in full (a movie, or an episode's own page) with
+    /// no alternative source selected. A show's page plays its on-deck episode, which is not the
+    /// item the page holds, and a selected alternative copy's tracks are not the ones this page
+    /// landed — both keep playing directly.
+    pub(crate) fn preplay_available(&self, meta: crate::metadata::MetadataView<'_>) -> bool {
+        self.detail(meta)
+            .is_some_and(|d| !d.is_show && d.has_own_file())
+            && self.selected().is_none()
+    }
+
     fn named_show(&self, meta: crate::metadata::MetadataView<'_>) -> bool {
         self.detail(meta).is_some_and(hero::watch_names_show)
     }
@@ -3690,12 +3703,10 @@ impl DetailScreen {
                     fx,
                 ),
             }
-        } else if self.selected().is_none() && d.has_own_file() {
+        } else if self.preplay_available(meta) {
             // **The pre-playback window, not the film** (issue #367, under #355). The item this
             // page holds is the item the press would start, so the window can show its own facts
-            // and offer its own tracks; the window's OK is what plays. An item with an
-            // ALTERNATIVE SOURCE selected plays directly — that copy's tracks are not the ones
-            // this page landed, and a window offering another file's list would be lying.
+            // and offer its own tracks; the window's OK is what plays.
             self.content(
                 fx,
                 ContentReq::Panel(ContentPanel::PrePlayback { restart: from_start }),
