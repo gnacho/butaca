@@ -366,7 +366,7 @@ impl LogicalState for Initial {
 pub(crate) enum Preflight {
     Live,
     Record,
-    Replay { initial: Initial, recording: Recording, mode: super::recorder::ReplayMode },
+    Replay { initial: Initial, recording: Recording, mode: super::recorder::ReplayMode, fill: bool },
 }
 
 impl Preflight {
@@ -381,14 +381,14 @@ impl Preflight {
         match (rec, replay) {
             (Some(_), Some(_)) => Err("conflicting recorder modes".into()),
             (None, Some(path)) => {
-                let (mode, path) = super::recorder::ReplayMode::parse(&path).map_err(str::to_owned)?;
+                let (mode, path, fill) = super::recorder::ReplayMode::parse(&path).map_err(str::to_owned)?;
                 let recording = Recording::load(std::path::Path::new(path), super::recorder::state_fp())
                     .map_err(|error| error.describe())?;
                 let initial = Initial::decode(recording.header.init_data.clone(), recording.header.init_hash)
                     .map_err(str::to_owned)?;
                 super::recorder::validate_controlled(&recording, &initial).map_err(str::to_owned)?;
                 super::recorder::validate_resolution_recording(&recording).map_err(str::to_owned)?;
-                Ok(Self::Replay { initial, recording, mode })
+                Ok(Self::Replay { initial, recording, mode, fill })
             }
             (Some(option), None) if option.is_empty() => Ok(Self::Record),
             (Some(_), None) => Err("unsupported recorder option".into()),

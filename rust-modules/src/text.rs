@@ -1632,11 +1632,11 @@ mod fitted_line_tests {
         let metrics = record.drain().unwrap().into_iter().collect::<HashMap<_, _>>();
         assert!(!metrics.is_empty(), "warm native memo must not hide recorded measurements");
         let mut replay = Measurements::Pending(Cell::new(false));
-        replay.prepare(Some(&metrics));
+        replay.prepare(Some(&metrics),false);
         assert_eq!(warm, replay.fit_line("episode", 20.0, 1, false));
         assert!(replay.drain().is_ok());
         let mut missing = Measurements::Pending(Cell::new(false));
-        missing.prepare(Some(&HashMap::new()));
+        missing.prepare(Some(&HashMap::new()),false);
         missing.fit_line("episode", 20.0, 1, false);
         assert!(missing.drain().is_err(), "warm native memo must not mask a replay miss");
     }

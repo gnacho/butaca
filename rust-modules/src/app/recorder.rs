@@ -277,22 +277,26 @@ pub(crate) struct Replay {
 pub(crate) enum ReplayMode { #[default] Targets, Resolve }
 impl ReplayMode {
     /// One bounded trigger, with an explicit version and no environment-dependent mode.
-    /// Bare absolute paths retain the historical Targets spelling.
-    pub(crate) fn parse(value: &str) -> Result<(Self, &str), &'static str> {
-        let (mode, path) = if let Some(path) = value.strip_prefix("v1\ntargets\n") { (Self::Targets, path) }
-            else if let Some(path) = value.strip_prefix("v1\nresolve\n") { (Self::Resolve, path) }
-            else { (Self::Targets, value) };
+    /// Bare absolute paths retain the historical Targets spelling. The `+fill` suffix is the
+    /// fixture writer's mode: a string the recording never measured is learned instead of
+    /// refusing the run (#333). `make check-replay` never asks for it.
+    pub(crate) fn parse(value: &str) -> Result<(Self, &str, bool), &'static str> {
+        let (mode, path, fill) = if let Some(path) = value.strip_prefix("v1\ntargets\n") { (Self::Targets, path, false) }
+            else if let Some(path) = value.strip_prefix("v1\nresolve\n") { (Self::Resolve, path, false) }
+            else if let Some(path) = value.strip_prefix("v1\nresolve+fill\n") { (Self::Resolve, path, true) }
+            else { (Self::Targets, value, false) };
         if value.len() > libc::PATH_MAX as usize || !path.starts_with('/')
             || path.chars().any(char::is_control) || path.trim() != path {
             return Err("invalid replay mode or directory");
         }
-        Ok((mode, path))
+        Ok((mode, path, fill))
     }
 }
 
 #[derive(Default)]
 struct ResolutionReplay {
     mode: ReplayMode,
+    fill: bool,
     at: usize,
     final_seen: bool,
     final_focus: Option<(u32, u32, Option<u32>)>,
@@ -810,8 +814,8 @@ impl Recplay {
     }
     pub(crate) fn prepare_resources(&self, bridge: &mut super::bridge::Bridge) {
         match self {
-            Self::Recording(_)=>bridge.prepare_measurements(None),
-            Self::Replaying(replay)=>bridge.prepare_measurements(Some(&replay.rec.metrics)),
+            Self::Recording(_)=>bridge.prepare_measurements(None,false),
+            Self::Replaying(replay)=>bridge.prepare_measurements(Some(&replay.rec.metrics),replay.resolution.fill),
             Self::Off=>{},
         }
         if let Self::Replaying(replay) = self {
@@ -831,9 +835,9 @@ impl Recplay {
                 let sink = DirSink::create(&dir).map_err(|_| "cannot create private recording")?;
                 Self::recording_with_sink(initial, Box::new(sink))
             }
-            super::bootstrap::Preflight::Replay { recording, mode, .. } => {
+            super::bootstrap::Preflight::Replay { recording, mode, fill, .. } => {
                 validate_resolution_recording(&recording)?;
-                Ok(Self::Replaying(Replay { resolution:ResolutionReplay { mode, ..Default::default() }, rec: recording, at: 0, graded: 0, diverged: 0,
+                Ok(Self::Replaying(Replay { resolution:ResolutionReplay { mode, fill, ..Default::default() }, rec: recording, at: 0, graded: 0, diverged: 0,
                     present_diffs: 0, result_diffs: 0, land_diffs: 0, result_at: 0, effect_at: 0,
                     input_at: 0, input_diffs: 0, effect_diffs: 0, started: false, failure: None }))
             }
@@ -847,8 +851,14 @@ impl Recplay {
             Ok(rows)=>{
                 if let Self::Recording(rec)=self {
                     let start=std::time::Instant::now();
-                    for (key,bits) in rows { rec.w.metric(rec.f,&key,bits); }
+                    for (key,bits) in &rows { rec.w.metric(rec.f,key,*bits); }
                     rec.spent_ns+=start.elapsed().as_nanos() as u64;
+                }
+                if let Self::Replaying(_)=self {
+                    for (key,bits) in rows {
+                        crate::log(&format!("replay: fill q={} bits={bits}",
+                            serde_json::to_string(&key).unwrap_or_default()));
+                    }
                 }
             },
         }
@@ -1505,11 +1515,12 @@ mod tests {
 
     #[test]
     fn product_mode_encoding_is_bounded_explicit_and_fail_closed() {
-        assert_eq!(ReplayMode::parse("/tmp/synthetic"),Ok((ReplayMode::Targets,"/tmp/synthetic")));
-        assert_eq!(ReplayMode::parse("v1\ntargets\n/tmp/synthetic"),Ok((ReplayMode::Targets,"/tmp/synthetic")));
-        assert_eq!(ReplayMode::parse("v1\nresolve\n/tmp/synthetic"),Ok((ReplayMode::Resolve,"/tmp/synthetic")));
+        assert_eq!(ReplayMode::parse("/tmp/synthetic"),Ok((ReplayMode::Targets,"/tmp/synthetic",false)));
+        assert_eq!(ReplayMode::parse("v1\ntargets\n/tmp/synthetic"),Ok((ReplayMode::Targets,"/tmp/synthetic",false)));
+        assert_eq!(ReplayMode::parse("v1\nresolve\n/tmp/synthetic"),Ok((ReplayMode::Resolve,"/tmp/synthetic",false)));
+        assert_eq!(ReplayMode::parse("v1\nresolve+fill\n/tmp/synthetic"),Ok((ReplayMode::Resolve,"/tmp/synthetic",true)));
         for bad in ["", "resolve", "v2\nresolve\n/tmp/x", "v1\nresolve\nx", "v1\nother\n/tmp/x",
-            "v1\ntargets\n/tmp/x\nresolve", "/tmp/x\0", "/tmp/x\n", " /tmp/x"] {
+            "v1\nresolve+fill\nx", "v1\ntargets\n/tmp/x\nresolve", "/tmp/x\0", "/tmp/x\n", " /tmp/x"] {
             assert!(ReplayMode::parse(bad).is_err());
         }
         assert!(ReplayMode::parse(&format!("/{}","x".repeat(libc::PATH_MAX as usize))).is_err());
@@ -1724,7 +1735,7 @@ mod tests {
             (crate::ui::rec::MetricKey::Cap {sz:28},0x00000001),
             (crate::ui::rec::MetricKey::Line {sz:28},0x41abcdef),
         ].into_iter().collect();
-        bridge.prepare_measurements(Some(&table));
+        bridge.prepare_measurements(Some(&table),false);
         let m=bridge.split().measure;
         assert_eq!(m.width(c"no fonts loaded",28,false).to_bits(),0x80000000);
         assert_eq!(m.cap_h(28).to_bits(),0x00000001);
