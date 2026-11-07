@@ -250,14 +250,22 @@ pub(crate) fn save_servers(servers: &[ServerEntry], active: usize) -> bool {
         "active": active,
     });
     let path = persistent_config_path();
-    let ok = std::fs::write(&path, body.to_string()).is_ok();
-    if ok {
-        // Best-effort 0600 — the umask usually beat us to it; a refusal is untidy, not fatal.
+    // Created 0600 rather than chmodded after: this file holds an access token, and the window
+    // between a 0644 create and the chmod is a window where another app can read it (#346).
+    let ok = {
+        use std::io::Write;
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .and_then(|mut f| f.write_all(body.to_string().as_bytes()))
+            .is_ok()
+    };
+    if ok {
         crate::log("jellyfin: config saved — the next boot signs in by itself");
     } else {
         crate::log("jellyfin: config NOT saved — the next boot will ask again");
@@ -369,10 +377,80 @@ pub(crate) fn persistent_config_path() -> std::path::PathBuf {
     if crate::paths::ENV_STEERABLE {
         return crate::paths::in_runtime_dir("jellyfin.json");
     }
-    std::path::PathBuf::from(format!(
-        "/media/developer/{}-jellyfin.json",
-        crate::paths::app_id()
-    ))
+    // One answer per process, chosen once. Read and write must never disagree about the file:
+    // a read that looked somewhere the write did not is a sign-in that silently does not persist,
+    // which is the very failure this ladder exists to end (#346).
+    static CHOSEN: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    CHOSEN
+        .get_or_init(|| {
+            let candidates = config_candidates();
+            let path = pick_config_path(&candidates, |p| p.exists(), |p| dir_writable(p));
+            if path != candidates[0] {
+                crate::log(&format!(
+                    "jellyfin: config lives at {} — the first candidate refuses writes on this jail",
+                    path.display()
+                ));
+            }
+            path
+        })
+        .clone()
+}
+
+/// **Where the config may live, in the order this install prefers.** The same ladder
+/// [`crate::paths::session_candidates`] already established, with the config's own filename: the
+/// two files age alike and a jail that refuses one refuses the other. `/tmp` is last for that
+/// function's reason and no better one — a save that lands there is not durable.
+fn config_candidates() -> Vec<std::path::PathBuf> {
+    let id = crate::paths::app_id();
+    let mut v = vec![
+        std::path::PathBuf::from(format!("/media/developer/{id}-jellyfin.json")),
+        std::path::PathBuf::from(format!("/media/internal/.{id}-jellyfin.json")),
+        crate::paths::in_app_dir(&format!("{id}-jellyfin.json")),
+    ];
+    // `/tmp` last, for `session_candidates`'s reason: it is the one thing this jail class
+    // guarantees writable, and a save that lands there is NOT durable.
+    v.push(crate::paths::in_runtime_dir("jellyfin.json"));
+    v
+}
+
+/// **The choice, as a pure function** — first candidate that already holds a file, else the first
+/// one that accepts a write, else the first one (so a hopeless install keeps the shape it always
+/// had and the failed write is reported, not hidden).
+///
+/// Existing-before-writable is the rule that makes a rescue stick: an install rescued onto
+/// `/media/internal` because `/media/developer` refused the write must keep reading THAT file on
+/// the next boot even if the jail later loosens, or the rescue silently costs a sign-in every time
+/// the permission flips back.
+fn pick_config_path(
+    candidates: &[std::path::PathBuf],
+    exists: impl Fn(&std::path::Path) -> bool,
+    writable: impl Fn(&std::path::Path) -> bool,
+) -> std::path::PathBuf {
+    if let Some(found) = candidates.iter().find(|p| exists(p)) {
+        return found.clone();
+    }
+    if let Some(ok) = candidates.iter().find(|p| writable(p)) {
+        return ok.clone();
+    }
+    candidates[0].clone()
+}
+
+/// Can this process create a file in the candidate's directory? Probed, not assumed: the jail
+/// profiles disagree about which of these accept writes, and a mode bit is not a guarantee.
+fn dir_writable(path: &std::path::Path) -> bool {
+    let Some(dir) = path.parent() else { return false };
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".butaca-probe-{}", std::process::id()));
+    let made = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&probe)
+        .is_ok();
+    let _ = std::fs::remove_file(&probe);
+    made
 }
 
 /// Read the persisted device id, or mint and persist one. A failed write degrades to a per-boot
@@ -566,5 +644,60 @@ mod tests {
         let mut one = ServerList { servers: vec![entry("http://10.0.0.2:8096", "a")], active: 0 };
         one = remaining_after_disconnect(Some(one));
         assert!(one.servers.is_empty(), "the only server signed out leaves none");
+    }
+
+    /// **#346: the config follows the same ladder the session already uses.** On a jail that
+    /// refuses `/media/developer`, the old hardcoded path dropped the write and every launch was a
+    /// fresh sign-in. These four cases are the whole rule.
+    #[test]
+    fn the_config_lands_on_the_first_place_that_can_hold_it() {
+        use std::path::PathBuf;
+        let c = |n: &str| PathBuf::from(n);
+        let cands = [c("/media/developer/x.json"), c("/media/internal/x.json"), c("/tmp/x.json")];
+
+        // Ordinary install: the first candidate takes the write.
+        assert_eq!(
+            pick_config_path(&cands, |_| false, |p| p == &cands[0]),
+            cands[0]
+        );
+
+        // The reported jail: developer refuses, internal accepts. The config must land there
+        // instead of being dropped.
+        assert_eq!(
+            pick_config_path(&cands, |_| false, |p| p == &cands[1]),
+            cands[1]
+        );
+
+        // A rescue must STICK: the file is already on the fallback, so it keeps being read there
+        // even if the jail later loosens and the first candidate becomes writable again. Reading
+        // the first writable instead would silently cost a sign-in every time the bit flipped.
+        assert_eq!(
+            pick_config_path(&cands, |p| p == &cands[1], |_| true),
+            cands[1]
+        );
+
+        // Nothing accepts a write: keep the shape the install always had, so the failure is the
+        // same reported failure and not a surprise relocation.
+        assert_eq!(pick_config_path(&cands, |_| false, |_| false), cands[0]);
+    }
+
+    /// The ladder is the session's, in the session's order: `/media/developer` first (today's
+    /// ordinary install), then the internal volume, then the app dir, and `/tmp` last because a
+    /// save that lands there does not survive a reboot.
+    #[test]
+    fn the_config_candidates_are_the_sessions_ladder() {
+        let c = config_candidates();
+        assert!(c.len() >= 3, "the ladder has to have somewhere to fall back to");
+        assert!(c[0].to_string_lossy().starts_with("/media/developer/"));
+        assert!(c[1].to_string_lossy().starts_with("/media/internal/"));
+        assert!(
+            c.last().is_some_and(|p| p.starts_with(crate::paths::runtime_dir())),
+            "the runtime dir is the last resort, never the first"
+        );
+        assert!(
+            c.iter().all(|p| p.to_string_lossy().ends_with("-jellyfin.json")
+                || p.ends_with("jellyfin.json")),
+            "every candidate names the same file"
+        );
     }
 }
