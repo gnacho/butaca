@@ -9,6 +9,9 @@
 int butaca_run(const char *launch_params) { (void)launch_params; return 0; }
 int butaca_sentry_spool_external(const char *path) { (void)path; return 0; }
 void butaca_crash_write_image_marker(int fd) { (void)fd; }
+/* #331: the boot shim asks Rust to archive the previous event log before truncating it; this
+ * host test only grades the sinks, so the hook is a no-op here. */
+void butaca_archive_events_log(void) { }
 void butaca_crash_install(int event_fd, int crash_fd) { (void)event_fd; (void)crash_fd; }
 int butaca_runtime_path(const char *name, char *out, size_t cap) {
     return snprintf(out, cap, "/tmp/%s", name) > 0;

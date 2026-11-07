@@ -46,6 +46,7 @@ extern void butaca_crash_write_image_marker(int fd); /* identify this binary in 
  * Two static buffers are alternated per call. No current call site holds two results at once, so
  * this is cheap insurance for a future one rather than a live hazard. */
 extern int butaca_runtime_path(const char *name, char *out, size_t cap);
+extern void butaca_archive_events_log(void); /* #331: keep the run this launch is about to truncate */
 
 static const char *runtime_path(const char *name) {
     static char buf[2][256];
@@ -73,6 +74,10 @@ static int open_fd_0600(const char *path, int flags);
  * Mode 0600 because this file records the server name, the LAN address, user names and episode
  * titles, and /tmp is world-readable. */
 static FILE *open_event_log(void) {
+    /* Before the truncation, not after: the previous run is the one worth keeping, and this is
+     * the last moment it exists. Rust owns the copy, the rotation and the caps (src/log_history.rs)
+     * because it is the side that knows which directories survive a reboot. */
+    butaca_archive_events_log();
     int fd = open_fd_0600(runtime_path("butaca-events.log"), O_TRUNC | O_APPEND);
     return fd >= 0 ? fdopen(fd, "a") : NULL;
 }
