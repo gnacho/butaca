@@ -742,3 +742,58 @@ fn a_demux_aborted_by_teardown_before_its_first_unit_is_not_a_failure() {
         "ff: open_input failed r=-1094995529",
     );
 }
+
+/// The stop that opened #327 left no line anywhere saying why the stream ended. Every exit from
+/// `read_cb` is a bare EOF and libavformat reports it as a clean end of media, so the demuxer
+/// said "ended", the engine pushed EOS and the player stopped as if the item had finished. The
+/// abort path is the one teardown takes, and it is the one that has to name itself: without this
+/// line a stop is indistinguishable from a real end in the log.
+#[test]
+fn an_aborted_read_says_which_branch_ended_the_stream() {
+    with_counting_listener(|port, _accepts, _| {
+        let (mut hs, mut aq, ip, path) = opened_stream_with_aborted_lane(port);
+        let mut st = AvioState {
+            src: Src::Socket {
+                hs: &mut *hs,
+                host: ip,
+                port: port as c_int,
+                path,
+            },
+            aq: &mut *aq,
+            off: 0,
+            size: 8,
+            io_failed: false,
+            short_body_retries: 0,
+            body_active_us: 0,
+            body_bytes: 0,
+            first_byte_at: None,
+            reserve_deadline: ReserveDeadlineState::new(None, false),
+            transport_watchdog: None,
+            acquisition: None,
+            bounce: Vec::new(),
+            bounce_pos: 0,
+        };
+        let op = &mut st as *mut AvioState as *mut c_void;
+        let before = std::fs::read_to_string(crate::events_log())
+            .unwrap_or_default()
+            .len();
+        let mut dst = [0u8; 8];
+
+        let rv = read_cb(op, dst.as_mut_ptr(), dst.len() as c_int);
+
+        let after = std::fs::read_to_string(crate::events_log()).unwrap_or_default();
+        let tail = after.get(before..).unwrap_or("");
+        assert_eq!(rv, AVERROR_EOF, "an aborted lane still ends the stream");
+        assert!(
+            tail.contains("ff: eof why=aborted-before-read"),
+            "the branch that ended the stream must be in the log; tail was: {tail}"
+        );
+        assert!(
+            tail.contains("off=0 size=8 body=0"),
+            "the numbers that separate the branches must be printed; tail was: {tail}"
+        );
+
+        crate::stream::http_close(&mut *hs);
+        crate::aq::aq_destroy(&mut *aq);
+    });
+}
