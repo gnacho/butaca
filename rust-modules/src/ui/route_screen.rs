@@ -99,9 +99,12 @@ const NARRATIVE_W: f32 = crate::ui::landing_hero::COL_W;
 const COLUMN_GAP: f32 = theme::space::XL * 2.0 + theme::space::LG + theme::space::SM;
 const TOP_INSET: f32 = theme::space::XL + theme::space::MD;
 const ACTION_H: f32 = crate::ui::widgets::StatusOverlay::CTRL_H;
-/// The crumb's mark, drawn at the smallest rung a mark is worn at anywhere in the product. It is
-/// a return affordance rather than a heading, so it may not outweigh the caption beside it.
-const CRUMB_MARK: f32 = theme::size::MICRO as f32;
+/// The crumb's mark. **A control, not a heading** — and that is a correction: it used to be worn at
+/// `MICRO`, on the argument that a way back "may not outweigh the caption beside it". At 1920x1080,
+/// seen from a sofa, that is not a subtle affordance, it is an invisible one: the owner reported
+/// "I don't see the back" about a screen that had it (#361). It is the only way out of a page for a
+/// remote whose BACK key is broken, so it is drawn at a size a person can aim at.
+const CRUMB_MARK: f32 = 30.0;
 /// The crumb LINE's height — the mark's, because the mark is the taller of the two things on it
 /// (a `CAPTION` cap band is a few px shorter) and both are centred in it.
 ///
@@ -985,12 +988,12 @@ impl RouteLayout {
                 CRUMB_MARK,
                 CRUMB_MARK,
             ),
-            theme::TEXT_TERTIARY,
+            theme::TEXT_SECONDARY,
         );
         let (_, ink_r) = icons::ink_x(Icon::ChevronLeft);
         let x = self.narrative.x + CRUMB_MARK * ink_r + theme::space::XS;
-        let ty = crumb_label_top(cy, measure.cap_h(theme::size::CAPTION));
-        TextView::new(back_to, theme::size::CAPTION, theme::TEXT_TERTIARY)
+        let ty = crumb_label_top(cy, measure.cap_h(theme::size::BODY));
+        TextView::new(back_to, theme::size::BODY, theme::TEXT_SECONDARY)
             .max_lines(1)
             .draw(p, Rect::new(x, ty, self.narrative.x + self.narrative.w - x, h));
     }
