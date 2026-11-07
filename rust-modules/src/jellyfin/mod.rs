@@ -167,10 +167,52 @@ pub(crate) fn uninstall() {
 /// rule cannot grade without a deadlock; and the address itself must still be a literal that
 /// cannot route off the LAN.
 pub(crate) fn plaintext_host_allowed(origin: &crate::origin::Origin) -> bool {
-    client().is_some_and(|installed| {
+    let installed_match = client().is_some_and(|installed| {
         origin.host() == installed.origin().host()
             && crate::http::is_lan_host(installed.origin().host())
+    });
+    installed_match || signin_anchor_matches(origin)
+}
+
+thread_local! {
+    /// The host a sign-in attempt on THIS thread is creating the anchor for. The sign-in gate
+    /// (`http::credential_transport_allowed_at_signin`) already admits that crossing up front,
+    /// but the request itself then went through the per-request gate, which (with no client
+    /// installed yet) failed closed — so a LAN sign-in never left the device and was reported as
+    /// "unreachable". The anchor carries the sign-in gate's decision down to that request, and
+    /// only for the client's own origin, only while the guard is alive.
+    static SIGNIN_ANCHOR: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn signin_anchor_matches(origin: &crate::origin::Origin) -> bool {
+    SIGNIN_ANCHOR.with(|a| {
+        a.borrow()
+            .as_deref()
+            .is_some_and(|host| host == origin.host() && crate::http::is_lan_host(host))
     })
+}
+
+/// RAII scope for one sign-in exchange (password, Quick Connect, or stored-token probe) against
+/// `origin`. While alive, plaintext Jellyfin credentials may reach exactly that LAN literal from
+/// this thread. Dropping it restores whatever anchor was there before.
+pub(crate) struct SigninAnchor {
+    prev: Option<String>,
+}
+
+impl SigninAnchor {
+    pub(crate) fn enter(origin: &crate::origin::Origin) -> SigninAnchor {
+        let host = origin.host().to_string();
+        let prev = SIGNIN_ANCHOR.with(|a| a.borrow_mut().replace(host));
+        SigninAnchor { prev }
+    }
+}
+
+impl Drop for SigninAnchor {
+    fn drop(&mut self) {
+        let prev = self.prev.take();
+        SIGNIN_ANCHOR.with(|a| *a.borrow_mut() = prev);
+    }
 }
 
 pub(crate) fn client() -> Option<&'static JfClient> {

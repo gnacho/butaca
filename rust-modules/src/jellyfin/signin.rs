@@ -275,6 +275,51 @@ mod tests {
         );
     }
 
+    /// The other half of #204: passing the sign-in gate is not enough, because the POST itself
+    /// then goes through `http::request_with`, which asks the PER-REQUEST gate. With no client
+    /// installed that gate failed closed, so the request never reached the wire and the form said
+    /// "couldn't reach the server" against a server that was answering. The sign-in exchange
+    /// runs under a `SigninAnchor` for the client's own origin, and only that origin passes.
+    #[test]
+    fn the_signin_request_itself_reaches_the_lan_literal_on_the_form() {
+        let _guard = crate::testlock::serial();
+        crate::jellyfin::uninstall();
+        let store = crate::origin::CredentialPolicy::HttpsOnly;
+        let path = "/Users/AuthenticateByName";
+        let headers = ["Accept: application/json", "Authorization: MediaBrowser …"];
+        let lan = crate::origin::Origin::parse("http://10.9.9.7:8096").unwrap();
+        let neighbour = crate::origin::Origin::parse("http://10.9.9.8:8096").unwrap();
+        assert!(
+            !crate::http::credential_transport_allowed_by_policy(&lan, path, &headers, store),
+            "outside a sign-in exchange the per-request gate still fails closed"
+        );
+        {
+            let _anchor = crate::jellyfin::SigninAnchor::enter(&lan);
+            assert!(
+                crate::http::credential_transport_allowed_by_policy(&lan, path, &headers, store),
+                "the sign-in POST must reach the address the form names"
+            );
+            assert!(
+                !crate::http::credential_transport_allowed_by_policy(
+                    &neighbour, path, &headers, store
+                ),
+                "…and only that address, not a neighbour on the same subnet"
+            );
+            let named = crate::origin::Origin::parse("http://jellyfin.local:8096").unwrap();
+            let _inner = crate::jellyfin::SigninAnchor::enter(&named);
+            assert!(
+                !crate::http::credential_transport_allowed_by_policy(
+                    &named, path, &headers, store
+                ),
+                "a hostname is never the carve-out, even as the anchor"
+            );
+        }
+        assert!(
+            !crate::http::credential_transport_allowed_by_policy(&lan, path, &headers, store),
+            "dropping the anchor closes the crossing again"
+        );
+    }
+
     #[test]
     fn a_stale_outcome_is_discarded() {
         // MUTATES the shared `EPOCH`/`MAIL` globals, so it holds the lock `serial()` guards
