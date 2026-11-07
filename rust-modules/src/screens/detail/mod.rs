@@ -692,6 +692,7 @@ impl DetailScreen {
         crate::ui::detail_layout::hero_chain(
             synopsis_h,
             d.is_some_and(|detail| !detail.ratings.is_empty()),
+            d.map_or(0.0, |detail| hero::people_h(detail, measure)),
             measure,
         )
     }
@@ -2309,7 +2310,7 @@ impl DetailScreen {
         }
         if let Some(d) = d {
             hero::draw_facts(chrome, d, chain.facts_y, cx.measure);
-            hero::draw_people(chrome, d, chain.btn_y, measure);
+            hero::draw_people(chrome, d, chain.people_y, measure);
         }
         // Full-trailer mode takes the action row with the rest of the page: the viewer asked for
         // the trailer and nothing else, and the transport drawn over the top
