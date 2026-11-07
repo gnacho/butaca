@@ -58,15 +58,25 @@ exec script -qc "luna-send -i -a com.webos.appInstallService luna://com.webos.ap
 EOF
 chmod +x "$WORK/install.sh"
 scp -q -o BatchMode=yes "$IPK" "$WORK/install.sh" "root@$TV:/tmp/"
-# `head` on the LOCAL side of the pipe, exactly as `make install` does it: the remote command
-# subscribes and never returns on its own, so closing our end is what ends it. Putting the `head`
-# inside the ssh command leaves ssh waiting for a pipeline that will not finish.
-ssh -o BatchMode=yes "root@$TV" "chmod +x /tmp/install.sh && /tmp/install.sh" 2>/dev/null \
-  | head -20 >/dev/null || true
+# The remote command SUBSCRIBES and never returns on its own, so the ssh call is bounded on the
+# remote side rather than by closing our end of a pipe: `head` on the local side only ends the
+# stream if the remote keeps writing, and a quiet install leaves ssh waiting for ever (measured:
+# the call hung until the caller's own timeout killed it).
+# Bounded from the LOCAL side: the remote `timeout` on this television is not the coreutils one
+# (it read `180` as the command and ran nothing, which made the sha check pass against the build
+# that was already installed — a false positive). The remote still writes its own report, and the
+# check below refuses a run whose report is empty.
+timeout 120 ssh -o BatchMode=yes "root@$TV" \
+  "chmod +x /tmp/install.sh && /tmp/install.sh >/tmp/install.out 2>&1" 2>/dev/null || true
+REPORT=$(ssh -o BatchMode=yes "root@$TV" "grep -c appInstallService /tmp/install.out 2>/dev/null || echo 0")
+if [ "${REPORT:-0}" -lt 1 ]; then
+  echo "deploy-ci: the installer reported nothing — it did not run" >&2
+  exit 1
+fi
 # Anchored on purpose: `pkill -f 'luna-send.*appInstallService'` matches the remote shell's own
 # command line, because that line contains the pattern, and kills the session running it.
 ssh -o BatchMode=yes "root@$TV" \
-  "pkill -f '^luna-send ' || true; rm -f '/tmp/$(basename "$IPK")' /tmp/install.sh"
+  "pkill -f '^luna-send ' || true; rm -f '/tmp/$(basename "$IPK")' /tmp/install.sh /tmp/install.out"
 
 # What the television is ACTUALLY running, not what we asked it to run.
 GOT=$(ssh -o BatchMode=yes "root@$TV" \
