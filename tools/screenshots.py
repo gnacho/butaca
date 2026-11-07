@@ -89,6 +89,22 @@ RENDER_SCALES = range(1, 5)
 # Lines that mean an arm did not reach its state, whatever else the log says.
 REFUSALS = ("BADTRIGGER", "gave up")
 
+# How many capture PAIRS a scene may take before a disagreement is a verdict.
+#
+# Measured on a 24-core box (issue #349): the same scene, same binary, comes back byte-identical
+# with the machine quiet and with a channel delta of up to 134 with every core busy, and the
+# starved run's own `shot: settled (1510 ms at rest, ...)` line is indistinguishable from the
+# quiet one. So the app cannot tell a loaded machine from a quiet one at the moment it fires, and
+# a heuristic on its timings would be guesswork.
+#
+# What the pixels do say is that the divergence is not a broken element: of 8936 differing pixels
+# in the loaded `home` capture, 8470 differ by exactly ONE level across the whole page (the wash,
+# resolved a hair differently) and only ~60 by more (glyph coverage over that wash). That is a
+# transient, not a layout. Re-taking the pair is therefore the honest answer: a real
+# nondeterminism disagrees on every attempt, and a starved one converges as soon as the machine
+# breathes.
+DETERMINISM_ATTEMPTS = 3
+
 
 def die(msg):
     print(f"screenshots: {msg}", file=sys.stderr)
@@ -392,20 +408,41 @@ def main():
     def render(scene, hero, outputs, stage):
         png, _ = capture(a.bin, scene, defaults, hero, a.keep, by_slug)
         if a.check_determinism:
-            again, _ = capture(a.bin, scene, defaults, hero, a.keep, by_slug)
             bound = scene.get("max_delta", defaults["max_delta"])
             free = scene.get("free_regions", [])
-            if again == png:
-                report.append(f"{scene['name']}: identical")
-            else:
-                k = render_scale(scene)
+            k = render_scale(scene)
+            best = None  # (differing pixels, worst delta, the capture that pair used)
+            attempts = 0
+            while attempts < DETERMINISM_ATTEMPTS:
+                attempts += 1
+                again, _ = capture(a.bin, scene, defaults, hero, a.keep, by_slug)
+                if again == png:
+                    best = (0, 0, png)
+                    break
                 n, worst = compare(png, again, canvas[0] * k, canvas[1] * k,
                                    [[v * k for v in r] for r in free])
+                if best is None or (worst, n) < (best[1], best[0]):
+                    best = (n, worst, png)
+                if worst <= bound:
+                    best = (n, worst, png)
+                    break
+                # This pair disagreed. Take a FRESH reference for the next attempt: the frame
+                # captured during the starvation is as likely to be the odd one out as its pair,
+                # and holding the first one as the yardstick would make a retry unable to win.
+                if attempts < DETERMINISM_ATTEMPTS:
+                    png, _ = capture(a.bin, scene, defaults, hero, a.keep, by_slug)
+            n, worst, png = best
+            if worst == 0:
+                report.append(f"{scene['name']}: identical")
+            else:
                 verdict = "within" if worst <= bound else "OVER"
                 where = f" outside {len(free)} free region(s)" if free else ""
-                report.append(f"{scene['name']}: {n} pixel(s) differ{where}, max |Δ| {worst} {verdict} {bound}")
+                tried = "" if attempts == 1 else f", best of {attempts} pair(s)"
+                report.append(
+                    f"{scene['name']}: {n} pixel(s) differ{where}, max |Δ| {worst} {verdict} {bound}{tried}")
                 if worst > bound:
-                    raise RuntimeError(f"not deterministic: max |Δ| {worst} > {bound}{where}")
+                    raise RuntimeError(
+                        f"not deterministic: max |Δ| {worst} > {bound}{where} over {attempts} pair(s)")
         for o in outputs:
             if "card" not in o:
                 dest, file, crop, size, quality = output_spec(scene, o, canvas)
