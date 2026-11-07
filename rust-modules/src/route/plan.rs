@@ -572,6 +572,7 @@ fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<Up
 /// a *function call* — `server::client_opt()` — which is worse, because `Send` cannot see a function
 /// call and a worker that resolves its own server therefore compiles clean and passes every test.
 /// It is captured here, at the request, and every server call the worker makes is `client_for(sid)`.
+
 /// **The tracks the pre-playback window chose, carried into the resolve that starts the film**
 /// (issue #367). Every other play leaves this out and the ladder picks as it always has.
 ///
@@ -1054,7 +1055,8 @@ fn chosen_subtitle(subs: &[crate::metadata::Stream], sid: i64) -> Option<(i64, i
     Some((subs[i].id, ord))
 }
 
-pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {    if mode == DirectPlayMode::Forced {
+pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
+    if mode == DirectPlayMode::Forced {
         crate::devcaps::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
     } else {
         crate::devcaps::is_dp_audio_track(codec, channels)
