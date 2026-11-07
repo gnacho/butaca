@@ -151,7 +151,7 @@ impl OptionRow {
 pub(crate) fn audio_choices(d: &Detail) -> Vec<(i64, String)> {
     d.audio
         .iter()
-        .map(|s| (s.id, crate::screens::tracks_panel::audio_choice(s)))
+        .map(|s| (s.id, crate::ui::track_facts::audio_choice(s)))
         .collect()
 }
 
@@ -162,7 +162,7 @@ pub(crate) fn subtitle_choices(d: &Detail) -> Vec<(i64, String)> {
     d.subs
         .iter()
         .filter(|s| !s.external && s.id > 0)
-        .map(|s| (s.id, crate::screens::tracks_panel::subtitle_choice(s)))
+        .map(|s| (s.id, crate::ui::track_facts::subtitle_choice(s)))
         .collect()
 }
 
@@ -259,9 +259,9 @@ fn credit_text(name: &str, role: &str) -> String {
 /// wall-clock end time and the length. Each is the item's own record through the formatters
 /// `screens::tracks_panel` already owns, so the window and the Track-information sheet cannot spell
 /// one number two ways.
-pub(crate) fn fact_rows(d: &Detail, audio: usize, now_min: i32) -> Vec<crate::screens::tracks_panel::Pair> {
-    use crate::screens::tracks_panel::{fmt_bitrate, fmt_codec_profile, fmt_frame_size, fmt_size};
-    use crate::screens::tracks_panel::Pair;
+pub(crate) fn fact_rows(d: &Detail, audio: usize, now_min: i32) -> Vec<crate::ui::track_facts::Pair> {
+    use crate::ui::track_facts::{fmt_bitrate, fmt_codec_profile, fmt_frame_size, fmt_size};
+    use crate::ui::track_facts::Pair;
     let mut v: Vec<Pair> = Vec::new();
     let mut push = |label: &'static str, value: Option<String>| {
         if let Some(value) = value.filter(|s| !s.is_empty()) {
@@ -460,7 +460,7 @@ impl PrePlaybackScreen {
 /// One label-over-value pair at a cursor y.
 fn pair_at(
     p: Painter,
-    pr: &crate::screens::tracks_panel::Pair,
+    pr: &crate::ui::track_facts::Pair,
     x: f32,
     y: f32,
     w: f32,
@@ -778,10 +778,17 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                     // the read-only alerts are careful to avoid. The play request carries the
                     // tracks on screen; the loop dismisses this surface before the player is pushed.
                     let meta = H::metadata(cx);
-                    if let Some(d) = meta.current() {
-                        self.seed(d);
-                        self.commit(d, fx);
-                        fx.invalidate(crate::ui::present::Provenance::Input);
+                    match meta.current() {
+                        Some(d) => {
+                            self.seed(d);
+                            self.commit(d, fx);
+                            fx.invalidate(crate::ui::present::Provenance::Input);
+                        }
+                        // Nothing landed to play: close rather than leave a dead OK on a window
+                        // with no item under it.
+                        None => {
+                            fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
+                        }
                     }
                     Handled::Yes
                 }
