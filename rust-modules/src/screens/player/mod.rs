@@ -171,7 +171,7 @@ impl PlayerScreen {
             scrub: Scrub::IDLE,
             row: TransportRow::new(),
             up_next: Countdown::default(),
-            slot: ControlSlot::Discs,
+            slot: ControlSlot::Discs { next: false },
             busy: crate::ui::player_hud::Busy::None,
             transport: true,
             hud_policy: HudPolicy::Normal,
@@ -395,7 +395,7 @@ impl PlayerScreen {
                 .is_some_and(|d| d < crate::ui::player_hud::PLAY_MARK_MS),
         ));
         mix(match self.slot {
-            ControlSlot::Discs => 1,
+            ControlSlot::Discs { .. } => 1,
             ControlSlot::Skip(_) => 2,
             ControlSlot::UpNext(_) => 3,
         });
@@ -1814,11 +1814,14 @@ mod step_ladder_tests {
         let row = |n: u32| (0..n).map(|i| ELEM_ROW_BASE + i).collect::<Vec<_>>();
         let failure_n = player_hud::FailureReadout::now(TestHost::session(&cx())).actions().len() as u32;
         assert!(failure_n >= 1, "Back is always offered");
-        let cases: [(&str, ControlSlot, Busy, Vec<u32>); 4] = [
-            ("discs", ControlSlot::Discs, Busy::None, [row(3), vec![ELEM_TAB_BASE]].concat()),
+        let cases: [(&str, ControlSlot, Busy, Vec<u32>); 5] = [
+            // The row is five discs on a movie and six on a series with another episode queued —
+            // the element registry has to follow the count, not a constant.
+            ("discs", ControlSlot::Discs { next: false }, Busy::None, [row(5), vec![ELEM_TAB_BASE]].concat()),
+            ("discs with next", ControlSlot::Discs { next: true }, Busy::None, [row(6), vec![ELEM_TAB_BASE]].concat()),
             ("skip", skip, Busy::None, [row(1), vec![ELEM_TAB_BASE]].concat()),
             ("up next", up_next, Busy::None, [row(2), vec![ELEM_TAB_BASE]].concat()),
-            ("failed", ControlSlot::Discs, failed, (0..failure_n).map(|i| ELEM_FAILURE_BASE + i).collect()),
+            ("failed", ControlSlot::Discs { next: false }, failed, (0..failure_n).map(|i| ELEM_FAILURE_BASE + i).collect()),
         ];
         for (name, slot, busy, controls) in cases {
             let mut page = PlayerScreen::new(ENTRY);
