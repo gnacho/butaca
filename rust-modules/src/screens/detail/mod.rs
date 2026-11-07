@@ -2613,7 +2613,6 @@ impl DetailScreen {
                 (0..d.credits_len().min(512))
                     .filter_map(|i| cast::elem(i).map(|e| (e, Activate::Press))),
             );
-            elems.push((about::CARD_ELEM, Activate::Press));
             if self.tracks_available(meta) {
                 elems.push((about::LANGUAGES_ELEM, Activate::Press));
             }
@@ -3554,7 +3553,6 @@ impl DetailScreen {
                     );
                 }
             }
-            Some(Located::About(0)) => self.content(fx, ContentReq::Panel(ContentPanel::About)),
             Some(Located::About(1)) => {
                 self.content(fx, ContentReq::Panel(ContentPanel::Tracks { page: 1 }))
             }
