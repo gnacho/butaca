@@ -161,6 +161,21 @@ pub(crate) struct PlayerScreen {
     failure_sel: usize,
     /// Did a failure own the frame at the last Tick — the edge that resets `failure_sel`.
     failure_up: bool,
+    /// Has this playback already offered the language choice (#314)?
+    ///
+    /// The offer is the track menu over a paused film, made once per mount, the first Tick on
+    /// which the item is known. A viewer who asked for it gets it before a single frame of
+    /// picture: the alternative was choosing a dub after the title card had already gone by.
+    asked_tracks: bool,
+}
+
+/// **Does this item have a language choice worth stopping for?** (#314)
+///
+/// Only when there is something to choose: two or more audio tracks, or two or more subtitle
+/// tracks. An item with one audio and no subtitles has no question to ask, and interrupting its
+/// play with a menu that offers nothing would be worse than the ladder's own default.
+pub(crate) fn should_ask_tracks(subs: usize, audio: usize) -> bool {
+    subs > 1 || audio > 1
 }
 
 impl PlayerScreen {
@@ -185,6 +200,7 @@ impl PlayerScreen {
             repair_scroll: 0,
             failure_sel: 0,
             failure_up: false,
+            asked_tracks: false,
         }
     }
 
@@ -574,6 +590,18 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 // armed by a real release must not then be answered twice.
                 self.step_scrub_hold(tick.ms, fx);
                 self.step_tap_commit(tick.ms, fx);
+                // #314: the language choice, before the picture starts. Once per mount, on the
+                // first Tick that knows the item — the track menu over a paused film, which is
+                // the same surface the transport's own discs open.
+                if !self.asked_tracks {
+                    if let Some(item) = H::metadata(cx).playing() {
+                        self.asked_tracks = true;
+                        if should_ask_tracks(item.subs.len(), item.audio.len()) {
+                            Self::ask(fx, PlayerReq::Transport(Some(false)));
+                            Self::ask(fx, PlayerReq::OpenOverlay(overlay::OverlayKind::Tracks { tab: 1 }));
+                        }
+                    }
+                }
                 self.publish();
                 Handled::Yes
             }
@@ -1636,8 +1664,25 @@ mod step_ladder_tests {
         }
     }
 
+    /// #314: the offer only fires when there is a choice to make. An item with one audio track
+    /// and no subtitles has no question, and stopping its play to show an empty menu would be
+    /// worse than the ladder's own default.
+    #[test]
+    fn the_language_offer_only_fires_when_there_is_something_to_choose() {
+        assert!(!should_ask_tracks(0, 1));
+        assert!(!should_ask_tracks(1, 1));
+        assert!(should_ask_tracks(2, 1), "two subtitle tracks are a choice");
+        assert!(should_ask_tracks(0, 2), "two audio tracks are a choice");
+        assert!(should_ask_tracks(4, 3));
+    }
+
+    #[test]
+    fn a_fresh_player_page_has_not_offered_the_language_choice_yet() {
+        assert!(!PlayerScreen::new(ENTRY).asked_tracks);
+    }
+
     /// One key press through `PlayerScreen::step`, returning `(handled, the PlayerReqs it asked
-    /// for)` — the same shape `overlay_tests.rs::press` returns for the sibling surface.
+    /// for)`, the same shape `overlay_tests.rs::press` returns for the sibling surface.
     fn press(page: &mut PlayerScreen, sym: u32, wcode: u32, edge: Edge) -> (Handled, Vec<PlayerReq>) {
         let mut out = Vec::new();
         let mut present = crate::ui::present::Present::new();
