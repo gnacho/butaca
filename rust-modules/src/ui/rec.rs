@@ -918,18 +918,38 @@ impl MetricKey {
 }
 
 /// Replay answers only from captured bits; a miss must be consumed before grading the frame.
+///
+/// A table can also be asked to LEARN a string it does not know, with the font it is running on
+/// (see [`TableMeasure::filling`]). That is how a page grows a line of text without a new
+/// recording: the measurement is deterministic for a given font and size, so the honest answer is
+/// to measure it, write it down, and let the next strict run answer from the table. Learning is
+/// off by default and only the fixture writer asks for it.
 pub struct TableMeasure {
-    table: HashMap<MetricKey,u32>,
+    table: std::cell::RefCell<HashMap<MetricKey,u32>>,
     miss: std::cell::RefCell<Option<MetricKey>>,
+    /// The font to measure a miss with, when this table is allowed to learn.
+    fill: Option<&'static dyn Measure>,
+    filled: std::cell::RefCell<Vec<(MetricKey,u32)>>,
     #[cfg(test)]
     queries: std::cell::RefCell<Vec<MetricKey>>,
 }
 
 impl TableMeasure {
     pub fn new(table: HashMap<MetricKey,u32>) -> Self {
+        Self::with_fill(table, None)
+    }
+
+    /// A table that measures a miss instead of charging it, and keeps what it learned.
+    pub fn filling(table: HashMap<MetricKey,u32>, source: &'static dyn Measure) -> Self {
+        Self::with_fill(table, Some(source))
+    }
+
+    fn with_fill(table: HashMap<MetricKey,u32>, fill: Option<&'static dyn Measure>) -> Self {
         Self {
-            table,
+            table: std::cell::RefCell::new(table),
             miss: std::cell::RefCell::new(None),
+            fill,
+            filled: Default::default(),
             #[cfg(test)]
             queries: Default::default(),
         }
@@ -939,15 +959,30 @@ impl TableMeasure {
     pub fn take_miss(&self) -> Option<MetricKey> {
         self.miss.borrow_mut().take()
     }
-    fn query(&self, key: MetricKey) -> f32 {
-        self.answer(key, true)
+
+    /// The keys this table measured because it did not know them (and clears the list).
+    pub fn take_filled(&self) -> Vec<(MetricKey,u32)> {
+        std::mem::take(&mut *self.filled.borrow_mut())
+    }
+
+    fn query(&self, key: MetricKey, live: impl FnOnce(&dyn Measure)->f32) -> f32 {
+        self.answer(key, true, live)
     }
     /// `strict` is false only inside [`speculative`]: the key is looked up and a miss answers 0.0
     /// without being charged against the replay.
-    fn answer(&self, key: MetricKey, strict: bool) -> f32 {
+    fn answer(&self, key: MetricKey, strict: bool, live: impl FnOnce(&dyn Measure)->f32) -> f32 {
         #[cfg(test)]
         self.queries.borrow_mut().push(key.clone());
-        if let Some(bits)=self.table.get(&key) { return f32::from_bits(*bits); }
+        if let Some(bits)=self.table.borrow().get(&key) { return f32::from_bits(*bits); }
+        // Only a strict query learns. A speculative probe answers zero in a strict replay, so
+        // filling it here would make the fill run behave differently from the run it is feeding.
+        if let Some(source)=self.fill.filter(|_| strict) {
+            let answer=live(source);
+            let bits=answer.to_bits();
+            self.table.borrow_mut().insert(key.clone(),bits);
+            self.filled.borrow_mut().push((key,bits));
+            return answer;
+        }
         if strict { self.miss.borrow_mut().get_or_insert(key); }
         0.0
     }
@@ -984,13 +1019,17 @@ pub(crate) fn speculating() -> bool {
 
 impl Measure for TableMeasure {
     fn width(&self, s: &CStr, sz: i32, bold: bool) -> f32 {
-        self.query(MetricKey::Width { text:s.to_bytes().to_vec(), sz, bold })
+        let fill=self.fill;
+        self.query(MetricKey::Width { text:s.to_bytes().to_vec(), sz, bold },
+            |_| fill.map_or(0.0,|m| m.width(s,sz,bold)))
     }
     fn cap_h(&self, sz: i32) -> f32 {
-        self.query(MetricKey::Cap {sz})
+        let fill=self.fill;
+        self.query(MetricKey::Cap {sz}, |_| fill.map_or(0.0,|m| m.cap_h(sz)))
     }
     fn line_h(&self, sz: i32) -> f32 {
-        self.query(MetricKey::Line {sz})
+        let fill=self.fill;
+        self.query(MetricKey::Line {sz}, |_| fill.map_or(0.0,|m| m.line_h(sz)))
     }
 }
 
@@ -1023,14 +1062,29 @@ impl Measurements {
     pub(crate) fn record(source: &'static dyn Measure) -> Self {
         Self::Record { source, capture:Default::default() }
     }
-    pub(crate) fn prepare(&mut self, replay: Option<&HashMap<MetricKey,u32>>) {
+    /// Installs the table the replay answers from.
+    ///
+    /// `fill` carries the measure to learn a missing key from, and is `None` for a strict replay.
+    /// It is a parameter rather than the `Live` source because a replay starts in `Pending`: the
+    /// controlled bridge deliberately has no live measure to answer from, and that state has to be
+    /// able to learn a key too, or a fixture could never be filled (#333).
+    pub(crate) fn prepare(&mut self, replay: Option<&HashMap<MetricKey,u32>>,
+        fill: Option<&'static dyn Measure>) {
         match self {
             Self::Live(source)=>*self=match replay {
-                Some(table)=>Self::Replay(TableMeasure::new(table.clone())),
+                Some(table)=>match fill {
+                    Some(fill)=>Self::Replay(TableMeasure::filling(table.clone(),fill)),
+                    None=>Self::Replay(TableMeasure::new(table.clone())),
+                },
                 None=>Self::record(*source),
             },
             Self::Pending(failed) if !failed.get()=>{
-                if let Some(table)=replay { *self=Self::Replay(TableMeasure::new(table.clone())); }
+                if let Some(table)=replay {
+                    *self=Self::Replay(match fill {
+                        Some(fill)=>TableMeasure::filling(table.clone(),fill),
+                        None=>TableMeasure::new(table.clone()),
+                    });
+                }
             },
             _=>{},
         }
@@ -1041,7 +1095,10 @@ impl Measurements {
     pub(crate) fn drain(&self) -> Result<Vec<(MetricKey,u32)>, &'static str> {
         match self {
             Self::Pending(_)=>Err("measurement capability not attached before use"),
-            Self::Replay(table) if table.take_miss().is_some()=>Err("replay measurement table miss"),
+            Self::Replay(table)=>match table.take_miss() {
+                Some(_)=>Err("replay measurement table miss"),
+                None=>Ok(table.take_filled()),
+            },
             Self::Record {capture,..}=>{
                 let mut capture=capture.borrow_mut();
                 if capture.failed { return Err("recording measurement bounds or conflicting answer"); }
@@ -1054,7 +1111,7 @@ impl Measurements {
         match self {
             Self::Live(source)=>live(*source),
             Self::Pending(failed)=>{ failed.set(true); 0.0 },
-            Self::Replay(table)=>table.answer(key, !speculating()),
+            Self::Replay(table)=>table.answer(key, !speculating(), live),
             Self::Record {source,capture}=>{
                 let answer=live(*source);
                 let bits=answer.to_bits();
@@ -1593,6 +1650,22 @@ mod tests {
     }
 
     #[test]
+    fn a_filling_table_learns_a_missing_measure_and_reports_it() {
+        static M:crate::ui::fixture::FixtureMeasure=crate::ui::fixture::FixtureMeasure;
+        let m=TableMeasure::filling(HashMap::new(), &M);
+        let key=MetricKey::Width {text:b"Play".to_vec(),sz:28,bold:false};
+        let got=m.width(c"Play", 28, false);
+        assert_eq!(got, M.width(c"Play", 28, false), "a filling table measures what the app measures");
+        assert!(m.take_miss().is_none(), "a learned measure is not a miss");
+        assert_eq!(m.take_filled(), vec![(key, got.to_bits())]);
+        assert_eq!(m.width(c"Play", 28, false), got, "the learned key answers from the table");
+        assert!(m.take_filled().is_empty(), "a key is learned once");
+        let strict=TableMeasure::new(HashMap::new());
+        strict.width(c"Play", 28, false);
+        assert!(strict.take_miss().is_some(), "without a source a miss is still a miss");
+    }
+
+    #[test]
     fn a_speculative_pass_is_recorded_but_a_replay_miss_inside_it_is_not_charged() {
         static M:crate::ui::fixture::FixtureMeasure=crate::ui::fixture::FixtureMeasure;
         let record=Measurements::record(&M);
@@ -1668,7 +1741,7 @@ mod tests {
         assert!(m.drain().is_err());
         let mut pending=Measurements::Pending(Default::default());
         pending.cap_h(28);
-        pending.prepare(Some(&HashMap::new()));
+        pending.prepare(Some(&HashMap::new()),None);
         assert!(pending.drain().is_err(),"late attachment must not erase an early query fault");
     }
 
