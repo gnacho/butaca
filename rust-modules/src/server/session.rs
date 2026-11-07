@@ -1934,6 +1934,20 @@ impl Session {
         next
     }
 
+    /// The persisted subtitle appearance steps, already clamped by the writer. Read once at boot
+    /// into `route`'s process globals: nothing else reads the file for them.
+    pub(crate) fn subtitle_scale(&self) -> u8 {
+        self.subtitle_scale
+    }
+
+    pub(crate) fn subtitle_position(&self) -> u8 {
+        self.subtitle_position
+    }
+
+    pub(crate) fn subtitle_background(&self) -> u8 {
+        self.subtitle_background
+    }
+
     pub(crate) fn with_subtitle_scale(&self, step: u8) -> Self {
         let mut next = self.clone();
         next.subtitle_scale = step;

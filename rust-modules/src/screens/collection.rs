@@ -61,9 +61,16 @@ const MORE_GAP: f32 = theme::space::LG;
 const ITEMS_HEADING_Y: f32 = 447.0;
 /// The first row's poster top (`.tl { top:520px }`).
 const GRID_TOP: f32 = 520.0;
+/// The favourites page's heading and grid tops. Its header carries no art and no fetched
+/// summary: the title stands alone at the content edge, so the heading and the grid rise to sit
+/// under it instead of leaving the art's 300px band empty (#318).
+const FAV_ITEMS_HEADING_Y: f32 = 200.0;
+const FAV_GRID_TOP: f32 = 273.0;
 /// C4a: the quiet read-outs' region, where the grid would be (`left:96; right:96; top:460;
 /// height:475`), its copy centred in it.
 const STATUS_FRAME: Rect = Rect { x: MARGIN_X, y: 460.0, w: SCR_W - 2.0 * MARGIN_X, h: 475.0 };
+/// The same region on the favourites page, where its higher grid would be.
+const FAV_STATUS_FRAME: Rect = Rect { x: MARGIN_X, y: FAV_GRID_TOP - 60.0, w: SCR_W - 2.0 * MARGIN_X, h: 475.0 };
 const LOAD_AHEAD: usize = crate::ui::poster_grid::COLS * 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,8 +107,8 @@ fn order_note(collection: &Collection) -> &'static str {
 /// How much of the page's head (art, text column, grid heading) is left at `scroll`: all of it at
 /// the top, none once the first row has risen to the content edge — so a scrolled page (C2)
 /// leaves no remnant of the head above its rows.
-fn head_alpha(scroll: f32) -> f32 {
-    (1.0 - scroll / (GRID_TOP - CONTENT_TOP)).clamp(0.0, 1.0)
+fn head_alpha(scroll: f32, grid_top: f32) -> f32 {
+    (1.0 - scroll / (grid_top - CONTENT_TOP)).clamp(0.0, 1.0)
 }
 
 /// The header's meta line — "Collection · N items", or the kind alone ([`meta_key`]).
@@ -242,7 +249,8 @@ impl CollectionScreen {
             collection.items.iter().map(|item| (item.sid, item.rk.as_str())), "collection");
         self.labels = collection.items.iter().map(member_label).collect();
         self.meta = (meta_key(collection), meta_line(collection));
-        self.summary_more = !collection.summary.is_empty() && summary_view(&collection.summary, measure).truncates(TEXT_W);
+        let text_w = self.text_w();
+        self.summary_more = !collection.summary.is_empty() && summary_view(&collection.summary, measure).truncates(text_w);
         self.links_c.clear();
         if self.summary_more && !collection.items.is_empty() {
             self.links_c.push(Link { from: HEADER_GROUP, dir: Dir::Down, to: GRID_GROUP });
@@ -321,7 +329,7 @@ impl CollectionScreen {
     /// Member `index`'s resting cell at the live scroll and live caption bands — the ONE rect
     /// draw, hit stops and focus placement all read.
     fn cell(&self, index: usize) -> Rect {
-        crate::ui::poster_grid::cell(index, GRID_TOP, self.scroll.pos, &self.bands.geometry())
+        crate::ui::poster_grid::cell(index, self.grid_top(), self.scroll.pos, &self.bands.geometry())
     }
 
     /// The row whose caption band is open: the focused member's, while focus is on a member.
@@ -331,7 +339,7 @@ impl CollectionScreen {
             .map(|index| index / crate::ui::poster_grid::COLS)
     }
 
-    fn status_frame() -> Rect { STATUS_FRAME }
+    fn status_frame(favorites: bool) -> Rect { if favorites { FAV_STATUS_FRAME } else { STATUS_FRAME } }
 
     /// The header text column's two anchors — the meta line's and the summary's cap tops — shared
     /// by [`Self::draw_header`] and [`Self::header_text_bottom`] so the read-out's glyph ceiling
@@ -362,11 +370,11 @@ impl CollectionScreen {
     /// failure is the page-placed `Failed` read-out every page shares (`StatusOverlay::page`,
     /// `ui/CLAUDE.md` rule 4) — Home's and the Library's untyped "can't reach" verdict, so their
     /// glyph too — with its glyph shrunk under the live header rather than drawn over it.
-    fn status_overlay<'a>(collection: Option<&Collection>, tick: u32,
-        measure: &dyn crate::ui::machine::Measure) -> StatusOverlay<'a> {
+    fn status_overlay<'a>(collection: Option<&'a Collection>, tick: u32,
+        measure: &dyn crate::ui::machine::Measure, favorites: bool) -> StatusOverlay<'a> {
         match collection.map(|c| c.status).unwrap_or(CollectionStatus::Loading) {
-            CollectionStatus::Loading => StatusOverlay::new(Self::status_frame(), crate::i18n::msg::browse_collection_loading_c(), StatusKind::Working).phase(tick),
-            CollectionStatus::Empty => StatusOverlay::new(Self::status_frame(), crate::i18n::msg::browse_collection_empty_c(), StatusKind::Empty),
+            CollectionStatus::Loading => StatusOverlay::new(Self::status_frame(favorites), crate::i18n::msg::browse_collection_loading_c(), StatusKind::Working).phase(tick),
+            CollectionStatus::Empty => StatusOverlay::new(Self::status_frame(favorites), crate::i18n::msg::browse_collection_empty_c(), StatusKind::Empty),
             CollectionStatus::Unavailable => StatusOverlay::new(Rect::FULL, crate::i18n::msg::browse_collection_unavailable_c(), StatusKind::Failed)
                 .page(crate::ui::icons::Icon::PersonBadgeXmark)
                 .reason(crate::i18n::msg::browse_collection_unavailable_reason_c()),
@@ -378,7 +386,7 @@ impl CollectionScreen {
                     None => overlay,
                 }
             }
-            CollectionStatus::Ready => StatusOverlay::new(Self::status_frame(), c"", StatusKind::Empty),
+            CollectionStatus::Ready => StatusOverlay::new(Self::status_frame(favorites), c"", StatusKind::Empty),
         }
     }
 
@@ -409,7 +417,7 @@ impl CollectionScreen {
         if let Some(index) = cx.focus.current.filter(|key| key.entry == self.entry)
             .and_then(|key| self.item_index(collection, key.elem)) {
             self.scroll_target = crate::ui::poster_grid::snap_row(self.scroll.pos,
-                index / crate::ui::poster_grid::COLS, collection.items.len(), GRID_TOP, CONTENT_TOP);
+                index / crate::ui::poster_grid::COLS, collection.items.len(), self.grid_top(), CONTENT_TOP);
         } else { self.scroll_target = 0.0; }
         // A focus the reader did not move (a restore, a landing) adopts its band settled; a D-pad
         // move opens it with motion from `FocusMoved`, as the Library grid does.
@@ -454,7 +462,7 @@ impl CollectionScreen {
     /// The header's focus rect — its text column — scrolled with the document: the header is the
     /// top of one page with the grid, not a band pinned over it.
     fn header_rect(&self) -> Rect {
-        Rect::new(COL_X, HEADER_TOP - self.scroll.pos, TEXT_W, ART_H)
+        Rect::new(self.text_x(), HEADER_TOP - self.scroll.pos, self.text_w(), ART_H)
     }
 
     /// The collection's art, scrolled with the document.
@@ -469,10 +477,24 @@ impl CollectionScreen {
         !self.id.is_favorites()
     }
 
+    /// The page's grid top: the shared geometry, or the compact one the favourites page uses
+    /// because its header carries no art and no fetched summary (#318).
+    fn grid_top(&self) -> f32 { if self.id.is_favorites() { FAV_GRID_TOP } else { GRID_TOP } }
+
+    /// The "Items" heading's cap top, under the header the page actually draws.
+    fn items_heading_y(&self) -> f32 {
+        if self.id.is_favorites() { FAV_ITEMS_HEADING_Y } else { ITEMS_HEADING_Y }
+    }
+
+    /// The header text column's left edge and width: beside the art, or the full content width
+    /// on a page that draws none.
+    fn text_x(&self) -> f32 { if self.id.is_favorites() { MARGIN_X } else { COL_X } }
+    fn text_w(&self) -> f32 { if self.id.is_favorites() { SCR_W - 2.0 * MARGIN_X } else { TEXT_W } }
+
     fn draw_header(&self, p: Painter, collection: &Collection, focused: bool,
         measure: &dyn crate::ui::machine::Measure) {
         let dy = -self.scroll.pos;
-        let alpha = head_alpha(self.scroll.pos);
+        let alpha = head_alpha(self.scroll.pos, self.grid_top());
         if alpha <= 0.0 { return; }
         let p = p.alpha(alpha);
         let art = self.art_rect();
@@ -489,11 +511,12 @@ impl CollectionScreen {
         }
         if collection.status == CollectionStatus::Ready {
             card_row::draw_heading(p, crate::i18n::msg::browse_collection_items(), order_note(collection),
-                MARGIN_X, ITEMS_HEADING_Y + dy, SCR_W - 2.0 * MARGIN_X, measure);
+                MARGIN_X, self.items_heading_y() + dy, SCR_W - 2.0 * MARGIN_X, measure);
         }
-        let title = measure.fit_line(name, TEXT_W, theme::size::DISPLAY, true);
+        let (text_x, text_w) = (self.text_x(), self.text_w());
+        let title = measure.fit_line(name, text_w, theme::size::DISPLAY, true);
         Label::new(title.as_ptr(), theme::size::DISPLAY, theme::TEXT_PRIMARY).bold()
-            .v(VAlign::CapTop).draw(p, Rect::new(COL_X, HEADER_TOP + dy, TEXT_W, 0.0));
+            .v(VAlign::CapTop).draw(p, Rect::new(text_x, HEADER_TOP + dy, text_w, 0.0));
         let (meta_y, summary_y) = Self::header_ys(measure);
         let (meta_y, summary_y) = (meta_y + dy, summary_y + dy);
         let built;
@@ -502,17 +525,17 @@ impl CollectionScreen {
             &built
         };
         Label::new(meta.as_ptr(), theme::size::LABEL, theme::TEXT_SECONDARY)
-            .v(VAlign::CapTop).draw(p, Rect::new(COL_X, meta_y, TEXT_W, 0.0));
+            .v(VAlign::CapTop).draw(p, Rect::new(text_x, meta_y, text_w, 0.0));
         if collection.summary.is_empty() { return; }
         let view = summary_view(&collection.summary, measure);
-        let h = view.measure_h(TEXT_W);
+        let h = view.measure_h(text_w);
         if focused && self.header_marked && self.summary_more {
-            widgets::text_block_highlight(p, Rect::new(COL_X - theme::space::SM,
-                summary_y - theme::space::SM, TEXT_W + 2.0 * theme::space::SM,
+            widgets::text_block_highlight(p, Rect::new(text_x - theme::space::SM,
+                summary_y - theme::space::SM, text_w + 2.0 * theme::space::SM,
                 h + 2.0 * theme::space::SM));
         }
-        view.draw(p, Rect::new(COL_X, summary_y, TEXT_W, h));
-        if self.summary_more { view.draw_more(p, COL_X, summary_y, TEXT_W, h, focused && self.header_marked); }
+        view.draw(p, Rect::new(text_x, summary_y, text_w, h));
+        if self.summary_more { view.draw_more(p, text_x, summary_y, text_w, h, focused && self.header_marked); }
     }
 
     /// Card `index`'s persistent label: the one [`Self::sync`] built, or — for a landing the page
@@ -561,7 +584,7 @@ impl CollectionScreen {
         let focus = f.focus.current.filter(|key| key.entry == self.entry);
         let current = focus.and_then(|key| self.item_index(collection, key.elem));
         let p = f.painter.alpha(f.page_alpha);
-        for index in crate::ui::poster_grid::visible(collection.items.len(), GRID_TOP, self.scroll.pos) {
+        for index in crate::ui::poster_grid::visible(collection.items.len(), self.grid_top(), self.scroll.pos) {
             if current == Some(index) || self.above_edge(index) { continue; }
             if let Some(item) = collection.items.get(index) {
                 self.draw_card(p, item, &self.label_at(collection, index, item), index, false, 1.0, f.measure);
@@ -572,7 +595,7 @@ impl CollectionScreen {
                 self.draw_card(p, item, &self.label_at(collection, index, item), index, true, f.press.scale, f.measure);
             }
         }
-        for index in crate::ui::poster_grid::visible(collection.items.len(), GRID_TOP, self.scroll.pos) {
+        for index in crate::ui::poster_grid::visible(collection.items.len(), self.grid_top(), self.scroll.pos) {
             let Some(elem) = self.elem_at(collection, index) else { continue };
             let focused = current == Some(index);
             let rect = self.card_rect(index, focused, if focused { f.press.scale } else { 1.0 });
@@ -591,7 +614,7 @@ impl<H: ContentLike + CollectionLike> Focusable<H> for CollectionScreen {
                 kind: GroupKind::Grid { cols: crate::ui::poster_grid::COLS, holes: &[] },
                 seat: Seat::Remembered, reachable: AxisMask::BOTH,
                 edge: [EdgeRule::Geometric; 4],
-                extent: Rect::new(MARGIN_X, GRID_TOP - self.scroll.pos,
+                extent: Rect::new(MARGIN_X, self.grid_top() - self.scroll.pos,
                     SCR_W - 2.0 * MARGIN_X, CARD_H), len: collection.items.len(), elem: ElemKind::Card });
         }
         if self.summary_more {
@@ -600,8 +623,8 @@ impl<H: ContentLike + CollectionLike> Focusable<H> for CollectionScreen {
                 extent: self.header_rect(), len: 1, elem: ElemKind::Bare });
         }
         if collection.status == CollectionStatus::Failed {
-            let rect = Self::status_overlay(Some(collection), cx.tick.ms, cx.measure).action_frame_measured(cx.measure)
-                .unwrap_or(Self::status_frame());
+            let rect = Self::status_overlay(Some(collection), cx.tick.ms, cx.measure, self.id.is_favorites()).action_frame_measured(cx.measure)
+                .unwrap_or(Self::status_frame(self.id.is_favorites()));
             out.push(GroupSpec { id: STATUS_GROUP, kind: GroupKind::Free, seat: Seat::First,
                 reachable: AxisMask::BOTH, edge: [EdgeRule::Stop; 4], extent: rect, len: 1, elem: ElemKind::Bare });
         }
@@ -630,7 +653,7 @@ impl<H: ContentLike + CollectionLike> Focusable<H> for CollectionScreen {
                 Some(Placed { rect, rest_rect: rect, clip: Rect::FULL, index: Some(0) })
             }
             Located::Retry => {
-                let rect = Self::status_overlay(Some(collection), cx.tick.ms, cx.measure).action_frame_measured(cx.measure)?;
+                let rect = Self::status_overlay(Some(collection), cx.tick.ms, cx.measure, self.id.is_favorites()).action_frame_measured(cx.measure)?;
                 Some(Placed { rect, rest_rect: rect, clip: Rect::FULL, index: Some(0) })
             }
             Located::Card(index) => {
@@ -773,7 +796,7 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
             }
             if collection.status == CollectionStatus::Ready { self.draw_grid(f, collection); }
             else {
-                let overlay = Self::status_overlay(Some(collection), f.cx.tick.ms, f.measure)
+                let overlay = Self::status_overlay(Some(collection), f.cx.tick.ms, f.measure, self.id.is_favorites())
                     .focused(f.focus.current.is_some_and(|key| key.entry == self.entry && key.elem == RETRY_ELEM));
                 overlay.draw_measured(&Env::inert(), p, f.measure);
                 if let Some(rect) = overlay.action_frame_measured(f.measure) {
@@ -782,7 +805,7 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
                 }
             }
         } else {
-            Self::status_overlay(None, f.cx.tick.ms, f.measure).draw_measured(&Env::inert(), p, f.measure);
+            Self::status_overlay(None, f.cx.tick.ms, f.measure, self.id.is_favorites()).draw_measured(&Env::inert(), p, f.measure);
         }
         if !self.id.is_favorites() {
             crate::ui::widgets::draw_back_control(p);
@@ -1010,7 +1033,7 @@ mod tests {
         let (mut store, _) = seeded();
         store.edit_for_test(|c| { c.items.clear(); c.summary.clear(); c.status = CollectionStatus::Failed; });
         let c = store.view().current().unwrap();
-        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure);
+        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure, false);
         assert_eq!(overlay.glyph, Some(crate::ui::icons::Icon::ServerBadgeMinus));
         let glyph = overlay.glyph_frame().expect("a bare header leaves room for the full glyph");
         assert_eq!(glyph.h, StatusOverlay::GLYPH_SIZE);
@@ -1019,13 +1042,13 @@ mod tests {
         store.edit_for_test(|c| c.summary = "A long collection summary that runs on. ".repeat(40));
         let c = store.view().current().unwrap();
         let bottom = CollectionScreen::header_text_bottom(c, &FixtureMeasure);
-        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure);
+        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure, false);
         if let Some(glyph) = overlay.glyph_frame() {
             assert!(glyph.y >= bottom, "glyph top {} is above the summary's bottom {bottom}", glyph.y);
         }
 
         store.edit_for_test(|c| c.status = CollectionStatus::Empty);
-        let overlay = CollectionScreen::status_overlay(store.view().current(), 0, &FixtureMeasure);
+        let overlay = CollectionScreen::status_overlay(store.view().current(), 0, &FixtureMeasure, false);
         assert!(overlay.glyph_frame().is_none() && overlay.kind == StatusKind::Empty,
             "an empty collection is a quiet answer, not a failure");
     }
@@ -1039,7 +1062,7 @@ mod tests {
         let c = store.view().current().unwrap();
         assert_eq!(meta_key(c), (0, true), "the meta line is the kind alone");
         assert!(CollectionScreen::shows_head(c));
-        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure);
+        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure, false);
         let f = overlay.frame;
         assert_eq!((f.x, f.y, f.w, f.h), (96.0, 460.0, 1728.0, 475.0));
         assert_eq!(overlay.caption, crate::i18n::msg::browse_collection_empty_c());
@@ -1053,7 +1076,7 @@ mod tests {
         store.edit_for_test(|c| { c.items.clear(); c.status = CollectionStatus::Unavailable; });
         let c = store.view().current().unwrap();
         assert!(!CollectionScreen::shows_head(c));
-        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure);
+        let overlay = CollectionScreen::status_overlay(Some(c), 0, &FixtureMeasure, false);
         assert_eq!(overlay.kind, StatusKind::Failed);
         let f = overlay.frame;
         assert_eq!((f.x, f.y, f.w, f.h), (0.0, 0.0, SCR_W, SCR_H));
@@ -1075,6 +1098,25 @@ mod tests {
         assert!(ITEMS_HEADING_Y + theme::size::HEADLINE as f32 <= GRID_TOP);
     }
 
+    /// #318: the favourites page draws no art, so its header text starts at the content edge and
+    /// the heading and the grid rise under the title instead of leaving the art's band empty.
+    #[test]
+    fn the_favourites_page_keeps_its_grid_under_the_title() {
+        let id = crate::collection::CollectionRef::favorites(crate::registry::ServerId::UNSET, "Favoritos");
+        let mut store = crate::stores::collection::CollectionStore::default();
+        store.run(CollectionCmd::Open { target: CollectionTarget { id: id.clone(), want: PAGE_SIZE } });
+        store.install_for_test(vec![item("a"), item("b"), item("c")], CollectionStatus::Ready);
+        let mut screen = CollectionScreen::new(EntryId(9), id);
+        screen.sync(store.view().current().unwrap(), &FixtureMeasure);
+        assert!(!screen.shows_header_art(store.view().current().unwrap()));
+        assert_eq!(screen.text_x(), MARGIN_X, "the title stands at the content edge");
+        assert_eq!(screen.text_w(), SCR_W - 2.0 * MARGIN_X);
+        assert_eq!(screen.cell(0).y, FAV_GRID_TOP);
+        assert_eq!(screen.cell(0).x, MARGIN_X);
+        assert!(screen.items_heading_y() + theme::size::HEADLINE as f32 <= screen.grid_top());
+        assert!(FAV_GRID_TOP < GRID_TOP, "the grid rises above the art-carrying geometry");
+    }
+
     /// C2: scrolling to a lower row rests the first visible row on the content edge, with the
     /// header gone and nothing of the row above it left showing.
     #[test]
@@ -1089,8 +1131,8 @@ mod tests {
         let rows: Vec<f32> = (0..30).step_by(cols).filter(|&i| !screen.above_edge(i))
             .map(|i| screen.cell(i).y).collect();
         assert!((rows[0] - CONTENT_TOP).abs() < 0.5, "first drawn row at {}", rows[0]);
-        assert_eq!(head_alpha(scroll), 0.0, "no remnant of the header");
-        assert_eq!(head_alpha(0.0), 1.0);
+        assert_eq!(head_alpha(scroll, GRID_TOP), 0.0, "no remnant of the header");
+        assert_eq!(head_alpha(0.0, GRID_TOP), 1.0);
     }
 
     /// Down from above a short last row lands on its last member (the Library grid's rule)
