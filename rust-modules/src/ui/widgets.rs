@@ -1968,6 +1968,26 @@ const HERO_SCRIM_R_W: f32 = 700.0;
 const HERO_SCRIM_R_TOP: f32 = 0.65 * crate::ui::consts::SCR_H; // 702
 const HERO_SCRIM_R_A: f32 = 0.50;
 
+/// Where the TEXT BAND starts horizontally, and where it is at full strength: the wedge has already
+/// given up by the first stop (`hero_scrim_a` keeps ~0.02 of its peak there), so the band can begin
+/// at zero without drawing a seam, and it reaches full weight exactly where a widened detail column
+/// ends its longest line. Past that it stays at full: the band is about the copy, and the copy does
+/// not get lighter at its last character.
+const HERO_SCRIM_BAND_X: f32 = 1344.0;
+const HERO_SCRIM_BAND_FULL_X: f32 = 1520.0;
+/// The vertical band the band-scrim darkens: the detail hero's whole copy column, from the top of
+/// its text block (`TITLE_BOTTOM - 200`) to below the facts row, with a flat middle and a feather at
+/// each end. It is not the title alone: the synopsis and the facts row are the same column of text
+/// and are graded by the same contract, so a band that stopped at the title would just move the
+/// failure down the page.
+const HERO_SCRIM_BAND_TOP: f32 = 366.0;
+const HERO_SCRIM_BAND_FLAT_TOP: f32 = 456.0;
+const HERO_SCRIM_BAND_FLAT_BOT: f32 = 810.0;
+const HERO_SCRIM_BAND_BOT: f32 = 900.0;
+/// The band's alpha. Measured against the 3:1 floor: a widened column needs ~0.21 of extra alpha at
+/// (1520, 514) over 0.85 artwork, so 0.34 leaves margin without turning the band into a bar.
+const HERO_SCRIM_BAND_A: f32 = 0.34;
+
 /// Where the frame-wide ATMOSPHERIC ramp starts — the treatment's other half, which both heroes
 /// paint under this wedge (`screens::home`'s `Backdrop::draw` / `detail::draw_backdrop`): nothing above this
 /// line, running to the foot of the panel. It sits here with the wedge's own stops because it is
@@ -2020,6 +2040,9 @@ pub(crate) fn hero_scrim_right_a(x: f32, y: f32, strength: f32) -> f32 {
 /// | 0 | `(0, TOP, W, KNEE−TOP)` | feather-in: 0 along the whole top edge, the full wedge along the bottom |
 /// | 1 | `(0, KNEE, W, SCR_H−KNEE)` | constant in y → a pure horizontal ramp to the frame's foot |
 /// | 2 | `(SCR_W−R_W, R_TOP, R_W, SCR_H−R_TOP)` | feathers in from the top AND the left, peaking bottom-right |
+/// | 3 | `(BAND_X, BAND_TOP, W−BAND_X, FLAT_TOP−BAND_TOP)` | the text band's entry: zero on its top edge, full on the flat line |
+/// | 4 | `(BAND_X, FLAT_TOP, W−BAND_X, FLAT_BOT−FLAT_TOP)` | the text band's body: constant in y, a pure horizontal ramp |
+/// | 5 | `(BAND_X, FLAT_BOT, W−BAND_X, BAND_BOT−FLAT_BOT)` | the text band's exit: full on the flat line, zero on its bottom edge |
 ///
 /// **Quad 0 and quad 1 abut exactly**, and must keep doing so: quad 0's bottom pair (`bl→br` =
 /// edge→none) is identical to quad 1's top pair (`tl→tr` = edge→none) at every x, and the two share
@@ -2036,14 +2059,41 @@ pub(crate) fn hero_scrim_right_a(x: f32, y: f32, strength: f32) -> f32 {
 /// construction cannot pin (that the closed forms are affine / bilinear in BETWEEN the corners,
 /// which is the shape `grad4` can actually interpolate). It also gives the two closed forms the
 /// production caller they otherwise lacked. Both clamp `strength` themselves, so it is passed raw.
-pub(crate) fn hero_scrim_quads(strength: f32, right: bool) -> ([(Rect, [[f32; 4]; 4]); 3], usize) {
+/// The TEXT BAND scrim: a second, narrow field over the detail hero's title block, for the copy a
+/// widened text column puts past the left wedge's reach (issue #315/#323). The left wedge is a
+/// function of x alone and stops at [`HERO_SCRIM_W`] by design, because the last fifth of the frame
+/// is the side of the picture the composition is about. Widening the column therefore cannot be
+/// paid for by stretching that wedge: it is paid for here, in a band that exists only where there
+/// is text to read.
+///
+/// The profile is a tent in y (zero at both edges of the band, peak at its middle) and a ramp in x
+/// (zero at [`HERO_SCRIM_BAND_X`], full at [`HERO_SCRIM_BAND_FULL_X`], full to the frame's edge).
+/// Two linear factors, which is exactly what [`Painter::grad4`] can reproduce: the band is painted
+/// as two bilinear quads, entry and exit, because a single quad cannot feather BOTH of its
+/// horizontal edges — its corners interpolate straight from one edge to the other, which would put
+/// a hard line under the title, the one place it would show.
+pub(crate) fn hero_scrim_band_a(x: f32, y: f32, strength: f32) -> f32 {
+    let across = ((x - HERO_SCRIM_BAND_X) / (HERO_SCRIM_BAND_FULL_X - HERO_SCRIM_BAND_X))
+        .clamp(0.0, 1.0);
+    let down = if y < HERO_SCRIM_BAND_FLAT_TOP {
+        (y - HERO_SCRIM_BAND_TOP) / (HERO_SCRIM_BAND_FLAT_TOP - HERO_SCRIM_BAND_TOP)
+    } else if y > HERO_SCRIM_BAND_FLAT_BOT {
+        (HERO_SCRIM_BAND_BOT - y) / (HERO_SCRIM_BAND_BOT - HERO_SCRIM_BAND_FLAT_BOT)
+    } else {
+        1.0
+    };
+    HERO_SCRIM_BAND_A * strength.clamp(0.0, crate::ui::landing_hero::PREVIEW_FIELD) * across
+        * down.clamp(0.0, 1.0)
+}
+
+pub(crate) fn hero_scrim_quads(strength: f32, right: bool) -> ([(Rect, [[f32; 4]; 4]); 6], usize) {
     let (sw, sh) = (crate::ui::consts::SCR_W, crate::ui::consts::SCR_H);
     // the wedge peaks at its left margin and is gone by `HERO_SCRIM_W`; the right one peaks in the
     // bottom-right corner of the panel, which is the corner it is anchored to
     let none = theme::scrim(hero_scrim_a(HERO_SCRIM_W, strength));
     let edge = theme::scrim(hero_scrim_a(0.0, strength));
     let redge = theme::scrim(hero_scrim_right_a(sw, sh, strength));
-    let mut q = [(Rect::new(0.0, 0.0, 0.0, 0.0), [none; 4]); 3];
+    let mut q = [(Rect::new(0.0, 0.0, 0.0, 0.0), [none; 4]); 6];
     q[0] = (
         Rect::new(
             0.0,
@@ -2067,8 +2117,30 @@ pub(crate) fn hero_scrim_quads(strength: f32, right: bool) -> ([(Rect, [[f32; 4]
             ),
             [none, none, redge, none],
         );
+        // The text band: entry, flat body, exit. Three quads, not one, because a single bilinear
+        // quad cannot feather BOTH of its horizontal edges — its corners interpolate straight from
+        // one edge to the other, which would put a hard line at the top or the bottom of the band,
+        // exactly where the title and the facts row sit.
+        let bw = sw - HERO_SCRIM_BAND_X;
+        let corner = |x: f32, y: f32| theme::scrim(hero_scrim_band_a(x, y, strength));
+        let (bl, br) = (corner(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_TOP), corner(sw, HERO_SCRIM_BAND_TOP));
+        let (fl, fr) = (corner(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_FLAT_TOP), corner(sw, HERO_SCRIM_BAND_FLAT_TOP));
+        let (gl, gr) = (corner(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_FLAT_BOT), corner(sw, HERO_SCRIM_BAND_FLAT_BOT));
+        let (el, er) = (corner(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_BOT), corner(sw, HERO_SCRIM_BAND_BOT));
+        q[3] = (
+            Rect::new(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_TOP, bw, HERO_SCRIM_BAND_FLAT_TOP - HERO_SCRIM_BAND_TOP),
+            [bl, br, fr, fl],
+        );
+        q[4] = (
+            Rect::new(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_FLAT_TOP, bw, HERO_SCRIM_BAND_FLAT_BOT - HERO_SCRIM_BAND_FLAT_TOP),
+            [fl, fr, gr, gl],
+        );
+        q[5] = (
+            Rect::new(HERO_SCRIM_BAND_X, HERO_SCRIM_BAND_FLAT_BOT, bw, HERO_SCRIM_BAND_BOT - HERO_SCRIM_BAND_FLAT_BOT),
+            [gl, gr, er, el],
+        );
     }
-    (q, if right { 3 } else { 2 })
+    (q, if right { 6 } else { 2 })
 }
 
 /// Draw the hero corner scrim: the darkening for copy that sits directly on a full-bleed backdrop,
@@ -4195,6 +4267,13 @@ impl View for StatusOverlay<'_> {
 pub struct TransportButton {
     pub frame: Rect,
     pub which: i32,
+    /// The glyph, when the caller knows better than the index does.
+    ///
+    /// The row used to be three fixed discs whose mark was a function of their position, so
+    /// `which` was enough. It is not any more: the Play/Pause disc wears a different mark per
+    /// frame, and the Next disc is not drawn at all on a movie. `which` stays because it is the
+    /// row's IDENTITY (what a click and the focus cursor address), not its appearance.
+    pub icon: Option<crate::ui::icons::Icon>,
     pub focused: bool,
     /// WHICH GROUND this disc stands on — see [`ControlGround`]. It defaults to
     /// [`Keyed`](ControlGround::Keyed) like every other control face, even though this family's one
@@ -4212,6 +4291,7 @@ impl TransportButton {
         Self {
             frame,
             which,
+            icon: None,
             focused: false,
             ground: ControlGround::Keyed,
             palette: ControlPalette::default(),
@@ -4220,6 +4300,11 @@ impl TransportButton {
     }
     pub fn focused(mut self, f: bool) -> Self {
         self.focused = f;
+        self
+    }
+    /// Wear this glyph instead of the one this position implies — see [`Self::icon`].
+    pub fn icon(mut self, id: crate::ui::icons::Icon) -> Self {
+        self.icon = Some(id);
         self
     }
     /// Stand this disc on a named [`ControlGround`] — see [`Button::ground`].
@@ -4270,11 +4355,14 @@ impl View for TransportButton {
             self.focused,
             self.ground,
         );
-        let id = match self.which {
-            1 => Icon::Audio,
-            2 => Icon::More,
-            _ => Icon::Cc,
-        };
+        let id = self.icon.unwrap_or(match self.which {
+            1 => Icon::Stop,
+            2 => Icon::SkipNext,
+            3 => Icon::Cc,
+            4 => Icon::Audio,
+            5 => Icon::More,
+            _ => Icon::Play,
+        });
         let s = (r.w * DISC_ICON_RATIO).round();
         let ir = Rect::new(r.x + (r.w - s) * 0.5, r.y + (r.h - s) * 0.5, s, s);
         crate::ui::icons::draw(p, id, ir, ink);

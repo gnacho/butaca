@@ -1,7 +1,9 @@
 //! The Detail page's About footer.
 //!
-//! Only the synopsis card and Languages column are controls. Information and Accessibility remain
-//! readable content, not dead focus stops.
+//! Only the Languages column is a control. The synopsis card, Information and Accessibility are
+//! readable content, not dead focus stops — the card stopped being one when the whole synopsis
+//! moved onto the page (#313, #316): with nothing behind a press, a stop on it would be a stop
+//! that does nothing.
 
 use std::ffi::CString;
 
@@ -36,13 +38,15 @@ const SYNOPSIS_W: f32 = CARD_W - 2.0 * CARD_PAD;
 
 /// The About card's synopsis: ONE builder for the height `card_rect` reserves and the block
 /// `draw` paints, so the two cannot disagree about the wrap.
+///
+/// The whole synopsis reads on the page (#313, #316). It used to stop at five lines behind a MORE
+/// that opened a sheet holding the rest: the same text twice, the page copy cut, and a press that
+/// left the page to read what the page already had. The card grows to whatever the text needs and
+/// nothing hides behind a mark.
 fn synopsis<'a>(summary: &'a str, measure: &'a dyn Measure) -> TextView<'a> {
     TextView::new(summary, theme::size::CAPTION, theme::TEXT_HEADING)
         .with_measure(measure)
         .leading(30.0)
-        .max_lines(5)
-        .fade_for_more(MORE_GAP)
-        .mark_always()
 }
 
 /// The Languages column's audio list: ONE builder for the height `languages_rect` reserves and
@@ -62,6 +66,8 @@ fn languages_more_y(plate: Rect) -> f32 {
     plate.y + plate.h - CARD_PAD - theme::size::CAPTION as f32
 }
 
+/// Element identity, not focusability: the card keeps its key so a remembered focus and the
+/// cached geometry still name it, but nothing publishes a stop on it any more.
 pub(crate) fn locate(key: u32, tracks_available: bool) -> Option<usize> {
     match key {
         CARD_ELEM => Some(0),
@@ -256,15 +262,6 @@ impl Rows {
         }
         synopsis(&d.summary, measure)
             .draw(p, Rect::new(ix, card.y + CARD_PAD + 100.0, SYNOPSIS_W, 0.0));
-        p.text(
-            crate::ui::text_view::more_mark().as_ptr(),
-            card.x + card.w - CARD_PAD,
-            card.y + card.h - CARD_PAD - theme::size::CAPTION as f32,
-            theme::size::CAPTION,
-            theme::TEXT_TERTIARY,
-            2,
-            1,
-        );
 
         self.draw_information(p, x, top + COL_Y, measure);
         self.draw_languages(p, top + COL_Y, focused == Some(LANGUAGES_ELEM), tracks, measure);
@@ -421,25 +418,17 @@ fn text_at(p: Painter, x: f32, y: f32, size: i32, color: [f32; 4], bold: i32, te
 mod tests {
     use super::*;
 
-    /// Issue 15: the About card's MORE is pinned on the synopsis' last line whether or not the
-    /// text was truncated, so a synopsis that fits in exactly its five lines with a long last
-    /// line runs under MORE unless that line fades too.
+    /// #313/#316: the card prints the whole synopsis. A long one is never cut, never fades and
+    /// carries no MORE — the page is the only place the text reads.
     #[test]
-    fn an_untruncated_last_line_reaching_under_more_fades() {
+    fn the_card_prints_the_whole_synopsis_with_no_mark() {
         let measure = crate::ui::fixture::FixtureMeasure;
-        let fits = |n: usize| {
-            let text = "word ".repeat(n);
-            (!synopsis(&text, &measure).truncates(SYNOPSIS_W)).then_some(text)
-        };
-        let longest = (1..2000).map_while(fits).last().expect("some synopsis fits");
-        let view = synopsis(&longest, &measure);
-        let mark = measure.width(crate::ui::text_view::more_mark(), theme::size::CAPTION, true);
-        assert!(!view.truncates(SYNOPSIS_W));
-        assert!(view.last_line_w(SYNOPSIS_W) > SYNOPSIS_W - (mark + MORE_GAP),
-            "precondition: the last line ends inside MORE's rect and its air");
-        assert!(view.last_line_fades(SYNOPSIS_W), "text running under MORE must fade");
+        let long = "word ".repeat(400);
+        let view = synopsis(&long, &measure);
+        assert!(!view.truncates(SYNOPSIS_W), "a long synopsis is not cut");
+        assert!(!view.last_line_fades(SYNOPSIS_W), "nothing runs under a mark that is gone");
         let short = synopsis("A short synopsis.", &measure);
-        assert!(!short.last_line_fades(SYNOPSIS_W), "a line clear of MORE stays plain");
+        assert!(!short.last_line_fades(SYNOPSIS_W));
     }
 
     /// The Languages column's MORE is not the About card's shape: it sits on its own row below the
@@ -466,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_card_and_available_languages_are_focusable() {
+    fn the_card_and_the_available_languages_column_keep_their_element_identity() {
         assert_eq!(locate(CARD_ELEM, false), Some(0));
         assert_eq!(locate(LANGUAGES_ELEM, false), None);
         assert_eq!(locate(LANGUAGES_ELEM, true), Some(1));
@@ -474,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn about_focus_only_ever_lands_on_the_card_and_a_clickable_languages_column() {
+    fn the_about_range_names_the_card_and_a_clickable_languages_column() {
         let without_tracks: Vec<_> = (ABOUT_ELEM_RANGE_START..ABOUT_ELEM_RANGE_END)
             .filter_map(|key| locate(key, false).map(|_| key))
             .collect();

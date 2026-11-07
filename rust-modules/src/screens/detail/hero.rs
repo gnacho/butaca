@@ -59,10 +59,10 @@ const PEOPLE_MAX_LINES: usize = 2;
 const PEOPLE_CAST: usize = 3;
 const PEOPLE_LABEL_INK: [f32; 4] = theme::TEXT_TERTIARY;
 const FACTS_SEP_PAD: f32 = theme::space::SM;
-const FACTS_R: f32 = crate::ui::consts::SCR_W
-    - crate::ui::consts::MARGIN_X
-    - crate::ui::detail_layout::PEOPLE_W
-    - theme::space::SM;
+/// The facts row now runs to the safe edge: the people band is BELOW it, not beside it, so the row
+/// no longer has a column to stop short of (issue #323).
+const FACTS_R: f32 =
+    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - theme::space::SM;
 
 /// Duplicated from `widgets::Button`'s own PRIVATE `BTN_ICON_RATIO`/`BTN_ICON_GAP` (1.15, 12.0):
 /// those two constants are `widgets.rs`-internal, and this module may not reach past that file's
@@ -518,10 +518,8 @@ pub(crate) fn has_people(d: &Detail) -> bool {
     !d.cast.is_empty() || hero_credit(d).is_some()
 }
 
-pub(crate) fn draw_people(p: Painter, d: &Detail, button_y: f32, measure: &dyn Measure) {
-    use crate::ui::detail_layout::PEOPLE_W;
-    let x = crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - PEOPLE_W;
-    let mut bottom = button_y + CD;
+pub(crate) fn draw_people(p: Painter, d: &Detail, top: f32, measure: &dyn Measure) {
+    let mut y = top;
     if !d.cast.is_empty() {
         let names: Vec<&str> = d
             .cast
@@ -529,27 +527,67 @@ pub(crate) fn draw_people(p: Painter, d: &Detail, button_y: f32, measure: &dyn M
             .take(PEOPLE_CAST)
             .map(|credit| credit.tag.as_str())
             .collect();
-        bottom -= people_line(p, crate::i18n::msg::browse_detail_starring(), &names, x, bottom, measure);
+        y += people_line(p, crate::i18n::msg::browse_detail_starring(), &names, y, measure);
     }
     if let Some((label, names)) = hero_credit(d) {
-        people_line(p, label, &names, x, bottom, measure);
+        people_line(p, label, &names, y, measure);
     }
 }
 
-fn people_line(p: Painter, label: &str, names: &[&str], x: f32, bottom: f32, measure: &dyn Measure) -> f32 {
-    use crate::ui::detail_layout::{PEOPLE_INK, PEOPLE_LEAD, PEOPLE_W};
-    let names = names
+/// The height the cast and crew band will take, without painting it: the hero chain has to know it
+/// before the action row can be placed (issue #315/#323).
+pub(crate) fn people_h(d: &Detail, measure: &dyn Measure) -> f32 {
+    let mut h = 0.0;
+    if !d.cast.is_empty() {
+        let names: Vec<&str> = d
+            .cast
+            .iter()
+            .take(PEOPLE_CAST)
+            .map(|credit| credit.tag.as_str())
+            .collect();
+        h += people_line_h(crate::i18n::msg::browse_detail_starring(), &names, measure);
+    }
+    if let Some((label, names)) = hero_credit(d) {
+        h += people_line_h(label, &names, measure);
+    }
+    h
+}
+
+fn people_join(names: &[&str]) -> String {
+    names
         .iter()
         .map(|name| name.replace(' ', "\u{a0}"))
         .collect::<Vec<_>>()
-        .join(", ");
-    let view = TextView::new(&names, theme::size::CAPTION, PEOPLE_INK).with_measure(measure)
+        .join(", ")
+}
+
+fn people_view<'a>(joined: &'a str, label: &'a str, measure: &'a dyn Measure) -> TextView<'a> {
+    use crate::ui::detail_layout::{PEOPLE_INK, PEOPLE_LEAD};
+    TextView::new(joined, theme::size::CAPTION, PEOPLE_INK)
+        .with_measure(measure)
         .leading(PEOPLE_LEAD)
         .max_lines(PEOPLE_MAX_LINES)
-        .h(HAlign::Right)
-        .lead_quiet(label, PEOPLE_LABEL_INK);
-    let h = view.measure_h(PEOPLE_W);
-    view.draw(p, Rect::new(x, bottom - h, PEOPLE_W, 0.0));
+        .h(HAlign::Left)
+        .lead_quiet(label, PEOPLE_LABEL_INK)
+}
+
+fn people_line_h(label: &str, names: &[&str], measure: &dyn Measure) -> f32 {
+    let joined = people_join(names);
+    people_view(&joined, label, measure).measure_h(crate::ui::detail_layout::HERO_TEXT_W)
+}
+
+fn people_line(
+    p: Painter,
+    label: &str,
+    names: &[&str],
+    top: f32,
+    measure: &dyn Measure,
+) -> f32 {
+    use crate::ui::detail_layout::{HERO_TEXT_W, HERO_TEXT_X};
+    let joined = people_join(names);
+    let view = people_view(&joined, label, measure);
+    let h = view.measure_h(HERO_TEXT_W);
+    view.draw(p, Rect::new(HERO_TEXT_X, top, HERO_TEXT_W, 0.0));
     h
 }
 

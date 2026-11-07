@@ -692,6 +692,7 @@ impl DetailScreen {
         crate::ui::detail_layout::hero_chain(
             synopsis_h,
             d.is_some_and(|detail| !detail.ratings.is_empty()),
+            d.map_or(0.0, |detail| hero::people_h(detail, measure)),
             measure,
         )
     }
@@ -2309,7 +2310,7 @@ impl DetailScreen {
         }
         if let Some(d) = d {
             hero::draw_facts(chrome, d, chain.facts_y, cx.measure);
-            hero::draw_people(chrome, d, chain.btn_y, measure);
+            hero::draw_people(chrome, d, chain.people_y, measure);
         }
         // Full-trailer mode takes the action row with the rest of the page: the viewer asked for
         // the trailer and nothing else, and the transport drawn over the top
@@ -2612,7 +2613,6 @@ impl DetailScreen {
                 (0..d.credits_len().min(512))
                     .filter_map(|i| cast::elem(i).map(|e| (e, Activate::Press))),
             );
-            elems.push((about::CARD_ELEM, Activate::Press));
             if self.tracks_available(meta) {
                 elems.push((about::LANGUAGES_ELEM, Activate::Press));
             }
@@ -2763,7 +2763,7 @@ fn rating_mark(art: crate::metadata::RatingArt) -> &'static [crate::ui::widgets:
         A::TomatoRotten => ROTTEN,
         A::PopcornUpright => CROWD_UP,
         A::PopcornSpilled => CROWD_DOWN,
-        A::Imdb | A::Tmdb => &[],
+        A::Imdb | A::Tmdb | A::Community => &[],
     }
 }
 
@@ -3553,7 +3553,6 @@ impl DetailScreen {
                     );
                 }
             }
-            Some(Located::About(0)) => self.content(fx, ContentReq::Panel(ContentPanel::About)),
             Some(Located::About(1)) => {
                 self.content(fx, ContentReq::Panel(ContentPanel::Tracks { page: 1 }))
             }

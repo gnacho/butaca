@@ -1033,7 +1033,7 @@ impl RootPage {
         TableScreen::new(
             Header::new(
                 layout,
-                None,
+                Some(crate::i18n::msg::browse_chrome_home()),
                 crate::i18n::msg::settings_title(),
                 crate::i18n::msg::settings_root_jellyfin_copy(),
             ),

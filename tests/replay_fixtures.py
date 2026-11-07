@@ -68,8 +68,60 @@ def verdict(log, returncode, counts):
     return summaries[0]
 
 
+def fill_rows(log):
+    """Every measurement the simulator had to learn, in the order it needed them."""
+    rows = []
+    for line in log.splitlines():
+        if not line.startswith('replay: fill q='):
+            continue
+        text, _, bits = line[len('replay: fill q='):].rpartition(' bits=')
+        rows.append((text, int(bits)))
+    return rows
+
+
+def last_frame(fixture):
+    """The segment and frame number a new measurement must be attached to.
+
+    A metrics line opens a new frame whenever its `f` differs from the last one seen, and
+    a frame without a `tick` fails the parse, so a learned measurement rides on the frame
+    that is already last.
+    """
+    segments = sorted(fixture.glob('rec-*.jsonl'))
+    frame = None
+    for segment in segments:
+        for line in segment.read_text().splitlines():
+            if line.strip():
+                frame = json.loads(line)['f']
+    if frame is None:
+        raise ValueError(f'{fixture.name}: no frame to attach a measurement to')
+    return segments[-1], frame
+
+
+def append_metrics(fixture, rows):
+    """Add the learned measurements the fixture does not already carry, and nothing else."""
+    segment, frame = last_frame(fixture)
+    seen = set()
+    for path in sorted(fixture.glob('rec-*.jsonl')):
+        for line in path.read_text().splitlines():
+            row = json.loads(line)
+            if row.get('t') == 'metrics':
+                seen.add(json.dumps(row['q'], sort_keys=True))
+    added = 0
+    with segment.open('a') as out:
+        for text, bits in rows:
+            key = json.dumps(json.loads(text), sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.write(json.dumps({'f': frame, 't': 'metrics', 'q': json.loads(text),
+                                  'bits': bits}) + '\n')
+            added += 1
+    return added
+
+
 def run_fixture(binary, assets, fixture, mode, output, timeout):
-    runtime = Path(tempfile.mkdtemp(prefix=fixture.name + '-' + mode + '-', dir=output))
+    runtime = Path(tempfile.mkdtemp(prefix=fixture.name + '-' + mode.replace('+', '-') + '-',
+                                   dir=output))
     (runtime / 'butaca-recplay').write_text('v1\n' + mode + '\n' + str(fixture))
     env = dict(os.environ, BUTACA_RUNTIME_DIR=str(runtime), BUTACA_APP_DIR=str(assets),
                BUTACA_WIN='1920x1080')
@@ -81,12 +133,13 @@ def run_fixture(binary, assets, fixture, mode, output, timeout):
         except subprocess.TimeoutExpired as error:
             raise ValueError(f'{fixture.name}/{mode}: timeout; evidence {runtime}') from error
     log = runtime / 'butaca-events.log'
+    text = log.read_text() if log.exists() else ''
     try:
-        summary = verdict(log.read_text() if log.exists() else '', process.returncode,
-                          expected_counts(fixture))
+        summary = verdict(text, process.returncode, expected_counts(fixture))
     except ValueError as error:
         raise ValueError(f'{fixture.name}/{mode}: {error}; evidence {runtime}') from error
     print(f'{fixture.name}/{mode}: {summary}', flush=True)
+    return text
 
 
 def main():
@@ -97,6 +150,9 @@ def main():
     parser.add_argument('--assets', type=Path, default=repo / 'pkg')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--timeout', type=float, default=300)
+    parser.add_argument('--fill', action='store_true',
+                        help='learn the measurements a fixture is missing and write them into it, '
+                             'then replay it strictly to prove the fill is right')
     args = parser.parse_args()
     try:
         fixtures = discover(args.fixtures.resolve())
@@ -108,6 +164,20 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     failures = []
     for fixture in fixtures:
+        if args.fill:
+            try:
+                learned = fill_rows(run_fixture(args.sim.resolve(), args.assets.resolve(),
+                                                fixture, 'resolve+fill', output.resolve(),
+                                                args.timeout))
+                added = append_metrics(fixture, learned)
+                print(f'{fixture.name}: {len(learned)} measurements learned, {added} written',
+                      flush=True)
+                run_fixture(args.sim.resolve(), args.assets.resolve(), fixture, 'resolve',
+                            output.resolve(), args.timeout)
+            except (ValueError, OSError) as error:
+                print(f'FAIL: {error}', file=sys.stderr, flush=True)
+                failures.append(error)
+            continue
         for mode in ('targets', 'resolve'):
             try:
                 run_fixture(args.sim.resolve(), args.assets.resolve(), fixture, mode,
@@ -115,6 +185,10 @@ def main():
             except (ValueError, OSError) as error:
                 print(f'FAIL: {error}', file=sys.stderr, flush=True)
                 failures.append(error)
+    if args.fill:
+        print(f'{len(fixtures)} fixtures filled, {len(failures)} failures; evidence {output}',
+              flush=True)
+        return bool(failures)
     print(f'{len(fixtures)} fixtures, {len(fixtures) * 2} replays, {len(failures)} failures; '
           f'evidence {output}', flush=True)
     return bool(failures)

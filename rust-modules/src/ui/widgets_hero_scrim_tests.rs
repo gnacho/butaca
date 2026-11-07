@@ -168,7 +168,7 @@ fn the_right_wedge_is_opt_in_and_starts_at_zero() {
         "no right wedge unless asked for"
     );
     let (q, n) = hero_scrim_quads(1.0, true);
-    assert_eq!(n, 3);
+    assert_eq!(n, 6, "the right wedge plus the text band's three quads");
     let (r, k) = q[2];
     assert_eq!(
         [k[0][3], k[1][3], k[3][3]],
@@ -256,10 +256,11 @@ fn the_wedge_leaves_with_the_hero() {
 #[test]
 fn the_hero_text_reads_over_bright_artwork() {
     use crate::ui::consts::{MARGIN_X, SCR_W};
+    use crate::ui::machine::Measure;
     let hc = crate::ui::detail_layout::hero_chain(
         // a two-line blurb — the shape `hero_chain`'s own doc is tuned on. Measuring is the one
         // thing the host cannot do, so the height is quoted, not computed.
-        76.0, true, &crate::ui::fixture::FixtureMeasure,
+        76.0, true, 0.0, &crate::ui::fixture::FixtureMeasure,
     );
     let band = crate::ui::hero_logo::band_h(crate::ui::hero_logo::LogoRung::Hero);
     let home_col_r = MARGIN_X + crate::ui::landing_hero::COL_W; // 750 — the column's right end
@@ -357,7 +358,10 @@ fn the_hero_text_reads_over_bright_artwork() {
         (
             "detail people (top line)",
             people_r,
-            crate::ui::detail_layout::people_top(hc.btn_y, crate::ui::detail_layout::PEOPLE_MAX_LINES),
+            crate::ui::detail_layout::people_top(
+                hc.facts_y,
+                crate::ui::fixture::FixtureMeasure.cap_h(theme::size::CAPTION),
+            ),
             crate::ui::detail_layout::PEOPLE_INK,
             true,
             3.0,
@@ -377,13 +381,20 @@ fn the_hero_text_reads_over_bright_artwork() {
         } else {
             0.0
         };
-        let total = 1.0 - (1.0 - base) * (1.0 - wedge) * (1.0 - rw);
+        // The text band (issue #315/#323) is part of the field a widened detail column is read
+        // through. Home has none: it has no copy past the wedge's reach.
+        let tb = if right {
+            hero_scrim_band_a(x, y, 1.0)
+        } else {
+            0.0
+        };
+        let total = 1.0 - (1.0 - base) * (1.0 - wedge) * (1.0 - rw) * (1.0 - tb);
         for (art, floor) in [(0.85f32, min_bright), (1.0, min_white)] {
             let before = contrast_over_art(ink, art, base);
             let after = contrast_over_art(ink, art, total);
             assert!(
                 after >= floor,
-                "{label} at ({x},{y}) over art {art}: {after:.2}:1, under its {floor}:1 floor (base {base:.3} + wedge {wedge:.3} + right {rw:.3})"
+                "{label} at ({x},{y}) over art {art}: {after:.2}:1, under its {floor}:1 floor (base {base:.3} + wedge {wedge:.3} + right {rw:.3} + band {tb:.3})"
             );
             assert!(
                 after > before,
@@ -399,9 +410,13 @@ fn the_hero_text_reads_over_bright_artwork() {
         let base = crate::ui::detail_layout::base_scrim_a(y, 1.0);
         let wedge = hero_scrim_a(x, strength);
         let rw = hero_scrim_right_a(x, y, strength);
+        let tb = hero_scrim_band_a(x, y, strength);
         let still = 1.0
-            - (1.0 - base) * (1.0 - hero_scrim_a(x, 1.0)) * (1.0 - hero_scrim_right_a(x, y, 1.0));
-        let total = 1.0 - (1.0 - base) * (1.0 - wedge) * (1.0 - rw);
+            - (1.0 - base)
+                * (1.0 - hero_scrim_a(x, 1.0))
+                * (1.0 - hero_scrim_right_a(x, y, 1.0))
+                * (1.0 - hero_scrim_band_a(x, y, 1.0));
+        let total = 1.0 - (1.0 - base) * (1.0 - wedge) * (1.0 - rw) * (1.0 - tb);
         let after = contrast_over_art(theme::TEXT_PRIMARY, 0.85, total);
         let still_after = contrast_over_art(theme::TEXT_PRIMARY, 0.85, still);
         assert!(
