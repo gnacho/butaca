@@ -610,10 +610,15 @@ impl JfClient {
 
     /// Home's Continue Watching: `/Items/Resume` — in-progress movies and episodes, server-sorted
     /// by last-played, which is the deck's own order.
+    ///
+    /// `IncludeItemTypes` is spelled out because newer servers roll progress up to the series and
+    /// season folders and list those as resumable too. A folder on the deck has no play target,
+    /// so the row would carry cards that cannot be resumed.
     pub(crate) fn resume(&self, limit: i64) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
             "/Users/{user_id}/Items/Resume?Limit={limit}&MediaTypes=Video\
+             &IncludeItemTypes=Movie,Episode,Video\
              &Fields={}&EnableImageTypes=Primary,Backdrop",
             Self::LISTING_FIELDS
         ))
@@ -634,44 +639,80 @@ impl JfClient {
              &Fields={}&EnableImageTypes=Primary,Backdrop",
             Self::LISTING_FIELDS
         );
+        self.get_items_loose(&path, "/Items/Latest")
+    }
+
+    /// A film's extras: the server's special features (behind the scenes, deleted scenes,
+    /// interviews, featurettes) followed by its local trailers, once each. Both routes answer a
+    /// bare item array. A route that fails is logged and the other still counts: extras are a
+    /// shelf, and one server hiccup must not empty it.
+    pub(crate) fn extras(&self, item_id: &str) -> Vec<BaseItemDto> {
+        let Some(user_id) = self.user_id() else {
+            return Vec::new();
+        };
+        let mut all: Vec<BaseItemDto> = Vec::new();
+        for path in [
+            format!(
+                "/Items/{item_id}/SpecialFeatures?userId={user_id}&Fields={}",
+                Self::LISTING_FIELDS
+            ),
+            format!(
+                "/Items/{item_id}/LocalTrailers?userId={user_id}&Fields={}",
+                Self::LISTING_FIELDS
+            ),
+        ] {
+            let Some(page) = self.get_items_loose(&path, "extras") else {
+                continue;
+            };
+            for it in page.items {
+                if !all.iter().any(|e| e.id == it.id) {
+                    all.push(it);
+                }
+            }
+        }
+        all
+    }
+
+    /// A GET whose answer may be either shape: the bare array current servers send for
+    /// `/Items/Latest`, `/Items/{id}/SpecialFeatures` and `/Items/{id}/LocalTrailers`, or the
+    /// `{Items:[…],TotalRecordCount}` envelope every other listing uses. `what` names the route in
+    /// the log.
+    fn get_items_loose(&self, path: &str, what: &str) -> Option<ItemsResult> {
         let headers = self.authed_headers()?;
         let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
-        let reply = http::request(&self.origin, &path, http::Method::Get, &refs, None)?;
+        let reply = http::request(&self.origin, path, http::Method::Get, &refs, None)?;
         if !reply.ok() {
             crate::log(&format!(
                 "jellyfin: GET {} answered {}",
-                path.split('?').next().unwrap_or(&path),
+                path.split('?').next().unwrap_or(path),
                 reply.status
             ));
             return None;
         }
-        // Sniff the first non-space byte: '[' is the bare array (what current servers answer),
-        // '{' the paged envelope (the shape the rest of this file's listings use).
-        let trimmed: &[u8] = {
-            let mut i = 0;
-            while i < reply.body.len() && reply.body[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            &reply.body[i..]
-        };
-        if trimmed.first() == Some(&b'[') {
-            match serde_json::from_slice::<Vec<BaseItemDto>>(trimmed) {
+        // Sniff the first non-space byte: '[' is the bare array, '{' the paged envelope.
+        let mut i = 0;
+        while i < reply.body.len() && reply.body[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let body = &reply.body[i..];
+        if body.first() == Some(&b'[') {
+            match serde_json::from_slice::<Vec<BaseItemDto>>(body) {
                 Ok(items) => {
                     let total = items.len() as i64;
                     Some(ItemsResult { items, total })
                 }
                 Err(e) => {
                     crate::log(&format!(
-                        "jellyfin: GET /Items/Latest (array) will not parse — {e}"
+                        "jellyfin: GET {what} (array) will not parse - {e}"
                     ));
                     None
                 }
             }
         } else {
-            serde_json::from_slice::<ItemsResult>(trimmed)
+            serde_json::from_slice::<ItemsResult>(body)
                 .map_err(|e| {
                     crate::log(&format!(
-                        "jellyfin: GET /Items/Latest (envelope) will not parse — {e}"
+                        "jellyfin: GET {what} (envelope) will not parse - {e}"
                     ));
                 })
                 .ok()
@@ -1495,6 +1536,71 @@ mod tests {
         let views_req = &reqs[1];
         assert!(views_req.starts_with("GET /Users/u-1/Views HTTP/1.1"));
         assert!(views_req.contains("Authorization: MediaBrowser Token=\"tok-1\", "));
+    }
+
+    /// Continue Watching asks for movies and episodes by type: a newer server also reports the
+    /// series and season folders it rolled the progress up to, and neither can be resumed.
+    #[test]
+    fn resume_asks_only_for_item_types_that_can_be_resumed() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Items":[],"TotalRecordCount":0}"#),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client
+            .authenticate_by_name("demo", "")
+            .expect("auth succeeds");
+        assert!(client.resume(20).is_some(), "an empty deck is not a failure");
+
+        let reqs = server.finish();
+        let resume = &reqs[1];
+        assert!(
+            resume.starts_with("GET /Users/u-1/Items/Resume?"),
+            "{resume}"
+        );
+        assert!(
+            resume.contains("IncludeItemTypes=Movie,Episode,Video"),
+            "{resume}"
+        );
+    }
+
+    /// The extras shelf is two routes, each a bare array, with an item that both routes name kept
+    /// once. A route that fails leaves the other's rows in place.
+    #[test]
+    fn extras_join_the_two_routes_and_keep_each_item_once() {
+        let features = r#"[
+            {"Id":"sf1","Name":"Making of","Type":"Video","ExtraType":"BehindTheScenes"},
+            {"Id":"t1","Name":"Trailer","Type":"Trailer"}
+        ]"#;
+        let trailers = r#"[
+            {"Id":"t1","Name":"Trailer","Type":"Trailer"},
+            {"Id":"t2","Name":"Teaser","Type":"Trailer"}
+        ]"#;
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, features),
+            (200, trailers),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client
+            .authenticate_by_name("demo", "")
+            .expect("auth succeeds");
+
+        let extras = client.extras("m1");
+        let ids: Vec<&str> = extras.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["sf1", "t1", "t2"]);
+
+        let reqs = server.finish();
+        assert!(
+            reqs[1].starts_with("GET /Items/m1/SpecialFeatures?"),
+            "{}",
+            reqs[1]
+        );
+        assert!(
+            reqs[2].starts_with("GET /Items/m1/LocalTrailers?"),
+            "{}",
+            reqs[2]
+        );
     }
 
     #[test]

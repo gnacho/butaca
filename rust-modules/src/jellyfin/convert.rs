@@ -68,6 +68,7 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
     };
 
     let (vcodec, acodec) = codecs(it);
+    let blur = blur_corners(it);
 
     Some(CatalogMovie {
         sid,
@@ -92,10 +93,8 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
         rk: it.id.clone(),
         vcodec,
         acodec,
-        blur: [[0.0; 3]; 4],
-        // Jellyfin ships BlurHash strings, not four corner colours, and decoding them is a
-        // rendering nicety, not a PoC blocker. The hero scrim falls back to its default tint.
-        has_blur: false,
+        blur: blur.unwrap_or([[0.0; 3]; 4]),
+        has_blur: blur.is_some(),
         kind,
         resume_ms,
         show_rk: it.series_id.clone().unwrap_or_default(),
@@ -171,6 +170,19 @@ pub(crate) fn codecs(it: &BaseItemDto) -> (String, String) {
     (v, a)
 }
 
+/// The ambient ground's four corners, decoded from the item's BlurHash strings. The backdrop's
+/// hash is the page's own picture; the poster's is the fallback for a library with no backdrops.
+pub(crate) fn blur_corners(it: &BaseItemDto) -> Option<[[f32; 3]; 4]> {
+    let hash = |kind: &str, tag: Option<&String>| {
+        it.image_blur_hashes
+            .get(kind)
+            .and_then(|tags| tag.and_then(|t| tags.get(t)))
+    };
+    hash("Backdrop", it.backdrop_tags.first())
+        .or_else(|| hash("Primary", it.image_tags.get("Primary")))
+        .and_then(|h| super::blurhash::corners(h))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +223,47 @@ mod tests {
         assert!(!m.unwatched);
         assert!(!m.watched);
         assert!(m.resume_frac().is_some());
+    }
+
+    #[test]
+    fn blur_corners_come_from_the_backdrop_then_the_poster() {
+        let with_both = one(
+            r#"{"Items": [{
+                "Id": "m1", "Name": "A Film", "Type": "Movie",
+                "ImageTags": {"Primary": "p1"}, "BackdropImageTags": ["b1"],
+                "ImageBlurHashes": {
+                    "Primary": {"p1": "LEHV6nWB2yk8pyo0adR*.7kCMdnj"},
+                    "Backdrop": {"b1": "LEHV6nWB2yk8pyo0adR*.7kCMdnj"}
+                }
+            }], "TotalRecordCount": 1}"#,
+        );
+        let m = movie_from_dto(&with_both, ServerId::from_raw(0), 0).unwrap();
+        assert!(m.has_blur);
+        assert!(m.blur.iter().flatten().all(|c| (0.0..=1.0).contains(c)));
+
+        let poster_only = one(
+            r#"{"Items": [{
+                "Id": "m2", "Name": "Another", "Type": "Movie",
+                "ImageTags": {"Primary": "p1"}, "BackdropImageTags": [],
+                "ImageBlurHashes": {"Primary": {"p1": "LEHV6nWB2yk8pyo0adR*.7kCMdnj"}}
+            }], "TotalRecordCount": 1}"#,
+        );
+        let m = movie_from_dto(&poster_only, ServerId::from_raw(0), 0).unwrap();
+        assert!(m.has_blur, "the poster's hash is the fallback");
+
+        let no_hash =
+            one(r#"{"Items": [{"Id": "m3", "Name": "Third", "Type": "Movie"}], "TotalRecordCount": 1}"#);
+        let m = movie_from_dto(&no_hash, ServerId::from_raw(0), 0).unwrap();
+        assert!(!m.has_blur, "no hash is no ground, not a black one");
+
+        let broken = one(
+            r#"{"Items": [{
+                "Id": "m4", "Name": "Broken", "Type": "Movie",
+                "ImageTags": {"Primary": "p1"}, "ImageBlurHashes": {"Primary": {"p1": "nope"}}
+            }], "TotalRecordCount": 1}"#,
+        );
+        let m = movie_from_dto(&broken, ServerId::from_raw(0), 0).unwrap();
+        assert!(!m.has_blur, "a hash that will not decode is no ground either");
     }
 
     #[test]

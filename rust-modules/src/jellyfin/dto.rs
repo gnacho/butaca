@@ -107,6 +107,10 @@ pub(crate) struct BaseItemDto {
     /// "BoxSet", "MusicAlbum" — must be skippable by the converter, not a parse error).
     #[serde(rename = "Type")]
     pub(crate) kind: String,
+    /// The extra's kind when the item is one ("Trailer", "BehindTheScenes", "DeletedScene",
+    /// "Interview", "Scene", "Sample", "Featurette"). Absent on ordinary items.
+    #[serde(rename = "ExtraType")]
+    pub(crate) extra_type: Option<String>,
     #[serde(rename = "ProductionYear")]
     pub(crate) year: Option<i32>,
     #[serde(rename = "Overview")]
@@ -130,6 +134,11 @@ pub(crate) struct BaseItemDto {
     /// `Deserialize`.)
     #[serde(rename = "ImageTags", default)]
     pub(crate) image_tags: std::collections::BTreeMap<String, String>,
+    /// Per-image-type BlurHash strings: image type (`Primary`, `Backdrop`) to image tag to hash.
+    /// The hash identifies the picture it was computed from, so a new image is a new hash.
+    #[serde(rename = "ImageBlurHashes", default)]
+    pub(crate) image_blur_hashes:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     #[serde(rename = "BackdropImageTags", default)]
     pub(crate) backdrop_tags: Vec<String>,
     /// Episode/season only: the containing series.
