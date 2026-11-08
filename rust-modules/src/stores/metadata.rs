@@ -188,6 +188,19 @@ pub(crate) enum MetadataCmd {
         rk: String,
         copies: Vec<crate::metadata::AltCopy>,
     },
+    /// **Identify's first half** (#369): ask the metadata providers what this item could be. The
+    /// surface asks on mount; the answer lands through `pump_identify` and raises this store's
+    /// notice, which is how the list appears without a keypress.
+    IdentifySearch { sid: ServerId, rk: String },
+    /// **Identify's second half**: apply one candidate to the item. A WRITE on the server's own
+    /// metadata record, reached only from a press on a candidate row. The candidate travels whole
+    /// (never an index): a newer lookup replaces the list, and an index would then name a different
+    /// film than the one the viewer chose.
+    IdentifyApply {
+        sid: ServerId,
+        rk: String,
+        hit: crate::metadata::IdentifyHit,
+    },
 }
 
 /// One Metadata owner: logical state, the worker adapter every current fetch captures, and
@@ -279,7 +292,8 @@ impl MetadataStore {
         let season = self.pump_season_with_gate(gate);
         let alt = crate::metadata::pump_alt_sources_with_gate(&mut self.state, &self.adapter, gate);
         if alt { self.bump(); }
-        detail || season || alt
+        let identify = self.pump_identify(gate);
+        detail || season || alt || identify
     }
 
     /// The async detail landing alone — `app/run.rs`'s own call site, pumped before season.
@@ -309,6 +323,13 @@ impl MetadataStore {
     ) -> bool {
         let changed = crate::metadata::pump_alt_sources_with_directory_and_gate(
             &mut self.state, &self.adapter, directory, gate);
+        if changed { self.bump(); }
+        changed
+    }
+
+    /// The Identify surface's landing (#369): a landed lookup's candidates, or an apply's verdict.
+    pub(crate) fn pump_identify(&mut self, gate: &crate::ui::landgate::Gate) -> bool {
+        let changed = crate::metadata::pump_identify(&mut self.state, &self.adapter, gate);
         if changed { self.bump(); }
         changed
     }

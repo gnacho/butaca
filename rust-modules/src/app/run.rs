@@ -2265,6 +2265,13 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // mounts. It raises the Metadata store's notice, since a landing that grows
         // the actions row must be drawn without waiting for a keypress.
         app.bridge.metadata_pump_alt_sources();
+        // …and Identify's lookup or apply answer (#369). Route-unconditional for the same reason:
+        // the window that asked may be gone, and what the answer changes is the store's state.
+        // AFTER the detail pump above, because a successful apply re-requests the item and that
+        // landing is the next frame's business either way.
+        if app.bridge.metadata_pump_identify() {
+            crate::ui::idle::invalidate();
+        }
 }
 
 /// The draw phase, entered only on a presenting frame: `clear_opaque_region` at entry, the
@@ -2572,7 +2579,9 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 | AppArg::AboutPanel
                 | AppArg::PersonBio
                 | AppArg::CollectionAbout
-                | AppArg::PrePlayback(_) => crate::focusprobe::Screen::Home,
+                | AppArg::PrePlayback(_)
+                | AppArg::PrePlaybackMenu(_)
+                | AppArg::Identify(_) => crate::focusprobe::Screen::Home,
         };
         // The probe reads the OWNER, and answers the resting cursor when no player is mounted —
         // which is what every non-player screen used to read off `App`'s second copy.

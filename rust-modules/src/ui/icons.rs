@@ -174,6 +174,12 @@ pub enum Icon {
     Search,
     /// The Settings gear, one stroked path with its centre circle as a subpath.
     Settings,
+    /// The empty face of the audience score's star, the SCALE a filled star is read against, and
+    /// the reason a row of them says "out of five". One five-point polygon, see `star.svg`.
+    Star,
+    /// The filled face of [`Icon::Star`], the same polygon filled. The half star is this mask
+    /// clipped at the draw site, never a third asset.
+    StarFill,
     // ---- review-score marks (the detail hero's ratings row) ----
     //
     // These are OUR OWN drawings, not reproductions. Rotten Tomatoes' marks — the fruit, the
@@ -321,6 +327,8 @@ fn src(id: Icon) -> &'static str {
         Icon::More => include_str!("../../../assets/icons/more.svg"),
         Icon::Search => include_str!("../../../assets/icons/search.svg"),
         Icon::Settings => include_str!("../../../assets/icons/settings.svg"),
+        Icon::Star => include_str!("../../../assets/icons/star.svg"),
+        Icon::StarFill => include_str!("../../../assets/icons/star-fill.svg"),
         Icon::Tomato => include_str!("../../../assets/icons/tomato.svg"),
         Icon::TomatoCalyx => include_str!("../../../assets/icons/tomato-calyx.svg"),
         Icon::TomatoHollow => include_str!("../../../assets/icons/tomato-hollow.svg"),

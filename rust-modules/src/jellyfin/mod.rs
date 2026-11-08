@@ -70,6 +70,7 @@ pub(crate) mod browse;
 pub(crate) mod client;
 mod convert;
 pub(crate) mod detail;
+pub(crate) mod identify;
 mod dto;
 pub(crate) mod profile;
 pub(crate) mod search;

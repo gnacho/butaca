@@ -1,0 +1,9 @@
+<!-- An outline five-point star, one star of the audience score's five (the pre-playback window,
+     issue #368). Our own drawing, not a reproduction of any store's rating mark: the star is the
+     universal vocabulary for a score out of five, so it names no provider.
+
+     Geometry: one closed ten-vertex polygon, alternating outer radius 9.6 and inner radius 4.0
+     around (12, 12), first vertex at the top. A single <path> per ui/icons.rs's authoring contract,
+     so the mark composites as one shape; the half-star read is a CLIP of the filled sibling at the
+     draw site, not a third asset. -->
+<svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.4 L14.351 8.764 L21.13 9.033 L15.804 13.236 L17.643 19.767 L12 16 L6.357 19.767 L8.196 13.236 L2.87 9.033 L9.649 8.764 Z"/></svg>

@@ -947,5 +947,37 @@
   "widgets.preplay.overview": {
     "value": "Overview",
     "description": "Heading over the item's synopsis in the pre-playback window."
+  },
+  "widgets.preplay.menu.media_info": {
+    "value": "Media information",
+    "description": "Pre-playback window menu: opens the read-only sheet listing the file's container, bitrate and every audio, video and subtitle track."
+  },
+  "widgets.preplay.menu.identify": {
+    "value": "Identify",
+    "description": "Pre-playback window menu: opens the list of metadata-provider matches so the viewer can replace the item's metadata match."
+  },
+  "widgets.identify.searching": {
+    "value": "Looking for matches…",
+    "description": "Identify sheet: the metadata lookup is still out, so the list is not empty, it is not yet known."
+  },
+  "widgets.identify.empty": {
+    "value": "No match found",
+    "description": "Identify sheet: the lookup answered and no metadata provider offered a candidate for this item."
+  },
+  "widgets.identify.failed": {
+    "value": "The server did not answer",
+    "description": "Identify sheet: the lookup itself failed (the server was unreachable or refused it), which is not the same answer as no match."
+  },
+  "widgets.identify.applying": {
+    "value": "Applying…",
+    "description": "Identify sheet: the chosen candidate is being written to the server, which then refreshes the item's metadata."
+  },
+  "widgets.identify.applied": {
+    "value": "Applied. The item will be refreshed.",
+    "description": "Identify sheet: the server accepted the chosen match; the item's metadata is being re-read."
+  },
+  "widgets.identify.apply_failed": {
+    "value": "The server did not accept the change",
+    "description": "Identify sheet: the server refused the metadata write, most often because the account is not an administrator."
   }
 }

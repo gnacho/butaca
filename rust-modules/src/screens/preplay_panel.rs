@@ -82,6 +82,11 @@ const HEAD_H: f32 = theme::size::CAPTION as f32;
 const GENRE_LEAD: f32 = theme::size::CAPTION as f32 * 1.3;
 const SYN_LEAD: f32 = theme::size::LABEL as f32 * 1.35;
 const CREDIT_LEAD: f32 = theme::size::CAPTION as f32 * 1.35;
+/// The scores line under the title: one band tall enough for the LABEL number the percentage is
+/// set in, which is also the band the stars are centred in.
+const RATING_ROW_H: f32 = theme::size::LABEL as f32 * 1.25;
+/// Scores → the facts under them. A tight gap: the two are one statement about the item.
+const GAP_RATINGS_FACTS: f32 = theme::space::SM;
 
 /// One option row's height — a capsule tall enough for a value and its chevrons.
 const OPT_H: f32 = 76.0;
@@ -127,24 +132,43 @@ fn options_rect() -> Rect {
     )
 }
 
+/// The three-dot control's capsule at the head of the options column: right-aligned, because the
+/// eye already reads this column's right edge (the chevrons, the action capsule) and a control in
+/// the middle of a header reads as a title.
+const MORE_W: f32 = 96.0;
+const MORE_H: f32 = 56.0;
+
+/// Where the three-dot control sits, derived from the column it heads. ONE function, so the rect
+/// it is DRAWN in and the rect the menu is anchored to cannot drift.
+fn more_rect(col: Rect) -> Rect {
+    Rect::new(col.x + col.w - MORE_W, col.y, MORE_W, MORE_H)
+}
+
 // ---- the choice model (PURE — this half is what the host suite grades) -------------------------
 
 /// Which row of the options column holds the cursor.
+///
+/// **`More` is the first row, not a chrome glyph**: the three-dot control at the head of the column
+/// is where the remote reaches the item's own actions (#369), and putting it in the ladder means
+/// UP from the audio row lands on it rather than it being a control with no way to reach it. OK on
+/// it opens the menu; OK on the other three starts the film.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum OptionRow {
+    More,
     Audio,
     Subtitles,
     Action,
 }
 
 impl OptionRow {
-    pub(crate) const ALL: [Self; 3] = [Self::Audio, Self::Subtitles, Self::Action];
+    pub(crate) const ALL: [Self; 4] = [Self::More, Self::Audio, Self::Subtitles, Self::Action];
 
     pub(crate) fn index(self) -> usize {
         match self {
-            Self::Audio => 0,
-            Self::Subtitles => 1,
-            Self::Action => 2,
+            Self::More => 0,
+            Self::Audio => 1,
+            Self::Subtitles => 2,
+            Self::Action => 3,
         }
     }
 
@@ -262,6 +286,16 @@ fn credit_text(name: &str, role: &str) -> String {
     } else {
         format!("{} ({})", name.trim(), role.trim())
     }
+}
+
+/// **The audience score**, 0-10, when the item carries one, the `Community` entry of
+/// `Detail::ratings`. `None` is "the server stated no score", which draws no stars rather than
+/// five empty ones: an empty row of stars would be asserting a zero the server never sent.
+pub(crate) fn audience_score(d: &Detail) -> Option<f64> {
+    d.ratings
+        .iter()
+        .find(|r| r.art == crate::metadata::RatingArt::Community)
+        .map(|r| r.value)
 }
 
 /// **The facts**, in the order the window draws them: resolution, codecs, container, size, the
@@ -443,6 +477,23 @@ impl PrePlaybackScreen {
         })));
     }
 
+    /// OK on the three-dot control: present the item's own menu over this window. The control's
+    /// drawn rect rides on the request, so the menu hangs off it exactly where it was pressed , 
+    /// and the loop presents it on this window's own stack, leaving the window up behind it.
+    fn open_menu<H: crate::screens::registry::AppLike>(
+        &self,
+        fx: &mut crate::ui::machine::Effects<'_, H>,
+    ) {
+        use crate::screens::registry::{AppFx, ContentPanel, ContentReq};
+        use crate::ui::machine::Fx;
+        let anchor = more_rect(options_rect());
+        fx.push(Fx::App(AppFx::Content(ContentReq::Panel(
+            ContentPanel::PrePlaybackMenu {
+                anchor: [anchor.x, anchor.y, anchor.w, anchor.h].map(f32::to_bits),
+            },
+        ))));
+    }
+
     /// LEFT/RIGHT on a language row. Answers whether anything moved.
     fn cycle_value(&mut self, d: &Detail, back: bool) -> bool {
         match self.row {
@@ -464,6 +515,8 @@ impl PrePlaybackScreen {
                 moved
             }
             OptionRow::Action => false,
+            // The menu control holds no value to cycle: LEFT/RIGHT there move nothing.
+            OptionRow::More => false,
         }
     }
 
@@ -547,6 +600,54 @@ impl PrePlaybackScreen {
         hint.draw(p, r.x + PANEL_W - PAD - hint.width(measure), cy, measure);
     }
 
+    /// **The scores line**: the audience's five stars, then the critics' percentage under the
+    /// provider's own name. Returns the height it consumed INCLUDING the gap under it, and `0.0`
+    /// when the server sent neither score, the facts then move up into the space rather than
+    /// sitting under an empty band.
+    ///
+    /// The two are separate facts from separate fields (`CommunityRating` and `CriticRating`), and
+    /// **each is drawn only when the server sent it**: one number under two names is the
+    /// attribution #317 refused, and it stays refused (#368).
+    fn paint_scores(
+        &self,
+        p: Painter,
+        d: &Detail,
+        x: f32,
+        y: f32,
+        clip: Rect,
+        measure: &dyn crate::ui::machine::Measure,
+    ) -> f32 {
+        let audience = audience_score(d);
+        let critic = d.critic_rating;
+        if audience.is_none() && critic.is_none() {
+            return 0.0;
+        }
+        let cy = y + RATING_ROW_H * 0.5;
+        let mut bx = x;
+        if let Some(value) = audience {
+            // No caption: five stars ARE a score out of five, and the caption would cost the width
+            // the critics' provider name needs on this line.
+            bx += widgets::star_score(p, clip, bx, cy, value) + theme::space::LG;
+        }
+        if let Some(percent) = critic {
+            let text = crate::ui::fmt::percent(percent);
+            let cells = [widgets::RatingCell {
+                mark: &[],
+                value: &text,
+                suffix: "",
+            }];
+            widgets::rating_group(
+                p,
+                bx,
+                cy,
+                crate::metadata::RatingArt::Critic.provider(),
+                &cells,
+                measure,
+            );
+        }
+        RATING_ROW_H + GAP_RATINGS_FACTS
+    }
+
     /// The left column: the backdrop beside the title and the facts, then genres, synopsis and
     /// credits under them.
     ///
@@ -600,6 +701,7 @@ impl PrePlaybackScreen {
                 .draw(p, Rect::new(text_x, ty, text_w, TITLE_H));
         }
         ty += TITLE_H + GAP_TITLE_FACTS;
+        ty += self.paint_scores(p, d, text_x, ty, col, measure);
 
         let now_min = crate::ui::fmt::wall_minutes().unwrap_or(0);
         let facts = fact_rows(d, self.audio, now_min);
@@ -663,7 +765,8 @@ impl PrePlaybackScreen {
         p.clip_clear();
     }
 
-    /// The right column: the two language choices and the primary action.
+    /// The right column: the item's own menu control, then the two language choices and the primary
+    /// action.
     fn paint_options(
         &self,
         p: Painter,
@@ -671,7 +774,8 @@ impl PrePlaybackScreen {
         col: Rect,
         measure: &dyn crate::ui::machine::Measure,
     ) {
-        let mut y = col.y;
+        self.paint_more(p, col);
+        let mut y = col.y + MORE_H + SECTION_GAP;
         let audio_rows = audio_choices(d);
         let audio_text = audio_rows
             .get(self.audio)
@@ -726,6 +830,40 @@ impl PrePlaybackScreen {
                 1,
             );
         }
+    }
+
+    /// The three-dot control at the head of the options column (#369): the overflow glyph in a
+    /// capsule that takes the focus fill like every other control in this window. It is the first
+    /// rung of the cursor ladder, so UP from the audio row reaches it.
+    fn paint_more(&self, p: Painter, col: Rect) {
+        let rect = more_rect(col);
+        let focused = self.row == OptionRow::More;
+        p.rrect(
+            rect,
+            MORE_H * 0.5,
+            MORE_H * 0.5,
+            if focused {
+                theme::OVERLAY_FOCUS_PILL
+            } else {
+                theme::CONTROL_IDLE_FILL
+            },
+        );
+        const GLYPH: f32 = 26.0;
+        crate::ui::icons::draw(
+            p,
+            Icon::More,
+            Rect::new(
+                rect.cx() - GLYPH * 0.5,
+                rect.y + (rect.h - GLYPH) * 0.5,
+                GLYPH,
+                GLYPH,
+            ),
+            if focused {
+                theme::TEXT_PRIMARY
+            } else {
+                theme::TEXT_SECONDARY
+            },
+        );
     }
 
     /// One language row: a capsule, its value, and the LEFT/RIGHT chevrons when it holds the
@@ -812,23 +950,27 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                     edge: Edge::Down,
                     ..
                 } => {
-                    // OK is the primary action from ANY row: a remote's OK means "do it", and a
-                    // window whose OK did nothing on two of its three rows would be the dead key
-                    // the read-only alerts are careful to avoid. The play request carries the
+                    // OK is the primary action from every LANGUAGE row: a remote's OK means "do
+                    // it", and a window whose OK did nothing on two of its rows would be the dead
+                    // key the read-only alerts are careful to avoid. The play request carries the
                     // tracks on screen; the loop dismisses this surface before the player is pushed.
+                    //
+                    // The one exception is the three-dot control at the head of the column, whose
+                    // OK opens the item's own menu, a real surface, so still not a dead key.
                     let meta = H::metadata(cx);
-                    match meta.current() {
-                        Some(d) => {
-                            self.seed(d);
-                            self.commit(d, fx);
-                            fx.invalidate(crate::ui::present::Provenance::Input);
-                        }
-                        // Nothing landed to play: close rather than leave a dead OK on a window
+                    let Some(d) = meta.current() else {
+                        // Nothing landed to act on: close rather than leave a dead OK on a window
                         // with no item under it.
-                        None => {
-                            fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
-                        }
+                        fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
+                        return Handled::Yes;
+                    };
+                    self.seed(d);
+                    if self.row == OptionRow::More {
+                        self.open_menu(fx);
+                    } else {
+                        self.commit(d, fx);
                     }
+                    fx.invalidate(crate::ui::present::Provenance::Input);
                     Handled::Yes
                 }
                 InputKind::Key {
@@ -1149,8 +1291,9 @@ mod tests {
         assert!(credits_line(&bare).is_empty());
     }
 
-    /// The cursor walks the three rows and stops at both ends: a window that wrapped from the
-    /// action back to the audio would make one DOWN press skip the whole column.
+    /// The cursor walks the four rows and stops at both ends: a window that wrapped from the
+    /// action back to the audio would make one DOWN press skip the whole column. The three-dot
+    /// control is the ladder's TOP rung, which is what gives the remote a way to reach it.
     #[test]
     fn the_cursor_walks_the_rows_and_stops_at_the_ends() {
         let mut s = PrePlaybackScreen::new(crate::ui::machine::EntryId(1), PrePlaybackArg { restart: false });
@@ -1159,7 +1302,10 @@ mod tests {
         assert_eq!(s.row, OptionRow::Subtitles);
         assert!(s.move_row(false));
         assert_eq!(s.row, OptionRow::Audio);
+        assert!(s.move_row(false));
+        assert_eq!(s.row, OptionRow::More, "UP from the audio row reaches the menu control");
         assert!(!s.move_row(false), "clamped at the top");
+        assert!(s.move_row(true));
         assert!(s.move_row(true));
         assert!(s.move_row(true));
         assert_eq!(s.row, OptionRow::Action);
@@ -1181,6 +1327,34 @@ mod tests {
         let without = main_synopsis_lines(300.0, 96.0, false);
         assert!(with_credits <= without, "reserved credits cannot buy lines");
         assert_eq!(main_synopsis_lines(0.0, 96.0, true), 1, "the floor is one line");
+    }
+
+    /// The two scores are SEPARATE facts from separate fields, and each is drawn only when the
+    /// server sent it: the stars come from the community score, the percentage from the critics'
+    /// field, and an item with neither states neither (#368, and #317 for why one number under two
+    /// names is refused).
+    #[test]
+    fn the_scores_are_the_two_the_server_sent_and_neither_is_invented() {
+        let plain = item();
+        assert_eq!(audience_score(&plain), None);
+        assert_eq!(plain.critic_rating, None);
+
+        let scored = Detail {
+            ratings: vec![crate::metadata::Rating {
+                art: crate::metadata::RatingArt::Community,
+                value: 7.4,
+                critic: false,
+            }],
+            critic_rating: Some(85),
+            ..item()
+        };
+        assert_eq!(audience_score(&scored), Some(7.4));
+        assert_eq!(scored.critic_rating, Some(85));
+        // …and the stars the window draws are that score, at half-star precision.
+        assert_eq!(
+            crate::ui::widgets::star_fills(audience_score(&scored).unwrap()),
+            [1.0, 1.0, 1.0, 0.5, 0.0]
+        );
     }
 
     /// The cursor is seeded ONCE: a refresh landing under an open window must not move the

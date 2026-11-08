@@ -7701,7 +7701,7 @@ const RATING_PAIR_GAP: f32 = 14.0;
 pub(crate) type MarkLayer = (crate::ui::icons::Icon, [f32; 4]);
 
 /// One score inside a provider group: the mark that carries its verdict, and the score as text.
-/// `mark` is empty for a provider that has no verdict to draw (IMDb, TMDB) — their number IS the
+/// `mark` is empty for a provider that has no verdict to draw (IMDb, TMDB), their number IS the
 /// whole statement, and inventing a glyph for them is what put a meaningless star here before.
 pub(crate) struct RatingCell<'a> {
     pub(crate) mark: &'a [MarkLayer],
@@ -7739,6 +7739,32 @@ pub(crate) fn rating_group_w(
     w
 }
 
+/// The provider caption that heads a score, drawn with its LEFT edge at `x` and **on the SCORE's
+/// baseline** rather than on its own centre: the design aligns the row by baseline
+/// (`align-items:baseline`), so a MICRO caption beside a LABEL number must share the number's
+/// baseline or it floats. Returns the advance INCLUDING the gap to the first score, so a caller
+/// that heads a score of its own (the star row) lands on the same rhythm.
+pub(crate) fn rating_caption(
+    p: Painter,
+    x: f32,
+    cy: f32,
+    caption: &str,
+    measure: &dyn crate::ui::machine::Measure,
+) -> f32 {
+    let Ok(cap) = std::ffi::CString::new(caption) else {
+        return 0.0;
+    };
+    let base = crate::text::baseline_y(
+        theme::size::MICRO,
+        1,
+        theme::size::LABEL,
+        1,
+        crate::text::text_vcenter_y(theme::size::LABEL, 1, cy),
+    );
+    p.text(cap.as_ptr(), x, base, theme::size::MICRO, theme::TEXT_TERTIARY, 0, 1);
+    measure.width(&cap, theme::size::MICRO, true) + RATING_CAPTION_GAP
+}
+
 /// Draw one provider's group with its LEFT edge at `x`, centred on `cy`; returns its width.
 pub(crate) fn rating_group(
     p: Painter,
@@ -7748,13 +7774,11 @@ pub(crate) fn rating_group(
     cells: &[RatingCell],
     measure: &dyn crate::ui::machine::Measure,
 ) -> f32 {
-    let Ok(cap) = std::ffi::CString::new(caption) else {
+    if caption.contains('\0') {
         return 0.0;
-    };
+    }
     let mut bx = x;
-    // The caption sits on the SCORE's baseline, not on its own centre: the design aligns the row
-    // by baseline (`align-items:baseline`), so a MICRO caption beside a LABEL number must share
-    // the number's baseline or it floats. `text::baseline_y` is that rule, shared.
+    bx += rating_caption(p, bx, cy, caption, measure);
     let base = crate::text::baseline_y(
         theme::size::MICRO,
         1,
@@ -7762,16 +7786,6 @@ pub(crate) fn rating_group(
         1,
         crate::text::text_vcenter_y(theme::size::LABEL, 1, cy),
     );
-    p.text(
-        cap.as_ptr(),
-        bx,
-        base,
-        theme::size::MICRO,
-        theme::TEXT_TERTIARY,
-        0,
-        1,
-    );
-    bx += measure.width(&cap, theme::size::MICRO, true) + RATING_CAPTION_GAP;
 
     for (i, cell) in cells.iter().enumerate() {
         if i > 0 {
@@ -7817,6 +7831,111 @@ pub(crate) fn rating_group(
     bx - x
 }
 
+// ---------------------------------------------------------------------------------------
+// ---- The audience score's stars: five marks for a 0-10 score.
+//
+// Issue #368. The star is the universal vocabulary for a score out of five, so unlike the provider
+// marks above it names nobody and needs no caption to be read. The one choice it makes is
+// HALF-PRECISION: the wire carries a tenth and the window draws the stars instead of the number,
+// so rounding 7.4 down to three whole stars would throw away a visible amount of the fact. A
+// verdict colour is deliberately not used either: `theme::RATING_*` belongs to a provider's
+// judgement, and a star score is a measurement.
+// ----
+
+/// Star box (px). A touch under [`RATING_MARK_D`] so five of them read as ONE run rather than as
+/// five badges, and small enough for the pre-playback window's text column.
+pub(crate) const STAR_D: f32 = 26.0;
+/// Star -> star. They are one run, so it stays tight.
+const STAR_GAP: f32 = 6.0;
+
+/// Each of five stars' fill, `1.0` full, `0.5` half, `0.0` empty, for a 0-10 score.
+///
+/// Each star is worth two points, so the score is first rounded to the nearest HALF star and then
+/// dealt out from the left. PURE, because this is the row's only decision and the host suite can
+/// grade it without a painter: 7.4 is seven half-units, i.e. three full stars and a half.
+pub(crate) fn star_fills(value_0_10: f64) -> [f32; 5] {
+    let halves = if value_0_10.is_finite() {
+        value_0_10.round().clamp(0.0, 10.0) as i64
+    } else {
+        0
+    };
+    let mut out = [0.0f32; 5];
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = (halves - 2 * i as i64).clamp(0, 2) as f32 * 0.5;
+    }
+    out
+}
+
+/// The width [`star_score`] draws: five boxes and four gaps.
+pub(crate) fn star_score_w() -> f32 {
+    STAR_D * 5.0 + STAR_GAP * 4.0
+}
+
+/// Draw the five stars for `value_0_10` with their LEFT edge at `x`, centred on `cy`; returns the
+/// width drawn.
+///
+/// `clip` is the clip the CALLER has already set, and it is passed rather than inferred because a
+/// half star needs a scissor of its own and the scissor is global GL state: this restores `clip`
+/// before returning, so a caller mid-column keeps its own bound. (There is no `Painter` query for
+/// "what is clipped now", see [`Painter::clip`]'s own note.)
+pub(crate) fn star_score(p: Painter, clip: Rect, x: f32, cy: f32, value_0_10: f64) -> f32 {
+    let fills = star_fills(value_0_10);
+    let mut bx = x;
+    for (i, fill) in fills.iter().enumerate() {
+        let r = Rect::new(bx, cy - STAR_D * 0.5, STAR_D, STAR_D);
+        // The EMPTY star is always drawn: it is the scale the filled part is read against, and a
+        // row of only the filled ones would not say "out of five".
+        crate::ui::icons::draw(p, crate::ui::icons::Icon::Star, r, theme::TEXT_TERTIARY);
+        if *fill >= 1.0 {
+            crate::ui::icons::draw(p, crate::ui::icons::Icon::StarFill, r, theme::TEXT_PRIMARY);
+        } else if *fill > 0.0 {
+            // A HALF star is the filled mask clipped to the left of the box: one asset registered
+            // against another rather than a third drawing that could drift out of alignment.
+            p.clip(Rect::new(r.x, r.y, r.w * fill, r.h));
+            crate::ui::icons::draw(p, crate::ui::icons::Icon::StarFill, r, theme::TEXT_PRIMARY);
+            p.clip(clip);
+        }
+        bx += STAR_D + if i == 4 { 0.0 } else { STAR_GAP };
+    }
+    bx - x
+}
+
+// ---------------------------------------------------------------------------------------
+// ---- Where an anchored menu hangs.
+//
+// The two anchored-menu families in the app each wrote this rule for themselves (`item_menu` beside
+// a card, `alt_sources` under a chip) because their anchors differ in SHAPE. A control in a panel
+// corner is the third shape and the first one two surfaces share (#369's three-dot menu and its
+// Identify list), so it is one function here rather than a third and fourth copy.
+// ----
+
+/// **An anchored menu's frame**: under `anchor` when the screen has room below it, above it when it
+/// does not, and never over it, the control that opened a panel stays readable beside its own list.
+/// `align_right` puts the panel's right edge on the anchor's, for a control in a corner; otherwise
+/// the left edges line up, for a chip in a row. `w` is the panel's own width; the height is the
+/// content's, clamped to the screen's keep-out. Pure (geometry in, rect out).
+pub(crate) fn anchored_menu(anchor: Rect, w: f32, content_h: f32, align_right: bool) -> Rect {
+    // Per AXIS, for `item_menu::EDGE`'s reason: `space::XL` clears the vertical margin and misses
+    // the horizontal one, so the horizontal keep-out is the screen's own `MARGIN_X`.
+    use crate::ui::consts::{SCR_H, SCR_W};
+    const EDGE: f32 = theme::space::XL;
+    const EDGE_X: f32 = crate::ui::consts::MARGIN_X;
+    let h = content_h.clamp(120.0, SCR_H - 2.0 * EDGE);
+    let below = anchor.y + anchor.h + theme::space::MD;
+    let y = if below + h <= SCR_H - EDGE {
+        below
+    } else {
+        (anchor.y - theme::space::MD - h).max(EDGE)
+    };
+    let x = if align_right {
+        anchor.x + anchor.w - w
+    } else {
+        anchor.x
+    }
+    .clamp(EDGE_X, (SCR_W - EDGE_X - w).max(EDGE_X));
+    Rect::new(x, y, w, h)
+}
+
 #[cfg(test)]
 #[test]
 fn rating_group_measures_each_run_once_and_returns_its_drawn_width() {
@@ -7843,6 +7962,33 @@ fn rating_group_measures_each_run_once_and_returns_its_drawn_width() {
     assert!((drawn - expected).abs() < 0.001);
     assert_eq!(measure.0.get(), runs, "the draw must not repeat its entire measurement walk");
     crate::text::take_measure_fault();
+}
+
+/// The star row's ONE decision: a 0-10 score rounds to the nearest HALF star and is dealt out from
+/// the left. A score the server did not send never reaches this function, but a nonsense one must
+/// not fill anything either, five full stars for a NaN would be a claim.
+#[test]
+fn the_star_row_rounds_to_half_stars_from_the_left() {
+    assert_eq!(star_fills(10.0), [1.0, 1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(star_fills(0.0), [0.0; 5]);
+    assert_eq!(star_fills(7.4), [1.0, 1.0, 1.0, 0.5, 0.0], "7.4 is seven half-units");
+    assert_eq!(star_fills(7.6), [1.0, 1.0, 1.0, 1.0, 0.0], "and 7.6 rounds up to eight");
+    assert_eq!(star_fills(-3.0), [0.0; 5]);
+    assert_eq!(star_fills(f64::NAN), [0.0; 5]);
+    assert_eq!(star_score_w(), STAR_D * 5.0 + STAR_GAP * 4.0);
+}
+
+/// The row draws five boxes and four gaps whatever the score, and answers that width: the EMPTY
+/// stars are part of the scale, so a 3.0 is three filled boxes among five rather than a shorter
+/// run.
+#[test]
+fn the_star_row_keeps_five_boxes_whatever_the_score() {
+    let _serial = crate::testlock::serial();
+    let clip = Rect::new(0.0, 0.0, 1920.0, 1080.0);
+    for value in [0.0, 3.0, 7.4, 10.0] {
+        let drawn = star_score(Painter::recording(), clip, 64.0, 100.0, value);
+        assert!((drawn - star_score_w()).abs() < 0.001, "value {value}");
+    }
 }
 
 #[cfg(test)]

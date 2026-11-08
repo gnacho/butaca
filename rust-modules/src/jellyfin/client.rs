@@ -480,9 +480,80 @@ impl JfClient {
         }
     }
 
+    /// One authed JSON POST whose answer is parsed, [`get_json`](Self::get_json)'s write twin.
+    /// Jellyfin's LOOKUP endpoints take their query in a body (`POST /Items/RemoteSearch/Movie`),
+    /// so a path-only GET shape cannot reach them; the failure granularity is the same `Option`.
+    pub(crate) fn post_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Option<T> {
+        let headers = self.authed_headers()?;
+        let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
+        let reply = http::request_post_json(&self.origin, path, &refs, body.to_string().as_bytes())?;
+        if !reply.ok() {
+            crate::log(&format!(
+                "jellyfin: POST {} answered {}",
+                path.split('?').next().unwrap_or(path),
+                reply.status
+            ));
+            return None;
+        }
+        match serde_json::from_slice::<T>(&reply.body) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::log(&format!(
+                    "jellyfin: POST {} answered {} bytes that will not parse - {e}",
+                    path.split('?').next().unwrap_or(path),
+                    reply.body.len()
+                ));
+                None
+            }
+        }
+    }
+
+    /// **Identify, first half**: the metadata providers' candidates for an item , 
+    /// `POST /Items/RemoteSearch/Movie` with a `MovieInfoRemoteSearchQuery` body. Verified against
+    /// Jellyfin's own OpenAPI: the typed POST has been the shape since 10.9 and is still the shape
+    /// on 12.x, which is the range this client targets. The item's `Id` rides the body so the
+    /// providers may reuse the ids it already carries, and `IncludeDisabledProviders` stays off:
+    /// a provider the owner switched off is not a candidate.
+    pub(crate) fn remote_search_movie(
+        &self,
+        item_id: &str,
+        name: &str,
+        year: i32,
+    ) -> Option<Vec<super::dto::RemoteSearchResultDto>> {
+        let body = serde_json::json!({
+            "SearchInfo": {
+                "Name": name,
+                "Year": (year > 0).then_some(year),
+            },
+            "ItemId": item_id,
+            "IncludeDisabledProviders": false,
+        });
+        self.post_json("/Items/RemoteSearch/Movie", &body)
+    }
+
+    /// **Identify, second half**: apply one candidate , 
+    /// `POST /Items/RemoteSearch/Apply/{itemId}`, whose body is the candidate itself. The server
+    /// re-reads its `ProviderIds` and refreshes the item, so the candidate travels back exactly as
+    /// the search sent it (see `RemoteSearchResultDto`). `replaceAllImages` is left at the server's
+    /// own default (`true`): the viewer chose this match, and a half-replaced image set is the
+    /// worse answer. The endpoint requires elevation, so a non-admin account is a plain `false`.
+    pub(crate) fn apply_remote_search(
+        &self,
+        item_id: &str,
+        hit: &super::dto::RemoteSearchResultDto,
+    ) -> bool {
+        let Ok(body) = serde_json::to_value(hit) else {
+            return false;
+        };
+        self.post_status(&format!("/Items/RemoteSearch/Apply/{item_id}"), &body)
+    }
+
     /// The library list — Jellyfin's counterpart of `/library/sections`.
-    pub(crate) fn views(&self) -> Option<ViewsResult> {
-        let user_id = self.user_id()?;
+    pub(crate) fn views(&self) -> Option<ViewsResult> {        let user_id = self.user_id()?;
         self.get_json(&format!("/Users/{user_id}/Views"))
     }
 
@@ -1536,6 +1607,36 @@ mod tests {
         assert!(clear.contains("\"PlaybackPositionTicks\":0"));
         // the merge sends NOTHING else — Played/PlayCount are the server's to keep
         assert!(!clear.contains("\"Played\""));
+    }
+
+    /// Identify's two calls: the search posts the item's own title and year as a BODY (Jellyfin's
+    /// typed POST, which replaced the older GET form), and Apply posts the chosen candidate back to
+    /// the item's own path, the provider ids in it are what the server looks the item up by.
+    #[test]
+    fn identify_searches_with_a_body_and_applies_the_candidate_verbatim() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"[{"Name":"Alien","ProviderIds":{"Tmdb":"348"},"ProductionYear":1979,
+                      "SearchProviderName":"TheMovieDb"}]"#),
+            (204, ""),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let hits = client
+            .remote_search_movie("mv-1", "Alien", 1979)
+            .expect("the candidates parse");
+        assert_eq!(hits.len(), 1);
+        assert!(client.apply_remote_search("mv-1", &hits[0]));
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[1].starts_with("POST /Items/RemoteSearch/Movie HTTP/1.1"));
+        assert!(reqs[1].contains("\"ItemId\":\"mv-1\""));
+        assert!(reqs[1].contains("\"Name\":\"Alien\""));
+        assert!(reqs[1].contains("\"Year\":1979"));
+        assert!(reqs[2].starts_with("POST /Items/RemoteSearch/Apply/mv-1 HTTP/1.1"));
+        assert!(reqs[2].contains("\"Tmdb\":\"348\""), "the ids Apply looks the item up by");
     }
 
     /// The Library grid's query puts every menu on the query string: sort + direction always

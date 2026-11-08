@@ -9,7 +9,7 @@
 //! Naming: Jellyfin uses PascalCase. Every field carries its `rename` explicitly rather than
 //! leaning on a container-wide rename rule, so each line greps to the wire name it parses.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `POST /Users/AuthenticateByName` 200. The access token is a credential: it is stored in the
 /// client and never logged (the client's parse log names the endpoint only).
@@ -119,6 +119,12 @@ pub(crate) struct BaseItemDto {
     pub(crate) official_rating: Option<String>,
     #[serde(rename = "CommunityRating")]
     pub(crate) community_rating: Option<f32>,
+    /// The CRITICS' score as a percentage, 0-100. It is Rotten Tomatoes' own number: the server's
+    /// OMDb provider parses RT's `"85%"` into this field (`OmdbProvider`), and no other provider
+    /// writes it. Absent whenever no provider supplied one, which is the ordinary case on a server
+    /// without OMDb, and absence is what keeps the window from inventing a score (issue #317).
+    #[serde(rename = "CriticRating")]
+    pub(crate) critic_rating: Option<f32>,
     /// Per-image-type cache-buster tags. A Primary exists iff this map names one. (`BTreeMap`,
     /// not `HashMap`: this crate builds serde no-std, where only the alloc maps implement
     /// `Deserialize`.)
@@ -240,9 +246,46 @@ pub(crate) struct PersonDto {
     pub(crate) primary_image_tag: Option<String>,
 }
 
+/// **One candidate from a metadata provider's lookup**, `POST /Items/RemoteSearch/{type}` 200,
+/// and the body the APPLY call takes back (`POST /Items/RemoteSearch/Apply/{itemId}`).
+///
+/// It is `Deserialize` AND `Serialize` on purpose: the server re-reads the chosen candidate's
+/// `ProviderIds` and refreshes the item from them, so the object the search returned is posted back
+/// **verbatim**. Every field is optional and skipped when absent, because a candidate carries only
+/// what its provider answered, an IMDb hit has no `IndexNumber`, a TMDB one no `ImageUrl`, and
+/// rebuilding the payload from this client's own idea of a query is exactly what would make Apply
+/// search for something the viewer never picked.
+///
+/// `ProviderIds` is the load-bearing member (it is what Apply looks up); the rest is what the row
+/// says and what the server may keep for the item's own record.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub(crate) struct RemoteSearchResultDto {
+    #[serde(rename = "Name", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) name: Option<String>,
+    #[serde(rename = "ProviderIds", default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(crate) provider_ids: std::collections::BTreeMap<String, String>,
+    #[serde(rename = "ProductionYear", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) production_year: Option<i32>,
+    #[serde(rename = "PremiereDate", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) premiere_date: Option<String>,
+    #[serde(rename = "ImageUrl", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) image_url: Option<String>,
+    /// WHICH provider offered this candidate ("TheMovieDb", "The Open Movie Database"). The row's
+    /// read-out: two providers routinely return the same film, and only this tells them apart.
+    #[serde(rename = "SearchProviderName", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) search_provider_name: Option<String>,
+    #[serde(rename = "Overview", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) overview: Option<String>,
+    #[serde(rename = "IndexNumber", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) index_number: Option<i32>,
+    #[serde(rename = "IndexNumberEnd", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) index_number_end: Option<i32>,
+    #[serde(rename = "ParentIndexNumber", default, skip_serializing_if = "Option::is_none")]
+    pub(crate) parent_index_number: Option<i32>,
+}
+
 #[derive(Debug, Deserialize)]
-pub(crate) struct ChapterDto {
-    #[serde(rename = "Name")]
+pub(crate) struct ChapterDto {    #[serde(rename = "Name")]
     pub(crate) name: Option<String>,
     /// 100-ns ticks — the module doc's units rule applies (`/ 10_000` for the seek target).
     #[serde(rename = "StartPositionTicks")]
@@ -438,6 +481,7 @@ mod tests {
         assert_eq!(it.year, Some(1976));
         assert_eq!(it.run_time_ticks, Some(55842000000));
         assert_eq!(it.official_rating.as_deref(), Some("PG"));
+        assert_eq!(it.critic_rating, None, "a server without OMDb sends no critic score");
         assert_eq!(
             it.image_tags.get("Primary").map(String::as_str),
             Some("a131fdbdca9ddadcda7d3c86756c6b67")
@@ -450,6 +494,36 @@ mod tests {
         let ms = it.media_sources.as_ref().unwrap();
         assert_eq!(ms[0].streams.len(), 2);
         assert_eq!(ms[0].streams[0].codec.as_deref(), Some("h264"));
+    }
+
+    /// The critics' score parses off the wire name and keeps the server's percentage. Absence is
+    /// the ordinary case and stays `None` (see the field's own doc).
+    #[test]
+    fn the_critic_rating_is_optional_and_keeps_its_percentage() {
+        let r: ItemsResult = serde_json::from_str(
+            r#"{"Items": [{"Id": "x", "Name": "A", "Type": "Movie", "CriticRating": 85.0}],
+                "TotalRecordCount": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(r.items[0].critic_rating, Some(85.0));
+    }
+
+    /// A candidate from a provider's lookup parses its wire names and posts back the SAME object:
+    /// Apply looks the item up by the ids in it, so the round trip is the contract.
+    #[test]
+    fn a_remote_search_candidate_round_trips_through_apply() {
+        let wire = r#"{"Name": "Alien", "ProviderIds": {"Tmdb": "348", "Imdb": "tt0078748"},
+            "ProductionYear": 1979, "ImageUrl": "https://image.tmdb.org/x.jpg",
+            "SearchProviderName": "TheMovieDb"}"#;
+        let hit: RemoteSearchResultDto = serde_json::from_str(wire).unwrap();
+        assert_eq!(hit.name.as_deref(), Some("Alien"));
+        assert_eq!(hit.production_year, Some(1979));
+        assert_eq!(hit.provider_ids.get("Imdb").map(String::as_str), Some("tt0078748"));
+        let back = serde_json::to_value(&hit).unwrap();
+        assert_eq!(back["ProviderIds"]["Tmdb"], "348", "the ids Apply looks up survive");
+        assert_eq!(back["Name"], "Alien");
+        assert_eq!(back["SearchProviderName"], "TheMovieDb");
+        assert!(back.get("IndexNumber").is_none(), "absent members are not nulled into the body");
     }
 
     #[test]
