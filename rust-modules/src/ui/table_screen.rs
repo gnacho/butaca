@@ -212,27 +212,41 @@ where
         let p = f.painter;
         self.frame = rect;
         self.paint(p, f.measure);
-        // every selectable row is a stop (rule 11: hover parks, a click activates)
-        for i in 0..self.table.n_rows() {
-            if self.table.next_selectable(i, 0) != Some(i) {
-                continue;
-            }
-            if let Some(r) = self.table.row_frame(rect, i) {
-                f.stop(
-                    p,
-                    Stop {
-                        key: FocusKey {
-                            entry: self.entry,
-                            elem: H::Elem::of_index(i as u32),
-                        },
-                        rect: r,
-                        rest_rect: r,
-                        clip: rect,
-                        hover: Hover::Focus,
-                        activate: Activate::Direct,
+        row_stops(self, f, rect);
+    }
+}
+
+/// **Every selectable row of a table is a stop** (rule 11: hover parks, a click activates). Free
+/// rather than a method so the host suite can grade the values without a paint pass: a host unit
+/// build links neither GL nor SDL2_ttf (`ui/CLAUDE.md`'s boundary), `TableView::draw` reaches both,
+/// and the hover/activate VALUES these stops carry were asserted nowhere in this tree before. The
+/// rect is `row_frame`'s — the same walk `place` and the painter share.
+pub(crate) fn row_stops<H: Host>(part: &TablePart<'_>, f: &mut DrawFrame<'_, '_, H>, rect: Rect)
+where
+    H::Elem: IndexElem,
+{
+    let p = f.painter;
+    for i in 0..part.table.n_rows() {
+        if part.table.next_selectable(i, 0) != Some(i) {
+            continue;
+        }
+        if let Some(r) = part.table.row_frame(rect, i) {
+            f.stop(
+                p,
+                Stop {
+                    key: FocusKey {
+                        entry: part.entry,
+                        elem: H::Elem::of_index(i as u32),
                     },
-                );
-            }
+                    rect: r,
+                    rest_rect: r,
+                    clip: rect,
+                    // The SAME focus face the arrows give it: the pointer parks focus through the
+                    // engine, so there is no second hover treatment to keep in step.
+                    hover: Hover::Focus,
+                    activate: Activate::Direct,
+                },
+            );
         }
     }
 }
@@ -403,18 +417,34 @@ where
                 b = b.style(super::widgets::ControlStyle::Danger);
             }
             b.draw(&env, p);
-            f.stop(
-                p,
-                Stop {
-                    key: self.key::<H>(i),
-                    rect: *r,
-                    rest_rect: *r,
-                    clip: Rect::FULL,
-                    hover: Hover::Focus,
-                    activate: Activate::Press,
-                },
-            );
         }
+        band_stops(self, f);
+    }
+}
+
+/// **Every control of the action band is a hit stop** (rule 11: hover parks focus, a click arms the
+/// pill's press). Free for `row_stops`'s reason: `Button::draw` reaches GL and SDL2_ttf, which a host
+/// unit build does not link. The rects are `place`'s own, so the clickable box is the drawn pill.
+pub(crate) fn band_stops<H: Host>(part: &BandPart<'_>, f: &mut DrawFrame<'_, '_, H>)
+where
+    H::Elem: IndexElem,
+{
+    let p = f.painter;
+    let rects = part.rects(f.measure);
+    for (i, r) in rects.iter().enumerate() {
+        f.stop(
+            p,
+            Stop {
+                key: part.key::<H>(i),
+                rect: *r,
+                rest_rect: *r,
+                clip: Rect::FULL,
+                // The SAME focus face the arrows give it: the pointer parks focus through the
+                // engine, so there is no second hover treatment to keep in step.
+                hover: Hover::Focus,
+                activate: Activate::Press,
+            },
+        );
     }
 }
 
@@ -998,6 +1028,66 @@ mod tests {
         for (i, key) in [first, last].into_iter().enumerate() {
             let placed = Focusable::<FixtureHost>::place(&band, &key.elem, &cx, At::SpringTarget).unwrap();
             assert!(same(placed.rest_rect, rects[i]));
+        }
+    }
+
+    /// **Rule 11's VALUES, asserted where they are assigned** (#359). `screens::legal`'s pointer test
+    /// names this gap: nothing in the tree proved that the shared table and band stops HOVER
+    /// (`Hover::Focus`, the very face the arrow keys give) and ACTIVATE with the policy their element
+    /// kind wants. These are the functions `draw` calls, so changing either policy fails here — and
+    /// every Settings-family page (Settings, Privacy, Legal, Preferences, servers, sign-in) inherits
+    /// its hover from exactly these two loops.
+    #[test]
+    fn every_table_row_and_band_control_hovers_like_the_keys_do() {
+        use super::{band_stops, row_stops};
+
+        let (m, v) = (FixtureMeasure, FixtureView::default());
+        let cx = cx(&m, &v);
+        let layout = RouteLayout::screen();
+        let mut t = table(3);
+        let ts = TableScreen::new(Header::new(layout, Some("Settings"), "Legal notices", "copy"), &mut t, G, E);
+
+        let mut f = DrawFrame::new(&cx, crate::ui::Painter::root());
+        row_stops(&ts.table, &mut f, layout.sectioned_table());
+        let rows = f.stops();
+        assert_eq!(rows.len(), 3, "every selectable row is a stop");
+        for (i, stop) in rows.iter().enumerate() {
+            assert_eq!(stop.key.elem, i as u32, "the stop's key is the row's own element");
+            assert!(matches!(stop.hover, Hover::Focus), "a row hovers: the pointer parks focus");
+            assert!(matches!(stop.activate, Activate::Direct), "a row opens on the press, with no dip");
+            let drawn = ts.table.table.row_frame(layout.sectioned_table(), i as i32).expect("the row is drawn");
+            assert!(same(stop.rect, drawn), "the clickable box is the band the row is painted in");
+        }
+        // A pointer move over the second row's band parks the second row.
+        let mut map: crate::ui::hit::HitMap<u32> = crate::ui::hit::HitMap::new();
+        map.fill(rows.to_vec());
+        map.swap();
+        let r1 = rows[1].rect;
+        assert_eq!(
+            map.resolve(Some(E), crate::ui::hit::PointerKind::Move, r1.cx(), r1.cy(), None).focus.map(|k| k.elem),
+            Some(1)
+        );
+
+        let labels = [c"Cancelar", c"Guardar"];
+        let band = BandPart {
+            layout,
+            labels: &labels,
+            group: G,
+            entry: E,
+            uncommitted: false,
+            scales: [1.0; 2],
+            palette: ControlPalette::default(),
+            danger: None,
+        };
+        let mut f = DrawFrame::new(&cx, crate::ui::Painter::root());
+        band_stops(&band, &mut f);
+        let controls = f.stops();
+        assert_eq!(controls.len(), 2, "every control of the band is a stop");
+        let rects = band.rects(&m);
+        for (i, stop) in controls.iter().enumerate() {
+            assert!(matches!(stop.hover, Hover::Focus), "a pill hovers like a row");
+            assert!(matches!(stop.activate, Activate::Press), "a pill dips and commits on the release");
+            assert!(same(stop.rect, rects[i]), "the clickable box is the drawn pill");
         }
     }
 
