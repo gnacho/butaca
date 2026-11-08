@@ -346,6 +346,18 @@ pub(crate) fn audience_score(d: &Detail) -> Option<f64> {
         .map(|r| r.value)
 }
 
+/// **The MDBList plugin's named sources** (issue #370), in the order the plugin returned them.
+///
+/// `Community` is excluded because it is the server's own field and already drawn as the stars
+/// above; every other entry is a source with its own name, which is the capability the plugin
+/// adds. Empty on a server without the plugin, and then no row is drawn at all.
+fn named_sources(d: &Detail) -> Vec<&crate::metadata::Rating> {
+    d.ratings
+        .iter()
+        .filter(|r| r.art != crate::metadata::RatingArt::Community)
+        .collect()
+}
+
 /// **The facts**, in the order the window draws them: resolution, codecs, container, size, the
 /// wall-clock end time and the length. Each is the item's own record through the formatters
 /// `screens::tracks_panel` already owns, so the window and the Track-information sheet cannot spell
@@ -674,6 +686,11 @@ impl PrePlaybackScreen {
     /// The two are separate facts from separate fields (`CommunityRating` and `CriticRating`), and
     /// **each is drawn only when the server sent it**: one number under two names is the
     /// attribution #317 refused, and it stays refused (#368).
+    ///
+    /// **A third line, only when the MDBList plugin answered** (issue #370): every named source it
+    /// holds, each under its own caption, on the row below. This is the whole capability gate:
+    /// `Detail::ratings` carries those entries only when the plugin's route answered, so a server
+    /// without it draws exactly the line it drew before.
     fn paint_scores(
         &self,
         p: Painter,
@@ -685,7 +702,9 @@ impl PrePlaybackScreen {
     ) -> f32 {
         let audience = audience_score(d);
         let critic = d.critic_rating;
-        if audience.is_none() && critic.is_none() {
+        let named = named_sources(d);
+        let server_row = audience.is_some() || critic.is_some();
+        if !server_row && named.is_empty() {
             return 0.0;
         }
         let cy = y + RATING_ROW_H * 0.5;
@@ -711,7 +730,35 @@ impl PrePlaybackScreen {
                 measure,
             );
         }
-        RATING_ROW_H + GAP_RATINGS_FACTS
+        let mut rows = if server_row { 1.0 } else { 0.0 };
+        if !named.is_empty() {
+            // The plugin's own row. It stops at the column's edge rather than spilling into the
+            // options column; the sources it cannot fit are the ones a 1920-wide sheet would also
+            // have had to drop, and the row above already carries the two the server always has.
+            let ry = y + rows * RATING_ROW_H + RATING_ROW_H * 0.5;
+            let mut gx = x;
+            let mut i = 0;
+            while i < named.len() {
+                let provider = named[i].art.provider();
+                let end = i + named[i..].partition_point(|r| r.art.provider() == provider);
+                let scores: Vec<String> = named[i..end]
+                    .iter()
+                    .map(|r| crate::ui::fmt::rating_score(r.art, r.value))
+                    .collect();
+                let cells: Vec<widgets::RatingCell<'_>> = scores
+                    .iter()
+                    .map(|score| widgets::RatingCell { mark: &[], value: score, suffix: "" })
+                    .collect();
+                let w = widgets::rating_group_w(provider, &cells, measure);
+                if gx + w > clip.x + clip.w {
+                    break;
+                }
+                gx += widgets::rating_group(p, gx, ry, provider, &cells, measure) + 32.0;
+                i = end;
+            }
+            rows += 1.0;
+        }
+        rows * RATING_ROW_H + GAP_RATINGS_FACTS
     }
 
     /// The left column: the backdrop beside the title and the facts, then genres, synopsis and
@@ -1529,6 +1576,38 @@ mod tests {
             crate::ui::widgets::star_fills(audience_score(&scored).unwrap()),
             [1.0, 1.0, 1.0, 0.5, 0.0]
         );
+    }
+
+    /// **#370: the MDBList sources are a THIRD band, and only when the plugin answered.** The two
+    /// scores the server always has are `Community`/`Critic`; every other entry is a named source
+    /// the plugin's cache added, and a detail without them states none. This pins the gate the
+    /// whole capability rests on: no plugin, no row.
+    #[test]
+    fn the_plugins_named_sources_are_a_row_of_their_own_and_only_when_they_arrived() {
+        use crate::metadata::{Rating, RatingArt};
+        let plain = item();
+        assert!(named_sources(&plain).is_empty(), "no plugin, no row");
+
+        let scored = Detail {
+            ratings: vec![
+                Rating { art: RatingArt::Community, value: 7.4, critic: false },
+                Rating { art: RatingArt::Imdb, value: 7.2, critic: false },
+                Rating { art: RatingArt::TomatoScore, value: 6.8, critic: true },
+            ],
+            ..item()
+        };
+        let named = named_sources(&scored);
+        assert_eq!(
+            named.iter().map(|r| r.art).collect::<Vec<_>>(),
+            vec![RatingArt::Imdb, RatingArt::TomatoScore],
+            "the community score is the stars above, never one of the named rows"
+        );
+        // The row's numbers are the app's own scale: the plugin's 0-100 score has already been
+        // halved onto the 0-10 one, which is what the formatter reads (IMDb as x.x/10, every
+        // other source as a percentage).
+        assert_eq!(named[0].value, 7.2);
+        assert_eq!(crate::ui::fmt::rating_suffix(named[0].art), "/10");
+        assert_eq!(crate::ui::fmt::rating_suffix(named[1].art), "");
     }
 
     /// The cursor is seeded ONCE: a refresh landing under an open window must not move the

@@ -73,6 +73,11 @@ pub(crate) fn fetch_full(c: &JfClient, sid: ServerId, rk: &str) -> Option<Detail
             .media_segments(rk)
             .map(|s| convert_segments(&s))
             .unwrap_or_default();
+        // The MDBList plugin's extra named sources ride on top of the two scores the server
+        // always has (issue #370). A server without the plugin answers 404 on that route, which
+        // the client folds to empty, so the row is exactly what it was before this call existed.
+        d.ratings
+            .extend(c.mdblist_ratings(rk).map(|m| named_ratings(&m)).unwrap_or_default());
     }
     d.related = c
         .similar(rk, 12)
@@ -632,6 +637,48 @@ fn convert_segments(s: &super::dto::SegmentsResult) -> Vec<crate::metadata::Mark
         .collect()
 }
 
+/// The MDBList plugin's cached ratings → the hero's named sources.
+///
+/// **Only sources this client can NAME survive**, because the caption is the whole attribution:
+/// printing the plugin's raw slug ("myanimelist") as if it were a provider's own spelling is a
+/// smaller lie than dropping it, but the row's rule since #317 is that a source is either stated
+/// correctly or not stated. An unknown slug is therefore dropped, never guessed at.
+///
+/// The score is divided by ten because `metadata::Rating` holds every provider on the app's one
+/// 0-10 scale (a 91% tomato arrives as 9.1); the plugin's `score` is the normalised 0-100, so 72
+/// becomes 7.2 and the formatter prints it back as 72%. Zero is dropped: a provider with no data
+/// is what the plugin sends for a source it has nothing for, and "0%" is a verdict, not absence.
+fn named_ratings(cached: &super::dto::MdbListCached) -> Vec<Rating> {
+    cached
+        .ratings
+        .iter()
+        .filter_map(|r| {
+            let (art, critic) = match r.source.trim().to_ascii_lowercase().as_str() {
+                "imdb" => (RatingArt::Imdb, false),
+                "tmdb" => (RatingArt::Tmdb, false),
+                "trakt" => (RatingArt::Trakt, false),
+                // The plugin's own slugs for Rotten Tomatoes' two readings. Neither carries a
+                // verdict: which tomato a percentage earns is a threshold the plugin computes for
+                // its web UI and does not send, so these name the source and state the number.
+                "tomatoes" => (RatingArt::TomatoScore, true),
+                "popcorn" => (RatingArt::PopcornScore, false),
+                "metacritic" => (RatingArt::Metacritic, true),
+                "letterboxd" => (RatingArt::Letterboxd, false),
+                "rogerebert" => (RatingArt::RogerEbert, true),
+                "myanimelist" => (RatingArt::MyAnimeList, false),
+                "anilist" => (RatingArt::AniList, false),
+                _ => return None,
+            };
+            let score = r.score.filter(|s| s.is_finite() && *s > 0.0)?;
+            Some(Rating {
+                art,
+                value: (score / 10.0).clamp(0.0, 10.0),
+                critic,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,6 +723,47 @@ mod tests {
             {"Type": "Audio", "Codec": "aac", "Index": 1, "Language": "spa"}
         ]}]
     }"#;
+
+    /// #370: the plugin's cached sources become the hero's named rows, on the app's one 0-10
+    /// scale. A source this client cannot NAME is dropped rather than captioned with the plugin's
+    /// raw slug, and a source with no score is dropped rather than printed as 0%.
+    #[test]
+    fn the_plugins_named_sources_land_on_the_apps_scale_and_unknown_ones_are_dropped() {
+        let cached: super::super::dto::MdbListCached = serde_json::from_str(
+            r#"{"hasCache":true,"ratings":[
+                {"source":"imdb","value":7.2,"score":72},
+                {"source":"trakt","score":74},
+                {"source":"tomatoes","score":68},
+                {"source":"popcorn","score":73},
+                {"source":"metacritic","score":"N/A"},
+                {"source":"tvdb","score":80},
+                {"source":"letterboxd","score":0}
+            ]}"#,
+        )
+        .unwrap();
+        let rows = named_ratings(&cached);
+        let seen: Vec<(RatingArt, f64)> = rows.iter().map(|r| (r.art, r.value)).collect();
+        assert_eq!(
+            seen,
+            vec![
+                (RatingArt::Imdb, 7.2),
+                (RatingArt::Trakt, 7.4),
+                (RatingArt::TomatoScore, 6.8),
+                (RatingArt::PopcornScore, 7.3),
+            ],
+            "the plugin's 0-100 score halved onto the app's 0-10 scale, named sources only"
+        );
+        // No art for any of them: the plugin does not send the verdict a mark would state.
+        assert!(rows.iter().all(|r| r.art != RatingArt::TomatoFresh));
+    }
+
+    /// A server without the plugin: the client folds the 404 to an empty list, so the detail's
+    /// ratings are exactly the community score it always had.
+    #[test]
+    fn no_plugin_adds_no_row_to_the_ratings() {
+        let empty = super::super::dto::MdbListCached::default();
+        assert!(named_ratings(&empty).is_empty());
+    }
 
     /// The plan asks the server for what follows off `show_rk`, so a leaf resolved cold (which is
     /// every episode after the first of a run) must still name its series.

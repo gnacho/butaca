@@ -1149,6 +1149,28 @@ pub(crate) enum RatingArt {
     /// a threshold the server never sends on this field, and inventing one is exactly what
     /// [`RatingArt::TomatoFresh`]'s doc refuses. The percentage is the whole statement.
     Critic,
+    /// **Rotten Tomatoes' critics' score as the MDBList plugin reports it** (issue #370): a
+    /// percentage with no verdict. Same refusal as [`RatingArt::Critic`], one layer further out:
+    /// the plugin computes which badge a number earns for its own web UI and does not send that
+    /// verdict, so this art draws no tomato at all.
+    TomatoScore,
+    /// **Rotten Tomatoes' audience score** from the same plugin, and the same no-verdict rule.
+    /// Captioned with the plugin's own source name for it ("popcorn") rather than folded under
+    /// "ROTTEN TOMATOES" beside the critics' number, because with no marks the two readings would
+    /// be two unlabelled percentages under one caption.
+    PopcornScore,
+    /// Trakt's community score.
+    Trakt,
+    /// Metacritic's metascore.
+    Metacritic,
+    /// Letterboxd's own five-star average, normalised by the plugin to 0-100.
+    Letterboxd,
+    /// Roger Ebert's review score.
+    RogerEbert,
+    /// MyAnimeList's score.
+    MyAnimeList,
+    /// AniList's mean score.
+    AniList,
 }
 
 impl RatingArt {
@@ -1174,6 +1196,14 @@ impl RatingArt {
             RatingArt::Tmdb => "TMDB",
             RatingArt::Community => "SCORE",
             RatingArt::Critic => "ROTTEN TOMATOES",
+            RatingArt::TomatoScore => "ROTTEN TOMATOES",
+            RatingArt::PopcornScore => "POPCORN",
+            RatingArt::Trakt => "TRAKT",
+            RatingArt::Metacritic => "METACRITIC",
+            RatingArt::Letterboxd => "LETTERBOXD",
+            RatingArt::RogerEbert => "ROGER EBERT",
+            RatingArt::MyAnimeList => "MYANIME LIST",
+            RatingArt::AniList => "ANILIST",
         }
     }
 }

@@ -2783,6 +2783,10 @@ fn rating_mark(art: crate::metadata::RatingArt) -> &'static [crate::ui::widgets:
         // the server never sends on that field, and inventing one is what #317 refused. The
         // pre-playback window draws it as the number it is (#368).
         A::Critic => &[],
+        // The MDBList plugin's named sources are the same statement one layer out: a percentage
+        // whose badge the plugin does not send (issue #370). No art is drawn for any of them.
+        A::TomatoScore | A::PopcornScore | A::Trakt | A::Metacritic | A::Letterboxd
+        | A::RogerEbert | A::MyAnimeList | A::AniList => &[],
     }
 }
 
