@@ -3119,3 +3119,77 @@ fn a_show_walk_derives_the_layout_identity_once_not_once_per_stop() {
     assert!(full_walk <= EPISODES, "one draw hashed {full_walk} episodes for a {EPISODES}-episode season");
     clear();
 }
+
+/// **The synopsis accordion** (the owner's pass): five lines and a `MORE` mark while the blurb
+/// is cut, the whole text after the press, and no mark at all on a blurb that fits.
+#[test]
+fn a_long_synopsis_offers_more_and_a_short_one_offers_nothing() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "long".into(),
+        kind: "movie".into(),
+        summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
+                  sentence, so the mark has something to open. "
+            .repeat(12),
+        ..Default::default()
+    });
+    let screen = bare(&_guard, sid, "long");
+    let measure = crate::ui::fixture::FixtureMeasure;
+    let more = screen
+        .synopsis_more_rect(&measure, test_store().view())
+        .expect("a cut blurb publishes the mark");
+    assert!(more.w > 0.0 && more.h > 0.0, "the mark has a real box: {more:?}");
+
+    crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
+        sid,
+        rk: "long".into(),
+        kind: "movie".into(),
+        summary: "Two lines of blurb, which the cap never touches.".into(),
+        ..Default::default()
+    }));
+    let short = screen.synopsis_more_rect(&measure, test_store().view());
+    assert!(short.is_none(), "nothing is clipped, so nothing is offered");
+    clear();
+}
+
+/// Pressing the mark opens the accordion in place: the synopsis' measured height grows, the
+/// action row moves down with it, and the mark itself is gone (one-way, so there is no second
+/// affordance to word).
+#[test]
+fn pressing_more_opens_the_synopsis_in_place() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "long".into(),
+        kind: "movie".into(),
+        summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
+                  sentence, so the mark has something to open. "
+            .repeat(12),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, sid, "long");
+    let measure = crate::ui::fixture::FixtureMeasure;
+    let meta = test_store().view();
+    let closed = screen.compute_hero_chain(screen.detail(meta), &measure);
+    assert!(
+        screen.synopsis_more_rect(&measure, meta).is_some(),
+        "the mark is there before the press"
+    );
+
+    let (handled, _) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_SYNOPSIS_MORE), None);
+    assert_eq!(handled, Handled::Yes);
+    assert!(screen.synopsis_open, "the press opened the accordion");
+    let open = screen.compute_hero_chain(screen.detail(meta), &measure);
+    assert!(
+        open.btn_y > closed.btn_y,
+        "the action row moves down to make room ({} -> {})",
+        closed.btn_y,
+        open.btn_y
+    );
+    assert!(
+        screen.synopsis_more_rect(&measure, meta).is_none(),
+        "the whole blurb is on the page, so the mark is gone"
+    );
+    clear();
+}
