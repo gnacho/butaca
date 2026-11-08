@@ -1,0 +1,13 @@
+<!-- Our own drawing of a full popcorn tub: four popped kernels over a tapered bucket.
+
+     It is drawn for the MDBList plugin's named-source row, where the glyph NAMES the provider
+     (Rotten Tomatoes' audience score) and says nothing about the score itself - no fresh/rotten
+     reading, no threshold, one flat ink. Same 26-unit viewBox as the tomato family so the two
+     register when they sit in one row.
+
+     Geometry: ONE <path>, five clockwise subpaths - the four kernels as near-round polygons of
+     deliberately uneven size and angle, then the bucket - so the rasterizer winding-unions them and
+     the overlaps carry no seam (ui/icons.rs's authoring contract). The gaps that stay open are the
+     interstices between kernels, not holes: every kernel either overlaps its neighbour or the rim.
+     No strokes: this is a filled mask like tomato.svg. -->
+<svg viewBox="-1 1.6 26 26" fill="#ffffff"><path d="M15.7 8.7L14.3 10.7L11.9 11.1L9.9 9.7L9.5 7.3L10.9 5.3L13.3 4.9L15.3 6.3ZM18.9 11.3L17.4 12.8L15.2 12.5L14.1 10.6L14.9 8.6L16.9 7.9L18.7 9.1ZM9.6 12.1L7.7 13L5.9 12L5.5 10L6.8 8.4L8.9 8.5L10.2 10.1ZM12.4 11.8L11 13.4L9 13L8.2 11L9.6 9.4L11.6 9.8ZM6 12.8L18 12.8L16.3 23.6L8.3 23.6Z"/></svg>

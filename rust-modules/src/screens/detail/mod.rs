@@ -2428,20 +2428,21 @@ impl DetailScreen {
                 .iter()
                 .map(|r| crate::ui::fmt::rating_score(r.art, r.value))
                 .collect();
+            let lead = crate::ui::widgets::rating_source_mark(d.ratings[i].art);
             let cells: Vec<crate::ui::widgets::RatingCell<'_>> = d.ratings[i..end]
                 .iter()
                 .zip(scores.iter())
                 .map(|(r, score)| crate::ui::widgets::RatingCell {
-                    mark: rating_mark(r.art),
+                    mark: crate::ui::widgets::rating_verdict_mark(r.art),
                     value: score,
                     suffix: crate::ui::fmt::rating_suffix(r.art),
                 })
                 .collect();
-            let width = crate::ui::widgets::rating_group_w(provider, &cells, measure);
+            let width = crate::ui::widgets::rating_group_w(provider, lead, &cells, measure);
             if x + width > crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X {
                 break;
             }
-            x += crate::ui::widgets::rating_group(p, x, cy, provider, &cells, measure) + 32.0;
+            x += crate::ui::widgets::rating_group(p, x, cy, lead, provider, &cells, measure) + 32.0;
             i = end;
         }
     }
@@ -2752,42 +2753,6 @@ fn hero_blurb<'a>(
         String::new(),
         row.map(|m| m.summary.clone()).unwrap_or_default(),
     )
-}
-
-fn rating_mark(art: crate::metadata::RatingArt) -> &'static [crate::ui::widgets::MarkLayer] {
-    use crate::metadata::RatingArt as A;
-    use crate::ui::icons::Icon;
-    use crate::ui::widgets::MarkLayer;
-    static FRESH: &[MarkLayer] = &[
-        (Icon::Tomato, theme::RATING_FRESH),
-        (Icon::TomatoCalyx, theme::RATING_LEAF),
-    ];
-    static CERTIFIED: &[MarkLayer] = &[
-        (Icon::Tomato, theme::RATING_CERTIFIED),
-        (Icon::TomatoCalyx, theme::RATING_LEAF),
-    ];
-    static ROTTEN: &[MarkLayer] = &[
-        (Icon::TomatoHollow, theme::RATING_MUTED),
-        (Icon::TomatoCalyx, theme::RATING_MUTED),
-    ];
-    static CROWD_UP: &[MarkLayer] = &[(Icon::Crowd, theme::RATING_AUDIENCE)];
-    static CROWD_DOWN: &[MarkLayer] = &[(Icon::Crowd, theme::RATING_MUTED)];
-    match art {
-        A::TomatoFresh => FRESH,
-        A::TomatoCertified => CERTIFIED,
-        A::TomatoRotten => ROTTEN,
-        A::PopcornUpright => CROWD_UP,
-        A::PopcornSpilled => CROWD_DOWN,
-        A::Imdb | A::Tmdb | A::Community => &[],
-        // The critics' percentage has no mark and no verdict: which tomato it earns is a threshold
-        // the server never sends on that field, and inventing one is what #317 refused. The
-        // pre-playback window draws it as the number it is (#368).
-        A::Critic => &[],
-        // The MDBList plugin's named sources are the same statement one layer out: a percentage
-        // whose badge the plugin does not send (issue #370). No art is drawn for any of them.
-        A::TomatoScore | A::PopcornScore | A::Trakt | A::Metacritic | A::Letterboxd
-        | A::RogerEbert | A::MyAnimeList | A::AniList => &[],
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

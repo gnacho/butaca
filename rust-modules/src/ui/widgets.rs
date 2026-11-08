@@ -7686,7 +7686,8 @@ pub(crate) fn badge(
 // ----
 
 /// Mark box (px). A little over the meta line's cap height so a 26-unit silhouette still resolves
-/// at couch distance — these marks carry the VERDICT, so legibility here is not cosmetic.
+/// at couch distance — these marks carry the VERDICT, and a source glyph has to be legible enough to
+/// be read as a mark rather than as ornament.
 pub(crate) const RATING_MARK_D: f32 = 30.0;
 /// Glyph → its score. They are one unit, so it stays tight.
 const RATING_GAP: f32 = 10.0;
@@ -7700,9 +7701,82 @@ const RATING_PAIR_GAP: f32 = 14.0;
 /// (body + calyx), and the rasterizer renders a MASK, so a mark is a slice rather than one icon.
 pub(crate) type MarkLayer = (crate::ui::icons::Icon, [f32; 4]);
 
+/// **The mark a score wears for its VERDICT** — the tomato's three readings for Rotten Tomatoes'
+/// critics (ripe, certified, drained) and the crowd for its audience. Empty where the server sends
+/// no verdict: IMDb and TMDB have one mark each and their number is the whole statement, and the
+/// undecided percentages (`Critic`, the plugin's two) are named in words instead (issues #317,
+/// #368, #370).
+///
+/// This is the ONE place the art-to-glyph mapping lives: both the detail hero's strip and the
+/// pre-playback window read it, so the same score cannot wear two different marks.
+pub(crate) fn rating_verdict_mark(art: crate::metadata::RatingArt) -> &'static [MarkLayer] {
+    use crate::metadata::RatingArt as A;
+    use crate::ui::icons::Icon;
+    static FRESH: &[MarkLayer] = &[
+        (Icon::Tomato, theme::RATING_FRESH),
+        (Icon::TomatoCalyx, theme::RATING_LEAF),
+    ];
+    static CERTIFIED: &[MarkLayer] = &[
+        (Icon::Tomato, theme::RATING_CERTIFIED),
+        (Icon::TomatoCalyx, theme::RATING_LEAF),
+    ];
+    static ROTTEN: &[MarkLayer] = &[
+        (Icon::TomatoHollow, theme::RATING_MUTED),
+        (Icon::TomatoCalyx, theme::RATING_MUTED),
+    ];
+    static CROWD_UP: &[MarkLayer] = &[(Icon::Crowd, theme::RATING_AUDIENCE)];
+    static CROWD_DOWN: &[MarkLayer] = &[(Icon::Crowd, theme::RATING_MUTED)];
+    match art {
+        A::TomatoFresh => FRESH,
+        A::TomatoCertified => CERTIFIED,
+        A::TomatoRotten => ROTTEN,
+        A::PopcornUpright => CROWD_UP,
+        A::PopcornSpilled => CROWD_DOWN,
+        A::Imdb | A::Tmdb | A::Community => &[],
+        // The critics' percentage has no mark and no verdict: which tomato it earns is a threshold
+        // the server never sends on that field, and inventing one is what #317 refused. The
+        // pre-playback window draws it as the number it is (#368).
+        A::Critic => &[],
+        // The plugin's named sources send a number and name the provider, never a badge (#370);
+        // they take [`rating_source_mark`]'s glyph at the head of their group instead of a verdict
+        // mark beside the number.
+        A::TomatoScore | A::PopcornScore | A::Trakt | A::Metacritic | A::Letterboxd
+        | A::RogerEbert | A::MyAnimeList | A::AniList => &[],
+    }
+}
+
+/// **The glyph that NAMES a rating's source**, drawn at the head of its group — before the caption,
+/// because it is the caption's subject rather than a statement about the number under it.
+///
+/// Rotten Tomatoes' two percentages get their two words as marks, the tomato for the critics and the
+/// popcorn for the audience. Every other named source keeps a text-only row: a glyph nobody can read
+/// without a key is worse than the name it would stand in for, and the plugin's other providers are
+/// not household shapes.
+///
+/// It is the same fruit as [`rating_verdict_mark`]'s and deliberately not the same ink: this is
+/// [`theme::RATING_SOURCE`], because fresh or rotten is a threshold the plugin does not send and a
+/// verdict tint here would state one.
+pub(crate) fn rating_source_mark(art: crate::metadata::RatingArt) -> &'static [MarkLayer] {
+    use crate::metadata::RatingArt as A;
+    use crate::ui::icons::Icon;
+    static TOMATO: &[MarkLayer] = &[
+        (Icon::Tomato, theme::RATING_SOURCE),
+        (Icon::TomatoCalyx, theme::RATING_SOURCE),
+    ];
+    static POPCORN: &[MarkLayer] = &[(Icon::Popcorn, theme::RATING_SOURCE)];
+    match art {
+        A::TomatoScore => TOMATO,
+        A::PopcornScore => POPCORN,
+        _ => &[],
+    }
+}
+
 /// One score inside a provider group: the mark that carries its verdict, and the score as text.
 /// `mark` is empty for a provider that has no verdict to draw (IMDb, TMDB), their number IS the
 /// whole statement, and inventing a glyph for them is what put a meaningless star here before.
+///
+/// A glyph that names the SOURCE rather than judging the score is not a cell mark: it heads the
+/// group, see [`rating_group`]'s `lead` and [`rating_source_mark`].
 pub(crate) struct RatingCell<'a> {
     pub(crate) mark: &'a [MarkLayer],
     pub(crate) value: &'a str,
@@ -7715,13 +7789,19 @@ pub(crate) struct RatingCell<'a> {
 /// instead of running a group off the panel (same contract as `badge`/`badge_w`).
 pub(crate) fn rating_group_w(
     caption: &str,
+    lead: &[MarkLayer],
     cells: &[RatingCell],
     measure: &dyn crate::ui::machine::Measure,
 ) -> f32 {
     if caption.contains('\0') {
         return 0.0;
     }
-    let mut w = measure.width_str(caption, theme::size::MICRO, true) + RATING_CAPTION_GAP;
+    let mut w = if lead.is_empty() {
+        0.0
+    } else {
+        RATING_MARK_D + RATING_GAP
+    };
+    w += measure.width_str(caption, theme::size::MICRO, true) + RATING_CAPTION_GAP;
     for (i, cell) in cells.iter().enumerate() {
         if i > 0 {
             w += RATING_PAIR_GAP;
@@ -7766,10 +7846,15 @@ pub(crate) fn rating_caption(
 }
 
 /// Draw one provider's group with its LEFT edge at `x`, centred on `cy`; returns its width.
+///
+/// `lead` is the glyph that names the SOURCE, drawn before the caption and consuming the same gap a
+/// cell mark does. It is empty for every provider that has no such glyph, which is every one but
+/// Rotten Tomatoes (see [`rating_source_mark`]).
 pub(crate) fn rating_group(
     p: Painter,
     x: f32,
     cy: f32,
+    lead: &[MarkLayer],
     caption: &str,
     cells: &[RatingCell],
     measure: &dyn crate::ui::machine::Measure,
@@ -7778,6 +7863,13 @@ pub(crate) fn rating_group(
         return 0.0;
     }
     let mut bx = x;
+    if !lead.is_empty() {
+        let r = Rect::new(bx, cy - RATING_MARK_D * 0.5, RATING_MARK_D, RATING_MARK_D);
+        for (mask, tint) in lead.iter() {
+            crate::ui::icons::draw(p, *mask, r, *tint);
+        }
+        bx += RATING_MARK_D + RATING_GAP;
+    }
     bx += rating_caption(p, bx, cy, caption, measure);
     let base = crate::text::baseline_y(
         theme::size::MICRO,
@@ -7956,11 +8048,56 @@ fn rating_group_measures_each_run_once_and_returns_its_drawn_width() {
         RatingCell { mark: &[], value: "8.1", suffix: "/10" },
         RatingCell { mark: &[], value: "92%", suffix: "" },
     ];
-    let expected = rating_group_w("Provider", &cells, &measure);
+    let expected = rating_group_w("Provider", &[], &cells, &measure);
     let runs = measure.0.replace(0);
-    let drawn = rating_group(Painter::recording(), 64.0, 100.0, "Provider", &cells, &measure);
+    let drawn = rating_group(Painter::recording(), 64.0, 100.0, &[], "Provider", &cells, &measure);
     assert!((drawn - expected).abs() < 0.001);
     assert_eq!(measure.0.get(), runs, "the draw must not repeat its entire measurement walk");
+    crate::text::take_measure_fault();
+}
+
+/// The source glyph heads the group, so it costs its box AND its gap before the caption — and a
+/// group without one is unchanged, which is every provider but Rotten Tomatoes.
+#[test]
+fn a_source_glyph_widens_the_group_before_its_caption() {
+    use crate::metadata::RatingArt;
+    use crate::ui::machine::Measure;
+    let _serial = crate::testlock::serial();
+    struct Plain;
+    impl Measure for Plain {
+        fn width(&self, s: &CStr, sz: i32, _: bool) -> f32 {
+            s.to_bytes().len() as f32 * sz as f32 * 0.5
+        }
+        fn cap_h(&self, sz: i32) -> f32 { sz as f32 }
+        fn line_h(&self, sz: i32) -> f32 { sz as f32 }
+    }
+    let measure = Plain;
+    let cells = [RatingCell { mark: &[], value: "91%", suffix: "" }];
+    let bare = rating_group_w("ROTTEN TOMATOES", &[], &cells, &measure);
+    let led = rating_group_w("ROTTEN TOMATOES", rating_source_mark(RatingArt::TomatoScore), &cells, &measure);
+    assert!((led - bare - (RATING_MARK_D + RATING_GAP)).abs() < 0.001);
+    // The two percentages are the only providers we mark by name, and each gets its own glyph.
+    assert!(!rating_source_mark(RatingArt::TomatoScore).is_empty());
+    assert!(!rating_source_mark(RatingArt::PopcornScore).is_empty());
+    assert_ne!(
+        rating_source_mark(RatingArt::TomatoScore),
+        rating_source_mark(RatingArt::PopcornScore),
+        "critics and audience are two sources, not one mark drawn twice"
+    );
+    for art in [
+        RatingArt::Imdb,
+        RatingArt::Tmdb,
+        RatingArt::Community,
+        RatingArt::Critic,
+        RatingArt::Trakt,
+        RatingArt::Metacritic,
+        RatingArt::Letterboxd,
+        RatingArt::RogerEbert,
+        RatingArt::MyAnimeList,
+        RatingArt::AniList,
+    ] {
+        assert!(rating_source_mark(art).is_empty(), "{art:?} keeps a text-only row");
+    }
     crate::text::take_measure_fault();
 }
 

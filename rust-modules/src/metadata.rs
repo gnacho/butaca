@@ -1176,12 +1176,17 @@ pub(crate) enum RatingArt {
     /// **Rotten Tomatoes' critics' score as the MDBList plugin reports it** (issue #370): a
     /// percentage with no verdict. Same refusal as [`RatingArt::Critic`], one layer further out:
     /// the plugin computes which badge a number earns for its own web UI and does not send that
-    /// verdict, so this art draws no tomato at all.
+    /// verdict, so nothing here says fresh or rotten. The row still draws the tomato at the head of
+    /// the group, and that glyph names the SOURCE, not the score: it is painted
+    /// [`theme::RATING_SOURCE`](crate::ui::theme::RATING_SOURCE), never a verdict tint.
     TomatoScore,
-    /// **Rotten Tomatoes' audience score** from the same plugin, and the same no-verdict rule.
-    /// Captioned with the plugin's own source name for it ("popcorn") rather than folded under
-    /// "ROTTEN TOMATOES" beside the critics' number, because with no marks the two readings would
-    /// be two unlabelled percentages under one caption.
+    /// **Rotten Tomatoes' audience score** from the same plugin, and the same no-verdict rule. It
+    /// heads its group with a popcorn for the same reason: the mark attributes the reading, the
+    /// number is the whole statement.
+    ///
+    /// It stays captioned with the plugin's own source name for it ("popcorn") rather than folded
+    /// under "ROTTEN TOMATOES" beside the critics' number, because the two are separate sources and
+    /// a shared caption with two glyphs would read as one provider's pair.
     PopcornScore,
     /// Trakt's community score.
     Trakt,

@@ -1212,6 +1212,16 @@ pub const RATING_LEAF: [f32; 4] = GREEN_500;
 /// caption now". Its own role ON that stop rather than an alias OF the text token: a verdict mark
 /// and a runtime label are two jobs, and retuning one must not restyle the other.
 pub const RATING_MUTED: [f32; 4] = WARM_700;
+/// **The ink of a mark that NAMES ITS SOURCE and judges nothing** — the tomato beside Rotten
+/// Tomatoes' critics' percentage and the popcorn beside its audience percentage, on the MDBList
+/// plugin's named-source row (#370).
+///
+/// Deliberately not one of the verdict stops above: those read as a judgement on the number, and
+/// which badge a percentage earns is a bar the plugin never sends. This takes a reading ink so the
+/// glyph sits at the weight of the caption it belongs to. Its own role rather than an alias of
+/// [`TEXT_SECONDARY`] for the same reason [`RATING_MUTED`] has one: a mark and a runtime label are
+/// two jobs, and retuning one must not restyle the other.
+pub const RATING_SOURCE: [f32; 4] = WARM_500;
 
 // ── Card-glow geometry (the glow *color* is shader-baked in gfx.rs's FS_SRC/FS_IMG; only geometry
 // is tunable). The hero-grid card's wide glow pad is `consts::GLOW_PAD` (shared with off-screen
