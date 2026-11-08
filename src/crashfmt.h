@@ -154,7 +154,8 @@ static inline int butaca_map_line_kind(const char *line, size_t n, unsigned long
  * with one sed and the two addresses with two more, all `head -1` over the block — which is why
  * the register line that follows deliberately repeats neither `pc=` nor `lr=`. */
 static inline size_t butaca_fmt_signal(char *out, size_t cap, int sig, const char *name,
-                                    unsigned long addr, unsigned long pc, unsigned long lr) {
+                                    unsigned long addr, unsigned long pc, unsigned long lr,
+                                    unsigned long when, long pid) {
     struct butaca_sbuf b = { out, 0, cap };
     butaca_s_str(&b, "\n*** SIGNAL ");
     butaca_s_dec(&b, (unsigned long)sig);
@@ -166,6 +167,15 @@ static inline size_t butaca_fmt_signal(char *out, size_t cap, int sig, const cha
     butaca_s_hex(&b, pc);
     butaca_s_str(&b, " lr=");
     butaca_s_hex(&b, lr);
+    /* WHEN and WHICH RUN, on the same line and after every field the parsers already read, so
+     * the sed patterns in `tools/crash-report.sh` keep matching unchanged. `when` is epoch
+     * seconds because `time()` is async-signal-safe and formatting a calendar date here is not;
+     * `pid` is what separates two runs that both wrote into the one append-only file, which is
+     * the whole complaint in #328: three blocks that cannot be dated or attributed. */
+    butaca_s_str(&b, " t=");
+    butaca_s_dec(&b, when);
+    butaca_s_str(&b, " pid=");
+    butaca_s_dec(&b, (unsigned long)pid);
     butaca_s_ch(&b, '\n');
     return b.n;
 }
