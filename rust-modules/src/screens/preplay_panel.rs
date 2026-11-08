@@ -30,9 +30,21 @@
 //! "ends 23:40" is worse than none (#355's own note). The run is SIZED from a fixed sample rather
 //! than from the string: a recording's measurement keys are the text itself, so a live clock in a
 //! key would miss on every replay of the same recording.
+//!
+//! ## The pointer
+//!
+//! The window answers the Magic Remote's pointer the way every other screen in the app does
+//! (`ui/route_screen`'s rule 11, restated in `ui/table_screen`): **hover PARKS focus and nothing
+//! else.** The four rows are the focus model's four elements, so a pointer move over one is an
+//! ordinary engine move (`Hover::Focus` on the stop), the row lights in the very face the arrow
+//! keys give it, and a click runs the row it parked. There is no separate hover treatment to keep
+//! in step, and no second ladder for the pointer to disagree with. A pointer that leaves the window
+//! leaves the row it last hovered focused, which is what the table rows do: the arrow ladder
+//! continues from there rather than being stranded, and a D-pad press re-arms
+//! `ui::hit`'s 120 px hover gate so the two cannot fight (#359).
 
 use crate::metadata::Detail;
-use crate::ui::consts::{SCR_H, SCR_W, SDLK_DOWN, SDLK_LEFT, SDLK_RIGHT, SDLK_UP};
+use crate::ui::consts::{SCR_H, SCR_W, SDLK_LEFT, SDLK_RIGHT};
 use crate::ui::icons::Icon;
 use crate::ui::label::{Label, VAlign};
 use crate::ui::text_view::TextView;
@@ -144,6 +156,33 @@ fn more_rect(col: Rect) -> Rect {
     Rect::new(col.x + col.w - MORE_W, col.y, MORE_W, MORE_H)
 }
 
+/// Where each row of the options column is drawn, in ladder order. **ONE function for the painter
+/// and the focus model**: the capsule a person aims at, the one the pointer's stop covers and the
+/// one `place` answers are then the same rectangle, and the stops can never drift off the pills.
+fn option_rects() -> [(OptionRow, Rect); 4] {
+    let col = options_rect();
+    let top = col.y + MORE_H + SECTION_GAP + HEAD_H + theme::space::XS;
+    let audio = Rect::new(col.x, top, col.w, OPT_H);
+    let subs = Rect::new(col.x, audio.y + OPT_H + OPT_GAP + HEAD_H + theme::space::XS, col.w, OPT_H);
+    let action = Rect::new(col.x, subs.y + OPT_H + OPT_GAP + SECTION_GAP, col.w, ACT_H);
+    [
+        (OptionRow::More, more_rect(col)),
+        (OptionRow::Audio, audio),
+        (OptionRow::Subtitles, subs),
+        (OptionRow::Action, action),
+    ]
+}
+
+/// Where one row is drawn: the entry of [`option_rects`] for it, so a `place` and a pill cannot
+/// disagree.
+fn option_rect(row: OptionRow) -> Rect {
+    option_rects()
+        .into_iter()
+        .find(|(r, _)| *r == row)
+        .map(|(_, rect)| rect)
+        .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0))
+}
+
 // ---- the choice model (PURE — this half is what the host suite grades) -------------------------
 
 /// Which row of the options column holds the cursor.
@@ -174,6 +213,19 @@ impl OptionRow {
 
     pub(crate) fn from_index(i: usize) -> Self {
         Self::ALL[i.min(Self::ALL.len() - 1)]
+    }
+
+    /// One rung DOWN the ladder (or UP), clamped at both ends. **The ends do not wrap**: one press
+    /// from the action would otherwise skip the whole column and land on the menu control. One
+    /// function for the keyboard's ladder and the engine's, so the two cannot disagree about where
+    /// the ends are.
+    pub(crate) fn stepped(self, down: bool) -> Self {
+        let i = self.index();
+        Self::from_index(if down {
+            (i + 1).min(Self::ALL.len() - 1)
+        } else {
+            i.saturating_sub(1)
+        })
     }
 }
 
@@ -520,17 +572,35 @@ impl PrePlaybackScreen {
         }
     }
 
-    fn move_row(&mut self, down: bool) -> bool {
-        let i = self.row.index();
-        let next = if down {
-            (i + 1).min(OptionRow::ALL.len() - 1)
-        } else {
-            i.saturating_sub(1)
-        };
-        let next = OptionRow::from_index(next);
-        let moved = next != self.row;
-        self.row = next;
-        moved
+    /// **The four rows as pointer stops** (rule 11: hover parks focus, a click activates). Split out
+    /// of `draw` for `PlayerScreen::record_stops`'s reason: a host unit build links no GL and no
+    /// SDL2_ttf, so the suite can grade the stops without the paint pass that would issue both.
+    /// They ride the SETTLED geometry, as every surface's stops do: at rest (`appear == 1`) the
+    /// drawn and settled rects are the same, and `place` answers these same four rectangles.
+    fn record_stops<H: crate::screens::registry::AppLike>(
+        &self,
+        f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
+    ) {
+        let p = f.painter;
+        for (row, rect) in option_rects() {
+            f.stop(
+                p,
+                crate::ui::screen::Stop {
+                    key: crate::ui::machine::FocusKey {
+                        entry: self.entry,
+                        elem: row.index() as u32,
+                    },
+                    rect,
+                    rest_rect: rect,
+                    clip: panel_rect(),
+                    // The SAME focus face the arrows give it: the pointer parks focus through the
+                    // engine, so there is no second, pointer-only treatment to keep in step.
+                    hover: crate::ui::screen::Hover::Focus,
+                    // A row here commits on the press, exactly as its OK does (no pill dip to arm).
+                    activate: crate::ui::screen::Activate::Immediate,
+                },
+            );
+        }
     }
 }
 
@@ -775,7 +845,6 @@ impl PrePlaybackScreen {
         measure: &dyn crate::ui::machine::Measure,
     ) {
         self.paint_more(p, col);
-        let mut y = col.y + MORE_H + SECTION_GAP;
         let audio_rows = audio_choices(d);
         let audio_text = audio_rows
             .get(self.audio)
@@ -787,19 +856,31 @@ impl PrePlaybackScreen {
             None => crate::i18n::msg::widgets_tracks_off().to_string(),
         };
 
-        head_at(p, crate::i18n::msg::widgets_tracks_audio(), col.x, y, col.w);
-        y += HEAD_H + theme::space::XS;
-        self.option_row(
-            p, OptionRow::Audio, &audio_text, col, y, !audio_rows.is_empty(), measure,
+        // The headings sit above their capsules at the ladder's own gaps, so the pills and the
+        // stops come from ONE walk (`option_rects`).
+        let audio = option_rect(OptionRow::Audio);
+        head_at(
+            p,
+            crate::i18n::msg::widgets_tracks_audio(),
+            col.x,
+            audio.y - theme::space::XS - HEAD_H,
+            col.w,
         );
-        y += OPT_H + OPT_GAP;
+        self.option_row(
+            p, OptionRow::Audio, &audio_text, audio, !audio_rows.is_empty(), measure,
+        );
 
-        head_at(p, crate::i18n::msg::widgets_tracks_subtitles(), col.x, y, col.w);
-        y += HEAD_H + theme::space::XS;
-        self.option_row(
-            p, OptionRow::Subtitles, &sub_text, col, y, !subs.is_empty(), measure,
+        let subs_rect = option_rect(OptionRow::Subtitles);
+        head_at(
+            p,
+            crate::i18n::msg::widgets_tracks_subtitles(),
+            col.x,
+            subs_rect.y - theme::space::XS - HEAD_H,
+            col.w,
         );
-        y += OPT_H + OPT_GAP + SECTION_GAP;
+        self.option_row(
+            p, OptionRow::Subtitles, &sub_text, subs_rect, !subs.is_empty(), measure,
+        );
 
         // ---- the primary action ------------------------------------------------------------
         let action = if self.arg.restart || crate::metadata::resume_ns(d.resume_ms, d.dur_ms) <= 0 {
@@ -808,7 +889,7 @@ impl PrePlaybackScreen {
             crate::i18n::msg::browse_detail_resume()
         };
         let focused = self.row == OptionRow::Action;
-        let rect = Rect::new(col.x, y, col.w, ACT_H);
+        let rect = option_rect(OptionRow::Action);
         let (fill, ink) = if focused {
             (theme::ACCENT, theme::ACCENT_INK)
         } else {
@@ -874,13 +955,11 @@ impl PrePlaybackScreen {
         p: Painter,
         row: OptionRow,
         value: &str,
-        col: Rect,
-        y: f32,
+        rect: Rect,
         has_choices: bool,
         measure: &dyn crate::ui::machine::Measure,
     ) {
         let focused = self.row == row;
-        let rect = Rect::new(col.x, y, col.w, OPT_H);
         p.rrect(
             rect,
             OPT_H * 0.5,
@@ -981,9 +1060,11 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                     let meta = H::metadata(cx);
                     let Some(d) = meta.current() else { return Handled::Yes };
                     self.seed(d);
+                    // UP/DOWN are the ENGINE's: this window's four rows are its focus model's four
+                    // elements (`Focusable::neighbour`), so a key and a hover land the same way and
+                    // the row below is always the row the pointer would park. Only the sideways
+                    // gesture is the screen's own, because it changes a VALUE rather than the seat.
                     let moved = match sym as u32 {
-                        SDLK_UP => self.move_row(false),
-                        SDLK_DOWN => self.move_row(true),
                         SDLK_LEFT => self.cycle_value(d, true),
                         SDLK_RIGHT => self.cycle_value(d, false),
                         _ => false,
@@ -996,34 +1077,84 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                 InputKind::Click { .. } | InputKind::Pointer { .. } => Handled::Yes,
                 _ => Handled::No,
             },
+            // The row the ENGINE landed on is the row this window draws lit: a D-pad press, a
+            // pointer hover (`Hover::Focus` on the four stops) and a restore all arrive here, so
+            // there is one focus face and no second hover style to keep in step.
+            ScreenEvent::FocusMoved { to, .. } => {
+                self.row = OptionRow::from_index(to.elem as usize);
+                fx.invalidate(crate::ui::present::Provenance::Input);
+                Handled::Yes
+            }
+            // A click on a row runs it, exactly as OK does on the row it parks.
+            ScreenEvent::Activate(elem) => {
+                let meta = H::metadata(cx);
+                let Some(d) = meta.current() else {
+                    fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
+                    return Handled::Yes;
+                };
+                self.seed(d);
+                self.row = OptionRow::from_index(*elem as usize);
+                if self.row == OptionRow::More {
+                    self.open_menu(fx);
+                } else {
+                    self.commit(d, fx);
+                }
+                fx.invalidate(crate::ui::present::Provenance::Input);
+                Handled::Yes
+            }
             _ => Handled::No,
         }
     }
 }
 
+/// **The window's focus model: its four rows, as four elements of one column.** The rows used to be
+/// a cursor the screen kept to itself over a single `Document` element covering the whole panel,
+/// which is what made the window dead to the Magic Remote's pointer: a hit map can only park focus
+/// on a stop whose key the focus model knows, and it knew one key for the entire sheet. With one
+/// element per row, the D-pad, a pointer hover (`Hover::Focus` on the stops `record_stops`
+/// registers) and a restore all move the same focus, so the row the pointer parks IS the row the
+/// arrows would have reached and the face it lights is the one focus face this window has.
 impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for PrePlaybackScreen {
     fn groups(&self, _cx: &crate::ui::machine::Cx<'_, H>, out: &mut Vec<crate::ui::screen::GroupSpec>) {
         out.push(crate::ui::screen::GroupSpec {
             id: crate::ui::machine::GroupId(0),
-            kind: crate::ui::screen::GroupKind::Document,
-            seat: crate::ui::screen::Seat::First,
+            kind: crate::ui::screen::GroupKind::Column,
+            seat: crate::ui::screen::Seat::Remembered,
             reachable: crate::ui::screen::AxisMask::BOTH,
+            // Every side is a wall at the ends: the ladder clamps, and the sideways gesture is the
+            // language rows' own (it changes a value), so it never leaves this column.
             edge: [crate::ui::screen::EdgeRule::Stop; 4],
-            extent: panel_rect(),
-            len: 1,
+            extent: options_rect(),
+            len: OptionRow::ALL.len(),
             elem: crate::ui::screen::ElemKind::Control,
         });
     }
     fn group_of(&self, key: &u32, _cx: &crate::ui::machine::Cx<'_, H>) -> Option<crate::ui::machine::GroupId> {
-        (*key == 0).then_some(crate::ui::machine::GroupId(0))
+        ((*key as usize) < OptionRow::ALL.len()).then_some(crate::ui::machine::GroupId(0))
     }
     fn neighbour(
         &self,
-        _key: crate::ui::machine::FocusKey<u32>,
-        _dir: crate::ui::screen::Dir,
+        key: crate::ui::machine::FocusKey<u32>,
+        dir: crate::ui::screen::Dir,
         _cx: &crate::ui::machine::Cx<'_, H>,
     ) -> crate::ui::screen::Step<u32> {
-        crate::ui::screen::Step::Edge
+        let down = match dir {
+            crate::ui::screen::Dir::Up => false,
+            crate::ui::screen::Dir::Down => true,
+            crate::ui::screen::Dir::Left | crate::ui::screen::Dir::Right => {
+                return crate::ui::screen::Step::Edge
+            }
+        };
+        let from = OptionRow::from_index(key.elem as usize);
+        let to = from.stepped(down);
+        if to == from {
+            crate::ui::screen::Step::Edge
+        } else {
+            crate::ui::screen::Step::Move(crate::ui::machine::FocusKey {
+                entry: key.entry,
+                elem: to.index() as u32,
+            })
+        }
     }
     fn place(
         &self,
@@ -1031,11 +1162,13 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
         _cx: &crate::ui::machine::Cx<'_, H>,
         _at: crate::ui::screen::At,
     ) -> Option<crate::ui::screen::Placed> {
-        (*key == 0).then(|| crate::ui::screen::Placed {
-            rect: panel_rect(),
-            rest_rect: panel_rect(),
+        let row = OptionRow::ALL.get(*key as usize)?;
+        let rect = option_rect(*row);
+        Some(crate::ui::screen::Placed {
+            rect,
+            rest_rect: rect,
             clip: panel_rect(),
-            index: Some(0),
+            index: Some(row.index() as u32),
         })
     }
     fn reconcile(
@@ -1043,12 +1176,14 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
         want: crate::ui::machine::FocusKey<u32>,
         _cx: &crate::ui::machine::Cx<'_, H>,
     ) -> crate::ui::machine::FocusKey<u32> {
-        if want.elem == 0 {
+        // A key that is not one of the four rows bounces back to the row this window is drawing
+        // lit, which is the row the engine last landed on.
+        if (want.elem as usize) < OptionRow::ALL.len() {
             want
         } else {
             crate::ui::machine::FocusKey {
                 entry: self.entry,
-                elem: 0,
+                elem: self.row.index() as u32,
             }
         }
     }
@@ -1060,7 +1195,7 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
     ) -> crate::ui::machine::FocusKey<u32> {
         crate::ui::machine::FocusKey {
             entry: self.entry,
-            elem: 0,
+            elem: self.row.index() as u32,
         }
     }
 }
@@ -1102,6 +1237,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
         let measure = f.measure;
         let field = f.underlay;
         crate::ui::profile::phase("dt.preplay", || self.paint(d, appear, measure, field));
+        self.record_stops(f);
     }
     fn render(&self) -> crate::ui::screen::RenderStrategy {
         crate::ui::screen::RenderStrategy::Page
@@ -1293,23 +1429,55 @@ mod tests {
 
     /// The cursor walks the four rows and stops at both ends: a window that wrapped from the
     /// action back to the audio would make one DOWN press skip the whole column. The three-dot
-    /// control is the ladder's TOP rung, which is what gives the remote a way to reach it.
+    /// control is the ladder's TOP rung, which is what gives the remote a way to reach it. The
+    /// ladder is the ENGINE's (`Focusable::neighbour` answers with this same step), so this walks
+    /// the real `FocusEngine` over the real screen rather than a private cursor.
     #[test]
     fn the_cursor_walks_the_rows_and_stops_at_the_ends() {
-        let mut s = PrePlaybackScreen::new(crate::ui::machine::EntryId(1), PrePlaybackArg { restart: false });
-        assert_eq!(s.row, OptionRow::Action, "the primary action holds the cursor");
-        assert!(s.move_row(false));
-        assert_eq!(s.row, OptionRow::Subtitles);
-        assert!(s.move_row(false));
-        assert_eq!(s.row, OptionRow::Audio);
-        assert!(s.move_row(false));
-        assert_eq!(s.row, OptionRow::More, "UP from the audio row reaches the menu control");
-        assert!(!s.move_row(false), "clamped at the top");
-        assert!(s.move_row(true));
-        assert!(s.move_row(true));
-        assert!(s.move_row(true));
-        assert_eq!(s.row, OptionRow::Action);
-        assert!(!s.move_row(true), "clamped at the bottom");
+        use crate::ui::focus::{FocusEngine, Outcome};
+        use crate::ui::machine::{FocusKey, GroupId, InputOwner};
+        use crate::ui::screen::Dir;
+
+        let mut row = OptionRow::Action;
+        assert_eq!(row, OptionRow::Action, "the primary action holds the cursor");
+        row = row.stepped(false);
+        assert_eq!(row, OptionRow::Subtitles);
+        row = row.stepped(false);
+        assert_eq!(row, OptionRow::Audio);
+        row = row.stepped(false);
+        assert_eq!(row, OptionRow::More, "UP from the audio row reaches the menu control");
+        assert_eq!(row.stepped(false), row, "clamped at the top");
+        row = row.stepped(true);
+        assert_eq!(row, OptionRow::Audio);
+        row = row.stepped(true);
+        row = row.stepped(true);
+        assert_eq!(row, OptionRow::Action);
+        assert_eq!(row.stepped(true), row, "clamped at the bottom");
+
+        // …and the engine's walk over the screen answers the same ladder, which is what the
+        // dispatcher hands a D-pad press and a pointer hover alike.
+        let screen = PrePlaybackScreen::new(ENTRY, PrePlaybackArg { restart: false });
+        let cx = fixture_cx(Some(OptionRow::Action.index() as u32));
+        let owner = InputOwner::Entry(ENTRY);
+        let mut engine: FocusEngine<u32> = FocusEngine::new();
+        let key = |row: OptionRow| FocusKey { entry: ENTRY, elem: row.index() as u32 };
+        engine.set(owner, key(OptionRow::Action), Some(GroupId(0)), crate::ui::screen::By::Restore);
+        for want in [OptionRow::Subtitles, OptionRow::Audio, OptionRow::More] {
+            let out = engine.move_dir(owner, &screen, &[], Dir::Up, &cx);
+            assert_eq!(
+                match out { Outcome::Moved { to, .. } => Some(to), _ => None },
+                Some(key(want)),
+                "UP walks the ladder one rung"
+            );
+        }
+        assert!(
+            matches!(engine.move_dir(owner, &screen, &[], Dir::Up, &cx), Outcome::Nothing),
+            "the top of the column is a wall, not a wrap"
+        );
+        assert!(
+            matches!(engine.move_dir(owner, &screen, &[], Dir::Left, &cx), Outcome::Nothing),
+            "LEFT belongs to the language row's value, so the ladder has no sideways rung"
+        );
     }
 
     /// The synopsis is the one block with no fixed height, so its line budget is what keeps the
@@ -1368,5 +1536,168 @@ mod tests {
         s.audio = 0;
         s.seed(&d);
         assert_eq!(s.audio, 0, "a second seed would overwrite the viewer's choice");
+    }
+
+    // ---- the pointer (#359) --------------------------------------------------------------------
+
+    struct HostFixture;
+    impl crate::ui::machine::Host for HostFixture {
+        type Arg = crate::ui::fixture::FixtureArg;
+        type Fx = crate::screens::registry::AppFx;
+        type Msg = crate::screens::registry::AppMsg;
+        type Elem = u32;
+        type Views<'a> = ();
+        type Init = crate::screens::family::NoInit;
+        type Memory = ();
+    }
+
+    thread_local! {
+        // TEST ONLY, `screens::detail::tests`' pattern: the store has to live somewhere for the
+        // free helpers below, and a per-owner one would be a second mechanism for reaching it.
+        static TEST_METADATA: std::cell::UnsafeCell<crate::stores::metadata::MetadataStore> =
+            std::cell::UnsafeCell::new(crate::stores::metadata::MetadataStore::default());
+    }
+
+    fn test_store() -> &'static mut crate::stores::metadata::MetadataStore {
+        TEST_METADATA.with(|cell| unsafe { &mut *cell.get() })
+    }
+
+    impl crate::screens::registry::MetadataLike for HostFixture {
+        fn metadata<'a>(_cx: &crate::ui::machine::Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
+            test_store().view()
+        }
+    }
+
+    fn install(d: Detail) -> crate::testlock::Serial {
+        let guard = crate::testlock::serial();
+        crate::metadata::set_current_for_test(test_store().state_mut(), Some(d));
+        guard
+    }
+
+    fn fixture_cx(focus: Option<u32>) -> crate::ui::machine::Cx<'static, HostFixture> {
+        crate::ui::machine::Cx {
+            views: (),
+            tick: crate::ui::machine::Tick::default(),
+            measure: &crate::ui::fixture::FixtureMeasure,
+            press: crate::ui::machine::PressRead::default(),
+            focus: crate::ui::machine::FocusRead {
+                current: focus.map(|elem| crate::ui::machine::FocusKey { entry: ENTRY, elem }),
+                ..Default::default()
+            },
+            owner: crate::ui::machine::InputOwner::Entry(ENTRY),
+        }
+    }
+
+    const ENTRY: crate::ui::machine::EntryId = crate::ui::machine::EntryId(4);
+
+    fn step(
+        screen: &mut PrePlaybackScreen,
+        event: &crate::ui::screen::ScreenEvent<HostFixture>,
+        focus: Option<u32>,
+    ) -> (crate::ui::machine::Handled, Vec<crate::ui::machine::Stamped<HostFixture>>) {
+        let context = fixture_cx(focus);
+        let mut effects = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let handled = {
+            let mut sink = crate::ui::machine::Effects::new(
+                &mut effects,
+                crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(1)),
+                &mut present,
+            );
+            crate::ui::machine::Machine::<HostFixture>::step(screen, event, &context, &mut sink)
+        };
+        (handled, effects)
+    }
+
+    /// **The pointer's half of rule 11 on this window** (#359): every row is a stop that HOVERS like
+    /// a table row does (`Hover::Focus`, the same face the arrows give it) and ACTIVATES like its own
+    /// OK does, and each stop's rectangle is the capsule that row is painted in. Before this the
+    /// window registered no stop at all, so the Magic Remote's pointer was dead over the whole sheet
+    /// and a click on a row fell on the alert's ground.
+    #[test]
+    fn every_row_is_a_stop_on_the_capsule_it_is_drawn_in() {
+        use crate::ui::hit::{HitMap, PointerKind};
+        use crate::ui::screen::{Activate, At, DrawFrame, Focusable, Hover};
+
+        let screen = PrePlaybackScreen::new(ENTRY, PrePlaybackArg { restart: false });
+        let cx = fixture_cx(None);
+        let mut f = DrawFrame::new(&cx, crate::ui::Painter::root());
+        screen.record_stops(&mut f);
+        let stops = f.into_stops();
+        assert_eq!(stops.len(), OptionRow::ALL.len(), "one stop per rung of the ladder");
+        for (i, stop) in stops.iter().enumerate() {
+            assert_eq!(stop.key.elem, i as u32, "the stop's key is its row");
+            assert!(matches!(stop.hover, Hover::Focus), "a row hovers: the pointer parks focus");
+            assert!(matches!(stop.activate, Activate::Immediate), "a click runs the row at once");
+            let placed = <PrePlaybackScreen as Focusable<HostFixture>>::place(&screen, &(i as u32), &cx, At::Drawn)
+                .expect("every row is a focusable element");
+            let same = |a: Rect, b: Rect| [a.x, a.y, a.w, a.h] == [b.x, b.y, b.w, b.h];
+            assert!(same(placed.rect, stop.rect), "the stop covers the capsule the row is drawn in");
+            assert!(same(placed.rect, option_rect(OptionRow::from_index(i))));
+        }
+
+        let mut map: HitMap<u32> = HitMap::new();
+        map.fill(stops);
+        map.swap();
+        // Two rows far apart in the column, so a geometry bug that merged them would still show.
+        let audio = option_rect(OptionRow::Audio);
+        let action = option_rect(OptionRow::Action);
+        assert!(audio.y + audio.h <= action.y, "the rows are separate bands");
+        assert_eq!(
+            map.resolve(Some(ENTRY), PointerKind::Move, audio.cx(), audio.cy(), None).focus.map(|k| k.elem),
+            Some(OptionRow::Audio.index() as u32),
+            "hovering the audio row parks the audio row"
+        );
+        assert_eq!(
+            map.resolve(Some(ENTRY), PointerKind::Move, action.cx(), action.cy(), None).focus.map(|k| k.elem),
+            Some(OptionRow::Action.index() as u32),
+            "…and a different row parks a different row"
+        );
+        // The facts column is not a control: a pointer there parks nothing and clicks nothing.
+        let facts = main_rect();
+        assert!(map.resolve(Some(ENTRY), PointerKind::Move, facts.cx(), facts.cy(), None).focus.is_none());
+        assert!(map.resolve(Some(ENTRY), PointerKind::Click, facts.cx(), facts.cy(), None).activate.is_none());
+        // A click on a row asks for that row, with the row's own activation policy.
+        let click = map.resolve(Some(ENTRY), PointerKind::Click, action.cx(), action.cy(), None);
+        assert_eq!(
+            click.activate.map(|(k, act)| (k.elem, act)),
+            Some((OptionRow::Action.index() as u32, Activate::Immediate))
+        );
+    }
+
+    /// A hover that lands on a row IS this window's cursor: the engine's `FocusMoved` moves the row
+    /// the pills are drawn lit from, so hover and the arrow keys land the same way, and a click on a
+    /// row runs exactly what OK on that row runs.
+    #[test]
+    fn the_engine_lands_the_row_and_a_click_runs_it() {
+        use crate::ui::machine::{Fx, Handled};
+        use crate::ui::screen::{By, ScreenEvent};
+
+        let _guard = install(item());
+        let mut screen = PrePlaybackScreen::new(ENTRY, PrePlaybackArg { restart: false });
+        assert_eq!(screen.row, OptionRow::Action, "the window opens on its primary action");
+
+        // A pointer move over the audio row parks element 1; the window follows it.
+        let moved = ScreenEvent::FocusMoved {
+            from: Some(crate::ui::machine::FocusKey { entry: ENTRY, elem: 3 }),
+            to: crate::ui::machine::FocusKey { entry: ENTRY, elem: 1 },
+            by: By::Pointer,
+        };
+        let (handled, _) = step(&mut screen, &moved, Some(1));
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(screen.row, OptionRow::Audio, "the hovered row is the row drawn lit");
+
+        // A click on the primary action starts the film with the tracks on screen.
+        let (handled, fx) = step(&mut screen, &ScreenEvent::Activate(3), Some(3));
+        assert_eq!(handled, Handled::Yes);
+        assert!(
+            fx.iter().any(|s| matches!(
+                &s.fx,
+                Fx::App(crate::screens::registry::AppFx::Content(
+                    crate::screens::registry::ContentReq::Play { .. }
+                ))
+            )),
+            "a click on the action row asks for the playback, exactly as its OK does"
+        );
     }
 }
