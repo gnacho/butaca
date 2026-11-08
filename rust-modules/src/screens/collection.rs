@@ -514,9 +514,15 @@ impl CollectionScreen {
                 MARGIN_X, self.items_heading_y() + dy, SCR_W - 2.0 * MARGIN_X, measure);
         }
         let (text_x, text_w) = (self.text_x(), self.text_w());
-        let title = measure.fit_line(name, text_w, theme::size::DISPLAY, true);
-        Label::new(title.as_ptr(), theme::size::DISPLAY, theme::TEXT_PRIMARY).bold()
-            .v(VAlign::CapTop).draw(p, Rect::new(text_x, HEADER_TOP + dy, text_w, 0.0));
+        // **Favourites draws no page title.** Its header starts at the content edge and the
+        // shared wordmark already owns that corner, so a `Favoritos` title landed under the
+        // `butaca` mark and read as two logos stacked. The strip's own pill names the page, and
+        // the grid heading below still says what the list is.
+        if !self.id.is_favorites() {
+            let title = measure.fit_line(name, text_w, theme::size::DISPLAY, true);
+            Label::new(title.as_ptr(), theme::size::DISPLAY, theme::TEXT_PRIMARY).bold()
+                .v(VAlign::CapTop).draw(p, Rect::new(text_x, HEADER_TOP + dy, text_w, 0.0));
+        }
         let (meta_y, summary_y) = Self::header_ys(measure);
         let (meta_y, summary_y) = (meta_y + dy, summary_y + dy);
         let built;
