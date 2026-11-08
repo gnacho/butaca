@@ -184,8 +184,20 @@ impl ImagesScreen {
         }
     }
 
+    /// Does the phase have a line to say? Asked WITHOUT building it: `frame` runs on every draw
+    /// and every placement, and the page-count line is formatted, so a status band derived from
+    /// `status_text` would allocate twice a frame for an answer that is a property of the phase.
+    fn has_status(&self) -> bool {
+        match self.status {
+            ImagesStatus::Ready => {
+                self.images.is_empty() || self.total > self.images.len() as i32
+            }
+            _ => true,
+        }
+    }
+
     fn status_h(&self) -> f32 {
-        if self.status_text().is_some() {
+        if self.has_status() {
             STATUS_GAP + STATUS_LEAD
         } else {
             0.0
@@ -449,7 +461,7 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + MetadataLike> S
                     focused == Some(index as u32),
                     1.0,
                 );
-                self.caption(p, img, cell);
+                self.caption(p, img, cell, f.measure);
             }
             if let Some(text) = self.status_text() {
                 if let Ok(cs) = std::ffi::CString::new(text) {
@@ -499,13 +511,22 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + MetadataLike> S
 }
 
 impl ImagesScreen {
-    /// The two caption lines under a tile: which provider offered the picture, and its size. Both
-    /// clipped to the tile's own column, because a provider's name is as long as it likes and the
-    /// tile beside it is somebody else's.
-    fn caption(&self, p: crate::ui::Painter, img: &RemoteImage, cell: Rect) {
-        p.clip(Rect::new(cell.x, cell.y + TILE_H, cell.w, CAP_H));
+    /// The two caption lines under a tile: which provider offered the picture, and its size.
+    /// ELIDED to the tile's own column rather than clipped: a provider's name is as long as it
+    /// likes ("The Open Movie Database"), and a clipped one would bleed into the tile beside it,
+    /// while `text::elide_by` ends in an ellipsis that says the name was longer.
+    fn caption(
+        &self,
+        p: crate::ui::Painter,
+        img: &RemoteImage,
+        cell: Rect,
+        measure: &dyn crate::ui::machine::Measure,
+    ) {
         let top = cell.y + TILE_H + theme::space::XS;
-        if let Ok(cs) = std::ffi::CString::new(img.provider.as_str()) {
+        let provider = crate::text::elide_by(&img.provider, cell.w, false, |t| {
+            measure.width_str(t, theme::size::CAPTION, false)
+        });
+        if let Ok(cs) = std::ffi::CString::new(provider) {
             Label::new(cs.as_ptr(), theme::size::CAPTION, theme::TEXT_SECONDARY)
                 .v(crate::ui::label::VAlign::CapTop)
                 .draw(p, Rect::new(cell.x, top, cell.w, CAP_LEAD));
@@ -518,6 +539,5 @@ impl ImagesScreen {
                     .draw(p, Rect::new(cell.x, top + CAP_LEAD, cell.w, CAP_LEAD));
             }
         }
-        p.clip_clear();
     }
 }
