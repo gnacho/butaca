@@ -1128,6 +1128,14 @@ pub(crate) enum RatingArt {
     /// shown under a generic caption rather than attributed to IMDb or TMDB by guess (issue
     /// #317).
     Community,
+    /// **The critics' score** (`CriticRating`, 0-100) — the second axis, and the one provider
+    /// this backend CAN name: Jellyfin fills that field from OMDb's Rotten Tomatoes entry and from
+    /// nothing else, so the caption states the source the number actually came from.
+    ///
+    /// It has **no art and no verdict**: which tomato (fresh, certified, rotten) the score earns is
+    /// a threshold the server never sends on this field, and inventing one is exactly what
+    /// [`RatingArt::TomatoFresh`]'s doc refuses. The percentage is the whole statement.
+    Critic,
 }
 
 impl RatingArt {
@@ -1152,6 +1160,7 @@ impl RatingArt {
             | RatingArt::PopcornSpilled => "ROTTEN TOMATOES",
             RatingArt::Tmdb => "TMDB",
             RatingArt::Community => "SCORE",
+            RatingArt::Critic => "ROTTEN TOMATOES",
         }
     }
 }
@@ -1306,6 +1315,15 @@ pub(crate) struct Detail {
     pub(crate) chapters: Vec<Chapter>,
     pub(crate) markers: Vec<Marker>, // intro / credits segments (leaf items only)
     pub(crate) ratings: Vec<Rating>, // review scores, critic-first (see convert_ratings)
+    /// **The critics' score as a percentage, 0-100, or `None` when the server sent none.** The
+    /// OTHER axis from [`Self::ratings`], which carries the audience/community score: Jellyfin
+    /// serves them as two separate fields (`CommunityRating` 0-10 and `CriticRating` 0-100) and
+    /// neither implies the other, so a window that printed one number under both would be
+    /// asserting a fact the server never stated (#317, and #368 for the pair this field exists
+    /// for). Stored as the wire's own percentage rather than rescaled to the ratings' 0-10: it is
+    /// an integer count of percent, and rescaling it would be inventing precision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) critic_rating: Option<i64>,
     /// Every extras row, server order. Empty when the server sent none, the GET was refused and no
     /// primary trailer could be filled, or this item is an episode/season (those never request
     /// extras). The Trailer control reads [`Self::trailer`], not this vec's first element.

@@ -314,6 +314,13 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
                 }]
             })
             .unwrap_or_default(),
+        // The critics' axis, kept as the wire's own percentage (see the field's doc). A server
+        // without OMDb sends nothing here, and the window then draws no critic score at all rather
+        // than repeating the community one under a second name.
+        critic_rating: it
+            .critic_rating
+            .filter(|v| v.is_finite())
+            .map(|v| (f64::from(v).round() as i64).clamp(0, 100)),
     };
     if !is_show {
         fill_streams(it, &mut d);
@@ -947,5 +954,22 @@ mod tests {
         let it: BaseItemDto = serde_json::from_str(DETAIL_JSON).unwrap();
         let d = detail_from_dto(&it, ServerId::from_raw(0));
         assert!(d.ratings.is_empty());
+        assert_eq!(d.critic_rating, None, "and no critic score either");
+    }
+
+    /// The critics' axis is a SEPARATE field, carried as the server's own percentage and kept
+    /// apart from the audience score: a window that showed one number under both names would be
+    /// asserting an attribution the server never made (#317, #368).
+    #[test]
+    fn the_critic_rating_is_the_servers_percentage_and_never_the_community_score() {
+        let with = DETAIL_JSON.replace(
+            "\"OfficialRating\": \"PG\",",
+            "\"OfficialRating\": \"PG\", \"CommunityRating\": 7.4, \"CriticRating\": 85.0,",
+        );
+        let it: BaseItemDto = serde_json::from_str(&with).unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert_eq!(d.critic_rating, Some(85), "the wire's percentage, not rescaled");
+        assert_eq!(d.ratings.len(), 1, "the audience score stays the one entry it was");
+        assert_eq!(d.ratings[0].art, RatingArt::Community);
     }
 }

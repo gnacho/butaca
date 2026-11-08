@@ -119,6 +119,12 @@ pub(crate) struct BaseItemDto {
     pub(crate) official_rating: Option<String>,
     #[serde(rename = "CommunityRating")]
     pub(crate) community_rating: Option<f32>,
+    /// The CRITICS' score as a percentage, 0-100. It is Rotten Tomatoes' own number: the server's
+    /// OMDb provider parses RT's `"85%"` into this field (`OmdbProvider`), and no other provider
+    /// writes it. Absent whenever no provider supplied one, which is the ordinary case on a server
+    /// without OMDb — and absence is what keeps the window from inventing a score (issue #317).
+    #[serde(rename = "CriticRating")]
+    pub(crate) critic_rating: Option<f32>,
     /// Per-image-type cache-buster tags. A Primary exists iff this map names one. (`BTreeMap`,
     /// not `HashMap`: this crate builds serde no-std, where only the alloc maps implement
     /// `Deserialize`.)
@@ -438,6 +444,7 @@ mod tests {
         assert_eq!(it.year, Some(1976));
         assert_eq!(it.run_time_ticks, Some(55842000000));
         assert_eq!(it.official_rating.as_deref(), Some("PG"));
+        assert_eq!(it.critic_rating, None, "a server without OMDb sends no critic score");
         assert_eq!(
             it.image_tags.get("Primary").map(String::as_str),
             Some("a131fdbdca9ddadcda7d3c86756c6b67")
@@ -450,6 +457,18 @@ mod tests {
         let ms = it.media_sources.as_ref().unwrap();
         assert_eq!(ms[0].streams.len(), 2);
         assert_eq!(ms[0].streams[0].codec.as_deref(), Some("h264"));
+    }
+
+    /// The critics' score parses off the wire name and keeps the server's percentage. Absence is
+    /// the ordinary case and stays `None` (see the field's own doc).
+    #[test]
+    fn the_critic_rating_is_optional_and_keeps_its_percentage() {
+        let r: ItemsResult = serde_json::from_str(
+            r#"{"Items": [{"Id": "x", "Name": "A", "Type": "Movie", "CriticRating": 85.0}],
+                "TotalRecordCount": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(r.items[0].critic_rating, Some(85.0));
     }
 
     #[test]

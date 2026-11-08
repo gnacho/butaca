@@ -2779,6 +2779,10 @@ fn rating_mark(art: crate::metadata::RatingArt) -> &'static [crate::ui::widgets:
         A::PopcornUpright => CROWD_UP,
         A::PopcornSpilled => CROWD_DOWN,
         A::Imdb | A::Tmdb | A::Community => &[],
+        // The critics' percentage has no mark and no verdict: which tomato it earns is a threshold
+        // the server never sends on that field, and inventing one is what #317 refused. The
+        // pre-playback window draws it as the number it is (#368).
+        A::Critic => &[],
     }
 }
 

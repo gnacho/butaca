@@ -82,6 +82,11 @@ const HEAD_H: f32 = theme::size::CAPTION as f32;
 const GENRE_LEAD: f32 = theme::size::CAPTION as f32 * 1.3;
 const SYN_LEAD: f32 = theme::size::LABEL as f32 * 1.35;
 const CREDIT_LEAD: f32 = theme::size::CAPTION as f32 * 1.35;
+/// The scores line under the title: one band tall enough for the LABEL number the percentage is
+/// set in, which is also the band the stars are centred in.
+const RATING_ROW_H: f32 = theme::size::LABEL as f32 * 1.25;
+/// Scores → the facts under them. A tight gap: the two are one statement about the item.
+const GAP_RATINGS_FACTS: f32 = theme::space::SM;
 
 /// One option row's height — a capsule tall enough for a value and its chevrons.
 const OPT_H: f32 = 76.0;
@@ -262,6 +267,16 @@ fn credit_text(name: &str, role: &str) -> String {
     } else {
         format!("{} ({})", name.trim(), role.trim())
     }
+}
+
+/// **The audience score**, 0-10, when the item carries one — the `Community` entry of
+/// `Detail::ratings`. `None` is "the server stated no score", which draws no stars rather than
+/// five empty ones: an empty row of stars would be asserting a zero the server never sent.
+pub(crate) fn audience_score(d: &Detail) -> Option<f64> {
+    d.ratings
+        .iter()
+        .find(|r| r.art == crate::metadata::RatingArt::Community)
+        .map(|r| r.value)
 }
 
 /// **The facts**, in the order the window draws them: resolution, codecs, container, size, the
@@ -547,6 +562,54 @@ impl PrePlaybackScreen {
         hint.draw(p, r.x + PANEL_W - PAD - hint.width(measure), cy, measure);
     }
 
+    /// **The scores line**: the audience's five stars, then the critics' percentage under the
+    /// provider's own name. Returns the height it consumed INCLUDING the gap under it, and `0.0`
+    /// when the server sent neither score — the facts then move up into the space rather than
+    /// sitting under an empty band.
+    ///
+    /// The two are separate facts from separate fields (`CommunityRating` and `CriticRating`), and
+    /// **each is drawn only when the server sent it**: one number under two names is the
+    /// attribution #317 refused, and it stays refused (#368).
+    fn paint_scores(
+        &self,
+        p: Painter,
+        d: &Detail,
+        x: f32,
+        y: f32,
+        clip: Rect,
+        measure: &dyn crate::ui::machine::Measure,
+    ) -> f32 {
+        let audience = audience_score(d);
+        let critic = d.critic_rating;
+        if audience.is_none() && critic.is_none() {
+            return 0.0;
+        }
+        let cy = y + RATING_ROW_H * 0.5;
+        let mut bx = x;
+        if let Some(value) = audience {
+            // No caption: five stars ARE a score out of five, and the caption would cost the width
+            // the critics' provider name needs on this line.
+            bx += widgets::star_score(p, clip, bx, cy, value) + theme::space::LG;
+        }
+        if let Some(percent) = critic {
+            let text = crate::ui::fmt::percent(percent);
+            let cells = [widgets::RatingCell {
+                mark: &[],
+                value: &text,
+                suffix: "",
+            }];
+            widgets::rating_group(
+                p,
+                bx,
+                cy,
+                crate::metadata::RatingArt::Critic.provider(),
+                &cells,
+                measure,
+            );
+        }
+        RATING_ROW_H + GAP_RATINGS_FACTS
+    }
+
     /// The left column: the backdrop beside the title and the facts, then genres, synopsis and
     /// credits under them.
     ///
@@ -600,6 +663,7 @@ impl PrePlaybackScreen {
                 .draw(p, Rect::new(text_x, ty, text_w, TITLE_H));
         }
         ty += TITLE_H + GAP_TITLE_FACTS;
+        ty += self.paint_scores(p, d, text_x, ty, col, measure);
 
         let now_min = crate::ui::fmt::wall_minutes().unwrap_or(0);
         let facts = fact_rows(d, self.audio, now_min);
@@ -1181,6 +1245,34 @@ mod tests {
         let without = main_synopsis_lines(300.0, 96.0, false);
         assert!(with_credits <= without, "reserved credits cannot buy lines");
         assert_eq!(main_synopsis_lines(0.0, 96.0, true), 1, "the floor is one line");
+    }
+
+    /// The two scores are SEPARATE facts from separate fields, and each is drawn only when the
+    /// server sent it: the stars come from the community score, the percentage from the critics'
+    /// field, and an item with neither states neither (#368, and #317 for why one number under two
+    /// names is refused).
+    #[test]
+    fn the_scores_are_the_two_the_server_sent_and_neither_is_invented() {
+        let plain = item();
+        assert_eq!(audience_score(&plain), None);
+        assert_eq!(plain.critic_rating, None);
+
+        let scored = Detail {
+            ratings: vec![crate::metadata::Rating {
+                art: crate::metadata::RatingArt::Community,
+                value: 7.4,
+                critic: false,
+            }],
+            critic_rating: Some(85),
+            ..item()
+        };
+        assert_eq!(audience_score(&scored), Some(7.4));
+        assert_eq!(scored.critic_rating, Some(85));
+        // …and the stars the window draws are that score, at half-star precision.
+        assert_eq!(
+            crate::ui::widgets::star_fills(audience_score(&scored).unwrap()),
+            [1.0, 1.0, 1.0, 0.5, 0.0]
+        );
     }
 
     /// The cursor is seeded ONCE: a refresh landing under an open window must not move the

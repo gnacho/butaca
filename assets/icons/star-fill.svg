@@ -1,0 +1,7 @@
+<!-- The filled face of `star.svg` — the SAME ten-vertex polygon, filled. Two assets rather than a
+     stroke/fill flag because the rasterizer renders a mask and the caller tints it: an unfilled
+     star and a filled one are two different masks at one rect, exactly like the heart pair.
+
+     The half star is drawn by clipping this mark to the left half of the star's box, so no third
+     asset exists to drift out of register with these two. -->
+<svg viewBox="0 0 24 24" fill="#ffffff"><path d="M12 2.4 L14.351 8.764 L21.13 9.033 L15.804 13.236 L17.643 19.767 L12 16 L6.357 19.767 L8.196 13.236 L2.87 9.033 L9.649 8.764 Z"/></svg>
