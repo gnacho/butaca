@@ -564,10 +564,15 @@ impl JfClient {
 
     /// Home's Continue Watching: `/Items/Resume` — in-progress movies and episodes, server-sorted
     /// by last-played, which is the deck's own order.
+    ///
+    /// `IncludeItemTypes` is spelled out because newer servers roll progress up to the series and
+    /// season folders and list those as resumable too. A folder on the deck has no play target,
+    /// so the row would carry cards that cannot be resumed.
     pub(crate) fn resume(&self, limit: i64) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
             "/Users/{user_id}/Items/Resume?Limit={limit}&MediaTypes=Video\
+             &IncludeItemTypes=Movie,Episode,Video\
              &Fields={}&EnableImageTypes=Primary,Backdrop",
             Self::LISTING_FIELDS
         ))
@@ -1422,6 +1427,32 @@ mod tests {
         let views_req = &reqs[1];
         assert!(views_req.starts_with("GET /Users/u-1/Views HTTP/1.1"));
         assert!(views_req.contains("Authorization: MediaBrowser Token=\"tok-1\", "));
+    }
+
+    /// Continue Watching asks for movies and episodes by type: a newer server also reports the
+    /// series and season folders it rolled the progress up to, and neither can be resumed.
+    #[test]
+    fn resume_asks_only_for_item_types_that_can_be_resumed() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Items":[],"TotalRecordCount":0}"#),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client
+            .authenticate_by_name("demo", "")
+            .expect("auth succeeds");
+        assert!(client.resume(20).is_some(), "an empty deck is not a failure");
+
+        let reqs = server.finish();
+        let resume = &reqs[1];
+        assert!(
+            resume.starts_with("GET /Users/u-1/Items/Resume?"),
+            "{resume}"
+        );
+        assert!(
+            resume.contains("IncludeItemTypes=Movie,Episode,Video"),
+            "{resume}"
+        );
     }
 
     #[test]
