@@ -19,9 +19,7 @@ pub(crate) enum SectionId {
     Episode = 2,
     Related = 3,
     Cast = 4,
-    /// **Reserved, not drawn.** Slot 5 belonged to the About footer the owner's pass removed; the
-    /// number stays allocated so a `Spot` saved by an older build still names the same sections
-    /// (`metadata::SPOT_SECTION_SLOTS` counts slots, not screens).
+    About = 5,
     Extras = 6,
 }
 

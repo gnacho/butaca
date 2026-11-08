@@ -21,7 +21,8 @@
 //! the legacy `hero_col` correction without a second cursor). Section helpers use disjoint LOCAL
 //! slot ranges starting at [`HERO_ELEM_RANGE_END`]; `DetailScreen` projects repeated items to stable
 //! engine identities instead of exposing those positional slots as focus keys.
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
+use std::os::raw::c_int;
 
 use crate::metadata::{Detail, Episode, Extra};
 use crate::ui::label::HAlign;
@@ -40,13 +41,6 @@ pub(crate) const ELEM_MARK_WATCHED: u32 = 3;
 pub(crate) const ELEM_MARK_UNWATCHED: u32 = 4;
 pub(crate) const ELEM_TRAILER: u32 = 5;
 pub(crate) const ELEM_FAVORITE: u32 = 6;
-/// The audio-track disc: which language the film starts in, chosen before the picture.
-pub(crate) const ELEM_AUDIO: u32 = 7;
-/// The subtitle disc: the track the film starts with, or Off.
-pub(crate) const ELEM_SUBTITLES: u32 = 8;
-/// The hero synopsis' `MORE` mark. Not a disc in the action row: it sits under the prose and its
-/// own group places it there (`screens::detail::SYNOPSIS_GROUP`).
-pub(crate) const ELEM_SYNOPSIS_MORE: u32 = 9;
 
 /// The hero's one focus group. Local to this screen — nothing outside `screens::detail` ever names
 /// it — so, like `screens::profiles`'s `ROSTER_GROUP`/`FOOTER_GROUP`, any small integer would do;
@@ -64,6 +58,7 @@ pub(crate) const CD: f32 = crate::ui::widgets::StatusOverlay::CTRL_H;
 const PEOPLE_MAX_LINES: usize = 2;
 const PEOPLE_CAST: usize = 3;
 const PEOPLE_LABEL_INK: [f32; 4] = theme::TEXT_TERTIARY;
+const FACTS_SEP_PAD: f32 = theme::space::SM;
 /// The facts row now runs to the safe edge: the people band is BELOW it, not beside it, so the row
 /// no longer has a column to stop short of (issue #323).
 const FACTS_R: f32 =
@@ -110,11 +105,6 @@ pub(crate) enum HeroCtl {
     /// the heart: worn only on a backend that HAS favorites (the Jellyfin flavor) — filled when
     /// the item is one. One identity for both states, like the watched pair shares its slot.
     Favorite,
-    /// the audio-language disc (issue #4 of the owner's pass): the track the play will start in.
-    /// Shown only when the file HAS a choice to make.
-    Audio,
-    /// the subtitle disc: the track the play will start with, or Off.
-    Subtitles,
 }
 
 impl HeroCtl {
@@ -128,8 +118,6 @@ impl HeroCtl {
             HeroCtl::MarkWatched => ELEM_MARK_WATCHED,
             HeroCtl::MarkUnwatched => ELEM_MARK_UNWATCHED,
             HeroCtl::Favorite => ELEM_FAVORITE,
-            HeroCtl::Audio => ELEM_AUDIO,
-            HeroCtl::Subtitles => ELEM_SUBTITLES,
         }
     }
     /// The inverse of [`elem`](Self::elem) — `None` for any `u32` outside the six identities
@@ -144,8 +132,6 @@ impl HeroCtl {
             ELEM_MARK_WATCHED => Some(HeroCtl::MarkWatched),
             ELEM_MARK_UNWATCHED => Some(HeroCtl::MarkUnwatched),
             ELEM_FAVORITE => Some(HeroCtl::Favorite),
-            ELEM_AUDIO => Some(HeroCtl::Audio),
-            ELEM_SUBTITLES => Some(HeroCtl::Subtitles),
             _ => None,
         }
     }
@@ -167,17 +153,13 @@ pub(crate) struct HeroSet {
     /// The heart: `Some(favorited)` on a backend that has favorites, `None` where the control
     /// must not exist at all (a backend with no such flag).
     pub(crate) favorite: Option<bool>,
-    /// The file offers more than one audio track, so there is a language to choose.
-    pub(crate) audio: bool,
-    /// The file carries at least one subtitle track, so Off is a choice worth offering.
-    pub(crate) subs: bool,
 }
 
 /// The row's controls, in drawn order, for a given set. A fixed 5-slot array (Play + Restart +
 /// Trailer + Alt + one watch face is the widest the row ever gets) plus a live count, so no
 /// per-frame allocation.
-pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 8], usize) {
-    let mut v = [HeroCtl::Play; 8];
+pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 6], usize) {
+    let mut v = [HeroCtl::Play; 6];
     let mut n = 1;
     if set.restart {
         v[n] = HeroCtl::Restart;
@@ -199,14 +181,6 @@ pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 8], usize) {
     n += 1;
     if set.favorite.is_some() {
         v[n] = HeroCtl::Favorite;
-        n += 1;
-    }
-    if set.audio {
-        v[n] = HeroCtl::Audio;
-        n += 1;
-    }
-    if set.subs {
-        v[n] = HeroCtl::Subtitles;
         n += 1;
     }
     (v, n)
@@ -241,12 +215,12 @@ pub(crate) fn focusable(ctl: HeroCtl, full_trailer: bool) -> bool {
 /// presentation mode. Every call site that enumerates the row for focus/hit-testing extent must go
 /// through this rather than `hero_ctls` directly, or the two can disagree about which controls
 /// exist right now.
-pub(crate) fn visible_ctls(set: HeroSet, full_trailer: bool) -> ([HeroCtl; 8], usize) {
+pub(crate) fn visible_ctls(set: HeroSet, full_trailer: bool) -> ([HeroCtl; 6], usize) {
     let (all, n) = hero_ctls(set);
     if !full_trailer {
         return (all, n);
     }
-    let mut v = [HeroCtl::Play; 8];
+    let mut v = [HeroCtl::Play; 6];
     let mut count = 0;
     for &c in &all[..n] {
         if focusable(c, full_trailer) {
@@ -340,8 +314,7 @@ pub(crate) fn watch_names_show(d: &Detail) -> bool {
     hero_episode(d).is_some()
 }
 
-/// A disc's slot (`[restart, trailer, watch, heart, audio, subtitles]`) and the verb it unfurls
-/// to — `None` for the two PILLS.
+/// A disc's slot (`[restart, trailer, watch, heart]`) and the verb it unfurls to — `None` for the two PILLS.
 pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool, favorited: bool) -> Option<(usize, &'static CStr)> {
     match (ctl, name_show) {
         (HeroCtl::Restart, _) => Some((0, play_from_start_label())),
@@ -351,8 +324,6 @@ pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool, favorited: bool) -> Optio
         (HeroCtl::MarkUnwatched, false) => Some((2, mark_unwatched_label())),
         (HeroCtl::MarkUnwatched, true) => Some((2, mark_show_unwatched_label())),
         (HeroCtl::Favorite, _) => Some((3, if favorited { unfavorite_label() } else { favorite_label() })),
-        (HeroCtl::Audio, _) => Some((4, audio_label())),
-        (HeroCtl::Subtitles, _) => Some((5, subtitles_label())),
         _ => None,
     }
 }
@@ -360,8 +331,6 @@ pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool, favorited: bool) -> Optio
 /// The heart's two verbs, in the Jellyfin flavor's own labels.
 fn favorite_label() -> &'static CStr { crate::i18n::msg::browse_detail_favorite_c() }
 fn unfavorite_label() -> &'static CStr { crate::i18n::msg::browse_detail_unfavorite_c() }
-fn audio_label() -> &'static CStr { crate::i18n::msg::browse_detail_audio_c() }
-fn subtitles_label() -> &'static CStr { crate::i18n::msg::settings_audio_subtitles_c() }
 
 /// The Trailer disc's play fields — extra identity and HUD title, always from start.
 /// `None` when the loaded item has no playable trailer (no button, no-op activate).
@@ -418,8 +387,8 @@ pub(crate) fn alt_pill_w(measure: &dyn Measure) -> f32 {
 pub(crate) struct HeroWidths {
     pub(crate) pill: f32,
     pub(crate) alt: f32,
-    /// the discs, in [`disc_verb`]'s slot order, each already unfurled
-    pub(crate) disc: [f32; 6],
+    /// the three discs, in [`disc_verb`]'s slot order, each already unfurled
+    pub(crate) disc: [f32; 4],
 }
 
 /// The accumulation itself, PURE: the drawn frame of control `i` in `set`, given both pills'
@@ -436,8 +405,6 @@ pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -
             HeroCtl::Trailer => cw.disc[1],
             HeroCtl::MarkWatched | HeroCtl::MarkUnwatched => cw.disc[2],
             HeroCtl::Favorite => cw.disc[3],
-            HeroCtl::Audio => cw.disc[4],
-            HeroCtl::Subtitles => cw.disc[5],
         };
         if k >= i {
             break;
@@ -457,11 +424,11 @@ pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -
 pub(crate) fn disc_caps(
     measure: &dyn Measure,
     set: HeroSet,
-    unfurl: [f32; 6],
+    unfurl: [f32; 4],
     named_show: bool,
-) -> [f32; 6] {
+) -> [f32; 4] {
     let (v, n) = hero_ctls(set);
-    let mut label_w = [0.0f32; 6];
+    let mut label_w = [0.0f32; 4];
     for &c in &v[..n] {
         if let Some((slot, label)) = disc_verb(c, named_show, set.favorite.unwrap_or(false)) {
             label_w[slot] = measure.width(label, theme::size::BODY, true);
@@ -480,27 +447,25 @@ pub(super) fn disc_caps_at(
     set: HeroSet,
     pill: f32,
     alt: f32,
-    unfurl: [f32; 6],
-    label_w: [f32; 6],
-) -> [f32; 6] {
+    unfurl: [f32; 4],
+    label_w: [f32; 4],
+) -> [f32; 4] {
     let (_, n) = hero_ctls(set);
     let closed = HeroWidths {
         pill,
         alt,
-        disc: [CD; 6],
+        disc: [CD; 4],
     };
     let last = hero_btn_rect_at(set, n.saturating_sub(1), 0.0, closed);
     let budget = CircleButton::label_budget(CD, FACTS_R - (last.x + last.w));
     if label_w.iter().copied().fold(0.0f32, f32::max) > budget {
-        return [CD; 6];
+        return [CD; 4];
     }
     let open = [
         CircleButton::cap_w(CD, unfurl[0], label_w[0]),
         CircleButton::cap_w(CD, unfurl[1], label_w[1]),
         CircleButton::cap_w(CD, unfurl[2], label_w[2]),
         CircleButton::cap_w(CD, unfurl[3], label_w[3]),
-        CircleButton::cap_w(CD, unfurl[4], label_w[4]),
-        CircleButton::cap_w(CD, unfurl[5], label_w[5]),
     ];
     let last_open = hero_btn_rect_at(
         set,
@@ -513,7 +478,7 @@ pub(super) fn disc_caps_at(
         },
     );
     if last_open.x + last_open.w > FACTS_R + 0.01 {
-        return [CD; 6];
+        return [CD; 4];
     }
     open
 }
@@ -525,7 +490,7 @@ pub(crate) fn hero_widths(
     measure: &dyn Measure,
     set: HeroSet,
     has_restart: bool,
-    unfurl: [f32; 6],
+    unfurl: [f32; 4],
     named_show: bool,
 ) -> HeroWidths {
     HeroWidths {
@@ -556,17 +521,13 @@ pub(crate) fn has_people(d: &Detail) -> bool {
 pub(crate) fn draw_people(p: Painter, d: &Detail, top: f32, measure: &dyn Measure) {
     let mut y = top;
     if !d.cast.is_empty() {
-        // **No `Starring` lead.** The owner's pass removed the word from the band: a run of names
-        // under a film's own title needs no caption saying they are the cast, and the label cost
-        // the width the third name uses. The crew line KEEPS `Directed by` — that one names a
-        // role the names do not.
         let names: Vec<&str> = d
             .cast
             .iter()
             .take(PEOPLE_CAST)
             .map(|credit| credit.tag.as_str())
             .collect();
-        y += people_line(p, "", &names, y, measure);
+        y += people_line(p, crate::i18n::msg::browse_detail_starring(), &names, y, measure);
     }
     if let Some((label, names)) = hero_credit(d) {
         people_line(p, label, &names, y, measure);
@@ -584,7 +545,7 @@ pub(crate) fn people_h(d: &Detail, measure: &dyn Measure) -> f32 {
             .take(PEOPLE_CAST)
             .map(|credit| credit.tag.as_str())
             .collect();
-        h += people_line_h("", &names, measure);
+        h += people_line_h(crate::i18n::msg::browse_detail_starring(), &names, measure);
     }
     if let Some((label, names)) = hero_credit(d) {
         h += people_line_h(label, &names, measure);
@@ -602,16 +563,12 @@ fn people_join(names: &[&str]) -> String {
 
 fn people_view<'a>(joined: &'a str, label: &'a str, measure: &'a dyn Measure) -> TextView<'a> {
     use crate::ui::detail_layout::{PEOPLE_INK, PEOPLE_LEAD};
-    let view = TextView::new(joined, theme::size::CAPTION, PEOPLE_INK)
+    TextView::new(joined, theme::size::CAPTION, PEOPLE_INK)
         .with_measure(measure)
         .leading(PEOPLE_LEAD)
         .max_lines(PEOPLE_MAX_LINES)
-        .h(HAlign::Left);
-    if label.is_empty() {
-        view
-    } else {
-        view.lead_quiet(label, PEOPLE_LABEL_INK)
-    }
+        .h(HAlign::Left)
+        .lead_quiet(label, PEOPLE_LABEL_INK)
 }
 
 fn people_line_h(label: &str, names: &[&str], measure: &dyn Measure) -> f32 {
@@ -634,52 +591,227 @@ fn people_line(
     h
 }
 
-/// **The item's own date, as the identity line says it**: the year alone for a film or a show, and
-/// the aired date for an episode (where the day is the fact a viewer plans around). The owner's
-/// pass removed the month and the day from a film's line: `26/9/2012` beside `1 h 52 min` read as
-/// a record, and the only part that answers "is this the one I mean" is the year.
-pub(crate) fn hero_year(d: &Detail) -> String {
+fn hero_facts(d: &Detail) -> (String, Option<String>) {
     if let Some(ep) = hero_episode(d) {
-        return crate::ui::fmt::pretty_date(&ep.aired, 0);
+        let runtime = (ep.dur_ms >= 60_000).then(|| crate::ui::fmt::dur_long(ep.dur_ms));
+        return (crate::ui::fmt::pretty_date(&ep.aired, 0), runtime);
     }
-    if d.year > 0 {
-        return d.year.to_string();
-    }
-    String::new()
-}
-
-/// **The item's extent**, in the identity line beside the year: the runtime of a film or an
-/// episode, and the season/episode count of a show. `None` when the server stated nothing, which
-/// draws no run at all rather than a zero.
-pub(crate) fn hero_extent(d: &Detail) -> Option<String> {
-    if let Some(ep) = hero_episode(d) {
-        return (ep.dur_ms >= 60_000).then(|| crate::ui::fmt::dur_long(ep.dur_ms));
-    }
+    let date = crate::ui::fmt::pretty_date(&d.aired, d.year);
     if d.is_show {
         let seasons = d.seasons.len();
         if seasons == 0 {
-            return None;
+            return (date, None);
         }
         let episodes: i64 = d.seasons.iter().map(|season| season.leaf_count).sum();
         let seasons = crate::i18n::msg::browse_detail_seasons(seasons as i64);
-        return Some(if episodes > 0 {
+        let extent = if episodes > 0 {
             crate::i18n::msg::browse_detail_extent(&crate::i18n::msg::browse_detail_episodes(episodes), &seasons)
-        } else {
-            seasons
-        });
+        } else { seasons };
+        return (date, Some(extent));
     }
-    (d.dur_ms >= 60_000).then(|| crate::ui::fmt::dur_long(d.dur_ms))
+    (
+        date,
+        (d.dur_ms >= 60_000).then(|| crate::ui::fmt::dur_long(d.dur_ms)),
+    )
 }
 
-/// **The audience score, 0-10**, when the item carries one — the `Community` entry of
-/// [`Detail::ratings`]. It is the number the hero draws beside a star next to the age rating
-/// (the owner's pass): the provider caption `SCORE` is gone, and the mark is the universal one.
-pub(crate) fn community_score(d: &Detail) -> Option<f64> {
-    d.ratings
-        .iter()
-        .find(|r| r.art == crate::metadata::RatingArt::Community)
-        .map(|r| r.value)
-        .filter(|v| v.is_finite() && *v > 0.0)
+fn converts_on_server_c() -> &'static CStr { crate::i18n::msg::browse_detail_converts_c() }
+
+#[derive(Clone, Copy)]
+enum Bit {
+    Word(&'static CStr, [f32; 4], c_int),
+    Sep(f32),
+    Air(f32),
+}
+
+const FACTS_BITS: usize = 8;
+
+fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
+    let mut bits = [Bit::Air(0.0); FACTS_BITS];
+    let mut n = 0;
+    let Some(preview) = crate::route::playback_preview(d) else {
+        return (bits, 0);
+    };
+    let mut push = |bit: Bit| {
+        bits[n] = bit;
+        n += 1;
+    };
+    if after {
+        push(Bit::Sep(theme::space::MD));
+    }
+    // The facts row names only HOW the item will play. The old annotation chain for a missing
+    // paid feature (the soft/warn notes and their capsule) rode a `serverinfo` fact no Jellyfin
+    // server can answer, so it never drew on this codebase's only live flavor. The capsule
+    // vocabulary went with it (see `ui::widgets` history).
+    push(Bit::Word(
+        match preview {
+            crate::route::Preview::DirectPlay => crate::i18n::msg::browse_detail_direct_play_c(),
+            crate::route::Preview::Remux => crate::i18n::msg::browse_detail_direct_stream_c(),
+            crate::route::Preview::Converts => converts_on_server_c(),
+        },
+        crate::ui::detail_layout::FACTS_INK,
+        0,
+    ));
+    (bits, n)
+}
+
+fn bit_w(bit: Bit, measure: &dyn crate::ui::machine::Measure) -> f32 {
+    match bit {
+        Bit::Word(text, _, bold) => measure.width(text, theme::size::CAPTION, bold != 0),
+        Bit::Sep(gap) => 2.0 * gap + measure.width(c"\u{b7}", theme::size::CAPTION, false),
+        Bit::Air(gap) => gap,
+    }
+}
+
+fn play_mode_w(d: &Detail, after: bool, measure: &dyn crate::ui::machine::Measure) -> f32 {
+    let (bits, n) = play_mode_bits(d, after);
+    bits[..n].iter().copied().map(|b| bit_w(b, measure)).sum()
+}
+
+fn draw_play_mode(
+    p: Painter,
+    d: &Detail,
+    x: f32,
+    y: f32,
+    after: bool,
+    measure: &dyn crate::ui::machine::Measure,
+) -> f32 {
+    let (bits, n) = play_mode_bits(d, after);
+    let mut bx = x;
+    for bit in &bits[..n] {
+        match *bit {
+            Bit::Word(text, color, bold) => {
+                bx += p.text(text.as_ptr(), bx, y, theme::size::CAPTION, color, 0, bold);
+            }
+            Bit::Sep(gap) => {
+                p.text(
+                    c"\u{b7}".as_ptr(),
+                    bx + gap,
+                    y,
+                    theme::size::CAPTION,
+                    theme::TEXT_SEPARATOR,
+                    0,
+                    0,
+                );
+                bx += bit_w(*bit, measure);
+            }
+            Bit::Air(gap) => bx += gap,
+        }
+    }
+    bx - x
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct FactsFit {
+    extent: bool,
+    credit: bool,
+    elide: bool,
+}
+
+fn facts_fit(has_credit: bool, budget: f32, mut width: impl FnMut(FactsFit) -> f32) -> FactsFit {
+    let mut fit = FactsFit {
+        extent: true,
+        credit: has_credit,
+        elide: false,
+    };
+    if width(fit) <= budget {
+        return fit;
+    }
+    if fit.credit {
+        fit.credit = false;
+        if width(fit) <= budget {
+            return fit;
+        }
+    }
+    fit.extent = false;
+    fit.elide = width(fit) > budget;
+    fit
+}
+
+fn facts_flow(
+    parts: &[&str],
+    credit: &str,
+    mut run: impl FnMut(&str, f32, c_int, [f32; 4]) -> f32,
+    mode: impl FnOnce(f32, bool) -> f32,
+) -> f32 {
+    fn separator(run: &mut impl FnMut(&str, f32, c_int, [f32; 4]) -> f32, dx: f32) -> f32 {
+        2.0 * FACTS_SEP_PAD
+            + run(
+                "\u{b7}",
+                dx + FACTS_SEP_PAD,
+                theme::size::CAPTION,
+                theme::TEXT_SEPARATOR,
+            )
+    }
+    let mut dx = 0.0;
+    let mut any = false;
+    for part in parts.iter().filter(|part| !part.is_empty()) {
+        if any {
+            dx += separator(&mut run, dx);
+        }
+        dx += run(part, dx, theme::size::CAPTION, crate::ui::detail_layout::FACTS_INK);
+        any = true;
+    }
+    let mode_w = mode(dx, any);
+    dx += mode_w;
+    any |= mode_w > 0.0;
+    if !credit.is_empty() {
+        if any {
+            dx += separator(&mut run, dx);
+        }
+        dx += run(credit, dx, theme::size::CAPTION, crate::ui::detail_layout::FACTS_INK);
+    }
+    dx
+}
+
+pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui::machine::Measure) {
+    let (date, extent) = hero_facts(d);
+    let extent = extent.as_deref().unwrap_or("");
+    let credit = crate::ui::fmt::shared_by(&d.source()).unwrap_or_default();
+    let width = |fit: FactsFit| {
+        facts_flow(
+            &[date.as_str(), if fit.extent { extent } else { "" }],
+            if fit.credit { &credit } else { "" },
+            |text, _, size, _| measure.width_str(text, size, false),
+            |_, after| play_mode_w(d, after, measure),
+        )
+    };
+    let fit = facts_fit(
+        !credit.is_empty(),
+        FACTS_R - crate::ui::detail_layout::HERO_TEXT_X,
+        width,
+    );
+    let elided;
+    let date = if fit.elide {
+        let budget = (FACTS_R - crate::ui::detail_layout::HERO_TEXT_X - play_mode_w(d, true, measure)).max(0.0);
+        elided = crate::text::elide_by(&date, budget, false, |t| {
+            measure.width_str(t, theme::size::CAPTION, false)
+        });
+        elided.as_str()
+    } else {
+        date.as_str()
+    };
+    facts_flow(
+        &[date, if fit.extent { extent } else { "" }],
+        if fit.credit { &credit } else { "" },
+        |text, dx, size, color| {
+            CString::new(text)
+                .ok()
+                .map(|text| {
+                    p.text(
+                        text.as_ptr(),
+                        crate::ui::detail_layout::HERO_TEXT_X + dx,
+                        y,
+                        size,
+                        color,
+                        0,
+                        0,
+                    )
+                })
+                .unwrap_or(0.0)
+        },
+        |dx, after| draw_play_mode(p, d, crate::ui::detail_layout::HERO_TEXT_X + dx, y, after, measure),
+    );
 }
 
 #[cfg(test)]
@@ -710,8 +842,6 @@ mod tests {
             alt,
             mark,
             favorite: None,
-            audio: false,
-            subs: false,
         }
     }
 
@@ -904,7 +1034,7 @@ mod tests {
         let cw = HeroWidths {
             pill: 200.0,
             alt: 260.0,
-            disc: [CD, CD, CD, CD, CD, CD],
+            disc: [CD, CD, CD, CD],
         };
         for restart in [false, true] {
             for alt in [false, true] {
@@ -953,6 +1083,97 @@ mod tests {
     }
 
     #[test]
+    fn the_two_spellings_of_the_conversion_notice_are_the_same_bytes() {
+        assert_eq!(
+            converts_on_server_c().to_str().unwrap(),
+            crate::ui::fmt::converts_on_server()
+        );
+    }
+
+    #[test]
+    fn an_item_on_your_own_server_gets_no_source_run_at_all() {
+        #[derive(Debug, PartialEq)]
+        enum Event {
+            Run(String),
+            Mode,
+        }
+        let events = std::cell::RefCell::new(Vec::new());
+        facts_flow(
+            &["13 Jun 2024", "1 hr 57 min"],
+            "",
+            |text, _, _, _| {
+                events.borrow_mut().push(Event::Run(text.into()));
+                text.len() as f32
+            },
+            |_, _| {
+                events.borrow_mut().push(Event::Mode);
+                5.0
+            },
+        );
+        assert_eq!(events.into_inner().last(), Some(&Event::Mode));
+    }
+
+    #[test]
+    fn the_source_credit_is_the_last_run_on_the_line_after_the_play_mode_fragment() {
+        let events = std::cell::RefCell::new(Vec::new());
+        facts_flow(
+            &["date", "extent"],
+            "Shared by friend",
+            |text, _, _, _| {
+                events.borrow_mut().push(text.to_string());
+                text.len() as f32
+            },
+            |_, _| {
+                events.borrow_mut().push("<mode>".into());
+                5.0
+            },
+        );
+        assert_eq!(
+            events.into_inner().last().map(String::as_str),
+            Some("Shared by friend")
+        );
+    }
+
+    #[test]
+    fn a_credit_with_nothing_in_front_of_it_opens_the_line_bare() {
+        let placed = std::cell::RefCell::new(Vec::new());
+        facts_flow(
+            &["", ""],
+            "Shared by friend",
+            |text, x, _, _| {
+                placed.borrow_mut().push((text.to_string(), x));
+                text.len() as f32
+            },
+            |_, _| 0.0,
+        );
+        assert_eq!(placed.into_inner(), vec![("Shared by friend".into(), 0.0)]);
+    }
+
+    #[test]
+    fn the_trailing_credit_is_the_first_member_the_row_gives_up() {
+        let width = |fit: FactsFit| {
+            100.0 + if fit.extent { 100.0 } else { 0.0 } + if fit.credit { 150.0 } else { 0.0 }
+        };
+        assert_eq!(
+            facts_fit(true, 349.0, width),
+            FactsFit {
+                extent: true,
+                credit: false,
+                elide: false
+            }
+        );
+        assert_eq!(
+            facts_fit(true, 199.0, width),
+            FactsFit {
+                extent: false,
+                credit: false,
+                elide: false
+            }
+        );
+        assert!(facts_fit(true, 99.0, width).elide);
+    }
+
+    #[test]
     fn the_crew_credit_names_the_right_job_for_the_kind_of_item() {
         fn credit(name: &str, role: &str) -> crate::metadata::Cast {
             crate::metadata::Cast {
@@ -990,8 +1211,6 @@ mod tests {
             alt: false,
             mark: PosterMark::Watched,
         favorite: None,
-        audio: false,
-        subs: false,
     };
         let (controls, n) = hero_ctls(set);
         assert_eq!(
@@ -1008,8 +1227,6 @@ mod tests {
             alt: false,
             mark: PosterMark::None,
         favorite: None,
-        audio: false,
-        subs: false,
     };
         let with = HeroSet {
             alt: true,
@@ -1029,8 +1246,6 @@ mod tests {
                     alt,
                     mark: PosterMark::InProgress,
         favorite: None,
-        audio: false,
-        subs: false,
     };
                 let (controls, n) = hero_ctls(set);
                 assert!(controls[..n].iter().all(|ctl| matches!(
@@ -1152,8 +1367,6 @@ mod tests {
             alt: false,
             mark: PosterMark::None,
         favorite: None,
-        audio: false,
-        subs: false,
     };
         let wide = HeroSet {
             restart: true,
@@ -1161,8 +1374,6 @@ mod tests {
             alt: true,
             mark: PosterMark::None,
         favorite: None,
-        audio: false,
-        subs: false,
     };
         assert_eq!(ctl_at(compact, 1), Some(HeroCtl::MarkWatched));
         assert_eq!(ctl_at(wide, 1), Some(HeroCtl::Restart));
@@ -1177,13 +1388,11 @@ mod tests {
             alt: true,
             mark: PosterMark::None,
         favorite: None,
-        audio: false,
-        subs: false,
     };
         let widths = HeroWidths {
             pill: 210.0,
             alt: 300.0,
-            disc: [90.0, 120.0, 120.0, 120.0, CD, CD],
+            disc: [90.0, 120.0, 120.0, 120.0],
         };
         let (controls, n) = hero_ctls(set);
         for i in 1..n {
@@ -1212,17 +1421,17 @@ mod tests {
                         let set = set_full(restart, alt, mark, trailer);
                         let (_, n) = hero_ctls(set);
                         for labels in [
-                            [10.0, 12.0, 12.0, 0.0, 0.0, 0.0],
-                            [201.0, 80.0, 316.0, 0.0, 0.0, 0.0],
-                            [400.0, 400.0, 400.0, 0.0, 0.0, 0.0],
-                            [900.0, 40.0, 40.0, 0.0, 0.0, 0.0],
+                            [10.0, 12.0, 12.0, 0.0],
+                            [201.0, 80.0, 316.0, 0.0],
+                            [400.0, 400.0, 400.0, 0.0],
+                            [900.0, 40.0, 40.0, 0.0],
                         ] {
                             for e in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
                                 for unfurl in [
-                                    [e, 0.0, 1.0 - e, 0.0, 0.0, 0.0],
-                                    [1.0 - e, 0.0, e, 0.0, 0.0, 0.0],
-                                    [e, e, 0.0, 0.0, 0.0, 0.0],
-                                    [0.0, e, e, 0.0, 0.0, 0.0],
+                                    [e, 0.0, 1.0 - e, 0.0],
+                                    [1.0 - e, 0.0, e, 0.0],
+                                    [e, e, 0.0, 0.0],
+                                    [0.0, e, e, 0.0],
                                 ] {
                                     let disc = disc_caps_at(set, PW + 62.0, 340.0, unfurl, labels);
                                     let last = hero_btn_rect_at(
@@ -1256,10 +1465,8 @@ mod tests {
             alt: true,
             mark: PosterMark::Watched,
         favorite: None,
-        audio: false,
-        subs: false,
     };
-        let caps = disc_caps(&measure, wide, [1.0; 6], true);
+        let caps = disc_caps(&measure, wide, [1.0; 4], true);
         let (_, n) = hero_ctls(wide);
         let last = hero_btn_rect_at(
             wide,
@@ -1282,10 +1489,8 @@ mod tests {
             alt: false,
             mark: PosterMark::Watched,
         favorite: None,
-        audio: false,
-        subs: false,
     };
-        let caps = disc_caps(&measure, roomy, [1.0; 6], false);
+        let caps = disc_caps(&measure, roomy, [1.0; 4], false);
         assert!(caps[1] > CD, "Trailer unfurls when the row has room");
         assert!(caps[2] > CD, "Watch unfurls when the row has room");
     }
@@ -1311,10 +1516,8 @@ mod tests {
             alt: true,
             mark: PosterMark::Watched,
         favorite: None,
-        audio: false,
-        subs: false,
     };
-        assert_eq!(disc_caps(&HugeMeasure, set, [1.0; 6], true), [CD; 6]);
+        assert_eq!(disc_caps(&HugeMeasure, set, [1.0; 4], true), [CD; 4]);
     }
 
     #[test]
@@ -1353,8 +1556,6 @@ mod tests {
             alt: true,
             mark: PosterMark::InProgress,
         favorite: None,
-        audio: false,
-        subs: false,
     };
         let (_, n) = hero_ctls(set);
         let last = hero_btn_rect_at(
@@ -1364,7 +1565,7 @@ mod tests {
             HeroWidths {
                 pill: PW + 62.0,
                 alt: 340.0,
-                disc: [CD; 6],
+                disc: [CD; 4],
             },
         );
         assert!(last.x + last.w < FACTS_R);

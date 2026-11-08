@@ -14,7 +14,7 @@
 //! `Movie`, `Series`, `BoxSet`, `MusicAlbum`, `MusicArtist`, `MusicVideo`, `Person`, `Trailer` and
 //! `Book`, and **not** for `Episode`, which is the other leaf the pre-playback window can stand on.
 //! An episode's match belongs to its series, i.e. to a different item than the one the window is
-//! about, so the item menu offers no Identify there (see `screens::item_menu`).
+//! about, so the window's menu offers no Identify there (see `screens::preplay_menu`).
 //!
 //! This module is the WORKER's half: it holds no state. The loaded item, the candidates and the
 //! phase live in `crate::metadata`'s Identify store, which is what a screen reads.

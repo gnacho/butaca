@@ -83,17 +83,14 @@ impl<'a> MetadataView<'a> {
         alt_available(self.state, sid, rk)
     }
     /// The Identify surface's data for the loaded item (#369).
-    #[allow(dead_code)] // Its surface (the pre-playback menu and the window behind it) was removed; the data layer waits for one.
     pub(crate) fn identify(&self) -> &'a IdentifyState {
         &self.state.identify
     }
     /// The *Edit images* surface's data for the loaded item (#369).
-    #[allow(dead_code)] // Its surface (the pre-playback menu and the window behind it) was removed; the data layer waits for one.
     pub(crate) fn images(&self) -> &'a ImagesState {
         &self.state.images
     }
     /// The loaded item's local intros (#370), the pre-playback window's optional row.
-    #[allow(dead_code)] // Its surface (the pre-playback menu and the window behind it) was removed; the data layer waits for one.
     pub(crate) fn intros(&self) -> &'a IntrosState {
         &self.state.intros
     }
@@ -1425,7 +1422,6 @@ impl Detail {
     /// `sibling` gate forbids a screen naming another screen, and the predicate used to be the
     /// panel's `is_available()`, a module function reading `metadata::current()` unfiltered, which
     /// Detail's seven layout reads asked before the page's own item had landed.
-    #[allow(dead_code)] // The About footer's Languages column and the pre-playback window were its readers; both are gone.
     pub(crate) fn has_own_file(&self) -> bool {
         !self.part.is_empty()
     }
@@ -1476,7 +1472,6 @@ impl Detail {
     /// absence of a handle rather than doing nothing. It stamps one handle onto every item this
     /// session loads, which is what a fully-borrowed library looks like. Read ONCE (see
     /// [`dev_source`]) — the trigger surface is boot state, and this is reached from a draw.
-    #[allow(dead_code)] // The hero's facts row (`Shared by`) was its reader; the owner's pass removed the row.
     pub(crate) fn source(&self) -> String {
         // The roster credit (`facts(sid)`'s handle) went with the describers (#166): a
         // single-source library is this account's own, so the answer is the dev stand-in or
@@ -1796,7 +1791,6 @@ pub(crate) fn trailer_now_playing(
 /// Compiled out with the `devtriggers` feature, like every other trigger, so a release build folds
 /// this to `None` and the whole call to the registry read below it.
 #[cfg(not(test))]
-#[allow(dead_code)] // Only `Detail::source` reads it, and that has no caller left.
 fn dev_source() -> Option<&'static str> {
     if crate::app::bootstrap::stores::active() { return None; }
     // Function-local, not process-wide mutable state: one dev-trigger stat per process, kept off
@@ -1810,7 +1804,6 @@ fn dev_source() -> Option<&'static str> {
 /// `butaca-shared` would outrank the registry and make every credit assertion here read the
 /// trigger's handle instead. [`alt_dev_stand_in`] states the same rule the same way.
 #[cfg(test)]
-#[allow(dead_code)] // Only `Detail::source` reads it, and that has no caller left.
 fn dev_source() -> Option<&'static str> {
     None
 }
@@ -3542,7 +3535,6 @@ pub(crate) struct IdentifyState {
     hits: Vec<IdentifyHit>,
 }
 
-#[allow(dead_code)] // Its surface (the pre-playback menu) was removed; the data layer waits for one.
 impl IdentifyState {
     /// The item these candidates belong to, when there is one.
     pub(crate) fn key(&self) -> Option<(crate::registry::ServerId, String)> {
@@ -3782,7 +3774,6 @@ pub(crate) struct ImagesState {
     total: i32,
 }
 
-#[allow(dead_code)] // Its surface (the pre-playback menu) was removed; the data layer waits for one.
 impl ImagesState {
     pub(crate) fn key(&self) -> Option<(crate::registry::ServerId, String)> {
         self.key.clone()
@@ -3978,7 +3969,6 @@ pub(crate) struct IntrosState {
     items: Vec<Intro>,
 }
 
-#[allow(dead_code)] // Its surface (the pre-playback window) was removed; the data layer waits for one.
 impl IntrosState {
     /// Does this answer describe `(sid, rk)`? [`IdentifyState::is_about`]'s rule.
     pub(crate) fn is_about(&self, sid: crate::registry::ServerId, rk: &str) -> bool {
@@ -4145,4 +4135,12 @@ mod test_support;
 #[cfg(test)]
 #[path = "metadata_season_mailbox_tests.rs"]
 mod season_mailbox_tests;
+
+#[cfg(test)]
+#[path = "metadata_identify_tests.rs"]
+mod identify_tests;
+
+#[cfg(test)]
+#[path = "metadata_images_tests.rs"]
+mod images_tests;
 

@@ -612,10 +612,9 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
         } else {
             // `/tmp/butaca-tracks=<n>` presents the page's own *Track information* sheet at
             // page `n` — the only caller that opens it anywhere but page 1, and the only way a
-            // headless capture reaches page 2 at all. It goes through the same door a press does
-            // (`bridge::open_content_panel`). Availability is the PAGE's answer about the page's
-            // own item: the sheet describes a file, so a page holding a show or a folder has
-            // nothing to describe.
+            // headless capture reaches page 2 at all. It goes through the same door the Languages
+            // press does (`bridge::open_content_panel`), so the trigger cannot present a panel the
+            // page would refuse: availability is the PAGE's answer about the page's own item.
             if let Some(pg) = app.boot_initial.is_none().then(|| crate::dev::read("tracks")).flatten() {
                 let host = app.pages.top_page();
                 let meta = app.bridge.metadata_view();
@@ -626,8 +625,7 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
                     .and_then(|e| e.inst.as_ref())
                     .and_then(|i| i.screen.as_any())
                     .and_then(|a| a.downcast_ref::<crate::screens::detail::DetailScreen>())
-                    .is_some_and(|_| true);
-                let _ = meta;
+                    .is_some_and(|d| d.tracks_available(meta));
                 if let (Some(host), true) = (host, available) {
                     let (sid, rk) = (boot.sid, boot.rk.clone());
                     bridge::open_content_panel(
@@ -658,6 +656,32 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
                         host,
                         Some((sid, &rk)),
                         crate::screens::registry::ContentPanel::About,
+                    );
+                }
+            }
+            // `/tmp/butaca-preplay` presents the item page's PRE-PLAYBACK WINDOW (issue #367) —
+            // the surface a press on Play opens instead of the film. It is the same door that
+            // press uses (`bridge::open_content_panel` over `ContentPanel::PrePlayback`), so a
+            // headless capture cannot present a window the page would refuse, and it exists for
+            // the reason `butaca-about` does: the window opens from the page's primary action, and
+            // a `down`/`right` script that reached it on one item would miss it on the next.
+            if app.boot_initial.is_none() && crate::dev::flag("preplay") {
+                let meta = app.bridge.metadata_view();
+                let available = app
+                    .pages
+                    .nav
+                    .top_page()
+                    .and_then(|e| e.inst.as_ref())
+                    .and_then(|i| i.screen.as_any())
+                    .and_then(|a| a.downcast_ref::<crate::screens::detail::DetailScreen>())
+                    .is_some_and(|d| d.preplay_available(meta));
+                if let (Some(host), true) = (app.pages.top_page(), available) {
+                    let (sid, rk) = (boot.sid, boot.rk.clone());
+                    bridge::open_content_panel(
+                        &mut app.pages,
+                        host,
+                        Some((sid, &rk)),
+                        crate::screens::registry::ContentPanel::PrePlayback { restart: false },
                     );
                 }
             }

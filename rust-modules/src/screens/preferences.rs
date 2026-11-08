@@ -47,7 +47,7 @@ enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(
     SubtitleSize(u8), SubtitlePosition(u8), SubtitleBackground(u8),
     Markers(crate::server::session::MarkerPolicy) }
 #[derive(Clone)]
-enum Action { Open(Field), Pick(Value), ToggleRecentlyAdded, ToggleIdleScreen }
+enum Action { Open(Field), Pick(Value), ToggleRecentlyAdded }
 struct State {
     kind: Kind, picker: Option<Field>, selected: i32, busy: bool, status: String,
     quality: Quality, direct_play: DirectPlayMode, values: Vec<String>,
@@ -89,9 +89,6 @@ pub(crate) struct PreferencesPage {
     /// outside [`State`] on purpose: this page's logical state is a recorded shape, and the
     /// setting is an install-wide preference with a process copy of its own.
     pending_recent: Option<(bool, crate::storage_worker::TypedTicket<bool>)>,
-    /// The "Screensaver" switch's optimistic value until its write lands, `pending_recent`'s twin
-    /// and outside [`State`] for the same reason: the page's logical state is a recorded shape.
-    pending_idle: Option<(bool, crate::storage_worker::TypedTicket<bool>)>,
     alert: DecisionPrompt,
 }
 impl PreferencesPage {
@@ -103,7 +100,6 @@ impl PreferencesPage {
                 values: Vec::new(), confirming: false, affirmative: false, alert_scroll: 0 },
             parent_row: 0, copy: String::new(), pending: None,
             pending_recent: None,
-            pending_idle: None,
             alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, crate::i18n::msg::settings_cancel_c(), crate::i18n::msg::settings_playback_enable_force_c()) };
         s.rebuild(0);
         s
@@ -140,7 +136,7 @@ impl PreferencesPage {
             Some(field) => (self.kind_title(), field.title(), &self.picker_table),
             None => (crate::i18n::msg::settings_title(), self.kind_title(), &self.table),
         };
-        TableScreen::new(Header::new(RouteLayout::screen(), Some(crumb), title, &self.copy).with_back_disc(),
+        TableScreen::new(Header::new(RouteLayout::screen(), Some(crumb), title, &self.copy),
             table, GroupId(0), self.entry).with_home()
     }
     /// Draw one level through `p` and hand back the focus stops it registered.
@@ -319,27 +315,6 @@ impl PreferencesPage {
             .into(),
         );
         list_actions.push(Action::ToggleRecentlyAdded);
-        // **The idle screen, off by default.** Appended AFTER the Recently Added switch so no
-        // recorded stop moves: the controlled replay presses this page by position.
-        let idle = self
-            .pending_idle
-            .as_ref()
-            .map_or_else(crate::route::idle_screen, |(on, _)| *on);
-        section = section.row(
-            Row::new(crate::i18n::msg::settings_playback_idle_screen())
-                .detail(crate::i18n::msg::settings_playback_idle_screen_detail())
-                .toggle(idle)
-                .dim(self.state.busy),
-        );
-        list_values.push(
-            if idle {
-                crate::i18n::msg::widgets_toggle_on()
-            } else {
-                crate::i18n::msg::widgets_toggle_off()
-            }
-            .into(),
-        );
-        list_actions.push(Action::ToggleIdleScreen);
         let list_sel = if self.state.picker.is_some() { self.parent_row } else { selected };
         for table in [&mut self.table, &mut self.picker_table] {
             table.compact = false; table.header_ink = theme::TEXT_READING; table.list_focused = true;
@@ -394,20 +369,6 @@ impl PreferencesPage {
                     (current.show_recently_added() != on).then(|| current.with_show_recently_added(on))
                 }) {
                     self.pending_recent = Some((on, ticket));
-                    self.state.busy = true;
-                }
-                self.rebuild(self.active().sel);
-            }
-            Action::ToggleIdleScreen => {
-                let current = self
-                    .pending_idle
-                    .as_ref()
-                    .map_or_else(crate::route::idle_screen, |(on, _)| *on);
-                let on = !current;
-                if let Ok(ticket) = crate::server::session::queue_update_ticket(move |current| {
-                    (current.idle_screen() != on).then(|| current.with_idle_screen(on))
-                }) {
-                    self.pending_idle = Some((on, ticket));
                     self.state.busy = true;
                 }
                 self.rebuild(self.active().sel);
@@ -507,24 +468,6 @@ impl Machine<InnerHost> for PreferencesPage {
                         crate::route::restore_show_recently_added(snapshot.show_recently_added());
                     }
                     self.pending_recent = None;
-                    self.state.busy = false;
-                    if !saved {
-                        self.state.status = crate::i18n::msg::settings_playback_save_failed().into();
-                    }
-                    recent_landed = true;
-                }
-                let idle_receipt = self.pending_idle.as_ref().and_then(|(_, ticket)| {
-                    match ticket.try_recv() {
-                        Ok(saved) => Some(saved),
-                        Err(mpsc::TryRecvError::Disconnected) => Some(false),
-                        Err(mpsc::TryRecvError::Empty) => None,
-                    }
-                });
-                if let Some(saved) = idle_receipt {
-                    if let Some(snapshot) = crate::server::session::peek_settled() {
-                        crate::route::restore_idle_screen(snapshot.idle_screen());
-                    }
-                    self.pending_idle = None;
                     self.state.busy = false;
                     if !saved {
                         self.state.status = crate::i18n::msg::settings_playback_save_failed().into();
@@ -756,13 +699,9 @@ mod tests {
         let _session = crate::server::session::TempSession::new("prefs-recently-added");
         crate::route::restore_show_recently_added(false);
         let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
-        // #322 split the rows into groups, and the screensaver switch now follows this one, so
-        // the row is found by what it IS rather than by being last.
-        let last = page
-            .actions
-            .iter()
-            .position(|action| matches!(action, Action::ToggleRecentlyAdded))
-            .expect("the recently-added switch is an action") as i32;
+        // #322 split the rows into groups, so the switch is the last ACTION, not the last row of
+        // the first section.
+        let last = page.actions.len() as i32 - 1;
         let row = page.table.sections.iter().flat_map(|s| s.rows.iter()).find(|r| r.label == crate::i18n::msg::settings_library_recently_added()).expect("the switch is in the table");
         assert_eq!(row.label, crate::i18n::msg::settings_library_recently_added());
         assert_eq!(row.toggle, Some(false), "off by default");

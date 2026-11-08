@@ -134,8 +134,6 @@
   "settings.preferences.section": "Preferencias",
   "settings.library.recently_added": "Mostrar añadidos recientemente",
   "settings.library.recently_added.detail": "Encabeza Películas y Series con lo nuevo.",
-  "settings.playback.idle_screen": "Salvapantallas",
-  "settings.playback.idle_screen.detail": "Atenúa la pantalla con un reloj cuando no hay nada en reproducción.",
   "settings.playback.title": "Vídeo y reproducción",
   "settings.playback.detail": "Calidad predeterminada y reproducción directa.",
   "settings.audio.title": "Audio y subtítulos",

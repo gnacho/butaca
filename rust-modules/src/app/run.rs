@@ -359,7 +359,7 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // very frame it moves on, and the close can leave the loop cleanly. Active playback
     // (`fr.player` + presenting + not paused) is never idle; a paused frame and a menu get
     // the owner's 3-minute and 2-minute thresholds respectively.
-    if crate::route::idle_screen() {
+    {
         let paused = crate::app::lifecycle::paused();
         let playing = fr.player && !paused && crate::player::is_playing(&app.player.session);
         match crate::ui::idle_screen::stage(fr.now, app.last_input, playing, paused) {
@@ -378,11 +378,6 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
                 app.idle_pos = None;
             }
         }
-    } else if app.idle_pos.is_some() {
-        // The switch was turned off from Settings while the clock was up: drop it now rather
-        // than waiting for an input that is what the idle screen exists to avoid.
-        app.idle_pos = None;
-        crate::ui::idle::invalidate();
     }
     // ---- whole-frame present gate (`ui::idle`) --------------------------------------
     // A screen with nothing moving on it does not need to be re-sent to the panel. This
@@ -2113,20 +2108,6 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                 app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
             });
             fr.underlay_moving |= moving;
-        } else if !super::bridge::host_frozen(&app.pages)
-            && crate::ui::screen::ScreenArg::chrome(&app.route()) == crate::ui::machine::Chrome::TabBar
-        {
-            // **Every other page that wears the shared bar** — today the favourites collection,
-            // which is a `Content(Collection)` page rather than a tab of its own. Without an arm
-            // here the strip's capsule, scroll and chip springs freeze at whatever the page the
-            // viewer left had them at: the selection capsule then rests mid-travel on the pill
-            // BEFORE the pressed one, which is exactly the "Favoritos leaves Series shaded"
-            // defect. One predicate (`ScreenArg::chrome`) rather than a fourth route name, so a
-            // page that starts wearing the bar cannot be forgotten the same way.
-            let (_, moving) = crate::ui::idle::scoped_motion(|| {
-                app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
-            });
-            fr.underlay_moving |= moving;
         }
         // dev: /tmp/butaca-searchosc — `crate::dev::scenarios::search_osc_tick`.
         crate::dev::scenarios::search_osc_tick(app, fr.now);
@@ -2639,7 +2620,10 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 | AppArg::AboutPanel
                 | AppArg::PersonBio
                 | AppArg::CollectionAbout
-                | AppArg::TrackPick(_) => crate::focusprobe::Screen::Home,
+                | AppArg::PrePlayback(_)
+                | AppArg::PrePlaybackMenu(_)
+                | AppArg::Identify(_)
+                | AppArg::Images(_) => crate::focusprobe::Screen::Home,
         };
         // The probe reads the OWNER, and answers the resting cursor when no player is mounted —
         // which is what every non-player screen used to read off `App`'s second copy.

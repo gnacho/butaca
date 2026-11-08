@@ -52,13 +52,6 @@ pub struct Header<'a> {
     pub title: &'a str,
     pub copy: &'a str,
     pub copy_size: std::os::raw::c_int,
-    /// **Wear the shared Back disc instead of the `‹ where BACK goes` crumb.** The disc is the
-    /// control the detail page, a collection, a person and the player already draw
-    /// (`widgets::back_control_frame`), and the owner asked Settings to stop being the one menu
-    /// family that answers BACK with a line of text. A disc carries no destination name, so the
-    /// header drops the crumb band and its title rises by exactly that band (see
-    /// [`RouteLayout::narrative_top`]) — the trade the crumb made in reverse.
-    pub back_disc: bool,
 }
 
 impl<'a> Header<'a> {
@@ -69,15 +62,7 @@ impl<'a> Header<'a> {
             title,
             copy,
             copy_size: theme::size::LABEL,
-            back_disc: false,
         }
-    }
-
-    /// Draw [`crate::ui::widgets::draw_back_control`] instead of the crumb line. The crumb TEXT is
-    /// ignored from here on; the page still answers BACK the same way it always did.
-    pub fn with_back_disc(mut self) -> Self {
-        self.back_disc = true;
-        self
     }
 
     pub fn with_copy_size(mut self, sz: std::os::raw::c_int) -> Self {
@@ -87,20 +72,12 @@ impl<'a> Header<'a> {
 
     /// The one drawing routine, for both loops. `focused` lights the crumb when the D-pad is on it.
     pub fn paint(&self, p: Painter, measure: &dyn Measure, focused: bool) {
-        if self.back_disc {
-            crate::ui::widgets::draw_back_control(p, focused);
-            self.layout.draw_narrative(p, None, self.title, self.copy, self.copy_size, measure, false);
-            return;
-        }
         self.layout.draw_narrative(p, self.crumb, self.title, self.copy, self.copy_size, measure, focused);
     }
 
     /// The crumb's box - what the pointer clicks and what the keyboard lands on - or `None` when
     /// this header draws no crumb. One expression for the drawn mark and its two targets.
     pub fn crumb_rect(&self, measure: &dyn Measure) -> Option<Rect> {
-        if self.back_disc {
-            return Some(crate::ui::widgets::back_control_frame());
-        }
         self.crumb.map(|back| self.layout.crumb_rect(back, measure))
     }
 
@@ -611,7 +588,8 @@ where
         // clickable box is the drawn one.
         let p = f.painter;
         let entry = self.table.entry;
-        if let Some(rect) = self.header.crumb_rect(f.measure) {
+        if let Some(back) = self.header.crumb {
+            let rect = self.header.layout.crumb_rect(back, f.measure);
             f.stop(
                 p,
                 Stop {
@@ -868,7 +846,8 @@ where
         // Same two targets as `TableScreen`, for the same reason (see there).
         let p = f.painter;
         let entry = self.doc.entry;
-        if let Some(rect) = self.header.crumb_rect(f.measure) {
+        if let Some(back) = self.header.crumb {
+            let rect = self.header.layout.crumb_rect(back, f.measure);
             f.stop(
                 p,
                 Stop {

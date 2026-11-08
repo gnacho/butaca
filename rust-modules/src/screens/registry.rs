@@ -885,10 +885,6 @@ pub(crate) enum ContentReq {
     /// all.
     PreviewSeek(i64),
     ItemMenu,
-    /// **The hero's track picker committed a row** — the stream ids the page keeps for its next
-    /// Play. The menu only REPORTS: the page owns the choice, so this is a message to it rather
-    /// than a write the surface performs.
-    Tracks { audio_sid: Option<i64>, sub_sid: Option<i64> },
     /// **Present one of the Detail page's own panels** on the container tree (spec §6.2's
     /// "page-owned panels"). The page names WHICH and supplies whatever the panel needs to place
     /// itself; the loop knows the style and the page's identity, so neither is on this request.
@@ -923,11 +919,23 @@ pub(crate) enum ContentPanel {
     /// About sheet (`screens::about_panel`) reading the collection store's current collection; it
     /// carries nothing, for `Bio`'s reason.
     CollectionAbout,
-    /// **The hero's track picker** (the owner's pass, `screens::track_pick`): the menu an audio or
-    /// subtitle disc opens. `audio` names the list, `chosen` is the stream id the page would play
-    /// today, and `anchor` is the disc's drawn rectangle, bit-preserving like every other anchored
-    /// menu's.
-    TrackPick { audio: bool, chosen: i64, anchor: [u32; 4] },
+    /// **The pre-playback window** (issue #367, `screens::preplay_panel`): what a press on Play
+    /// opens instead of the film — the item's own facts, its cast and crew, and the audio and
+    /// subtitle the playback will start with. `restart` says which of the two actions was pressed
+    /// (Play from Start drops the resume point; Play keeps it), so the window's primary action
+    /// means the same thing the button under the poster meant.
+    PrePlayback { restart: bool },
+    /// **The pre-playback window's three-dot menu** (issue #369, `screens::preplay_menu`): the
+    /// item's own actions behind the control at the head of its options column. `anchor` is that
+    /// control's drawn rectangle, bit-preserving like every other anchored menu's.
+    PrePlaybackMenu { anchor: [u32; 4] },
+    /// **The metadata providers' candidates for the loaded item** (issue #369,
+    /// `screens::identify`), anchored where the menu that opened it was. It carries nothing else:
+    /// the subject is `metadata::current()`, exactly as the Track-information sheet's is.
+    Identify { anchor: [u32; 4] },
+    /// **The pictures the providers already hold for the loaded item** (issue #369,
+    /// `screens::images`), anchored where the menu that opened it was, for `Identify`'s reasons.
+    Images { anchor: [u32; 4] },
 }
 
 impl ContentPanel {
@@ -971,9 +979,26 @@ impl ContentPanel {
             Self::About => (Style::Alert, AppArg::AboutPanel),
             Self::Bio => (Style::Alert, AppArg::PersonBio),
             Self::CollectionAbout => (Style::Alert, AppArg::CollectionAbout),
-            Self::TrackPick { audio, chosen, anchor } => (
+            Self::PrePlayback { restart } => (
+                Style::Alert,
+                AppArg::PrePlayback(crate::screens::preplay_panel::PrePlaybackArg { restart }),
+            ),
+            // The window's own menu and its Identify list are Compact surfaces, not sheets: they
+            // hang off a control inside the window and never replace it (§ "menus are popovers").
+            Self::PrePlaybackMenu { anchor } => (
                 Style::Compact,
-                AppArg::TrackPick(crate::screens::track_pick::TrackPickArg { audio, chosen, anchor }),
+                AppArg::PrePlaybackMenu(crate::screens::preplay_menu::PrePlaybackMenuArg {
+                    host,
+                    anchor,
+                }),
+            ),
+            Self::Identify { anchor } => (
+                Style::Compact,
+                AppArg::Identify(crate::screens::identify::IdentifyArg { anchor }),
+            ),
+            Self::Images { anchor } => (
+                Style::Compact,
+                AppArg::Images(crate::screens::images::ImagesArg { anchor }),
             ),
         })
     }
@@ -1096,10 +1121,6 @@ pub(crate) enum AppMsg {
     /// the destination and the PAGE navigates, which is `LibraryMenu`'s shape (`LibrarySelect`) and
     /// what keeps "what a press means on the Detail page" in one place instead of two.
     AltSourceOpen(ContentArg),
-    /// **The hero's track picker committed a row** (the owner's pass): the stream ids the page's
-    /// next Play starts with. `None` means "this half was not the one being chosen", so a picker
-    /// for audio never clears a subtitle the viewer set from the other disc.
-    DetailTracks { audio_sid: Option<i64>, sub_sid: Option<i64> },
 }
 
 /// What an owned screen asks the LEGACY LOOP to do, because the owner of that decision is not on
@@ -1511,11 +1532,22 @@ pub(crate) enum AppArg {
     /// The Collection page's summary sheet — the About panel over `collection::current()`. **It
     /// carries nothing**, for `PersonBio`'s reasons.
     CollectionAbout,
-    /// **The hero's track picker** (the owner's pass, `screens::track_pick`): the menu the audio
-    /// and subtitle discs open so a language is chosen before the picture starts. It carries which
-    /// list, the stream id the page would play today (for the checkmark) and the disc's drawn rect;
-    /// WHICH tracks it offers is read off `metadata::current()`, the item the page stands on.
-    TrackPick(crate::screens::track_pick::TrackPickArg),
+    /// **The pre-playback window** (issue #367, `screens::preplay_panel`). It carries the one bit
+    /// the surface cannot read off the item: whether the press was *Play from Start* (resume
+    /// dropped) or *Play/Resume*. Everything else it draws comes from `metadata::current()`, the
+    /// item the host page landed, exactly as the two read-only sheets do.
+    PrePlayback(crate::screens::preplay_panel::PrePlaybackArg),
+    /// **The pre-playback window's three-dot menu** (issue #369, `screens::preplay_menu`). It
+    /// carries the entry it hangs off and the control's drawn rect; WHICH rows it offers is read
+    /// off `metadata::current()`, the item the window under it describes.
+    PrePlaybackMenu(crate::screens::preplay_menu::PrePlaybackMenuArg),
+    /// **Identify** (issue #369, `screens::identify`): the metadata providers' candidates for the
+    /// loaded item. It carries only where it hangs, the subject is `metadata::current()`, for the
+    /// Track-information and About sheets' reason.
+    Identify(crate::screens::identify::IdentifyArg),
+    /// **Edit images** (issue #369, `screens::images`): the pictures the providers already hold
+    /// for the loaded item. It carries only where it hangs, for `Identify`'s reason.
+    Images(crate::screens::images::ImagesArg),
     /// Account sign-in (QR), shown when there is no usable session.
     Login,
     /// The "who's watching" profile picker.
@@ -1552,7 +1584,7 @@ pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,S
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
-     TrackPick{audio:u8,chosen:i64,anchor:[u32;4]},\
+     PrePlayback{restart:bool},PrePlaybackMenu{host:u32,anchor:[u32;4]},Identify{anchor:[u32;4]},Images{anchor:[u32;4]},\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
      host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
 
@@ -1569,10 +1601,14 @@ impl LogicalState for AppArg {
             Self::AboutPanel => { c.u32(10); }
             Self::PersonBio => { c.u32(11); }
             Self::CollectionAbout => { c.u32(12); }
-            // 17: the hero's track picker, allocated forward. 13 and 14 belonged to the retired
-            // pre-playback window and its menu and are NOT reused: a canon tag is a surface's
-            // identity in a recorded state, so a retired one is never handed to its replacement.
-            Self::TrackPick(arg) => { c.u32(17); arg.write(c); }
+            // 13: the pre-playback window (#367). Allocated forward like every surface tag.
+            Self::PrePlayback(arg) => { c.u32(13); arg.write(c); }
+            // 14 and 15: the window's three-dot menu and its Identify list (#369). Allocated
+            // forward, so a recording taken before them can never be read as one of them.
+            Self::PrePlaybackMenu(arg) => { c.u32(14); arg.write(c); }
+            Self::Identify(arg) => { c.u32(15); arg.write(c); }
+            // 16: the Edit-images grid (#369), allocated forward like every surface tag.
+            Self::Images(arg) => { c.u32(16); arg.write(c); }
             // 8 and 9 rather than the 6/7 the profile and card menus carried on their own
             // branch: this canon tag is the surface's identity in a recorded state, so two
             // surfaces merged from two lanes may not share one. 4/5 are the library and player
@@ -1622,7 +1658,10 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::AboutPanel
             | AppArg::PersonBio
             | AppArg::CollectionAbout
-            | AppArg::TrackPick(_) => Chrome::None,
+            | AppArg::PrePlayback(_)
+            | AppArg::PrePlaybackMenu(_)
+            | AppArg::Identify(_)
+            | AppArg::Images(_) => Chrome::None,
         }
     }
     fn id(&self) -> ScreenId {
@@ -1639,9 +1678,13 @@ impl crate::ui::screen::ScreenArg for AppArg {
             AppArg::AboutPanel => 21,
             AppArg::PersonBio => 22,
             AppArg::CollectionAbout => 24,
-            // 29: the hero's track picker, allocated forward. 25 and 26 belonged to the retired
-            // pre-playback window and its menu and are not reused.
-            AppArg::TrackPick(_) => 29,
+            // 25: the pre-playback window (#367), allocated forward like every surface id.
+            AppArg::PrePlayback(_) => 25,
+            // 26 and 27: its three-dot menu and its Identify list (#369), allocated forward.
+            AppArg::PrePlaybackMenu(_) => 26,
+            AppArg::Identify(_) => 27,
+            // 28: its Edit-images grid (#369), allocated forward.
+            AppArg::Images(_) => 28,
             // 19 and 20, not the 5 and 6 `Route::Account`/`Route::ItemMenu` vacated when this
             // phase deleted them, and not the 17/18 these two carried on their own branch: ids
             // are allocated forward here so a retired identity is never handed to the screen
@@ -1782,8 +1825,17 @@ where
             AppArg::CollectionAbout => Box::new(
                 crate::screens::about_panel::AboutPanelScreen::collection(entry),
             ),
-            AppArg::TrackPick(arg) => Box::new(
-                crate::screens::track_pick::TrackPickScreen::new(entry, *arg, H::metadata(cx)),
+            AppArg::PrePlayback(arg) => Box::new(
+                crate::screens::preplay_panel::PrePlaybackScreen::new(entry, *arg),
+            ),
+            AppArg::PrePlaybackMenu(arg) => Box::new(
+                crate::screens::preplay_menu::PrePlaybackMenuScreen::new(entry, *arg, H::metadata(cx)),
+            ),
+            AppArg::Identify(arg) => Box::new(
+                crate::screens::identify::IdentifyScreen::new(entry, *arg),
+            ),
+            AppArg::Images(arg) => Box::new(
+                crate::screens::images::ImagesScreen::new(entry, *arg),
             ),
             AppArg::Content(ContentArg::Detail { sid, rk }) => {
                 let mut page = crate::screens::detail::DetailScreen::new(entry, *sid, rk.clone(), H::hubs(cx));
@@ -1936,11 +1988,13 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         AppArg::AboutPanel,
         AppArg::PersonBio,
         AppArg::CollectionAbout,
-        AppArg::TrackPick(crate::screens::track_pick::TrackPickArg {
-            audio: true,
-            chosen: 0,
+        AppArg::PrePlayback(crate::screens::preplay_panel::PrePlaybackArg { restart: false }),
+        AppArg::PrePlaybackMenu(crate::screens::preplay_menu::PrePlaybackMenuArg {
+            host: crate::ui::machine::InstanceId(1),
             anchor: [0; 4],
         }),
+        AppArg::Identify(crate::screens::identify::IdentifyArg { anchor: [0; 4] }),
+        AppArg::Images(crate::screens::images::ImagesArg { anchor: [0; 4] }),
     ];
     // The player's panels are ONE screen with several kinds, and each answers a different
     // `Screen::name` — so every kind is listed, not one representative.
@@ -1956,7 +2010,10 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::AboutPanel
             | AppArg::PersonBio
             | AppArg::CollectionAbout
-            | AppArg::TrackPick(_)
+            | AppArg::PrePlayback(_)
+            | AppArg::PrePlaybackMenu(_)
+            | AppArg::Identify(_)
+            | AppArg::Images(_)
             | AppArg::PlayerOverlay(_)
             | AppArg::Settings(_) => {}
             // The eight PAGE variants. Named rather than swept into a `_`, so the exhaustiveness
@@ -2021,8 +2078,12 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::tracks_panel::SHAPE,
     crate::screens::about_panel::SHAPE,
     crate::screens::person_bio::SHAPE,
-    crate::screens::track_pick::SHAPE[0],
-    crate::screens::track_pick::SHAPE[1],
+    crate::screens::preplay_panel::SHAPE,
+    crate::screens::preplay_menu::SHAPE[0],
+    crate::screens::preplay_menu::SHAPE[1],
+    crate::screens::identify::SHAPE[0],
+    crate::screens::identify::SHAPE[1],
+    crate::screens::images::SHAPE,
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::screens::preferences::SHAPE,
 ];
@@ -2152,7 +2213,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // The fork's sync drops the consent and incident-report screens from the inventory: the pin
 // above was 0x668c_44dc_797c_5b0f with them. The Jellyfin-only conversion then retires the
 // Settings AudioSubtitles page from the shape (0xab1b_123e_0a85_9621 before it).
-const SCREEN_SHAPES_PIN: u64 = 0xc20f_2e11_2b09_3a51;
+const SCREEN_SHAPES_PIN: u64 = 0x43f4_58c2_d588_d9c5;
 
 #[cfg(test)]
 mod arg_tests {

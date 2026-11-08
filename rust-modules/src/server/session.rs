@@ -558,17 +558,6 @@ pub struct Session {
     /// is stated here rather than left to be noticed.
     #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
     pub(crate) show_recently_added: bool,
-    /// **The OLED idle screen** (issue #66) as an opt-in setting. Off by default: the owner
-    /// asked for the clock-and-black panel to stop appearing on its own, and kept it as a switch.
-    /// Install-wide like the playback preferences beside it, and skipped on write while off so a
-    /// session persisted before the field existed round-trips byte-identical.
-    ///
-    /// **Deliberately absent from the controlled-replay initial-state digest** (`auth::owner`'s
-    /// `write_persisted`): that digest's shape may not move while the committed fixtures cannot be
-    /// re-recorded (`tests/fixtures/replay/README.md`). Nothing in the replay domain idles long
-    /// enough to draw the screen, and absence means off.
-    #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
-    pub(crate) idle_screen: bool,
     /// **Automatically Sign In** — skip the boot who's-watching picker and enter as
     /// [`Session::user`]. Install-wide, not per profile: the boot gate reads it before anyone is
     /// seated this run. Absence is **off**, which is today's picker. Enabling it from Settings
@@ -676,9 +665,6 @@ struct CanonicalSessionPreferences {
     /// #297: the Library's opt-in Recently Added shelf. Absent means off.
     #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
     show_recently_added: bool,
-    /// The opt-in idle screen. Absent means off.
-    #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
-    idle_screen: bool,
     #[serde(default, deserialize_with = "de_soft_bool")]
     auto_sign_in: bool,
     #[serde(default, deserialize_with = "de_soft_vec")]
@@ -725,7 +711,6 @@ impl Default for CanonicalSessionPreferences {
             up_next_window_s: None,
             marker_policy: MarkerPolicy::default(),
             show_recently_added: false,
-            idle_screen: false,
             auto_sign_in: false,
             last_library: Vec::new(),
             library_sorts: Vec::new(),
@@ -779,7 +764,6 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         up_next_window_s: session.up_next_window_s,
         marker_policy: session.marker_policy,
         show_recently_added: session.show_recently_added,
-        idle_screen: session.idle_screen,
         auto_sign_in: session.auto_sign_in,
         last_library: session.last_library.clone(),
         library_sorts: session.library_sorts.clone(),
@@ -855,7 +839,6 @@ pub(crate) fn join_canonical(
         up_next_window_s: preferences.up_next_window_s,
         marker_policy: preferences.marker_policy,
         show_recently_added: preferences.show_recently_added,
-        idle_screen: preferences.idle_screen,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -891,7 +874,6 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         up_next_window_s: preferences.up_next_window_s,
         marker_policy: preferences.marker_policy,
         show_recently_added: preferences.show_recently_added,
-        idle_screen: preferences.idle_screen,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -2081,18 +2063,6 @@ impl Session {
     pub(crate) fn with_show_recently_added(&self, on: bool) -> Self {
         let mut next = self.clone();
         next.show_recently_added = on;
-        next
-    }
-
-    /// Whether the idle screen may take the panel after the owner's thresholds. Off unless the
-    /// viewer opted in from Settings.
-    pub(crate) fn idle_screen(&self) -> bool {
-        self.idle_screen
-    }
-
-    pub(crate) fn with_idle_screen(&self, on: bool) -> Self {
-        let mut next = self.clone();
-        next.idle_screen = on;
         next
     }
 

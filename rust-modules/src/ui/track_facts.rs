@@ -193,7 +193,7 @@ pub(crate) fn audio_detail(s: &Stream) -> String {
 
 /// One audio track as a CHOICE: `"EAC3 5.1 + Atmos · 768 kbps"` — every clause [`audio_detail`]
 /// composes except its `playing` tail, because a picker states the option and the cursor states
-/// the state. `screens::tracks_panel` draws its rows from this, so the inspector
+/// the state. `screens::preplay_panel` draws its rows from this, so the window and the inspector
 /// cannot spell one track two ways.
 pub(crate) fn audio_choice(s: &Stream) -> String {
     let mut head = s.codec.to_uppercase();
@@ -282,7 +282,7 @@ pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
 
 /// One subtitle track as a CHOICE line: `"English · SUBRIP · Forced"`. The same name and head the
 /// grouped list composes, for ONE track and with no count — a picker lists the tracks a viewer may
-/// choose between, it does not summarise them. `screens::tracks_panel` draws its rows from this.
+/// choose between, it does not summarise them. `screens::preplay_panel` draws its rows from this.
 pub(crate) fn subtitle_choice(s: &Stream) -> String {
     let name = subtitle_name(s);
     let head = subtitle_head(s, &name);

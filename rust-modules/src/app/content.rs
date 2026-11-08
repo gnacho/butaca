@@ -611,19 +611,6 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                     target_ns,
                 );
             }
-            ContentReq::Tracks { audio_sid, sub_sid } => {
-                // The picker named stream ids; the PAGE keeps them (it owns what its Play press
-                // hands to `StartTracks`), so this is one message to the instance that opened it.
-                app.pages.emit(
-                    MachineId::Nav,
-                    Fx::Deliver(
-                        MachineId::Instance(instance),
-                        Delivery::Screen(ScreenEvent::App(
-                            crate::screens::registry::AppMsg::DetailTracks { audio_sid, sub_sid },
-                        )),
-                    ),
-                );
-            }
             ContentReq::Panel(panel) => {
                 halt_preview(app);
                 // **The SUBJECT is the page's item, and a page need not have one.** A panel that

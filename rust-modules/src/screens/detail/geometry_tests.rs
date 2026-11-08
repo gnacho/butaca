@@ -111,8 +111,9 @@ fn bare(sid: ServerId, rk: &str) -> DetailScreen {
         tabs: TabStrip::new(),
         season_pop: CtlPop::new(),
         ctl_pop: CtlPop::new(),
-        disc_unfurl: [Spring::at(0.0); 6],
+        disc_unfurl: [Spring::at(0.0); 4],
         season_metrics: season::Metrics::new(),
+        about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
             // No production `HubsStore`/`CatalogState` is ever seeded in this file (fixtures come from
@@ -129,9 +130,6 @@ fn bare(sid: ServerId, rk: &str) -> DetailScreen {
         layout: std::cell::Cell::new(None),
         layout_pinned: std::cell::Cell::new(false),
         spot_facts: SpotFacts::default(),
-        synopsis_open: false,
-        audio_sid: None,
-        sub_sid: None,
     };
     screen.sync_keys(test_store().view());
     screen
@@ -208,6 +206,7 @@ fn populated_detail_geometry_uses_recorded_metrics() {
     crate::ui::rec::assert_measured_geometry(|measure| {
         let mut s = bare(sid, "show");
         let meta = test_store().view();
+        s.about_rows.update(s.detail(meta).unwrap());
         s.season_metrics.update(s.detail(meta).unwrap(), measure);
         let context = cx(measure, None);
         let mut groups = Vec::new();
@@ -217,7 +216,8 @@ fn populated_detail_geometry_uses_recorded_metrics() {
         for g in groups {
             bits.extend([g.extent.x, g.extent.y, g.extent.w, g.extent.h].map(f32::to_bits));
         }
-        let mut elems = Vec::new();
+        assert!(s.tracks_available(meta));
+        let mut elems = vec![about::CARD_ELEM, about::LANGUAGES_ELEM];
         let (controls, n) = hero::hero_ctls(s.hero_set(meta));
         elems.extend(controls[..n].iter().map(|ctl| ctl.elem()));
         elems.extend(s.keys.iter().map(|key| key.elem));

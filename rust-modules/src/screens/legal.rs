@@ -150,8 +150,7 @@ impl LegalIndex {
                 Some(crate::i18n::msg::settings_title()),
                 crate::i18n::msg::settings_legal_title(),
                 crate::i18n::msg::settings_legal_copy(),
-            )
-            .with_back_disc(),
+            ),
             &self.table,
             GroupId(0),
             self.entry,
@@ -410,8 +409,7 @@ impl Screen<InnerHost> for DocumentPage {
         Some(Cow::Borrowed(self.crumb))
     }
     fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
-        let _ = cx;
-        Some(crate::ui::widgets::back_control_frame())
+        Some(RouteLayout::screen().crumb_rect(self.crumb, cx.measure))
     }
     fn prepare(&mut self, _b: &mut Budget, cx: &Cx<'_, InnerHost>) {
         let code = self.guide().map(|guide| guide.layout(self.document_frame(), cx.measure).code);
@@ -425,13 +423,12 @@ impl Screen<InnerHost> for DocumentPage {
             let layout = guide.draw(f.painter, document_frame, f.measure);
             if let Some(qr) = &self.qr { qr.draw(f.painter, layout.code); }
             Header::new(RouteLayout::screen(), Some(self.crumb), self.title, self.subtitle)
-                .with_back_disc()
                 .paint(f.painter, f.measure, crate::ui::widgets::back_control_focused(f));
             return;
         }
         let Self { reader, crumb, title, subtitle, body, entry, .. } = self;
         let mut v = DocumentScreen::new(
-            Header::new(RouteLayout::screen(), Some(crumb), title, subtitle).with_back_disc(),
+            Header::new(RouteLayout::screen(), Some(crumb), title, subtitle),
             reader,
             body.as_ref(),
             GroupId(0),

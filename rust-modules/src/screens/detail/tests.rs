@@ -123,8 +123,9 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         tabs: TabStrip::new(),
         season_pop: CtlPop::new(),
         ctl_pop: CtlPop::new(),
-        disc_unfurl: [Spring::at(0.0); 6],
+        disc_unfurl: [Spring::at(0.0); 4],
         season_metrics: season::Metrics::new(),
+        about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
             let catalog_state = crate::catalog::CatalogState::default();
@@ -137,9 +138,6 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         layout: std::cell::Cell::new(None),
         layout_pinned: std::cell::Cell::new(false),
         spot_facts: SpotFacts::default(),
-        synopsis_open: false,
-        audio_sid: None,
-        sub_sid: None,
     };
     screen.sync_keys(test_store().view());
     screen
@@ -512,6 +510,7 @@ fn a_spot_round_trips_through_the_page_it_describes() {
         ),
         (episodes::elem(1, episodes::Row::Text).unwrap(), 2, 1, true),
         (related::elem(5).unwrap(), 3, 5, false),
+        (about::CARD_ELEM, 5, 0, false),
     ] {
         let elem = screen.engine_key(elem).expect("fixture item key");
         let spot = screen.spot(Some(FocusKey {
@@ -538,7 +537,12 @@ fn a_spot_round_trips_through_the_page_it_describes() {
         part: "/library/parts/1".into(),
         ..Default::default()
     }));
-    let _movie = bare(&_guard, sid, "movie");
+    let movie = bare(&_guard, sid, "movie");
+    let languages = movie.spot(Some(FocusKey {
+        entry: EntryId(7),
+        elem: about::LANGUAGES_ELEM,
+    }), SpotFacts::of(&movie, test_store().view()));
+    assert_eq!((languages.section, languages.col), (5, 2));
     clear();
 }
 
@@ -587,6 +591,37 @@ fn a_restored_spot_clamps_onto_an_item_whose_lists_shrank() {
     clear();
 }
 
+#[test]
+fn a_movie_spot_does_not_wait_for_a_season_that_will_never_land() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "movie".into(),
+        kind: "movie".into(),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, sid, "movie");
+    screen.restore(&Spot {
+        section: 5,
+        season: None,
+        ..Default::default()
+    }, test_store().view());
+    let measure = crate::ui::fixture::FixtureMeasure;
+    let restored = Focusable::<TestHost>::reconcile(
+        &screen,
+        FocusKey {
+            entry: EntryId(7),
+            elem: hero::ELEM_PLAY,
+        },
+        &cx(&measure, None),
+    );
+    assert_eq!(restored.elem, about::CARD_ELEM);
+    assert!(screen
+        .restore_intent
+        .as_ref()
+        .is_some_and(|r| !r.season_requested));
+    clear();
+}
 
 #[test]
 fn the_filmstrips_text_row_opens_that_episodes_own_page() {
@@ -712,6 +747,49 @@ fn the_episode_text_highlight_fits_the_block_the_flow_already_reserves() {
 ///
 /// The panel is never presented in either leg, which is the other half of the claim: the
 /// availability question is settled entirely on the page's own state.
+#[test]
+fn tracks_availability_is_detail_state_not_surface_state() {
+    // A leaf with a file — the item some OTHER page loaded, still standing in the store.
+    let elsewhere = Detail {
+        sid: ServerId::UNSET,
+        rk: "elsewhere".into(),
+        part: "/library/parts/751/1745595530/file.mp4".into(),
+        ..Default::default()
+    };
+    let _guard = install(elsewhere);
+
+    // This page is standing on a different item and its own fetch has not landed.
+    let screen = DetailScreen::new(EntryId(7), ServerId::UNSET, "here".into(),
+        crate::catalog::HubsSnapshot::empty_for_test().view());
+    assert!(
+        !screen.tracks_available(test_store().view()),
+        "the page has no item of its own yet, so there is no file it can describe"
+    );
+    assert!(
+        screen.locate(about::LANGUAGES_ELEM, test_store().view()).is_none(),
+        "…and the About footer publishes no Languages element to press"
+    );
+
+    // The page's OWN item lands, and it is a show: its streams are episode 1's, so still no file.
+    crate::metadata::set_current_for_test(test_store().state_mut(), Some(detail(ServerId::UNSET, "here")));
+    assert!(!screen.tracks_available(test_store().view()), "a show has no file of its own");
+    assert!(screen.locate(about::LANGUAGES_ELEM, test_store().view()).is_none());
+
+    // A leaf with a part, on this page's own key: now the column is pressable.
+    crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
+        sid: ServerId::UNSET,
+        rk: "here".into(),
+        part: "/library/parts/751/1745595530/file.mp4".into(),
+        ..Default::default()
+    }));
+    assert!(screen.tracks_available(test_store().view()));
+    assert!(
+        matches!(screen.locate(about::LANGUAGES_ELEM, test_store().view()), Some(Located::About(1))),
+        "the page's own leaf has a file, so the column is the About footer's second element"
+    );
+    clear();
+    test_store().run(MetadataCmd::Clear);
+}
 
 #[test]
 fn opening_a_catalog_row_mounts_on_it_without_blocking_on_the_fetch() {
@@ -815,8 +893,6 @@ fn hero_focus_survives_a_control_appearing_in_the_middle_of_the_row() {
         alt: false,
         mark: PosterMark::None,
         favorite: None,
-        audio: false,
-        subs: false,
     };
     let after = hero::HeroSet {
         alt: true,
@@ -981,13 +1057,11 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
         alt: false,
         mark: PosterMark::InProgress,
         favorite: None,
-        audio: false,
-        subs: false,
     };
     let index = hero::watch_index(set).unwrap();
     assert_eq!(hero::ctl_at(set, index - 1), Some(hero::HeroCtl::Restart));
     for unfurl in [0.2, 0.6, 1.0] {
-        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl, 0.0, 0.0, 0.0], [201.0, 0.0, 267.0, 0.0, 0.0, 0.0]);
+        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl, 0.0], [201.0, 0.0, 267.0, 0.0]);
         let widths = hero::HeroWidths {
             pill: 230.0,
             alt: 0.0,
@@ -1060,12 +1134,12 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
                         + usize::from(set.favorite.is_some()));
                     sizes.insert(n);
                     for unfurl in [
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.3, 0.0, 0.7, 0.0, 0.0, 0.0],
-                        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.3, 0.0, 0.7, 0.0],
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 1.0, 0.0],
                     ] {
                         screen.disc_unfurl = unfurl.map(Spring::at);
                         for scroll in [0.0, 48.0] {
@@ -1430,6 +1504,7 @@ fn the_hero_chain_is_identical_whether_or_not_the_trailer_preview_has_faded_its_
     assert_eq!(rest.meta_y, faded.meta_y, "meta line must not move when it fades");
     assert_eq!(rest.ratings_y, faded.ratings_y, "ratings row must not move when it fades");
     assert_eq!(rest.syn_y, faded.syn_y, "synopsis must not move");
+    assert_eq!(rest.facts_y, faded.facts_y, "facts/playback-note line must not move when it fades");
     assert_eq!(rest.btn_y, faded.btn_y, "the action row must not move");
     clear();
 }
@@ -2572,8 +2647,8 @@ fn a_movie_without_a_filmstrip_sits_its_first_block_on_content_top() {
         "absent filmstrip sections must share the walk's end"
     );
     assert!(
-        screen.section_top(1, detail, &measure) > screen.section_top(4, detail, &measure),
-        "an absent section's fallback is past the last drawn section, not its own top"
+        screen.section_top(1, detail, &measure) > screen.section_top(5, detail, &measure),
+        "an absent section's fallback is past About, not About's own top"
     );
     assert!(
         screen.section_top(3, detail, &measure) > top,
@@ -2659,7 +2734,7 @@ fn extras_sit_after_cast_and_crew_and_do_not_move_the_compact_title() {
     let (sections, n) = screen.sections(Some(loaded));
     assert_eq!(
         &sections[..n],
-        &[0, 1, 2, 4, 6, 3],
+        &[0, 1, 2, 4, 6, 3, 5],
         "extras sits after Cast and before Related"
     );
     // The pinned title is no longer anchored to a NAMED section: it leaves as soon as the first
@@ -2709,7 +2784,7 @@ fn extras_sit_after_cast_and_crew_and_do_not_move_the_compact_title() {
         ..Default::default()
     };
     let (sections, n) = screen.sections(Some(&movie));
-    assert_eq!(&sections[..n], &[0, 4, 6, 3]);
+    assert_eq!(&sections[..n], &[0, 4, 6, 3, 5]);
     // Same rule on a movie, whose first below-hero section is Cast rather than the season strip:
     // the title is out by the time that block has moved a fraction of its own height.
     let first_top = screen.section_top_settled(sections[1], &movie, &crate::ui::fixture::FixtureMeasure);
@@ -2750,7 +2825,7 @@ fn cast_section_top_is_keyed_by_identity_not_array_position() {
     let (sections, n) = screen.sections(Some(loaded));
     assert_eq!(
         &sections[..n],
-        &[0, 4, 3],
+        &[0, 4, 3, 5],
         "Cast sits at array position 1, three away from its own SectionId discriminant (4)"
     );
     let measure = crate::ui::fixture::FixtureMeasure;
@@ -3117,79 +3192,5 @@ fn a_show_walk_derives_the_layout_identity_once_not_once_per_stop() {
         crate::gfx::without_frame_clear(|| Screen::<TestHost>::draw(&mut screen, &mut f));
     });
     assert!(full_walk <= EPISODES, "one draw hashed {full_walk} episodes for a {EPISODES}-episode season");
-    clear();
-}
-
-/// **The synopsis accordion** (the owner's pass): five lines and a `MORE` mark while the blurb
-/// is cut, the whole text after the press, and no mark at all on a blurb that fits.
-#[test]
-fn a_long_synopsis_offers_more_and_a_short_one_offers_nothing() {
-    let sid = ServerId::UNSET;
-    let _guard = install(Detail {
-        sid,
-        rk: "long".into(),
-        kind: "movie".into(),
-        summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
-                  sentence, so the mark has something to open. "
-            .repeat(12),
-        ..Default::default()
-    });
-    let screen = bare(&_guard, sid, "long");
-    let measure = crate::ui::fixture::FixtureMeasure;
-    let more = screen
-        .synopsis_more_rect(&measure, test_store().view())
-        .expect("a cut blurb publishes the mark");
-    assert!(more.w > 0.0 && more.h > 0.0, "the mark has a real box: {more:?}");
-
-    crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
-        sid,
-        rk: "long".into(),
-        kind: "movie".into(),
-        summary: "Two lines of blurb, which the cap never touches.".into(),
-        ..Default::default()
-    }));
-    let short = screen.synopsis_more_rect(&measure, test_store().view());
-    assert!(short.is_none(), "nothing is clipped, so nothing is offered");
-    clear();
-}
-
-/// Pressing the mark opens the accordion in place: the synopsis' measured height grows, the
-/// action row moves down with it, and the mark itself is gone (one-way, so there is no second
-/// affordance to word).
-#[test]
-fn pressing_more_opens_the_synopsis_in_place() {
-    let sid = ServerId::UNSET;
-    let _guard = install(Detail {
-        sid,
-        rk: "long".into(),
-        kind: "movie".into(),
-        summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
-                  sentence, so the mark has something to open. "
-            .repeat(12),
-        ..Default::default()
-    });
-    let mut screen = bare(&_guard, sid, "long");
-    let measure = crate::ui::fixture::FixtureMeasure;
-    let meta = test_store().view();
-    let closed = screen.compute_hero_chain(screen.detail(meta), &measure);
-    assert!(
-        screen.synopsis_more_rect(&measure, meta).is_some(),
-        "the mark is there before the press"
-    );
-
-    let (handled, _) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_SYNOPSIS_MORE), None);
-    assert_eq!(handled, Handled::Yes);
-    assert!(screen.synopsis_open, "the press opened the accordion");
-    let open = screen.compute_hero_chain(screen.detail(meta), &measure);
-    assert!(
-        open.btn_y > closed.btn_y,
-        "the action row moves down to make room ({} -> {})",
-        closed.btn_y,
-        open.btn_y
-    );
-    assert!(
-        screen.synopsis_more_rect(&measure, meta).is_none(),
-        "the whole blurb is on the page, so the mark is gone"
-    );
     clear();
 }

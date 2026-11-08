@@ -109,8 +109,7 @@ impl ServersPage {
                 Some(crate::i18n::msg::settings_title()),
                 crate::i18n::msg::settings_servers_select(),
                 crate::i18n::msg::settings_servers_copy(),
-            )
-            .with_back_disc(),
+            ),
             &self.table,
             GroupId(0),
             self.entry,

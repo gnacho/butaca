@@ -78,16 +78,13 @@ fn body(entry: EntryId, rk: &str) -> DetailScreen {
         episode_scale: [Spring::at(1.0); EP_SCALE_MAX], related: CardRow::new(),
         extras: CardRow::new(),
         cast: CardRow::new(), tabs: TabStrip::new(), season_pop: CtlPop::new(),
-        ctl_pop: CtlPop::new(), disc_unfurl: [Spring::at(0.0); 6],
-        season_metrics: season::Metrics::new(),
+        ctl_pop: CtlPop::new(), disc_unfurl: [Spring::at(0.0); 4],
+        season_metrics: season::Metrics::new(), about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP), selected: None, spin_ms: 0.0,
         spin_phase: crate::ui::motion::Phase::default(),
         layout: std::cell::Cell::new(None),
         layout_pinned: std::cell::Cell::new(false),
         spot_facts: SpotFacts::default(),
-        synopsis_open: false,
-        audio_sid: None,
-        sub_sid: None,
     }
 }
 struct Mount;

@@ -39,9 +39,6 @@ pub enum Icon {
     Agreement,
     Cc,
     Audio,
-    /// **A SINGLE note** — the detail hero's audio-language disc. [`Icon::Audio`] is the library's
-    /// double note and reads as a stereo mark; the owner asked for the simple one here.
-    Note,
     Check,
     Chevron, // points RIGHT; the directional variants below are separate masks (the
     // rasterizer draws untransformed, so direction is per-asset, not a rotation)
@@ -317,7 +314,6 @@ fn src(id: Icon) -> &'static str {
         Icon::Agreement => include_str!("../../../assets/icons/agreement.svg"),
         Icon::Cc => include_str!("../../../assets/icons/cc.svg"),
         Icon::Audio => include_str!("../../../assets/icons/audio.svg"),
-        Icon::Note => include_str!("../../../assets/icons/note.svg"),
         Icon::Check => include_str!("../../../assets/icons/check.svg"),
         Icon::Image => include_str!("../../../assets/icons/image.svg"),
         Icon::Heart => include_str!("../../../assets/icons/heart.svg"),

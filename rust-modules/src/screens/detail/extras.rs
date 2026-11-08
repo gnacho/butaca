@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn the_extras_range_abuts_about_and_stays_below_published_keys() {
-        assert!(super::super::cast::CAST_ELEM_RANGE_END <= EXTRAS_ELEM_RANGE_START);
+        assert_eq!(super::super::about::ABOUT_ELEM_RANGE_END, EXTRAS_ELEM_RANGE_START);
         assert!(EXTRAS_ELEM_RANGE_END <= 2048);
         assert!(EXTRAS_ELEM_RANGE_START < EXTRAS_ELEM_RANGE_END);
     }
