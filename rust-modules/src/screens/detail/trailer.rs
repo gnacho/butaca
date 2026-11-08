@@ -452,12 +452,13 @@ impl Transport {
         extra_title: &str,
         paused: bool,
         measure: &dyn crate::ui::machine::Measure,
+        back_focused: bool,
     ) {
         if self.alpha <= 0.01 {
             return;
         }
         let p = p.alpha(self.alpha);
-        crate::ui::player_hud::draw_scrim(p);
+        crate::ui::player_hud::draw_scrim(p, back_focused);
         // `if let Ok`, not `.unwrap_or_default()` — the player HUD's own rule (5a221a54): a title
         // with an interior NUL skips the title block rather than drawing an empty line under the
         // kicker. The transport below it still draws; only the unprintable text is dropped.

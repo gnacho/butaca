@@ -2907,18 +2907,39 @@ impl View for CircleButton {
 /// The shared top-left Back control for a non-root page or a visible playback HUD.
 ///
 /// It deliberately reuses the account chip's frame and the circle-button family. Root tab pages
-/// keep the chip instead, so the two controls never compete for the same spot. The control is
-/// pointer-only: the remote's established Back key remains the D-pad path and the page restores
-/// focus through the ordinary navigation return state.
-pub(crate) fn draw_back_control(p: Painter) {
+/// keep the chip instead, so the two controls never compete for the same spot. `focused` is the
+/// D-pad's, not the pointer's: the control is a focus stop (the dispatcher composes it as a chrome
+/// group, `dispatch::BACK`), so a viewer whose remote's BACK key is broken can still leave the
+/// page with the arrows, and it lights up in the circle-button family's own focus face rather
+/// than in a treatment invented for it.
+pub(crate) fn draw_back_control(p: Painter, focused: bool) {
     let button = CircleButton::new(std::ptr::null())
         .frame(CHIP_FRAME)
         .icon(crate::ui::icons::Icon::ChevronLeft)
-        .ground(ControlGround::Unkeyed);
+        .ground(ControlGround::Unkeyed)
+        .focused(focused);
     button.draw(&Env::inert(), p);
 }
 
-/// Register the visible Back control without adding an unreachable element to the D-pad model.
+/// Where [`draw_back_control`] paints — the box the keyboard lands on and the pointer clicks.
+/// One expression for the drawn control and its stop, as [`CHIP_FRAME`] is for the chip.
+pub(crate) fn back_control_frame() -> Rect {
+    CHIP_FRAME
+}
+
+/// Does this frame's focus sit on the shared Back control? The one test the disc's draw sites use,
+/// so "is it drawn lit" and "is it the stop the engine is on" cannot drift apart.
+pub(crate) fn back_control_focused<H: crate::ui::machine::Host>(
+    f: &crate::ui::screen::DrawFrame<'_, '_, H>,
+) -> bool
+where
+    H::Elem: crate::ui::geom::IndexElem,
+{
+    use crate::ui::geom::IndexElem as _;
+    f.focus.current.and_then(|k| k.elem.index()) == Some(crate::ui::table_screen::CRUMB_ELEM)
+}
+
+/// Register the visible Back control as a pointer stop at its drawn frame.
 pub(crate) fn back_control_stop<H: crate::ui::machine::Host>(
     f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
     entry: crate::ui::machine::EntryId,
@@ -2927,7 +2948,7 @@ pub(crate) fn back_control_stop<H: crate::ui::machine::Host>(
     back_control_stop_at(f, entry, elem, CHIP_FRAME);
 }
 
-/// The pointer-only Back stop at an existing crumb's measured rectangle.
+/// The pointer stop of a Back control at an existing crumb's measured rectangle.
 pub(crate) fn back_control_stop_at<H: crate::ui::machine::Host>(
     f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
     entry: crate::ui::machine::EntryId,
@@ -2941,7 +2962,9 @@ pub(crate) fn back_control_stop_at<H: crate::ui::machine::Host>(
             rect,
             rest_rect: rect,
             clip: Rect::FULL,
-            hover: crate::ui::screen::Hover::Ignore,
+            // A stop the arrows can land on hovers like every other one: the pointer parks focus
+            // on it and a click activates it, exactly as it does on a row.
+            hover: crate::ui::screen::Hover::Focus,
             activate: crate::ui::screen::Activate::Direct,
         },
     );

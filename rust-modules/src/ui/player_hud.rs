@@ -1387,7 +1387,7 @@ pub(crate) fn scrub_clamp_target(ns: i64, duration_ns: i64) -> i64 {
 
 /// The transport's dark ground: transparent at its top edge, `theme::scrim_black(0.86)` at the
 /// panel bottom, [`SCRIM_H`] tall. Drawn under every transport, the player's and the trailer's.
-pub(crate) fn draw_scrim(p: Painter) {
+pub(crate) fn draw_scrim(p: Painter, back_focused: bool) {
     p.rect(
         Rect::new(0.0, SCR_H - SCRIM_H, SCR_W, SCRIM_H),
         0.0,
@@ -1395,7 +1395,7 @@ pub(crate) fn draw_scrim(p: Painter) {
         theme::scrim_black(0.86),
         0.0,
     );
-    crate::ui::widgets::draw_back_control(p);
+    crate::ui::widgets::draw_back_control(p, back_focused);
 }
 
 /// The line over a transport's display title. Non-owning `*const c_char`, the `Label` rule
@@ -1709,6 +1709,7 @@ pub(crate) fn draw_hud(
     transport: bool,
     measure: &dyn crate::ui::machine::Measure,
     meta: crate::metadata::MetadataView<'_>,
+    back_focused: bool,
 ) {
     // A FAILURE owns the frame, and it outranks every branch below — including the Up Next card,
     // which cannot coexist with one but must not be the arm that decides so. `Player Screen.dc.html`
@@ -1732,7 +1733,7 @@ pub(crate) fn draw_hud(
     let p = Painter::root();
     let e = hud_env();
 
-    draw_scrim(p);
+    draw_scrim(p, back_focused);
 
     if transport {
         // title block under the playbar: for an episode, "S1, E1 · Episode Name" (white) sits above the

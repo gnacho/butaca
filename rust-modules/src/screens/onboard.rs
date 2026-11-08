@@ -699,6 +699,10 @@ impl<H: DirectoryLike> Screen<H> for OnboardScreen {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         Some(Cow::Borrowed(if self.settings { crate::i18n::msg::settings_title() } else { crate::i18n::msg::settings_profiles_title() }))
     }
+    fn back_control(&self, cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        let back = if self.settings { crate::i18n::msg::settings_title() } else { crate::i18n::msg::settings_profiles_title() };
+        Some(RouteLayout::screen().crumb_rect(back, cx.measure))
+    }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         let p = f.painter;
@@ -715,7 +719,7 @@ impl<H: DirectoryLike> Screen<H> for OnboardScreen {
             if self.settings { crate::i18n::msg::settings_libraries_title() } else { crate::i18n::msg::settings_onboard_title() },
             &body,
         )
-        .paint(p, f.measure);
+        .paint(p, f.measure, crate::ui::widgets::back_control_focused(f));
         let labels = self.labels(directory);
         let pal = if self.settings { palette() } else { self.ground.palette() };
         let mut band = BandPart {

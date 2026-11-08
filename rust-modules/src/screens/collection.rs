@@ -779,6 +779,10 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
     fn name(&self) -> &'static str { super::registry::word::COLLECTION }
     fn state(&self) -> &dyn LogicalState { self }
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> { None }
+    fn back_control(&self, _cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        // the Favourites page wears no disc: it is a root, not a page you left
+        (!self.id.is_favorites()).then(crate::ui::widgets::back_control_frame)
+    }
     fn prepare(&mut self, _budget: &mut crate::ui::frame::Budget, _cx: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         let p = f.painter.alpha(f.page_alpha);
@@ -808,7 +812,7 @@ impl<H: ContentLike + CollectionLike> Screen<H> for CollectionScreen {
             Self::status_overlay(None, f.cx.tick.ms, f.measure, self.id.is_favorites()).draw_measured(&Env::inert(), p, f.measure);
         }
         if !self.id.is_favorites() {
-            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::draw_back_control(p, crate::ui::widgets::back_control_focused(f));
             crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
         }
     }

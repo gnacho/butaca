@@ -1905,6 +1905,15 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
         None
     }
 
+    fn back_control(&self, _cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        // The union of the two sites that DRAW it — this page's own disc, and the full-trailer
+        // transport's scrim — the same condition its pointer stop uses. `full_trailer` is the one
+        // predicate every site that enumerates or resolves hero focus agrees on; the disc's paint
+        // fading with `preview_chrome` is a different question.
+        (!self.full_trailer() || self.trailer_ctl.visible())
+            .then(crate::ui::widgets::back_control_frame)
+    }
+
     fn prepare(&mut self, _budget: &mut Budget, _cx: &Cx<'_, H>) {}
 
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
@@ -2051,9 +2060,13 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
             self.preview_extra(meta).map(|e| e.title.as_str()).unwrap_or_default(),
             crate::player::preview::paused(),
             measure,
+            crate::ui::widgets::back_control_focused(f),
         );
         if !self.full_trailer() {
-            crate::ui::widgets::draw_back_control(p.alpha(self.preview_chrome));
+            crate::ui::widgets::draw_back_control(
+                p.alpha(self.preview_chrome),
+                crate::ui::widgets::back_control_focused(f),
+            );
         }
 
         self.record_stops(f);
@@ -2637,6 +2650,8 @@ impl DetailScreen {
                 },
             );
         }
+        // The union of the two sites that DRAW it: this page's own disc, and the full-trailer
+        // transport's scrim (`player_hud::draw_scrim`, under `trailer_ctl`).
         if !self.full_trailer() || self.trailer_ctl.visible() {
             crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
         }

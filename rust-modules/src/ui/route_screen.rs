@@ -953,10 +953,14 @@ impl RouteLayout {
     /// It is the DRAWN extent, not a padded rectangle around it: [`Self::draw_crumb`] lays the mark
     /// out at the narrative's left edge and the word after its ink, and this is that same span. The
     /// height is the whole band, because a caption is a small target for a pointer.
+    ///
+    /// **Measured at the size the word is DRAWN at** ([`theme::size::BODY`]). It was `CAPTION` for
+    /// as long as the word was a caption; when the mark and the label grew the measurement did not
+    /// follow, so the last few pixels of every destination name were painted but not clickable.
     pub(crate) fn crumb_rect(self, back_to: &str, measure: &dyn Measure) -> Rect {
         let (_, ink_r) = icons::ink_x(Icon::ChevronLeft);
         let x = self.narrative.x + CRUMB_MARK * ink_r + theme::space::XS;
-        let word_w = measure.width_str(back_to, theme::size::CAPTION, false);
+        let word_w = measure.width_str(back_to, theme::size::BODY, false);
         let w = (x - self.narrative.x) + word_w;
         Rect::new(self.narrative.x, self.narrative.y, w.min(self.narrative.w), CRUMB_BAND)
     }
@@ -976,9 +980,22 @@ impl RouteLayout {
         Rect::new(self.action.x + self.action.w - w, self.action.y, w, self.action.h)
     }
 
-    fn draw_crumb(self, p: Painter, top: f32, back_to: &str, measure: &dyn Measure) {
+    /// The crumb as it is DRAWN. `focused` is the D-pad's: the crumb is a focus stop on every
+    /// route (the dispatcher composes it as one chrome group, `dispatch::BACK`), so it wears the
+    /// pill family's focus face — the accent capsule with the dark ink over it — rather than a
+    /// treatment invented for one control. Nothing moves when it lights: the capsule is the band
+    /// the crumb already occupies, so focus never reflows the title under it.
+    fn draw_crumb(self, p: Painter, top: f32, back_to: &str, measure: &dyn Measure, focused: bool) {
         let h = CRUMB_BAND;
         let cy = top + h * 0.5;
+        let ink = if focused { theme::ACCENT_INK } else { theme::TEXT_SECONDARY };
+        if focused {
+            // The capsule stops at the narrative's left edge, i.e. on the safe margin: an inflated
+            // one would put its own edge inside the overscan exclusion zone, which is the defect
+            // `CHIP_FRAME` records for the profile chip. The chevron's bearing supplies the lead.
+            let w = (self.crumb_rect(back_to, measure).w + theme::space::XS).min(self.narrative.w);
+            p.rrect(Rect::new(self.narrative.x, top, w, h), h * 0.5, h * 0.5, theme::ACCENT);
+        }
         icons::draw(
             p,
             Icon::ChevronLeft,
@@ -988,12 +1005,12 @@ impl RouteLayout {
                 CRUMB_MARK,
                 CRUMB_MARK,
             ),
-            theme::TEXT_SECONDARY,
+            ink,
         );
         let (_, ink_r) = icons::ink_x(Icon::ChevronLeft);
         let x = self.narrative.x + CRUMB_MARK * ink_r + theme::space::XS;
         let ty = crumb_label_top(cy, measure.cap_h(theme::size::BODY));
-        TextView::new(back_to, theme::size::BODY, theme::TEXT_SECONDARY)
+        TextView::new(back_to, theme::size::BODY, ink)
             .max_lines(1)
             .draw(p, Rect::new(x, ty, self.narrative.x + self.narrative.w - x, h));
     }
@@ -1021,7 +1038,8 @@ impl RouteLayout {
     /// `back_to` is `None` exactly when BACK does not go anywhere inside the app — see the module
     /// doc for which routes those are and how to census them.  Passing it here rather than letting
     /// screens draw their own line is what makes that a contract instead of a convention: a new
-    /// route cannot forget to answer without deleting an argument.
+    /// route cannot forget to answer without deleting an argument. `focused` lights the crumb in
+    /// the pill family's focus face; see [`Self::draw_crumb`].
     pub(crate) fn draw_narrative(
         self,
         p: Painter,
@@ -1030,10 +1048,11 @@ impl RouteLayout {
         copy: &str,
         copy_size: std::os::raw::c_int,
         measure: &dyn Measure,
+        focused: bool,
     ) {
         let top = self.narrative_top(back_to.is_some());
         if let Some(back_to) = back_to {
-            self.draw_crumb(p, self.narrative.y, back_to, measure);
+            self.draw_crumb(p, self.narrative.y, back_to, measure, focused);
         }
 
         let title = Self::narrative_title(title);

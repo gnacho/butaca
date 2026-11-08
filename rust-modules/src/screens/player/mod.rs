@@ -255,6 +255,7 @@ impl PlayerScreen {
         now: u32,
         measure: &dyn crate::ui::machine::Measure,
         meta: crate::metadata::MetadataView<'_>,
+        back_focused: bool,
     ) {
         crate::ui::player_hud::draw_hud(
             ps,
@@ -269,6 +270,7 @@ impl PlayerScreen {
             self.transport,
             measure,
             meta,
+            back_focused,
         );
     }
 
@@ -1365,6 +1367,13 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         None
     }
+    fn back_control(&self, cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        // The disc is drawn with the transport's scrim, so it is a stop on exactly the frames the
+        // HUD is up and no failure read-out owns the picture — the same gate `record_stops` uses.
+        let ps = H::session(cx);
+        (self.hud_drawn(ps, cx.tick.ms) && !crate::ui::player_hud::readout_owns_frame(self.busy))
+            .then(crate::ui::widgets::back_control_frame)
+    }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         // The frame's publication of the playback session (spec §2.3) — see `AppViews::session`.
@@ -1398,7 +1407,8 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
         // and so cannot be carried by a bare `ScreenEvent::Activate` at all.
         let hud_drawn = self.hud_drawn(ps, now);
         if hud_drawn {
-            self.draw_hud(ps, now, f.measure, H::metadata(f.cx));
+            let back_focused = crate::ui::widgets::back_control_focused(f);
+            self.draw_hud(ps, now, f.measure, H::metadata(f.cx), back_focused);
         }
         // The read-out is NOT transport chrome — it is drawn whether or not the HUD is up, so a
         // terminal `Error` (which is not `is_busy()`, so it does not pin the HUD) keeps its message
@@ -1948,8 +1958,8 @@ mod step_ladder_tests {
         }
     }
 
-    /// The visible Back control is a pointer-only stop in the same top-left frame as the root
-    /// account chip. It uses the existing player exit request and never joins the D-pad ring.
+    /// The visible Back control sits in the same top-left frame as the root account chip, uses the
+    /// existing player exit request, and hovers like every other stop the arrows can land on.
     #[test]
     fn the_visible_back_control_is_clickable_and_exits() {
         use crate::ui::screen::DrawFrame;
@@ -1963,7 +1973,7 @@ mod step_ladder_tests {
             .expect("the visible Back control registers a pointer stop");
         let frame = crate::ui::widgets::CHIP_FRAME;
         assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h], [frame.x, frame.y, frame.w, frame.h]);
-        assert!(matches!(stop.hover, crate::ui::screen::Hover::Ignore));
+        assert!(matches!(stop.hover, crate::ui::screen::Hover::Focus));
         let (handled, reqs) = click(&mut page, crate::screens::registry::HEADER_CRUMB);
         assert_eq!(handled, Handled::Yes);
         assert_eq!(reqs, vec![PlayerReq::Exit]);
