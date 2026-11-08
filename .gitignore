@@ -113,7 +113,8 @@ vendor/sentry-native-*.tar.gz
 vendor/sentry-native-src
 vendor/sentry-native-build
 vendor/sentry-native-prefix
-vendor/libass-sources
+vendor/libass-sources/*
+!vendor/libass-sources/*.tar.xz
 vendor/libass-build
 vendor/libass-build-host
 vendor/libass-prefix
