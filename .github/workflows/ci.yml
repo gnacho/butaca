@@ -218,7 +218,9 @@ jobs:
           )
           for p in fw-symbols ipk-verify; do
             file="webosbrew-toolbox-${p}_0.4.0-1_arm64.deb"
-            curl -fsSLo "$file" "https://github.com/webosbrew/dev-toolbox-cli/releases/download/${TAG}/$file"
+            # Vendored: the same bytes, pinned by the same sha256 below. This step used to be
+            # the last thing standing between a green build and a GitHub release-asset 504.
+            cp "vendor/webosbrew-toolbox/$file" "$file"
             echo "${SHA256[$p]}  $file" | sha256sum -c -
           done
           sudo apt-get install -y ./webosbrew-toolbox-*.deb
