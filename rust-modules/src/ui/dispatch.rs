@@ -111,15 +111,20 @@ where
         }
     }
 
-    /// The Back control's rectangle when the crumb group is part of THIS query's model, and
-    /// `None` when it is not - the one expression `groups`, `group_of`, `place`, `reconcile` and
-    /// `seat` share, so an element the model does not hold can never be placed, seated or
-    /// reconciled onto. See [`Self::groups`] for the "page with nothing of its own" case.
+    /// The Back control's rectangle when the crumb group is part of the model, given the page's OWN
+    /// groups. `None` for a page that shows no Back control, and for one that has nothing of its own
+    /// to stand on yet (see [`Self::groups`]) - ONE predicate, so `groups`, `group_of`, `place`,
+    /// `reconcile` and `seat` cannot disagree about whether the element exists.
+    fn back_rect_in(&self, page: &[GroupSpec]) -> Option<Rect> {
+        let rect = self.back?;
+        page.iter().any(|s| s.len > 0).then_some(rect)
+    }
+
+    /// [`Self::back_rect_in`] over the page's groups, built for this query.
     fn back_rect(&self, cx: &Cx<'_, H>) -> Option<Rect> {
-        let back = self.back?;
-        let mut groups = Vec::new();
-        self.page.groups(cx, &mut groups);
-        groups.iter().any(|s| s.len > 0).then_some(back)
+        let mut page = Vec::new();
+        self.page.groups(cx, &mut page);
+        self.back_rect_in(&page)
     }
 
     fn is_back(&self, key: &H::Elem) -> bool {
@@ -145,8 +150,8 @@ where
         // the page never asked for - the 12-filmography-detail-return anchor caught exactly that on
         // Detail's mount. So the crumb joins the model only while the page has something of its own
         // to stand on, which is also the only state in which the arrows have a stop to leave.
-        let page_has_a_stop = out[page_from..].iter().any(|s| s.len > 0);
-        if let Some(rect) = self.back.filter(|_| page_has_a_stop) {
+        let back = self.back_rect_in(&out[page_from..]);
+        if let Some(rect) = back {
             out.push(back_group(rect));
         }
     }

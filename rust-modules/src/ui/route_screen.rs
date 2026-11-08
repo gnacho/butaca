@@ -1333,6 +1333,42 @@ mod tests {
         assert!(label_x > l.narrative.x + CRUMB_MARK * 0.5, "…but not over it");
     }
 
+    /// **The crumb's box is the size its word is DRAWN at.** It was measured at `CAPTION` for as
+    /// long as the word was a caption; the mark and the label then grew to `BODY` and the
+    /// measurement did not follow, so the tail of every destination name was painted but not
+    /// clickable - and, once the crumb became a focus stop, not reachable either. A measure whose
+    /// width scales with the size is what makes this grade the size rather than restate it.
+    #[test]
+    fn the_crumbs_box_is_measured_at_the_size_its_word_is_drawn() {
+        struct ScaledMeasure;
+        impl Measure for ScaledMeasure {
+            fn width(&self, text: &std::ffi::CStr, size: i32, _bold: bool) -> f32 {
+                text.to_string_lossy().chars().count() as f32 * size as f32 * 0.6
+            }
+            fn cap_h(&self, size: i32) -> f32 { size as f32 * 0.7 }
+            fn line_h(&self, size: i32) -> f32 { size as f32 * 1.2 }
+        }
+        let measure = ScaledMeasure;
+        let l = RouteLayout::screen();
+        for word in ["Home", "Settings", "Privacy and data"] {
+            let rect = l.crumb_rect(word, &measure);
+            let drawn = measure.width_str(word, theme::size::BODY, false);
+            assert!(
+                rect.w >= drawn,
+                "{word}: the box must cover the word as drawn ({} < {drawn})",
+                rect.w
+            );
+            assert!(
+                rect.w < measure.width_str(word, theme::size::BODY, false) + CRUMB_MARK
+                    + theme::space::XS + 1.0,
+                "{word}: …and not by a whole extra mark, which is the CAPTION box being padded"
+            );
+            assert_eq!(rect.x, l.narrative.x, "{word}: it starts on the narrative's own edge");
+            assert_eq!(rect.h, CRUMB_BAND, "{word}: the whole band is the target");
+            assert!(inside_safe(rect), "{word}: the crumb is required content");
+        }
+    }
+
     /// **The whole reason `ActionRow` exists**: a control holding row focus pops, an unfocused
     /// sibling in the same row does not, and both reach a settled rest — the same shape
     /// `CtlPop`'s own doc promises, pinned again here because this is the type every action-row
