@@ -59,5 +59,11 @@ pub(super) fn execute(command: PreferenceCmd) {
                 crate::ui::idle::invalidate();
             });
         }
+        PreferenceCmd::MarkerPolicy { policy, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_marker_policy(policy));
+                crate::ui::idle::invalidate();
+            });
+        }
     }
 }

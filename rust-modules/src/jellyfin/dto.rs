@@ -313,6 +313,47 @@ pub(crate) struct SegmentDto {
     pub(crate) end_ticks: i64,
 }
 
+/// `GET /Plugins/MdbListRatings/CachedByItemId?itemId={id}`, the MDBList Ratings plugin's own
+/// cache (issue #370).
+///
+/// **There is no ratings array on `BaseItemDto`.** Jellyfin 12.4's schema carries exactly two
+/// scores (`CommunityRating` 0-10 and `CriticRating` 0-100) and the plugin does not add a third
+/// field to the item payload: it writes ONE admin-chosen source into those two fields and keeps
+/// every other source in a cache it exposes over its own REST route
+/// (`Jellyfin.Plugin.MdbListRatings/Api/CachedRatingsController.cs`). That route is the proof the
+/// plugin is installed: a server without it answers 404, which is folded to "no extra sources".
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct MdbListCached {
+    #[serde(default)]
+    pub(crate) ratings: Vec<MdbListRatingDto>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct MdbListRatingDto {
+    /// The provider's own slug: "imdb", "tmdb", "trakt", "tomatoes", "popcorn", "metacritic",
+    /// "letterboxd", "rogerebert", "myanimelist", "anilist" (the plugin's documented list).
+    #[serde(default)]
+    pub(crate) source: String,
+    /// **The normalised 0-100 score**, which the plugin's own model calls "the best field to use
+    /// consistently". The native `value` beside it is deliberately NOT read: it is 0-10 for IMDb,
+    /// 0-100 for Trakt and 0-5 for Letterboxd, a per-source scale the payload never states.
+    #[serde(default, deserialize_with = "de_soft_score")]
+    pub(crate) score: Option<f64>,
+}
+
+/// The plugin hands MDBList's numbers through lenient converters (the wire sometimes carries
+/// `"7.4"`, sometimes `""` or `"N/A"`), so a value this client cannot read is an absent score
+/// rather than a parse failure that would cost the whole payload.
+fn de_soft_score<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    let number = match value {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    Ok(number.filter(|n| n.is_finite()))
+}
+
 /// The `POST /Items/{id}/PlaybackInfo` answer — Jellyfin's Media Decision Engine verdict, the
 /// counterpart of the retired `/decision`. We read two things off it: WHICH source the server
 /// chose (so a multi-version item plays the one the server adjudicated) and HOW it must be

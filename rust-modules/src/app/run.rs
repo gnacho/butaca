@@ -1551,6 +1551,7 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // Focus follows the control row's OCCUPANT, on both edges. Driven by slot identity
         // rather than a "was something shown" bool, because the two edges have different jobs
         // and the previous bool implemented neither of the ones its comment promised.
+        let mut auto_skip = false;
         if let Some(player) = super::bridge::player_mut(&mut app.pages) {
             // Keyed on the SEGMENT, not the slot, and `last_offer` is only ever advanced to
             // a real offer — never cleared back to None. `active_marker` is gated on `is_playing`,
@@ -1562,6 +1563,17 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
             if offer.is_some() {
                 player.hud.last_offer = offer;
             }
+            // **#370: `Auto` takes the segment instead of offering it.** Decided here, beside the
+            // offer, because this is the ONE place that knows a segment has just BEGUN
+            // (`last_offer`'s edge), and taking it is the same act as pressing the control the
+            // row would have drawn (`activate_ctrl_row`, below). The rule itself is
+            // `takes_marker_automatically`, host-testable and the single statement of what
+            // "skip automatically" means.
+            let auto = crate::screens::player::takes_marker_automatically(
+                fresh,
+                player.hud_policy(),
+                crate::route::marker_auto_skips(),
+            );
             if fresh {
                 // One line per SEGMENT offered — the on-device suite grades this feature from
                 // the event log like everything else, and "the control row offered a skip" had
@@ -1569,11 +1581,13 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
                 if let Some((kind, start)) = offer {
                     log(&format!("marker offer: {kind:?} at {}s", start / 1000));
                 }
-                // A segment beginning puts the HUD ON SCREEN and offers the row — the timer,
-                // the DISMISSAL and the ring in one act, because raising the timer alone left
-                // the tile behind a transport nobody drew. `HudState::raise_for_offer` is where
-                // that rule, its resting-position clause and the bug are written down.
-                player.hud.raise_for_offer(fr.now, fr.ctrl.primary_btn());
+                if !auto {
+                    // A segment beginning puts the HUD ON SCREEN and offers the row: the timer,
+                    // the DISMISSAL and the ring in one act, because raising the timer alone left
+                    // the tile behind a transport nobody drew. `HudState::raise_for_offer` is where
+                    // that rule, its resting-position clause and the bug are written down.
+                    player.hud.raise_for_offer(fr.now, fr.ctrl.primary_btn());
+                }
             } else if crate::ui::player_hud::standin_left_the_ring(
                 player.hud.was_standin,
                 fr.ctrl,
@@ -1589,6 +1603,25 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
             }
             player.hud.was_standin = !fr.ctrl.is_discs();
             player.publish();
+            auto_skip = auto;
+        }
+        // The segment is taken exactly as a press would take it: `activate_ctrl_row` is the same
+        // dispatch the OK key and the pointer share, so `Auto` cannot drift from `Ask` in what a
+        // skip MEANS (a seek past a marker, or the next episode off a credits segment). Outside
+        // the `player_mut` borrow because it needs the session, the adapter and the dispatcher.
+        if auto_skip {
+            if let Some((kind, start)) = fr.ctrl.offer() {
+                log(&format!("marker auto-skip: {kind:?} at {}s", start / 1000));
+            }
+            let _ = activate_ctrl_row(
+                &mut app.player.session,
+                &mut app.adapters.player,
+                fr.ctrl,
+                &mut app.refresh_hubs_at,
+                crate::ui::up_next::BTN_NEXT,
+                &mut app.pages,
+                &mut app.bridge,
+            );
         }
         // While the countdown runs, hold the HUD up — a timer nobody can see is a cut to the
         // next episode out of nowhere. `hud.dismissed` has to clear with it, not just the

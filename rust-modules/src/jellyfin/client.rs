@@ -968,6 +968,46 @@ impl JfClient {
         }
     }
 
+    /// The named scores the MDBList Ratings plugin holds for this item
+    /// (`GET /Plugins/MdbListRatings/CachedByItemId?itemId={id}`).
+    ///
+    /// A 404 is folded to EMPTY for the same reason [`Self::media_segments`] folds its own: the
+    /// route exists only while the plugin is installed, so "no plugin" and "the plugin holds
+    /// nothing for this item" both mean the window shows the two scores the server always has and
+    /// invents no third. A 200 with an empty `ratings` array is the plugin's own answer for an
+    /// item it has not cached (`hasCache: false`), and needs no separate arm.
+    pub(crate) fn mdblist_ratings(&self, item_id: &str) -> Option<super::dto::MdbListCached> {
+        let headers = self.authed_headers()?;
+        let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
+        let reply = http::request(
+            &self.origin,
+            &format!("/Plugins/MdbListRatings/CachedByItemId?itemId={item_id}"),
+            http::Method::Get,
+            &refs,
+            None,
+        )?;
+        if reply.status == 404 {
+            return Some(super::dto::MdbListCached::default());
+        }
+        if !reply.ok() {
+            crate::log(&format!(
+                "jellyfin: GET /Plugins/MdbListRatings/CachedByItemId answered {}",
+                reply.status
+            ));
+            return None;
+        }
+        match serde_json::from_slice(&reply.body) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::log(&format!(
+                    "jellyfin: the MDBList cache answered {} bytes that will not parse - {e}",
+                    reply.body.len()
+                ));
+                None
+            }
+        }
+    }
+
     /// Build an image request path — the Jellyfin counterpart of
     /// `server::Client::image_transcode_path`, and like it BOTH the poster store's LRU key and the
     /// bytes it fetches. `src_path` is the stored image path (`/Items/{id}/Images/Primary?tag=…`,
@@ -2031,5 +2071,57 @@ mod tests {
         client2.authenticate_by_name("demo", "").unwrap();
         assert!(client2.trickplay_info("mv-2").is_none(), "no trickplay generated");
         empty.finish();
+    }
+
+    /// #370: a server WITHOUT the MDBList plugin has no `/Plugins/MdbListRatings` route, and the
+    /// 404 is the client's proof that the capability is absent. Folded to an empty list here so
+    /// the caller cannot tell "no plugin" from "nothing cached" and draw a row for either.
+    #[test]
+    fn a_server_without_the_plugin_answers_the_cache_route_with_nothing() {
+        let server = MockServer::start(vec![(200, AUTH_OK), (404, "")]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let cached = client.mdblist_ratings("mv-1").expect("a 404 is an answer, not a failure");
+        assert!(cached.ratings.is_empty());
+        let reqs = server.finish();
+        assert!(
+            reqs[1].starts_with(
+                "GET /Plugins/MdbListRatings/CachedByItemId?itemId=mv-1 HTTP/1.1"
+            ),
+            "{}",
+            reqs[1]
+        );
+    }
+
+    /// The plugin's own numbers are read leniently on purpose: MDBList hands them through
+    /// converters that accept `7.4` and `"7.4"` and turn `"N/A"` into null, so a value this
+    /// client cannot read must cost that one source, never the payload.
+    #[test]
+    fn the_plugin_scores_parse_from_numbers_and_strings_and_nonsense_is_absent() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (
+                200,
+                r#"{"hasCache":true,"ratings":[
+                    {"source":"imdb","value":7.2,"score":72},
+                    {"source":"trakt","value":"74","score":"74"},
+                    {"source":"metacritic","score":"N/A"},
+                    {"source":"letterboxd"},
+                    {"source":"tmdb","score":null}
+                ]}"#,
+            ),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let cached = client.mdblist_ratings("mv-1").expect("payload parses");
+        assert_eq!(cached.ratings.len(), 5);
+        assert_eq!(cached.ratings[0].score, Some(72.0));
+        assert_eq!(cached.ratings[1].score, Some(74.0));
+        assert_eq!(cached.ratings[2].score, None, "\"N/A\" is no score, not zero");
+        assert_eq!(cached.ratings[3].score, None);
+        assert_eq!(cached.ratings[4].score, None);
+        server.finish();
     }
 }

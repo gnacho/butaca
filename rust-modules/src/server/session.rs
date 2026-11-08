@@ -534,6 +534,17 @@ pub struct Session {
     /// segment (credits detection is a server feature). Skipped on write while at its default.
     #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
     pub(crate) up_next_window_s: Option<i64>,
+    /// **What a server-marked intro or credits segment does when the playhead reaches it**
+    /// (issue #370): `Ask` puts the Skip control up and waits, `Auto` takes it without drawing it.
+    /// Skipped on write while `Ask`, so a session persisted before the field existed round-trips
+    /// byte-identical.
+    ///
+    /// Like [`Self::show_recently_added`], **deliberately absent from the controlled-replay
+    /// initial-state digest** (`auth::owner`'s `write_persisted`): the digest's shape may not move
+    /// while the committed fixtures cannot be re-recorded, and nothing in the replay domain opens
+    /// a player. Absence means `Ask`, which is what every recording describes.
+    #[serde(default, deserialize_with = "de_soft_marker_policy", skip_serializing_if = "MarkerPolicy::is_ask")]
+    pub(crate) marker_policy: MarkerPolicy,
     /// **Whether the Library shows the section's Recently Added shelf** above its grid. Off by
     /// default: the owner asked for the shelf to stop leading Movies and TV Shows, and for the
     /// shelf to be an opt-in setting instead. Install-wide like the playback preferences beside
@@ -649,6 +660,8 @@ struct CanonicalSessionPreferences {
     up_next_policy: UpNextPolicy,
     #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
     up_next_window_s: Option<i64>,
+    #[serde(default, deserialize_with = "de_soft_marker_policy", skip_serializing_if = "MarkerPolicy::is_ask")]
+    marker_policy: MarkerPolicy,
     /// #297: the Library's opt-in Recently Added shelf. Absent means off.
     #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "is_false")]
     show_recently_added: bool,
@@ -696,6 +709,7 @@ impl Default for CanonicalSessionPreferences {
             subtitle_background: 0,
             up_next_policy: UpNextPolicy::default(),
             up_next_window_s: None,
+            marker_policy: MarkerPolicy::default(),
             show_recently_added: false,
             auto_sign_in: false,
             last_library: Vec::new(),
@@ -748,6 +762,7 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         subtitle_background: session.subtitle_background,
         up_next_policy: session.up_next_policy,
         up_next_window_s: session.up_next_window_s,
+        marker_policy: session.marker_policy,
         show_recently_added: session.show_recently_added,
         auto_sign_in: session.auto_sign_in,
         last_library: session.last_library.clone(),
@@ -822,6 +837,7 @@ pub(crate) fn join_canonical(
         subtitle_background: preferences.subtitle_background,
         up_next_policy: preferences.up_next_policy,
         up_next_window_s: preferences.up_next_window_s,
+        marker_policy: preferences.marker_policy,
         show_recently_added: preferences.show_recently_added,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
@@ -856,6 +872,7 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         subtitle_background: preferences.subtitle_background,
         up_next_policy: preferences.up_next_policy,
         up_next_window_s: preferences.up_next_window_s,
+        marker_policy: preferences.marker_policy,
         show_recently_added: preferences.show_recently_added,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
@@ -1008,6 +1025,27 @@ impl UpNextPolicy {
     /// Whether this is the default, which is also the value the file omits.
     pub(crate) fn is_auto(&self) -> bool {
         matches!(self, Self::Auto)
+    }
+}
+
+/// What a server-marked intro or credits segment does when the playhead reaches it. See
+/// [`Session::marker_policy`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MarkerPolicy {
+    /// Put the Skip control up inside the segment and wait for the press. The default, and what
+    /// the app did before the preference existed.
+    #[default]
+    Ask,
+    /// Take the segment without drawing the control: the playhead jumps to its end as soon as it
+    /// begins.
+    Auto,
+}
+
+impl MarkerPolicy {
+    /// Whether this is the default, which is also the value the file omits.
+    pub(crate) fn is_ask(&self) -> bool {
+        matches!(self, Self::Ask)
     }
 }
 
@@ -1802,6 +1840,15 @@ where D: Deserializer<'de> {
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
+/// A marker policy written by a newer build falls back to `Ask`, which is what the app did before
+/// the preference existed: drawing a control nobody asked to have pressed for them would be the
+/// worse failure of the two.
+fn de_soft_marker_policy<'de, D>(d: D) -> Result<MarkerPolicy, D::Error>
+where D: Deserializer<'de> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
 /// The lip-sync offset is a preference too: garbage degrades to 0 ms rather than failing the
 /// enclosing [`Session`].
 /// Absence, null or garbage all mean "not configured", which is the default window rather than
@@ -1979,6 +2026,17 @@ impl Session {
     pub(crate) fn with_up_next_policy(&self, policy: UpNextPolicy) -> Self {
         let mut next = self.clone();
         next.up_next_policy = policy;
+        next
+    }
+
+    /// What a server-marked intro or credits segment does when the playhead reaches it.
+    pub(crate) fn marker_policy(&self) -> MarkerPolicy {
+        self.marker_policy
+    }
+
+    pub(crate) fn with_marker_policy(&self, policy: MarkerPolicy) -> Self {
+        let mut next = self.clone();
+        next.marker_policy = policy;
         next
     }
 
@@ -4909,6 +4967,37 @@ mod up_next_preference_tests {
         assert_eq!(encoded["up_next_window_s"], 45);
         let round: Session = serde_json::from_value(encoded).unwrap();
         assert_eq!(round.up_next_window_s(), 45);
+    }
+}
+
+/// Issue #370: `Session::marker_policy`, whether a server-marked intro or credits segment is
+/// offered or taken. Same contract as the Up Next pair: a value from a newer build softens to
+/// `Ask` (the behaviour every earlier build had, and the one that cannot surprise a viewer by
+/// jumping their picture), and `Ask` is omitted so a session persisted before the field existed
+/// round-trips byte-identical.
+#[cfg(test)]
+mod marker_policy_preference_tests {
+    use super::*;
+
+    #[test]
+    fn the_marker_policy_defaults_softly_and_round_trips() {
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"marker_policy": "future"}),
+            serde_json::json!({"marker_policy": 7}),
+        ] {
+            let session: Session = serde_json::from_value(value).unwrap();
+            assert_eq!(session.marker_policy(), MarkerPolicy::Ask);
+        }
+        let encoded = serde_json::to_value(Session::default()).unwrap();
+        assert!(
+            !encoded.as_object().unwrap().contains_key("marker_policy"),
+            "Ask is the omission: {encoded}"
+        );
+        let encoded = serde_json::to_value(Session::default().with_marker_policy(MarkerPolicy::Auto)).unwrap();
+        assert_eq!(encoded["marker_policy"], "auto");
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        assert_eq!(round.marker_policy(), MarkerPolicy::Auto);
     }
 }
 
