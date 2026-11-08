@@ -541,3 +541,83 @@ impl ImagesScreen {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen(n: usize) -> ImagesScreen {
+        let mut screen = ImagesScreen::new(
+            EntryId(5),
+            ImagesArg {
+                anchor: [
+                    1400.0f32.to_bits(),
+                    120.0f32.to_bits(),
+                    96.0f32.to_bits(),
+                    56.0f32.to_bits(),
+                ],
+            },
+        );
+        screen.images = (0..n)
+            .map(|i| {
+                crate::jellyfin::images::image_for_test(
+                    &format!("https://img.example/{i}.jpg"),
+                    "TheMovieDb",
+                    1000,
+                    1500,
+                )
+            })
+            .collect();
+        screen.total = n as i32;
+        screen.status = ImagesStatus::Ready;
+        screen
+    }
+
+    /// The panel is the GRID's width, it hangs off its control inside the screen's keep-out, and
+    /// every tile is a cell of a six-column lattice with no two cells overlapping.
+    #[test]
+    fn the_grid_hangs_off_its_control_and_its_cells_never_overlap() {
+        use crate::ui::consts::{MARGIN_X, SCR_W};
+        let screen = screen(12);
+        let r = screen.frame();
+        assert!(r.x >= MARGIN_X && r.x + r.w <= SCR_W - MARGIN_X, "inside the horizontal keep-out");
+        assert!(r.w >= PANEL_W - 0.01, "the panel is at least the grid's own width");
+        let first = screen.cell(0, r).expect("the first picture has a cell");
+        let sixth = screen.cell(5, r).expect("the sixth picture closes the first row");
+        let seventh = screen.cell(6, r).expect("the seventh opens the second");
+        assert_eq!(first.y, sixth.y, "six across");
+        assert!(seventh.y > first.y, "the seventh starts a new row");
+        assert!(sixth.x + sixth.w <= r.x + r.w, "the row fits the panel");
+        assert!(screen.cell(12, r).is_none(), "a picture past the page has no cell");
+    }
+
+    /// The lattice walks like every other poster grid: LEFT/RIGHT along a row, UP/DOWN a row at a
+    /// time, and a WALL (not a wrap) at every edge, so a press at the edge cannot hand focus to the
+    /// page behind the surface.
+    #[test]
+    fn the_lattice_walks_and_stops_at_its_edges() {
+        use crate::ui::poster_grid::neighbour;
+        use crate::ui::screen::Dir;
+        assert_eq!(neighbour(0, 12, COLS, Dir::Right), Some(1));
+        assert_eq!(neighbour(0, 12, COLS, Dir::Left), None);
+        assert_eq!(neighbour(0, 12, COLS, Dir::Down), Some(6));
+        assert_eq!(neighbour(6, 12, COLS, Dir::Up), Some(0));
+        assert_eq!(neighbour(0, 12, COLS, Dir::Up), None);
+        assert_eq!(neighbour(11, 12, COLS, Dir::Right), None);
+        assert_eq!(neighbour(11, 12, COLS, Dir::Down), None, "the last row is the floor");
+    }
+
+    /// A bounded page says so, and a complete one says nothing: the line under the grid is the
+    /// difference between "these are the pictures" and "these are SOME of the pictures".
+    #[test]
+    fn a_bounded_page_says_how_many_of_how_many() {
+        let mut screen = screen(12);
+        screen.total = 31;
+        assert!(screen.has_status(), "twelve of thirty-one is a line");
+        screen.total = 12;
+        assert!(!screen.has_status(), "the whole page is not");
+        screen.images.clear();
+        screen.total = 0;
+        assert!(screen.has_status(), "an empty page is a line of its own");
+    }
+}
