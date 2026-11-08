@@ -874,9 +874,14 @@ pub(crate) unsafe fn construct(
     //     dev-token world (ActivateDevBootstrap) is gone with the DevServer authority.
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
+    // A live boot reads the session file with minting enabled, not a default `Session`. The
+    // default carries an empty `client_id`, and an empty `client_id` is what makes every
+    // preference write refuse itself: the file was therefore never created on a real install,
+    // and every preference a viewer picked came back factory on the next launch (#358). `load`
+    // mints the id, seeds the product defaults and commits the first file.
     let session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
-        None => crate::server::session::Session::default(),
+        None => crate::server::session::load(),
     };
     #[cfg(not(test))]
     crate::i18n::initialize(session.language, controlled);
@@ -1555,17 +1560,6 @@ pub(crate) unsafe fn construct(
             app.t0 = ms;
             app.loop_t = ms;
             app.last_input = ms;
-        }
-    } else if let Some(deferred) = deferred {
-        // The minted client id reaches disk on the LIVE path too. Until this arm existed only the
-        // controlled constructor applied the deferred capture, so a real install kept the id in
-        // memory and never wrote the session file: every preference write is a read-modify-write
-        // that refuses an empty `client_id`, which is why a picked subtitle size was never
-        // remembered (#358). A refusal here is a lost race, not a boot failure — the same
-        // distinction `apply_deferred_capture` makes for the controlled path.
-        match deferred.apply() {
-            Ok(()) => log("bootstrap: session persistence applied"),
-            Err(reason) => log(&format!("bootstrap: session persistence refused — {reason}")),
         }
     }
     // **ROOT THE TREE AT THE BOOT PAGE.** The `route` chosen above used to be a field of `App`

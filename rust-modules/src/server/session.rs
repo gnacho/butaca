@@ -2436,7 +2436,6 @@ fn cached_arm(state: std::sync::Arc<ReadState>, now: std::time::Instant) -> Cach
 }
 
 /// A cache hit as of `now`, if one exists. Never takes [`IO`].
-#[cfg_attr(not(test), expect(dead_code))]
 fn cached_at(now: std::time::Instant) -> Option<std::sync::Arc<ReadState>> {
     match &*CACHE.lock().unwrap_or_else(|e| e.into_inner()) {
         Cached::Unloaded | Cached::Revoked => None,
@@ -2451,7 +2450,6 @@ fn cached_at(now: std::time::Instant) -> Option<std::sync::Arc<ReadState>> {
 /// already carry, so a cache-filling read is covered by the scrubber exactly as an uncached one
 /// always was. The retry anchor is at least `now` and at least the read's completion time, so a
 /// slow read cannot consume its own cache lifetime before the next frame gets to use it.
-#[cfg_attr(not(test), expect(dead_code))]
 fn refresh_locked(now: std::time::Instant) -> std::sync::Arc<ReadState> {
     refresh_if_current_locked(now, None)
 }
@@ -3393,7 +3391,6 @@ fn publish_identities(s: &Session) {
 /// Load the persisted session, ensuring a stable `client_id` exists (generated + saved on first
 /// boot). Never returns an error — a missing/corrupt file degrades to a fresh, logged-out session.
 /// Falls back to the pre-relocation path once and re-saves at the new one (migration).
-#[cfg_attr(not(test), expect(dead_code))]
 pub fn load() -> Session {
     load_with_id(new_client_id)
 }
@@ -3466,7 +3463,6 @@ pub(crate) fn load_capturing_entropy() -> (Session, Option<[u8; 16]>, DeferredLo
 /// read-modify-write, so a save is never built from a read that was not taken in the same `IO`
 /// critical section as the write it might cause — the no-lost-update invariant `IO`'s own doc
 /// states, which caching must not weaken.
-#[cfg_attr(not(test), expect(dead_code))]
 fn established(read: &ReadState) -> bool {
     matches!(
         read,
@@ -3474,7 +3470,6 @@ fn established(read: &ReadState) -> bool {
     )
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 fn load_with_id(mint: impl FnOnce() -> String) -> Session {
     if cache_revoked() { return Session::default(); }
     let now = std::time::Instant::now();
