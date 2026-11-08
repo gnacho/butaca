@@ -906,6 +906,7 @@ pub(crate) unsafe fn construct(
     crate::route::restore_lip_sync_offset_ms(session.lip_sync_offset_ms());
     crate::route::restore_up_next_policy(session.up_next_policy());
     crate::route::restore_up_next_window_s(session.up_next_window_s());
+    crate::route::restore_marker_policy(session.marker_policy());
     crate::route::restore_show_recently_added(session.show_recently_added());
     crate::route::restore_series_tracks(session.series_tracks.as_slice());
     restore_subtitle_appearance(&session);

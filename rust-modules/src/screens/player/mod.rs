@@ -115,6 +115,16 @@ pub(crate) enum HudPolicy {
     Hidden,
 }
 
+/// **PURE: may a freshly offered segment be taken without being shown** (issue #370)?
+///
+/// Three facts and no more. The offer must be NEW: an offer already on the row is one the viewer
+/// is looking at, and re-taking it every frame would be a seek loop. No surface may be up: they
+/// opened a panel over this segment, and jumping the picture out from under it is not what "skip
+/// automatically" means. And the policy must say `Auto`; `Ask` is the whole pre-#370 behaviour.
+pub(crate) fn takes_marker_automatically(fresh: bool, hud: HudPolicy, policy_auto: bool) -> bool {
+    fresh && hud == HudPolicy::Normal && policy_auto
+}
+
 pub(crate) struct PlayerScreen {
     entry: EntryId,
     /// The transport HUD's timer, cursor, dismissal and control-row edges.
@@ -432,6 +442,14 @@ impl PlayerScreen {
             self.hud.dismiss();
         }
         self.hud_policy = policy;
+    }
+
+    /// **The policy this frame is drawing under.** Read by `app/run.rs` before it decides whether
+    /// a freshly offered segment may be taken automatically (#370): with a surface up, the viewer
+    /// is reading something, and jumping the picture out from under it is not what "skip
+    /// automatically" means.
+    pub(crate) fn hud_policy(&self) -> HudPolicy {
+        self.hud_policy
     }
 
     /// Does the caption block lift clear of the transport this frame? While the transport is up,
@@ -1634,6 +1652,35 @@ mod render_residency_tests {
 /// rather than a clean failure (`ok_elsewhere_toggles_play_pause` asked for the quality ladder).
 /// A screen that reads a crate global from its input path owes the lock to every test that drives
 /// that path.
+#[cfg(test)]
+mod marker_auto_skip_tests {
+    use super::*;
+
+    /// #370: `Auto` is the only policy that takes a segment without offering it, and even then
+    /// only a FRESH offer with no surface being read over the picture. Each of the three facts
+    /// can veto on its own, which is what this pins.
+    #[test]
+    fn only_a_fresh_offer_with_no_surface_up_is_taken_automatically() {
+        let _g = crate::testlock::serial();
+        crate::route::restore_marker_policy(crate::server::session::MarkerPolicy::Ask);
+        assert!(!crate::route::marker_auto_skips(), "Ask is the shipped default");
+        assert!(!takes_marker_automatically(true, HudPolicy::Normal, false));
+
+        crate::route::restore_marker_policy(crate::server::session::MarkerPolicy::Auto);
+        assert!(crate::route::marker_auto_skips());
+        assert!(takes_marker_automatically(true, HudPolicy::Normal, true));
+        // An offer already on the row is one the viewer is looking at: re-taking it every frame
+        // would be a seek loop, not a skip.
+        assert!(!takes_marker_automatically(false, HudPolicy::Normal, true));
+        // A panel over the picture holds the offer as an offer.
+        assert!(!takes_marker_automatically(true, HudPolicy::Lifted, true));
+        assert!(!takes_marker_automatically(true, HudPolicy::Hidden, true));
+
+        // Leave the process copy where every other test expects it.
+        crate::route::restore_marker_policy(crate::server::session::MarkerPolicy::Ask);
+    }
+}
+
 #[cfg(test)]
 mod step_ladder_tests {
     use super::*;

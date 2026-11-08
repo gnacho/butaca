@@ -25,7 +25,11 @@ pub(crate) const SHAPE: &str = "PreferencesV2{kind:u8,picker:u8,selection:u32,bu
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind { Playback }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow, SubtitleSize, SubtitlePosition, SubtitleBackground }
+enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow, SubtitleSize, SubtitlePosition, SubtitleBackground,
+    /// #370: ask or auto-skip for server-marked intro/credits segments. LAST on purpose: the
+    /// variant index rides the page's logical state (`picker as u8`), so appending keeps every
+    /// index a recording already knows.
+    SkipMarkers }
 impl Field {
     fn title(self) -> &'static str { match self {
         Self::Quality => crate::i18n::msg::settings_playback_quality(), Self::DirectPlay => crate::i18n::msg::settings_playback_direct_play(),
@@ -35,11 +39,13 @@ impl Field {
         Self::SubtitleSize => crate::i18n::msg::settings_playback_subtitle_size(),
         Self::SubtitlePosition => crate::i18n::msg::settings_playback_subtitle_position(),
         Self::SubtitleBackground => crate::i18n::msg::settings_playback_subtitle_background(),
+        Self::SkipMarkers => crate::i18n::msg::settings_playback_skip_markers(),
     }}
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::server::session::UpNextPolicy), Window(i64),
-    SubtitleSize(u8), SubtitlePosition(u8), SubtitleBackground(u8) }
+    SubtitleSize(u8), SubtitlePosition(u8), SubtitleBackground(u8),
+    Markers(crate::server::session::MarkerPolicy) }
 #[derive(Clone)]
 enum Action { Open(Field), Pick(Value), ToggleRecentlyAdded }
 struct State {
@@ -157,6 +163,7 @@ impl PreferencesPage {
             Value::SubtitleSize(step) => PreferenceCmd::SubtitleScale { step, reply },
             Value::SubtitlePosition(step) => PreferenceCmd::SubtitlePosition { step, reply },
             Value::SubtitleBackground(step) => PreferenceCmd::SubtitleBackground { step, reply },
+            Value::Markers(policy) => PreferenceCmd::MarkerPolicy { policy, reply },
         };
         self.pending = Some(Pending::Local(rx)); self.state.busy = true;
         self.state.status = crate::i18n::msg::settings_playback_saving().into();
@@ -172,6 +179,7 @@ impl PreferencesPage {
             Field::SubtitleSize => Value::SubtitleSize(crate::route::subtitle_scale_step()),
             Field::SubtitlePosition => Value::SubtitlePosition(crate::route::subtitle_position_step()),
             Field::SubtitleBackground => Value::SubtitleBackground(crate::route::subtitle_background_step()),
+            Field::SkipMarkers => Value::Markers(crate::route::marker_policy()),
         }
     }
     fn options(&self, field: Field) -> Vec<(String, Value)> {
@@ -224,6 +232,10 @@ impl PreferencesPage {
                 crate::i18n::msg::settings_playback_subtitle_background_half(),
                 crate::i18n::msg::settings_playback_subtitle_background_solid(),
             ].into_iter().enumerate().map(|(i, label)| (label.into(), Value::SubtitleBackground(i as u8))).collect(),
+            Field::SkipMarkers => [
+                crate::server::session::MarkerPolicy::Ask,
+                crate::server::session::MarkerPolicy::Auto,
+            ].into_iter().map(|p| (marker_label(p).into(), Value::Markers(p))).collect(),
         }
     }
     fn value_label(&self, field: Field) -> String {
@@ -249,6 +261,10 @@ impl PreferencesPage {
             Kind::Playback => {
                 let mut f = vec![Field::Quality, Field::DirectPlay, Field::LipSync, Field::UpNext];
                 if crate::route::up_next_offered() { f.push(Field::UpNextWindow); }
+                // #370: the Skip control's own policy sits with the transport rows it governs,
+                // ahead of the subtitle look. The controlled replay never opens this page, so a
+                // row here moves no recorded stop.
+                f.push(Field::SkipMarkers);
                 // The look of a subtitle track the app composes. Tail position: these never
                 // displace the transport rows a person reaches for while watching.
                 f.push(Field::SubtitleSize);
@@ -364,7 +380,8 @@ impl PreferencesPage {
         match value {
             Value::Quality(_) | Value::DirectPlay(_) | Value::LipSync(_)
             | Value::UpNext(_) | Value::Window(_) | Value::SubtitleSize(_)
-            | Value::SubtitlePosition(_) | Value::SubtitleBackground(_) => self.save_local(value, fx),
+            | Value::SubtitlePosition(_) | Value::SubtitleBackground(_)
+            | Value::Markers(_) => self.save_local(value, fx),
         }
     }
     fn poll(&mut self) -> bool {
@@ -396,6 +413,15 @@ fn up_next_label(policy: crate::server::session::UpNextPolicy) -> &'static str {
         crate::server::session::UpNextPolicy::Auto => crate::i18n::msg::settings_playback_up_next_auto(),
         crate::server::session::UpNextPolicy::Ask => crate::i18n::msg::settings_playback_up_next_ask(),
         crate::server::session::UpNextPolicy::Off => crate::i18n::msg::settings_playback_up_next_off(),
+    }
+}
+
+/// The skip picker's row label (#370). `Ask` is spelled as the promise it makes: the control
+/// appears and waits.
+fn marker_label(policy: crate::server::session::MarkerPolicy) -> &'static str {
+    match policy {
+        crate::server::session::MarkerPolicy::Ask => crate::i18n::msg::settings_playback_skip_markers_ask(),
+        crate::server::session::MarkerPolicy::Auto => crate::i18n::msg::settings_playback_skip_markers_auto(),
     }
 }
 

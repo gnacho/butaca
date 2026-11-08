@@ -70,6 +70,8 @@ pub(crate) enum PreferenceCmd {
     SubtitleBackground { step: u8, reply: std::sync::mpsc::Sender<bool> },
     UpNext { policy: crate::server::session::UpNextPolicy, reply: std::sync::mpsc::Sender<bool> },
     UpNextWindow { seconds: i64, reply: std::sync::mpsc::Sender<bool> },
+    /// What a server-marked intro or credits segment does when the playhead reaches it (#370).
+    MarkerPolicy { policy: crate::server::session::MarkerPolicy, reply: std::sync::mpsc::Sender<bool> },
     Language { language: crate::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
 }
 

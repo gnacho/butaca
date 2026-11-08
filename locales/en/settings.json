@@ -1093,5 +1093,17 @@
   "settings.root.jellyfin_copy": {
     "value": "Manage this television and your Jellyfin servers. Everything stays on your local network: no account, no telemetry, nothing leaves it.",
     "description": "Settings root left-column intro on the Jellyfin flavor: settings.root.jellyfin_copy"
+  },
+  "settings.playback.skip_markers": {
+    "value": "Skip intro and credits",
+    "description": "Settings, consent or sign-in UI: settings.playback.skip_markers"
+  },
+  "settings.playback.skip_markers_ask": {
+    "value": "Ask me",
+    "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_ask"
+  },
+  "settings.playback.skip_markers_auto": {
+    "value": "Skip automatically",
+    "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_auto"
   }
 }

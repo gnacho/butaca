@@ -4675,11 +4675,48 @@ pub(crate) fn up_next_policy() -> crate::server::session::UpNextPolicy {
 pub(crate) fn up_next_auto_advances() -> bool {
     matches!(up_next_policy(), crate::server::session::UpNextPolicy::Auto)
 }
-
 /// Whether the card is offered at all. Reads the policy once so the draw, the hit map and the
 /// countdown cannot disagree within a frame.
 pub(crate) fn up_next_offered() -> bool {
     !matches!(up_next_policy(), crate::server::session::UpNextPolicy::Off)
+}
+
+/// **What a server-marked intro or credits segment does when the playhead reaches it** (issue
+/// #370). A process-wide atomic beside [`UP_NEXT_POLICY`] for the same reason: the player reads it
+/// while drawing the control row, and a lock there would be a lock in the draw path.
+static MARKER_POLICY: AtomicU8 = AtomicU8::new(0);
+
+pub(crate) fn marker_policy() -> crate::server::session::MarkerPolicy {
+    match MARKER_POLICY.load(Ordering::Relaxed) {
+        1 => crate::server::session::MarkerPolicy::Auto,
+        _ => crate::server::session::MarkerPolicy::Ask,
+    }
+}
+
+/// Whether a segment the playhead enters is taken without being offered. `false` is the whole
+/// pre-#370 behaviour: the Skip control appears and waits for the press.
+pub(crate) fn marker_auto_skips() -> bool {
+    matches!(marker_policy(), crate::server::session::MarkerPolicy::Auto)
+}
+
+/// Restore the persisted preference without writing it back, exactly as
+/// [`restore_up_next_policy`].
+pub(crate) fn restore_marker_policy(policy: crate::server::session::MarkerPolicy) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the marker policy (restore_marker_policy)");
+    MARKER_POLICY.store(match policy {
+        crate::server::session::MarkerPolicy::Ask => 0,
+        crate::server::session::MarkerPolicy::Auto => 1,
+    }, Ordering::Relaxed);
+}
+
+/// Blocking persistence seam; Settings dispatches it on the storage worker.
+pub(crate) fn set_marker_policy(policy: crate::server::session::MarkerPolicy) -> bool {
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_marker_policy(policy)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_marker_policy(policy); }
+    saved
 }
 
 pub(crate) fn up_next_window_s() -> i64 {
