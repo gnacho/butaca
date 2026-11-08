@@ -26,9 +26,15 @@ pub(crate) const POSTER_Y: f32 = HERO_TOP;
 /// (title logo, identity, ratings, synopsis, people, actions) starts here, so the poster never
 /// shares ink with the text.
 pub(crate) const HERO_TEXT_X: f32 = MARGIN_X + POSTER_W + POSTER_GAP;
-/// The title band's BOTTOM edge — its anchor (`HeroLogo` places by the band's foot). Derived from
-/// [`HERO_TOP`] and the hero rung's ceiling, so the band's head can only be the poster's head:
-/// `hero_logo::band_h(Hero)` is `theme::logo::HERO_H_MAX`, a constant for exactly this reason.
+/// The title band's BOTTOM edge — its anchor (`HeroLogo` places by the band's foot), and the line
+/// the identity row hangs under.
+///
+/// **The rung's ceiling, so the band's HEAD is the poster's head** (the owner's "alinear el logo
+/// con la carátula"): the two columns start on one line. The title's own ink stays at the band's
+/// foot rather than at its head, and that is not negotiable: the hero's scrim reaches full strength
+/// only at [`crate::ui::widgets`]' knee, and a `size::HERO` run moved up to 282 measured 1.41:1 over
+/// bright artwork against the design system's 3:1 floor. A clearLogo is placed by the same foot and
+/// spills upward as paint, which is what makes the alignment visible for the art case.
 pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + theme::logo::HERO_H_MAX;
 /// The cast and crew band, which is now a BAND under the facts row rather than a column beside the
 /// copy. A 560-wide column at the right edge was what capped the copy at 943: the two shared a
@@ -161,7 +167,7 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
     let tall = theme::logo::COMPACT_H_MAX;
     out.push(("detail pinned compact title (tallest logo)",
         Rect::new(MARGIN_X, COMPACT_TITLE_BOT - tall, SCR_W - 2.0 * MARGIN_X, tall)));
-    out.push(("detail hero text column", Rect::new(HERO_TEXT_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0)));
+    out.push(("detail hero text column", Rect::new(HERO_TEXT_X, HERO_TOP, HERO_TEXT_W, 200.0)));
     out.push(("detail hero poster", Rect::new(MARGIN_X, POSTER_Y, POSTER_W, POSTER_H)));
     out.push(("detail people band", Rect::new(HERO_TEXT_X, 700.0, HERO_TEXT_W, 100.0)));
     out.push(("detail below-hero flow, at rest", Rect::new(MARGIN_X, TOP_MARGIN, SCR_W - 2.0 * MARGIN_X, 100.0)));
@@ -327,7 +333,7 @@ mod tests {
             ),
             (
                 "detail hero text column",
-                Rect::new(HERO_TEXT_X, TITLE_BOTTOM - 200.0, HERO_TEXT_W, 200.0),
+                Rect::new(HERO_TEXT_X, HERO_TOP, HERO_TEXT_W, 200.0),
             ),
             (
                 "detail hero poster",

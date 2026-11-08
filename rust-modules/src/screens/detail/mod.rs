@@ -311,7 +311,7 @@ struct LayoutStamp {
 }
 
 impl LayoutStamp {
-    fn of(d: &Detail) -> Self {
+    fn of(d: &Detail, synopsis_open: bool) -> Self {
         use std::hash::{Hash, Hasher};
         let hero = hero::hero_episode(d);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -334,6 +334,11 @@ impl LayoutStamp {
         }
         if !d.ratings.is_empty() {
             flags |= 2;
+        }
+        // The accordion's open state changes the synopsis' measured height, so it is part of the
+        // stamp: a cached layout measured at five lines must not be served after the press.
+        if synopsis_open {
+            flags |= 128;
         }
         Self {
             episodes: d.episodes.as_ptr() as usize,
@@ -778,7 +783,7 @@ impl DetailScreen {
                 return c;
             }
         }
-        let stamp = LayoutStamp::of(d);
+        let stamp = LayoutStamp::of(d, self.synopsis_open);
         if let Some(c) = self.layout.get() {
             if c.stamp == stamp {
                 return c;
@@ -2320,6 +2325,8 @@ impl DetailScreen {
                 None,
             );
         }
+        // The band's head is the poster's head (`TITLE_BOTTOM`'s doc has the measurement that kept
+        // the title's own ink where the scrim can carry it).
         HeroLogo::new(self.sid, &rk, title, LogoRung::lerp(LogoRung::Hero, LogoRung::Compact, t))
             .draw(logo_alpha, band, cx.measure);
 
@@ -3550,6 +3557,12 @@ impl DetailScreen {
         let local = self.locate(elem, meta).and_then(Located::local_key).unwrap_or(elem);
         match self.locate(elem, meta) {
             Some(Located::Hero(ctl)) => self.activate_hero(ctl, cx, fx, meta),
+            // The accordion is one-way: the press opens the whole blurb and the mark leaves with
+            // it, so there is no second state to word or to return to.
+            Some(Located::Synopsis) => {
+                self.synopsis_open = true;
+                fx.invalidate(Provenance::Input);
+            }
             Some(Located::Season(i)) => {
                 // A direct press skips the dwell entirely — pre-loading `season_settle` past the
                 // threshold fires on the very NEXT `tick` rather than after a full `SETTLE_S`.
