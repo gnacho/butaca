@@ -389,6 +389,25 @@ fn strip_pointer_stops_use_drawn_geometry_and_stable_keys() {
     assert_eq!(bounds(stop.clip), bounds(clip));
 }
 
+/// Rule 11 on the CHROME (#359): a reachable strip tab hovers, so a pointer over the tab bar parks
+/// that tab and it lights in the very face UP gives it. The tab is the CONTAINER's stop, not the
+/// page's, and the folded page's gate above is what keeps a pointer from re-seating a page the
+/// arrows cannot leave.
+#[test]
+fn a_pointer_over_a_reachable_strip_tab_parks_it() {
+    let (mut d, mut rig) = boot(FixtureArg::Home);
+    let entry = d.nav.top_page().unwrap().id;
+    d.nav.tabs.strip = vec![StripMember::new(STRIP_BASE + 3, Rect::new(100.0, 10.0, 160.0, 48.0))];
+    d.draw(&mut rig, true);
+    assert_ne!(elem(&d), Some(STRIP_BASE + 3), "the pointer starts elsewhere");
+    d.frame(&mut rig, tick(16), vec![pointer(150.0, 30.0, tick(16))], vec![], &mut NoTap);
+    assert_eq!(
+        d.focus(),
+        Some(FocusKey { entry, elem: STRIP_BASE + 3 }),
+        "hovering the tab parks the tab, exactly as UP does"
+    );
+}
+
 #[test]
 fn a_folded_page_keeps_visible_strip_clicks_without_hover_reseating() {
     let (mut d, mut rig) = boot(FixtureArg::Snapped);
