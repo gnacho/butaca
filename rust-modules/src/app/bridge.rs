@@ -3180,6 +3180,10 @@ mod search_owned_tests;
 mod detail_panel_tests;
 
 #[cfg(test)]
+#[path = "poster_preplay_tests.rs"]
+mod poster_preplay_tests;
+
+#[cfg(test)]
 #[path = "surface_navigation_tests.rs"]
 mod surface_navigation_tests;
 
