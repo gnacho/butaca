@@ -237,3 +237,11 @@ configured servers the page renders the two static rows, the DOWN step lands on 
 row, and neither press emits a loop effect. The alphabet gains the mock's shapes (32-hex GUIDs,
 image routes, `jf.*` hub ids, ratings and codecs, hub/episode/duration/date/audio-label
 formats) recorded under `_sources.jellyfin_shapes`.
+
+**Rebaselining a shape.** `python3 tests/replay_fixtures.py --rebase-shape --reason <token>`
+rewrites each fixture's `state_fp` and appends a `shape_history` entry, and keeps the rewrite only
+if the strict replay still grades `SAME` in both modes (a refused rewrite restores the manifest
+byte for byte). Both halves of that entry must belong to `ALPHABET.json`: the `from`/`to` values are
+the `0x`-prefixed 16-hex spelling `ui/rec.rs` prints, and `--reason` is a TOKEN naming what moved
+(the screen or feature word, e.g. `preplay`), never prose — the explanation belongs in the commit
+message, because a committed fixture may not carry arbitrary strings.

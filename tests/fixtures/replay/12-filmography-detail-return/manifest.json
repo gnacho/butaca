@@ -171,7 +171,7 @@
  "shape_history": [
   {
    "from": "0x4857d0f3323b78ca",
-   "reason": "pre-playback window (#367): ARG_SHAPE gains PrePlayback{restart} and screens::preplay_panel::SHAPE joins the inventory; additive for every recorded route",
+   "reason": "preplay",
    "to": "0x75eb261dc92a0f22"
   }
  ],
