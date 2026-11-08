@@ -4,7 +4,7 @@
 //! A `Style::Compact` surface on the shared `ModalStack`, anchored under the control that opened it,
 //! exactly as `screens::item_menu` and `screens::alt_sources` are: a `TableView` on the panel
 //! ground, rows of `[leading glyph] [label]`, the focused row a filled pill. The window stays on
-//! screen behind it — the menu is about the item the window describes, and closing the window to
+//! screen behind it, the menu is about the item the window describes, and closing the window to
 //! ask about the item would be the wrong way round.
 //!
 //! **What is here, and what is deliberately not.** Two entries, and the absence of the other two is
@@ -13,7 +13,7 @@
 //! * **Media information** opens `ContentPanel::Tracks`, the read-only Track-information sheet the
 //!   detail page already presents. It is the entry that proves the menu, because it needs no write.
 //! * **Identify** opens `ContentPanel::Identify`, the provider-match list. Jellyfin's lookup routes
-//!   cover `Movie` and not `Episode`, so the row exists **only for a movie** — see [`identify_offered`].
+//!   cover `Movie` and not `Episode`, so the row exists **only for a movie**, see [`identify_offered`].
 //! * **Edit images** and **Edit subtitles** are NOT here. Both are uploads: they take a file the
 //!   viewer chooses, and a webOS television has no file picker this app can reach, so there is no
 //!   source for the bytes. An entry that cannot work is a lie the viewer discovers by pressing it,
@@ -26,7 +26,7 @@
 //!
 //! The window that opens this menu is presented over the item's own page and describes
 //! `metadata::current()` (`screens::preplay_panel`'s module doc has the full argument). The menu is
-//! one more surface on that same stack, so the loaded item IS the item the menu is about — the fact
+//! one more surface on that same stack, so the loaded item IS the item the menu is about, the fact
 //! `screens::tracks_panel` and `screens::about_panel` already rely on. The argument therefore
 //! carries only where it hangs.
 
@@ -52,7 +52,7 @@ use crate::ui::{theme, Rect};
 const PANEL_W: f32 = 460.0;
 /// The pinned ~20px corner radius, the item menu's and the alt-sources panel's.
 const PANEL_RAD: f32 = 20.0;
-/// How far the panel rises into place — the one number the whole panel family shares. The
+/// How far the panel rises into place, the one number the whole panel family shares. The
 /// container's appear spring drives it (`DrawFrame::page_alpha` IS the surface's spring).
 const RISE: f32 = crate::ui::popover::Popover::RISE;
 
@@ -67,7 +67,7 @@ pub(crate) const SHAPE: [&str; 2] = [
 /// What the container is asked to present.
 ///
 /// `host` is the pre-playback entry the menu hangs off; it rides on the argument rather than being
-/// looked up, for `AltSourcesArg`'s reason — the entry outlives any one frame's idea of what is on
+/// looked up, for `AltSourcesArg`'s reason, the entry outlives any one frame's idea of what is on
 /// top. `anchor` is the three-dot control's rest rectangle, bit-preserving so a canonical argument
 /// needs no float equality.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -92,16 +92,16 @@ impl LogicalState for PrePlaybackMenuArg {
 /// re-point a press at another action.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Action {
-    /// *Media information* — the read-only Track-information sheet.
+    /// *Media information*, the read-only Track-information sheet.
     MediaInfo,
-    /// *Identify* — the metadata providers' candidate list.
+    /// *Identify*, the metadata providers' candidate list.
     Identify,
 }
 
 /// **Does this item offer Identify?** Only a MOVIE does, and that is the server's shape rather than
 /// a choice of this client: Jellyfin's remote-search routes exist for `Movie`, `Series`, `BoxSet`,
 /// `MusicAlbum`, `MusicArtist`, `MusicVideo`, `Person`, `Trailer` and `Book`, and for no other leaf.
-/// An EPISODE — the other leaf this window can stand on — has no lookup route of its own, and its
+/// An EPISODE, the other leaf this window can stand on, has no lookup route of its own, and its
 /// match is its series': replacing that from an episode's window would be a write on a different
 /// item than the one on screen. So the row is absent rather than present-and-failing.
 pub(crate) fn identify_offered(d: &Detail) -> bool {
@@ -134,7 +134,7 @@ fn label_for(action: Action) -> &'static str {
     }
 }
 
-/// Under the control when there is room, above it when there is not — never over it, so the control
+/// Under the control when there is room, above it when there is not, never over it, so the control
 /// that opened the panel stays readable beside its own list. Right-aligned with the control: this
 /// menu hangs off a corner control, which is `widgets::anchored_menu`'s right-aligned case.
 pub(crate) fn panel_at(a: Rect, content_h: f32) -> Rect {
@@ -144,7 +144,7 @@ pub(crate) fn panel_at(a: Rect, content_h: f32) -> Rect {
 pub(crate) struct PrePlaybackMenuScreen {
     entry: EntryId,
     arg: PrePlaybackMenuArg,
-    /// The actions the table was built from — the rebuild stamp, and the index→action map.
+    /// The actions the table was built from, the rebuild stamp, and the index→action map.
     actions: Vec<Action>,
     pub(crate) table: TableView,
 }
@@ -269,7 +269,7 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + crate::screens:
 }
 
 /// A single-column `Focusable` over the table's own cursor, `AltSourcesScreen`'s shape: one
-/// `GroupKind::Column` of `Bare` elements (OK activates on the down edge — there is nothing to
+/// `GroupKind::Column` of `Bare` elements (OK activates on the down edge, there is nothing to
 /// hold), `EdgeRule::Stop` on every side, and `place`/`neighbour` read straight off `TableView`.
 impl<H: AppLike<Memory = crate::screens::registry::PageMemory>> Focusable<H> for PrePlaybackMenuScreen {
     fn groups(&self, _cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
@@ -359,7 +359,7 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + crate::screens:
         None
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, H>) {}
-    /// The modal dim, asked for rather than drawn — `AltSourcesScreen::scrim`'s contract: the
+    /// The modal dim, asked for rather than drawn, `AltSourcesScreen::scrim`'s contract: the
     /// window behind recedes and stays readable, because the menu is about the item it describes.
     fn scrim(&self) -> Scrim {
         Scrim::dim(theme::underlay::DIM_PANEL)
@@ -440,7 +440,7 @@ mod tests {
     }
 
     /// The panel hangs UNDER its control and never over it, is right-aligned with it, and stays
-    /// inside the screen's keep-out — the placement rules, graded without a surface.
+    /// inside the screen's keep-out, the placement rules, graded without a surface.
     #[test]
     fn the_panel_hangs_under_its_control_inside_the_keep_out() {
         use crate::ui::consts::{SCR_H, SCR_W};

@@ -161,7 +161,8 @@ pub enum Icon {
     /// A horizontal ellipsis — "more options". The player transport's third control disc, which
     /// opens the overflow popover (`ui/more_menu.rs`). Overflow, so it sits at the END of the row.
     More,
-    /// The magnifier — the only pill in the shared top strip that is a MARK instead of a word    /// (`ui_kits/tv-app/SearchScreen.jsx`). Drawn at 1.15× the strip's own type rung, inked exactly as a
+    /// The magnifier — the only pill in the shared top strip that is a MARK instead of a word
+    /// (`ui_kits/tv-app/SearchScreen.jsx`). Drawn at 1.15× the strip's own type rung, inked exactly as a
     /// label would be, so it reads as one of the row rather than as an ornament on it.
     ///
     /// ONE `<path>`, two subpaths (the ring as a pair of half-arcs, then the handle), both STROKED
@@ -173,10 +174,10 @@ pub enum Icon {
     Search,
     /// The Settings gear, one stroked path with its centre circle as a subpath.
     Settings,
-    /// The empty face of the audience score's star — the SCALE a filled star is read against, and
+    /// The empty face of the audience score's star, the SCALE a filled star is read against, and
     /// the reason a row of them says "out of five". One five-point polygon, see `star.svg`.
     Star,
-    /// The filled face of [`Icon::Star`] — the same polygon filled. The half star is this mask
+    /// The filled face of [`Icon::Star`], the same polygon filled. The half star is this mask
     /// clipped at the draw site, never a third asset.
     StarFill,
     // ---- review-score marks (the detail hero's ratings row) ----

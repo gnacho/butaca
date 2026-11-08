@@ -100,7 +100,7 @@ pub(crate) struct MetadataState {
     /// doc.
     skipped: Vec<(MarkerKind, i64)>,
     alt: AltStore,
-    /// The Identify surface's data for the loaded item (#369) — see [`IdentifyState`].
+    /// The Identify surface's data for the loaded item (#369), see [`IdentifyState`].
     identify: IdentifyState,
 }
 
@@ -1141,7 +1141,7 @@ pub(crate) enum RatingArt {
     /// shown under a generic caption rather than attributed to IMDb or TMDB by guess (issue
     /// #317).
     Community,
-    /// **The critics' score** (`CriticRating`, 0-100) — the second axis, and the one provider
+    /// **The critics' score** (`CriticRating`, 0-100), the second axis, and the one provider
     /// this backend CAN name: Jellyfin fills that field from OMDb's Rotten Tomatoes entry and from
     /// nothing else, so the caption states the source the number actually came from.
     ///
@@ -2592,7 +2592,7 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
         }
         #[cfg(test)]
         MetadataCmd::AltInstall { sid, rk, copies } => alt_install(state, sid, &rk, copies),
-        // Identify (#369): the lookup and the apply are requests, not writes — they spawn a worker
+        // Identify (#369): the lookup and the apply are requests, not writes, they spawn a worker
         // and land through `pump_identify`. `true` because the surface's phase moved either way.
         MetadataCmd::IdentifySearch { sid, rk } => {
             request_identify(state, adapter, sid, &rk);
@@ -3418,7 +3418,7 @@ mod marker_tests {
 // The metadata-provider match for the LOADED item: the candidates the server's providers offered,
 // and the phase of the one write this client can perform on an item's metadata. It sits beside
 // `current` because that is the item it describes, and it is addressed by `(sid, rk)` for `alt`'s
-// reason — an answer landing one round trip later must not be installed onto whatever page holds
+// reason, an answer landing one round trip later must not be installed onto whatever page holds
 // the same ratingKey by then.
 //
 // The two calls themselves (and the candidate model) are `crate::jellyfin::identify`'s; this is
@@ -3436,7 +3436,7 @@ pub(crate) enum IdentifyStatus {
     /// The lookup is out. The surface says so rather than drawing an empty list, which would read
     /// as "no match" before the server has answered.
     Searching,
-    /// The list landed — possibly EMPTY, which the surface words as "no match found".
+    /// The list landed, possibly EMPTY, which the surface words as "no match found".
     Ready,
     /// The lookup itself failed (transport, auth, or an answer that would not parse).
     Failed,
@@ -3444,7 +3444,7 @@ pub(crate) enum IdentifyStatus {
     Applying,
     /// The server took the apply; the item is being re-fetched.
     Applied,
-    /// The server refused the apply — most often an account without elevation, which
+    /// The server refused the apply, most often an account without elevation, which
     /// `POST /Items/RemoteSearch/Apply/{itemId}` requires.
     ApplyFailed,
 }
@@ -3618,7 +3618,7 @@ fn request_identify_apply_with_spawn(
 
 /// MAIN THREAD, once a frame, ROUTE-UNCONDITIONAL (the surface that asked may be gone by the time
 /// the answer lands, and what it lands in is the store's state, not a screen's). Answers whether a
-/// reader would see any difference — the Metadata store's notice folds it exactly as the detail,
+/// reader would see any difference, the Metadata store's notice folds it exactly as the detail,
 /// season and alt pumps are folded.
 pub(crate) fn pump_identify(
     state: &mut MetadataState,

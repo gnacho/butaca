@@ -7700,7 +7700,8 @@ const RATING_PAIR_GAP: f32 = 14.0;
 /// (body + calyx), and the rasterizer renders a MASK, so a mark is a slice rather than one icon.
 pub(crate) type MarkLayer = (crate::ui::icons::Icon, [f32; 4]);
 
-/// One score inside a provider group: the mark that carries its verdict, and the score as text./// `mark` is empty for a provider that has no verdict to draw (IMDb, TMDB) — their number IS the
+/// One score inside a provider group: the mark that carries its verdict, and the score as text.
+/// `mark` is empty for a provider that has no verdict to draw (IMDb, TMDB), their number IS the
 /// whole statement, and inventing a glyph for them is what put a meaningless star here before.
 pub(crate) struct RatingCell<'a> {
     pub(crate) mark: &'a [MarkLayer],
@@ -7847,7 +7848,7 @@ pub(crate) const STAR_D: f32 = 26.0;
 /// Star -> star. They are one run, so it stays tight.
 const STAR_GAP: f32 = 6.0;
 
-/// Each of five stars' fill — `1.0` full, `0.5` half, `0.0` empty — for a 0-10 score.
+/// Each of five stars' fill, `1.0` full, `0.5` half, `0.0` empty, for a 0-10 score.
 ///
 /// Each star is worth two points, so the score is first rounded to the nearest HALF star and then
 /// dealt out from the left. PURE, because this is the row's only decision and the host suite can
@@ -7876,7 +7877,7 @@ pub(crate) fn star_score_w() -> f32 {
 /// `clip` is the clip the CALLER has already set, and it is passed rather than inferred because a
 /// half star needs a scissor of its own and the scissor is global GL state: this restores `clip`
 /// before returning, so a caller mid-column keeps its own bound. (There is no `Painter` query for
-/// "what is clipped now" — see [`Painter::clip`]'s own note.)
+/// "what is clipped now", see [`Painter::clip`]'s own note.)
 pub(crate) fn star_score(p: Painter, clip: Rect, x: f32, cy: f32, value_0_10: f64) -> f32 {
     let fills = star_fills(value_0_10);
     let mut bx = x;
@@ -7909,7 +7910,7 @@ pub(crate) fn star_score(p: Painter, clip: Rect, x: f32, cy: f32, value_0_10: f6
 // ----
 
 /// **An anchored menu's frame**: under `anchor` when the screen has room below it, above it when it
-/// does not, and never over it — the control that opened a panel stays readable beside its own list.
+/// does not, and never over it, the control that opened a panel stays readable beside its own list.
 /// `align_right` puts the panel's right edge on the anchor's, for a control in a corner; otherwise
 /// the left edges line up, for a chip in a row. `w` is the panel's own width; the height is the
 /// content's, clamped to the screen's keep-out. Pure (geometry in, rect out).
@@ -7965,7 +7966,7 @@ fn rating_group_measures_each_run_once_and_returns_its_drawn_width() {
 
 /// The star row's ONE decision: a 0-10 score rounds to the nearest HALF star and is dealt out from
 /// the left. A score the server did not send never reaches this function, but a nonsense one must
-/// not fill anything either — five full stars for a NaN would be a claim.
+/// not fill anything either, five full stars for a NaN would be a claim.
 #[test]
 fn the_star_row_rounds_to_half_stars_from_the_left() {
     assert_eq!(star_fills(10.0), [1.0, 1.0, 1.0, 1.0, 1.0]);

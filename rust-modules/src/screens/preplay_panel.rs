@@ -288,7 +288,7 @@ fn credit_text(name: &str, role: &str) -> String {
     }
 }
 
-/// **The audience score**, 0-10, when the item carries one — the `Community` entry of
+/// **The audience score**, 0-10, when the item carries one, the `Community` entry of
 /// `Detail::ratings`. `None` is "the server stated no score", which draws no stars rather than
 /// five empty ones: an empty row of stars would be asserting a zero the server never sent.
 pub(crate) fn audience_score(d: &Detail) -> Option<f64> {
@@ -478,7 +478,7 @@ impl PrePlaybackScreen {
     }
 
     /// OK on the three-dot control: present the item's own menu over this window. The control's
-    /// drawn rect rides on the request, so the menu hangs off it exactly where it was pressed —
+    /// drawn rect rides on the request, so the menu hangs off it exactly where it was pressed , 
     /// and the loop presents it on this window's own stack, leaving the window up behind it.
     fn open_menu<H: crate::screens::registry::AppLike>(
         &self,
@@ -602,7 +602,7 @@ impl PrePlaybackScreen {
 
     /// **The scores line**: the audience's five stars, then the critics' percentage under the
     /// provider's own name. Returns the height it consumed INCLUDING the gap under it, and `0.0`
-    /// when the server sent neither score — the facts then move up into the space rather than
+    /// when the server sent neither score, the facts then move up into the space rather than
     /// sitting under an empty band.
     ///
     /// The two are separate facts from separate fields (`CommunityRating` and `CriticRating`), and
@@ -956,7 +956,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                     // tracks on screen; the loop dismisses this surface before the player is pushed.
                     //
                     // The one exception is the three-dot control at the head of the column, whose
-                    // OK opens the item's own menu — a real surface, so still not a dead key.
+                    // OK opens the item's own menu, a real surface, so still not a dead key.
                     let meta = H::metadata(cx);
                     let Some(d) = meta.current() else {
                         // Nothing landed to act on: close rather than leave a dead OK on a window

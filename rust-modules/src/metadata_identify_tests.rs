@@ -1,6 +1,6 @@
 //! The Identify store (#369): the two requests, their landings, and the phases a surface reads.
 //!
-//! The worker is never started here — `request_identify_with_spawn`'s spawn argument is the seam
+//! The worker is never started here, `request_identify_with_spawn`'s spawn argument is the seam
 //! (`request_detail_with_spawn`'s twin), so each test posts the answer the worker would have
 //! produced and grades the landing. A real thread would race every assertion below, and a fetch for
 //! an unknown server returns in microseconds.
@@ -29,7 +29,7 @@ fn loaded(sid: ServerId, rk: &str) -> (MetadataState, std::sync::Arc<MetadataAda
     (state, std::sync::Arc::new(MetadataAdapter::default()))
 }
 
-/// The lookup's answer lands as the list, and the surface is READY — which is a different answer
+/// The lookup's answer lands as the list, and the surface is READY, which is a different answer
 /// from an empty one, and both are different from the lookup failing.
 #[test]
 fn a_lookup_lands_its_candidates_and_the_surface_becomes_ready() {

@@ -1,4 +1,4 @@
-//! **Identify** — replacing an item's metadata match with another the providers offered (#369).
+//! **Identify**, replacing an item's metadata match with another the providers offered (#369).
 //!
 //! Two server calls and one model:
 //!
@@ -12,7 +12,7 @@
 //!
 //! **Only a MOVIE can be identified from this client.** Jellyfin's lookup routes exist for
 //! `Movie`, `Series`, `BoxSet`, `MusicAlbum`, `MusicArtist`, `MusicVideo`, `Person`, `Trailer` and
-//! `Book` — and **not** for `Episode`, which is the other leaf the pre-playback window can stand on.
+//! `Book`, and **not** for `Episode`, which is the other leaf the pre-playback window can stand on.
 //! An episode's match belongs to its series, i.e. to a different item than the one the window is
 //! about, so the window's menu offers no Identify there (see `screens::preplay_menu`).
 //!
@@ -28,7 +28,7 @@ pub(crate) struct IdentifyHit {
     /// looks the item up by the provider ids inside it, and rebuilding that payload here would be
     /// this client inventing a query the viewer never picked.
     pub(crate) raw: super::dto::RemoteSearchResultDto,
-    /// The candidate's title — what the row's label says. Empty only if a provider answered with no
+    /// The candidate's title, what the row's label says. Empty only if a provider answered with no
     /// name at all, which the row then shows as its year alone.
     pub(crate) name: String,
     /// The candidate's year, 0 when the provider sent none (the row drops the year then).
@@ -49,7 +49,7 @@ impl IdentifyHit {
     }
 }
 
-/// The candidates for one movie. `None` is a transport/auth/parse failure — the list and "the
+/// The candidates for one movie. `None` is a transport/auth/parse failure, the list and "the
 /// server did not answer" are different answers and the store keeps them apart.
 pub(crate) fn search(sid: ServerId, item_id: &str, name: &str, year: i32) -> Option<Vec<IdentifyHit>> {
     let client = super::client()?;
@@ -61,8 +61,8 @@ pub(crate) fn search(sid: ServerId, item_id: &str, name: &str, year: i32) -> Opt
     Some(hits.into_iter().map(IdentifyHit::from_dto).collect())
 }
 
-/// Apply one candidate. `false` covers every refusal the endpoint can give — transport, a non-admin
-/// account (403), an item the server no longer has (404) — and the surface says so in one line.
+/// Apply one candidate. `false` covers every refusal the endpoint can give, transport, a non-admin
+/// account (403), an item the server no longer has (404), and the surface says so in one line.
 pub(crate) fn apply(sid: ServerId, item_id: &str, hit: &IdentifyHit) -> bool {
     let Some(client) = super::client() else {
         return false;

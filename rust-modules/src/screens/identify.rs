@@ -1,4 +1,4 @@
-//! **Identify** — the metadata providers' candidates for the item the pre-playback window is about,
+//! **Identify**, the metadata providers' candidates for the item the pre-playback window is about,
 //! and the press that makes one of them the item's match (issue #369).
 //!
 //! A `Style::Compact` surface on the shared `ModalStack`, anchored where the menu that opened it
@@ -12,7 +12,7 @@
 //! a server (§2.1).
 //!
 //! **The write is the server's, and it says so.** `POST /Items/RemoteSearch/Apply/{itemId}`
-//! requires elevation, so an ordinary viewer's account is refused — the panel then states that in
+//! requires elevation, so an ordinary viewer's account is refused, the panel then states that in
 //! one line instead of looking like a network wobble. It never claims the change landed: `Applied`
 //! is set only from the server's own 2xx.
 //!
@@ -43,7 +43,7 @@ use crate::ui::{theme, Rect};
 const PANEL_W: f32 = 720.0;
 /// The pinned ~20px corner radius, the menu family's.
 const PANEL_RAD: f32 = 20.0;
-/// How far the panel rises into place — the one number the whole panel family shares.
+/// How far the panel rises into place, the one number the whole panel family shares.
 const RISE: f32 = crate::ui::popover::Popover::RISE;
 /// The status line's band, under the list: one `LABEL` line of prose and its air.
 const STATUS_LEAD: f32 = theme::size::LABEL as f32 * 1.35;
@@ -81,7 +81,7 @@ impl LogicalState for IdentifyArg {
 pub(crate) struct IdentifyScreen {
     entry: EntryId,
     arg: IdentifyArg,
-    /// The rows the table was built from — the rebuild stamp.
+    /// The rows the table was built from, the rebuild stamp.
     hits: Vec<IdentifyHit>,
     /// The phase the rows were built under; a change re-seats the cursor and repaints the line.
     status: IdentifyStatus,
@@ -99,7 +99,7 @@ impl IdentifyScreen {
         }
     }
 
-    /// The candidates the store holds for THIS item, or nothing — an answer about another item is
+    /// The candidates the store holds for THIS item, or nothing, an answer about another item is
     /// not this surface's to draw.
     fn live_hits(&self, meta: crate::metadata::MetadataView<'_>) -> Vec<IdentifyHit> {
         let Some(d) = meta.current() else { return Vec::new() };
@@ -147,7 +147,7 @@ impl IdentifyScreen {
         true
     }
 
-    /// Ask the store for the lookup — ONCE per mount, which is what makes re-opening the surface a
+    /// Ask the store for the lookup, ONCE per mount, which is what makes re-opening the surface a
     /// fresh search and a landed answer stable.
     fn request<H: AppLike + MetadataLike>(&self, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
         let Some(d) = H::metadata(cx).current() else { return };
@@ -373,7 +373,7 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + MetadataLike> S
         None
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, H>) {}
-    /// The modal dim, asked for rather than drawn — `AltSourcesScreen::scrim`'s contract.
+    /// The modal dim, asked for rather than drawn, `AltSourcesScreen::scrim`'s contract.
     fn scrim(&self) -> Scrim {
         Scrim::dim(theme::underlay::DIM_PANEL)
     }

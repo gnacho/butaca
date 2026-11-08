@@ -1,4 +1,4 @@
-<!-- The filled face of `star.svg` — the SAME ten-vertex polygon, filled. Two assets rather than a
+<!-- The filled face of `star.svg`, the SAME ten-vertex polygon, filled. Two assets rather than a
      stroke/fill flag because the rasterizer renders a mask and the caller tints it: an unfilled
      star and a filled one are two different masks at one rect, exactly like the heart pair.
 

@@ -480,7 +480,7 @@ impl JfClient {
         }
     }
 
-    /// One authed JSON POST whose answer is parsed — [`get_json`](Self::get_json)'s write twin.
+    /// One authed JSON POST whose answer is parsed, [`get_json`](Self::get_json)'s write twin.
     /// Jellyfin's LOOKUP endpoints take their query in a body (`POST /Items/RemoteSearch/Movie`),
     /// so a path-only GET shape cannot reach them; the failure granularity is the same `Option`.
     pub(crate) fn post_json<T: DeserializeOwned>(
@@ -512,7 +512,7 @@ impl JfClient {
         }
     }
 
-    /// **Identify, first half**: the metadata providers' candidates for an item —
+    /// **Identify, first half**: the metadata providers' candidates for an item , 
     /// `POST /Items/RemoteSearch/Movie` with a `MovieInfoRemoteSearchQuery` body. Verified against
     /// Jellyfin's own OpenAPI: the typed POST has been the shape since 10.9 and is still the shape
     /// on 12.x, which is the range this client targets. The item's `Id` rides the body so the
@@ -535,7 +535,7 @@ impl JfClient {
         self.post_json("/Items/RemoteSearch/Movie", &body)
     }
 
-    /// **Identify, second half**: apply one candidate —
+    /// **Identify, second half**: apply one candidate , 
     /// `POST /Items/RemoteSearch/Apply/{itemId}`, whose body is the candidate itself. The server
     /// re-reads its `ProviderIds` and refreshes the item, so the candidate travels back exactly as
     /// the search sent it (see `RemoteSearchResultDto`). `replaceAllImages` is left at the server's
@@ -1611,7 +1611,7 @@ mod tests {
 
     /// Identify's two calls: the search posts the item's own title and year as a BODY (Jellyfin's
     /// typed POST, which replaced the older GET form), and Apply posts the chosen candidate back to
-    /// the item's own path — the provider ids in it are what the server looks the item up by.
+    /// the item's own path, the provider ids in it are what the server looks the item up by.
     #[test]
     fn identify_searches_with_a_body_and_applies_the_candidate_verbatim() {
         let server = MockServer::start(vec![

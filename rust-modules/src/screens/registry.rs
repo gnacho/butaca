@@ -1533,7 +1533,7 @@ pub(crate) enum AppArg {
     /// off `metadata::current()`, the item the window under it describes.
     PrePlaybackMenu(crate::screens::preplay_menu::PrePlaybackMenuArg),
     /// **Identify** (issue #369, `screens::identify`): the metadata providers' candidates for the
-    /// loaded item. It carries only where it hangs — the subject is `metadata::current()`, for the
+    /// loaded item. It carries only where it hangs, the subject is `metadata::current()`, for the
     /// Track-information and About sheets' reason.
     Identify(crate::screens::identify::IdentifyArg),
     /// Account sign-in (QR), shown when there is no usable session.
@@ -2163,7 +2163,8 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// are state that moves while those surfaces are up, so a recording taken before them could not
 /// tell two of their frames apart.
 ///
-/// **Collection removal** (`0xd4f7_ab4b_d0e9_e119` → this): the promoted-hub collection/// links die with the collection reads: the Library shelf loses `heading`,
+/// **Collection removal** (`0xd4f7_ab4b_d0e9_e119` → this): the promoted-hub collection
+/// links die with the collection reads: the Library shelf loses `heading`,
 /// `DetailIdentity` loses `CollectionMember`, detail `Spot.saved_col` drops back to seven
 /// slots, and the metadata `Detail` record loses `collection`. The collection PAGE stays (it is
 /// the Jellyfin BoxSet detail route), and only the old server's surfaces leave. Re-record replay

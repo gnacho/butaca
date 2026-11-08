@@ -122,7 +122,7 @@ pub(crate) struct BaseItemDto {
     /// The CRITICS' score as a percentage, 0-100. It is Rotten Tomatoes' own number: the server's
     /// OMDb provider parses RT's `"85%"` into this field (`OmdbProvider`), and no other provider
     /// writes it. Absent whenever no provider supplied one, which is the ordinary case on a server
-    /// without OMDb — and absence is what keeps the window from inventing a score (issue #317).
+    /// without OMDb, and absence is what keeps the window from inventing a score (issue #317).
     #[serde(rename = "CriticRating")]
     pub(crate) critic_rating: Option<f32>,
     /// Per-image-type cache-buster tags. A Primary exists iff this map names one. (`BTreeMap`,
@@ -246,13 +246,13 @@ pub(crate) struct PersonDto {
     pub(crate) primary_image_tag: Option<String>,
 }
 
-/// **One candidate from a metadata provider's lookup** — `POST /Items/RemoteSearch/{type}` 200,
+/// **One candidate from a metadata provider's lookup**, `POST /Items/RemoteSearch/{type}` 200,
 /// and the body the APPLY call takes back (`POST /Items/RemoteSearch/Apply/{itemId}`).
 ///
 /// It is `Deserialize` AND `Serialize` on purpose: the server re-reads the chosen candidate's
 /// `ProviderIds` and refreshes the item from them, so the object the search returned is posted back
 /// **verbatim**. Every field is optional and skipped when absent, because a candidate carries only
-/// what its provider answered — an IMDb hit has no `IndexNumber`, a TMDB one no `ImageUrl` — and
+/// what its provider answered, an IMDb hit has no `IndexNumber`, a TMDB one no `ImageUrl`, and
 /// rebuilding the payload from this client's own idea of a query is exactly what would make Apply
 /// search for something the viewer never picked.
 ///

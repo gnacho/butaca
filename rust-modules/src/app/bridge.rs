@@ -1055,7 +1055,7 @@ impl Bridge {
         self.stores.metadata.pump_alt_sources_with_directory(directory, &self.stores.landgate)
     }
 
-    /// The `MetadataStore`'s Identify landing (#369) — the lookup's candidates or an apply's
+    /// The `MetadataStore`'s Identify landing (#369), the lookup's candidates or an apply's
     /// verdict, `app/run.rs`'s route-unconditional pump.
     pub(crate) fn metadata_pump_identify(&mut self) -> bool {
         self.stores.metadata.pump_identify(&self.stores.landgate)
