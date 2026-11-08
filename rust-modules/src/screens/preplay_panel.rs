@@ -1079,21 +1079,31 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
             },
             // The row the ENGINE landed on is the row this window draws lit: a D-pad press, a
             // pointer hover (`Hover::Focus` on the four stops) and a restore all arrive here, so
-            // there is one focus face and no second hover style to keep in step.
+            // there is one focus face and no second hover style to keep in step. A key that is not
+            // one of the four rows is chrome the container composes (the shared Back control), and
+            // it lights ITSELF: the rows keep the cursor they had.
             ScreenEvent::FocusMoved { to, .. } => {
-                self.row = OptionRow::from_index(to.elem as usize);
-                fx.invalidate(crate::ui::present::Provenance::Input);
+                if let Some(row) = OptionRow::ALL.get(to.elem as usize) {
+                    self.row = *row;
+                    fx.invalidate(crate::ui::present::Provenance::Input);
+                }
                 Handled::Yes
             }
             // A click on a row runs it, exactly as OK does on the row it parks.
             ScreenEvent::Activate(elem) => {
+                // Only a ROW activates here. `from_index`'s clamp would turn a foreign key (the
+                // shared Back control's) into the primary action, which is the one thing a click on
+                // the way OUT must never do.
+                let Some(row) = OptionRow::ALL.get(*elem as usize).copied() else {
+                    return Handled::No;
+                };
                 let meta = H::metadata(cx);
                 let Some(d) = meta.current() else {
                     fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
                     return Handled::Yes;
                 };
                 self.seed(d);
-                self.row = OptionRow::from_index(*elem as usize);
+                self.row = row;
                 if self.row == OptionRow::More {
                     self.open_menu(fx);
                 } else {
@@ -1699,5 +1709,20 @@ mod tests {
             )),
             "a click on the action row asks for the playback, exactly as its OK does"
         );
+
+        // The container's own chrome is NOT a row: the shared Back control's element must never be
+        // clamped into "the primary action", or the way OUT would start the film.
+        let crumb = crate::ui::table_screen::CRUMB_ELEM;
+        let (handled, fx) = step(&mut screen, &ScreenEvent::Activate(crumb), Some(crumb));
+        assert_eq!(handled, Handled::No, "the window does not own the Back control");
+        assert!(fx.is_empty(), "a click on the way out starts nothing");
+        let stray = ScreenEvent::FocusMoved {
+            from: None,
+            to: crate::ui::machine::FocusKey { entry: ENTRY, elem: crumb },
+            by: By::Pointer,
+        };
+        let (handled, _) = step(&mut screen, &stray, Some(crumb));
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(screen.row, OptionRow::Action, "chrome lighting itself leaves the cursor alone");
     }
 }
