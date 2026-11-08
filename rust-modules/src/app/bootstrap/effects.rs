@@ -179,16 +179,14 @@ fn content_request(request: &crate::screens::registry::ContentReq) -> Result<Val
         ContentReq::PreviewTransport(play) => json!({"preview_transport":play}),
         ContentReq::PreviewSeek(position) => json!({"preview_seek":position}),
         ContentReq::ItemMenu => json!("itemmenu"),
+        ContentReq::Tracks { audio_sid, sub_sid } => json!({"tracks_choice":audio_sid,"sub":sub_sid}),
         ContentReq::Panel(panel) => json!({"panel":match panel {
             ContentPanel::AltSources { anchor } => json!({"alt_sources":anchor}),
             ContentPanel::Tracks { page } => json!({"tracks":page}),
             ContentPanel::About => json!("about"),
             ContentPanel::Bio => json!("bio"),
             ContentPanel::CollectionAbout => json!("collection_about"),
-            ContentPanel::PrePlayback { restart } => json!({"preplay":restart}),
-            ContentPanel::PrePlaybackMenu { anchor } => json!({"preplay_menu":anchor}),
-            ContentPanel::Identify { anchor } => json!({"identify":anchor}),
-            ContentPanel::Images { anchor } => json!({"images":anchor}),
+            ContentPanel::TrackPick { audio, chosen, anchor } => json!({"track_pick":audio,"chosen":chosen,"anchor":anchor}),
         }}),
         // Full playback still needs its own controlled bootstrap and resource/result contract.
         ContentReq::Play { .. } => return Err("unsupported controlled playback effect"),

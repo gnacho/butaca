@@ -136,6 +136,8 @@
   "settings.preferences.section": "Налады",
   "settings.library.recently_added": "Паказваць нядаўна дададзенае",
   "settings.library.recently_added.detail": "Пачынаць Фільмы і Серыялы з новага.",
+  "settings.playback.idle_screen": "Застаўка",
+  "settings.playback.idle_screen.detail": "Прыглушаць экран з гадзіннікам, калі нічога не прайграецца.",
   "settings.playback.title": "Відэа і прайграванне",
   "settings.playback.detail": "Прадвызначаная якасць і прамое прайграванне.",
   "settings.audio.title": "Гук і субцітры",

@@ -169,9 +169,14 @@
    "from": "0x6d49289ade7e4c7d",
    "reason": "preplay",
    "to": "0xeb59dbd7d424353f"
+  },
+  {
+   "from": "0xeb59dbd7d424353f",
+   "reason": "Favorites",
+   "to": "0x5c5293fe8e840ca3"
   }
  ],
- "state_fp": 16958827591863907647,
+ "state_fp": 6652542321101638819,
  "triggers": [
   "butaca-app-init",
   "butaca-rec",
