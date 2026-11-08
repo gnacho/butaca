@@ -71,6 +71,8 @@ pub(crate) mod client;
 mod convert;
 pub(crate) mod detail;
 pub(crate) mod identify;
+pub(crate) mod images;
+pub(crate) mod intros;
 mod dto;
 pub(crate) mod profile;
 pub(crate) mod search;
