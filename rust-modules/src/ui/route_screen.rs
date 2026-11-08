@@ -952,7 +952,7 @@ impl RouteLayout {
     ///
     /// It is the DRAWN extent, not a padded rectangle around it: [`Self::draw_crumb`] lays the mark
     /// out at the narrative's left edge and the word after its ink, and this is that same span. The
-    /// height is the whole band, because a caption is a small target for a pointer.
+    /// height is the whole band, because one line of text is a small target for a pointer.
     ///
     /// **Measured at the size the word is DRAWN at** ([`theme::size::BODY`]). It was `CAPTION` for
     /// as long as the word was a caption; when the mark and the label grew the measurement did not

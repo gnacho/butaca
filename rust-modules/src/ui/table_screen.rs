@@ -550,10 +550,12 @@ where
     }
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>, _rect: Rect) {
         composed_draw(self, f);
-        // The header's two targets. Both are focus stops: the crumb's group is composed by the
-        // dispatcher (`dispatch::BACK`) from `Screen::back_control`, and the Home word is pointer
-        // only - the keyboard already reaches the top of the app with BACK. Their rectangles come
-        // from the same functions the drawing uses, so the clickable box is the drawn one.
+        // The header's two targets. The crumb is a FOCUS stop too - its group is composed by the
+        // dispatcher (`dispatch::BACK`) from `Screen::back_control`, so the arrows reach it and OK
+        // runs what a click runs. The Home word stays pointer only: the keyboard already reaches
+        // the top of the app with BACK, and a second stop for the same destination would be a
+        // duplicate rung. Their rectangles come from the same functions the drawing uses, so the
+        // clickable box is the drawn one.
         let p = f.painter;
         let entry = self.table.entry;
         if let Some(back) = self.header.crumb {
