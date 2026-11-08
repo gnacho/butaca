@@ -16,6 +16,7 @@ pub(crate) mod about_panel;
 pub(crate) mod account_menu;
 pub(crate) mod alt_sources;
 pub(crate) mod tracks_panel;
+pub(crate) mod preplay_panel;
 pub(crate) mod collection;
 pub(crate) mod detail;
 pub(crate) mod person;

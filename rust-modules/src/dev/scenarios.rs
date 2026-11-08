@@ -659,6 +659,32 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
                     );
                 }
             }
+            // `/tmp/butaca-preplay` presents the item page's PRE-PLAYBACK WINDOW (issue #367) —
+            // the surface a press on Play opens instead of the film. It is the same door that
+            // press uses (`bridge::open_content_panel` over `ContentPanel::PrePlayback`), so a
+            // headless capture cannot present a window the page would refuse, and it exists for
+            // the reason `butaca-about` does: the window opens from the page's primary action, and
+            // a `down`/`right` script that reached it on one item would miss it on the next.
+            if app.boot_initial.is_none() && crate::dev::flag("preplay") {
+                let meta = app.bridge.metadata_view();
+                let available = app
+                    .pages
+                    .nav
+                    .top_page()
+                    .and_then(|e| e.inst.as_ref())
+                    .and_then(|i| i.screen.as_any())
+                    .and_then(|a| a.downcast_ref::<crate::screens::detail::DetailScreen>())
+                    .is_some_and(|d| d.preplay_available(meta));
+                if let (Some(host), true) = (app.pages.top_page(), available) {
+                    let (sid, rk) = (boot.sid, boot.rk.clone());
+                    bridge::open_content_panel(
+                        &mut app.pages,
+                        host,
+                        Some((sid, &rk)),
+                        crate::screens::registry::ContentPanel::PrePlayback { restart: false },
+                    );
+                }
+            }
             if boot.activate {
                 if let (Some(instance), Some(focus)) = (app.pages.top_page(), app.pages.focus()) {
                     app.pages.emit(MachineId::Nav, Fx::Deliver(MachineId::Instance(instance),

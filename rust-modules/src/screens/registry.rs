@@ -843,7 +843,14 @@ pub(crate) enum ContentReq {
     Push(ContentArg),
     Present(ContentArg),
     Back,
-    Play { play: PlayIntent, resume_ns: i64 },
+    Play {
+        play: PlayIntent,
+        resume_ns: i64,
+        /// **The pre-playback window's track choice** (issue #367), or [`StartTracks::NONE`] for
+        /// every other play: the film starts with the audio and subtitle the viewer named before
+        /// the picture instead of with the ladder's own pick.
+        tracks: crate::route::StartTracks,
+    },
     /// Start a hero preview. Does not push the player route.
     PreviewStart {
         sid: crate::registry::ServerId,
@@ -910,6 +917,12 @@ pub(crate) enum ContentPanel {
     /// About sheet (`screens::about_panel`) reading the collection store's current collection; it
     /// carries nothing, for `Bio`'s reason.
     CollectionAbout,
+    /// **The pre-playback window** (issue #367, `screens::preplay_panel`): what a press on Play
+    /// opens instead of the film — the item's own facts, its cast and crew, and the audio and
+    /// subtitle the playback will start with. `restart` says which of the two actions was pressed
+    /// (Play from Start drops the resume point; Play keeps it), so the window's primary action
+    /// means the same thing the button under the poster meant.
+    PrePlayback { restart: bool },
 }
 
 impl ContentPanel {
@@ -953,6 +966,10 @@ impl ContentPanel {
             Self::About => (Style::Alert, AppArg::AboutPanel),
             Self::Bio => (Style::Alert, AppArg::PersonBio),
             Self::CollectionAbout => (Style::Alert, AppArg::CollectionAbout),
+            Self::PrePlayback { restart } => (
+                Style::Alert,
+                AppArg::PrePlayback(crate::screens::preplay_panel::PrePlaybackArg { restart }),
+            ),
         })
     }
 }
@@ -1485,6 +1502,11 @@ pub(crate) enum AppArg {
     /// The Collection page's summary sheet — the About panel over `collection::current()`. **It
     /// carries nothing**, for `PersonBio`'s reasons.
     CollectionAbout,
+    /// **The pre-playback window** (issue #367, `screens::preplay_panel`). It carries the one bit
+    /// the surface cannot read off the item: whether the press was *Play from Start* (resume
+    /// dropped) or *Play/Resume*. Everything else it draws comes from `metadata::current()`, the
+    /// item the host page landed, exactly as the two read-only sheets do.
+    PrePlayback(crate::screens::preplay_panel::PrePlaybackArg),
     /// Account sign-in (QR), shown when there is no usable session.
     Login,
     /// The "who's watching" profile picker.
@@ -1521,6 +1543,7 @@ pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,S
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
+     PrePlayback{restart:bool},\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
      host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
 
@@ -1537,6 +1560,8 @@ impl LogicalState for AppArg {
             Self::AboutPanel => { c.u32(10); }
             Self::PersonBio => { c.u32(11); }
             Self::CollectionAbout => { c.u32(12); }
+            // 13: the pre-playback window (#367). Allocated forward like every surface tag.
+            Self::PrePlayback(arg) => { c.u32(13); arg.write(c); }
             // 8 and 9 rather than the 6/7 the profile and card menus carried on their own
             // branch: this canon tag is the surface's identity in a recorded state, so two
             // surfaces merged from two lanes may not share one. 4/5 are the library and player
@@ -1585,7 +1610,8 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::TracksPanel(_)
             | AppArg::AboutPanel
             | AppArg::PersonBio
-            | AppArg::CollectionAbout => Chrome::None,
+            | AppArg::CollectionAbout
+            | AppArg::PrePlayback(_) => Chrome::None,
         }
     }
     fn id(&self) -> ScreenId {
@@ -1602,6 +1628,8 @@ impl crate::ui::screen::ScreenArg for AppArg {
             AppArg::AboutPanel => 21,
             AppArg::PersonBio => 22,
             AppArg::CollectionAbout => 24,
+            // 25: the pre-playback window (#367), allocated forward like every surface id.
+            AppArg::PrePlayback(_) => 25,
             // 19 and 20, not the 5 and 6 `Route::Account`/`Route::ItemMenu` vacated when this
             // phase deleted them, and not the 17/18 these two carried on their own branch: ids
             // are allocated forward here so a retired identity is never handed to the screen
@@ -1741,6 +1769,9 @@ where
             ),
             AppArg::CollectionAbout => Box::new(
                 crate::screens::about_panel::AboutPanelScreen::collection(entry),
+            ),
+            AppArg::PrePlayback(arg) => Box::new(
+                crate::screens::preplay_panel::PrePlaybackScreen::new(entry, *arg),
             ),
             AppArg::Content(ContentArg::Detail { sid, rk }) => {
                 let mut page = crate::screens::detail::DetailScreen::new(entry, *sid, rk.clone(), H::hubs(cx));
@@ -1893,6 +1924,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         AppArg::AboutPanel,
         AppArg::PersonBio,
         AppArg::CollectionAbout,
+        AppArg::PrePlayback(crate::screens::preplay_panel::PrePlaybackArg { restart: false }),
     ];
     // The player's panels are ONE screen with several kinds, and each answers a different
     // `Screen::name` — so every kind is listed, not one representative.
@@ -1908,6 +1940,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::AboutPanel
             | AppArg::PersonBio
             | AppArg::CollectionAbout
+            | AppArg::PrePlayback(_)
             | AppArg::PlayerOverlay(_)
             | AppArg::Settings(_) => {}
             // The eight PAGE variants. Named rather than swept into a `_`, so the exhaustiveness
@@ -1972,6 +2005,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::tracks_panel::SHAPE,
     crate::screens::about_panel::SHAPE,
     crate::screens::person_bio::SHAPE,
+    crate::screens::preplay_panel::SHAPE,
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::screens::preferences::SHAPE,
 ];
@@ -2061,6 +2095,12 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// eighth identity-keyed slot for the collection shelf, and `DetailIdentity` grows
 /// `CollectionMember`. Re-record replay fixtures like any other shape-pin bump.
 ///
+/// **The pre-playback window** (`0x8f98_af11_eb39_bb08` → this, issue #367): `ARG_SHAPE` gains
+/// `PrePlayback{restart:bool}` and `screens::preplay_panel::SHAPE` joins the inventory. A schema
+/// transition rather than a rebaseline: the window's cursor and its two language choices are the
+/// only state in the app that moves when it is open, so a recording taken before this graded the
+/// surface opening and closing with a hole between.
+///
 /// **Collection removal** (`0xd4f7_ab4b_d0e9_e119` → this): the promoted-hub collection
 /// links die with the collection reads: the Library shelf loses `heading`,
 /// `DetailIdentity` loses `CollectionMember`, detail `Spot.saved_col` drops back to seven
@@ -2079,7 +2119,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // The fork's sync drops the consent and incident-report screens from the inventory: the pin
 // above was 0x668c_44dc_797c_5b0f with them. The Jellyfin-only conversion then retires the
 // Settings AudioSubtitles page from the shape (0xab1b_123e_0a85_9621 before it).
-const SCREEN_SHAPES_PIN: u64 = 0x8f98_af11_eb39_bb08;
+const SCREEN_SHAPES_PIN: u64 = 0xa5ee_1d77_7a9e_066c;
 
 #[cfg(test)]
 mod arg_tests {

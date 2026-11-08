@@ -2219,7 +2219,7 @@ fn trailer_extra() -> crate::metadata::Extra {
 
 fn play_item(effects: &[crate::ui::machine::Stamped<TestHost>]) -> Option<(&PlayIntent, i64)> {
     effects.iter().find_map(|effect| match &effect.fx {
-        Fx::App(AppFx::Content(ContentReq::Play { play, resume_ns })) => Some((play, *resume_ns)),
+        Fx::App(AppFx::Content(ContentReq::Play { play, resume_ns, .. })) => Some((play, *resume_ns)),
         _ => None,
     })
 }

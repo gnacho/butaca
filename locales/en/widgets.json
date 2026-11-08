@@ -939,5 +939,13 @@
   "widgets.failure.change_quality": {
     "value": "Change quality",
     "description": "Failed-playback button: opens the quality ladder; picking a rung retries at it."
+  },
+  "widgets.tracks.ends": {
+    "value": "Ends",
+    "description": "Label or formatted fact in the media track information sheet or track selector."
+  },
+  "widgets.preplay.overview": {
+    "value": "Overview",
+    "description": "Heading over the item's synopsis in the pre-playback window."
   }
 }
