@@ -883,6 +883,7 @@ pub(crate) unsafe fn construct(
         Some(initial) => initial.session.persisted.clone(),
         None => crate::server::session::load(),
     };
+    crate::log(&format!("session: boot id_len={} scale={}", session.client_id.len(), session.subtitle_scale()));
     #[cfg(not(test))]
     crate::i18n::initialize(session.language, controlled);
     let forced_login = !controlled && crate::dev::scenarios::login_forced();

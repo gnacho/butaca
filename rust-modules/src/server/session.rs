@@ -3538,7 +3538,11 @@ fn prepare_load(read: &ReadState, mint: impl FnOnce() -> String) -> (Session, bo
         s.client_id = mint();
     }
     // Preserve ordinary fresh/locked/plaintext policy; only its execution boundary is deferred.
-    (s, (fresh && !locked) || (!fresh && plaintext))
+    let save = (fresh && !locked) || (!fresh && plaintext);
+    crate::log(&format!(
+        "session: prepare_load fresh={fresh} locked={locked} plaintext={plaintext} persisted={persisted} save={save}"
+    ));
+    (s, save)
 }
 
 /// **One read-modify-write of the session file, under [`IO`], as a single atomic step.** This is
@@ -3711,6 +3715,7 @@ fn save_locked_with_authority(
     {
         *LAST_WRITE_AUTHORITY.lock().unwrap_or_else(|e| e.into_inner()) = Some(authority);
     }
+    crate::log(&format!("session: write attempt authority={authority:?} id_len={}", s.client_id.len()));
     // Before the write, not after: a failed persist still means these names are live in THIS run,
     // and the log wants them redacted either way.
     publish_identities(s);
