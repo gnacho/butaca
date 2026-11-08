@@ -193,6 +193,10 @@ pub enum Icon {
     // instead, which is referential use and needs no licence — so the glyph no longer has to say
     // *whose* score this is. It only has to carry the VERDICT, which is what these four do.
     //
+    // `Popcorn` is the exception, and it earns it by pointing the other way: on the plugin's
+    // named-source row the caption IS the provider's name and the glyph only repeats it, so it
+    // carries attribution and no verdict at all (see that variant's doc).
+    //
     // Two layers per mark for the same reason as before: the rasterizer renders a MASK and the
     // colour is the tint (`theme::RATING_*`), so a two-tone mark needs two masks at one rect.
     // Both critic layers share one 26×26 viewBox and register exactly.
@@ -214,6 +218,16 @@ pub enum Icon {
     /// It negates by DRAINING to [`theme::RATING_MUTED`] rather than going hollow: a single fruit
     /// can carry an outline, but outlining every shape in a crowd is a tangle of strokes at 30px.
     Crowd,
+    /// A popcorn tub — our own drawing (`assets/icons/popcorn.svg`), and the ONE mark here that
+    /// attributes rather than judges.
+    ///
+    /// The MDBList plugin names its sources in words and sends no badge for any of them (#370), so
+    /// on that row the glyph's whole job is to say *which* provider spoke: the tomato for Rotten
+    /// Tomatoes' critics' percentage, this for its audience percentage. It is painted
+    /// [`theme::RATING_SOURCE`] and never a `RATING_*` verdict colour, because fresh or rotten is a
+    /// threshold nobody sent. It is not the retired rented tub either: same vocabulary, our own
+    /// geometry, one filled path.
+    Popcorn,
     // ---- read-out glyphs (the 112px mark `StatusOverlay::page` draws above a page-filling
     // `Failed` verdict — spec "1A") ----
     //
@@ -337,6 +351,7 @@ fn src(id: Icon) -> &'static str {
         Icon::TomatoCalyx => include_str!("../../../assets/icons/tomato-calyx.svg"),
         Icon::TomatoHollow => include_str!("../../../assets/icons/tomato-hollow.svg"),
         Icon::Crowd => include_str!("../../../assets/icons/crowd.svg"),
+        Icon::Popcorn => include_str!("../../../assets/icons/popcorn.svg"),
         Icon::ClockBadgeAlert => include_str!("../../../assets/icons/clock-badge-alert.svg"),
         Icon::CloudBadgeAlert => include_str!("../../../assets/icons/cloud-badge-alert.svg"),
         Icon::GlobeBadgeMinus => include_str!("../../../assets/icons/globe-badge-minus.svg"),
