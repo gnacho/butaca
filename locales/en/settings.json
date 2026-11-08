@@ -540,6 +540,14 @@
     "value": "Lead Movies and TV Shows with new arrivals.",
     "description": "Settings, consent or sign-in UI: the show-recently-added switch's detail line."
   },
+  "settings.playback.idle_screen": {
+    "value": "Screensaver",
+    "description": "Settings, consent or sign-in UI: the switch that lets the OLED idle screen appear when nothing is playing."
+  },
+  "settings.playback.idle_screen.detail": {
+    "value": "Dim the panel with a clock when the room is idle.",
+    "description": "Settings, consent or sign-in UI: the screensaver switch's detail line."
+  },
   "settings.playback.title": {
     "value": "Video & playback",
     "description": "Settings, consent or sign-in UI: settings.playback.title"

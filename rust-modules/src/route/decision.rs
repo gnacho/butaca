@@ -4798,6 +4798,23 @@ pub(crate) fn restore_show_recently_added(on: bool) {
     SHOW_RECENTLY_ADDED.store(on, Ordering::Relaxed);
 }
 
+/// **Whether the OLED idle screen may take the panel** — opt-in, off by default. A process copy
+/// for the same reason as the switch above: the frame loop reads it every frame and a session
+/// read there would be file I/O on the frame thread.
+static IDLE_SCREEN: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn idle_screen() -> bool {
+    IDLE_SCREEN.load(Ordering::Relaxed)
+}
+
+/// Restore the persisted preference without writing it back, exactly as
+/// [`restore_show_recently_added`].
+pub(crate) fn restore_idle_screen(on: bool) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the idle-screen preference (restore_idle_screen)");
+    IDLE_SCREEN.store(on, Ordering::Relaxed);
+}
+
 /// **What each series was last watched with**, held as the process copy the resolve worker reads.
 ///
 /// A `Mutex<Vec<_>>` rather than a session read for the reason every preference here has a process
