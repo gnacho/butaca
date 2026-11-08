@@ -173,14 +173,10 @@ fn option_rects() -> [(OptionRow, Rect); 4] {
     ]
 }
 
-/// Where one row is drawn: the entry of [`option_rects`] for it, so a `place` and a pill cannot
-/// disagree.
+/// Where one row is drawn: the entry of [`option_rects`] for it (the array is in `index()` order),
+/// so a `place` and a pill cannot disagree.
 fn option_rect(row: OptionRow) -> Rect {
-    option_rects()
-        .into_iter()
-        .find(|(r, _)| *r == row)
-        .map(|(_, rect)| rect)
-        .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0))
+    option_rects()[row.index()].1
 }
 
 // ---- the choice model (PURE — this half is what the host suite grades) -------------------------
