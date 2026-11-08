@@ -241,5 +241,14 @@
   "widgets.identify.failed": "El servidor no respondió",
   "widgets.identify.applying": "Aplicando…",
   "widgets.identify.applied": "Aplicado. Se actualizará el elemento.",
-  "widgets.identify.apply_failed": "El servidor no aceptó el cambio"
+  "widgets.identify.apply_failed": "El servidor no aceptó el cambio",
+  "widgets.preplay.menu.edit_images": "Cambiar imágenes",
+  "widgets.images.loading": "Buscando imágenes…",
+  "widgets.images.empty": "No se han encontrado imágenes",
+  "widgets.images.failed": "El servidor no respondió",
+  "widgets.images.applying": "Aplicando…",
+  "widgets.images.applied": "Aplicada. Se actualizará el elemento.",
+  "widgets.images.apply_failed": "El servidor no aceptó el cambio",
+  "widgets.images.page": "Mostrando {shown} de {total}",
+  "widgets.preplay.watch_intro": "Ver intro"
 }

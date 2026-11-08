@@ -1061,6 +1061,17 @@ impl Bridge {
         self.stores.metadata.pump_identify(&self.stores.landgate)
     }
 
+    /// The `MetadataStore`'s *Edit images* landing (#369), a page of the provider's pictures or a
+    /// download's verdict, `app/run.rs`'s route-unconditional pump.
+    pub(crate) fn metadata_pump_images(&mut self) -> bool {
+        self.stores.metadata.pump_images(&self.stores.landgate)
+    }
+
+    /// The `MetadataStore`'s local-intros landing (#370), `app/run.rs`'s route-unconditional pump.
+    pub(crate) fn metadata_pump_intros(&mut self) -> bool {
+        self.stores.metadata.pump_intros(&self.stores.landgate)
+    }
+
     /// Refresh only the retained directory at synchronous application boundaries that must make
     /// a routing decision before the next dispatcher frame.
     pub(crate) fn refresh_browse_directory(&mut self) {

@@ -2305,6 +2305,14 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         if app.bridge.metadata_pump_identify() {
             crate::ui::idle::invalidate();
         }
+        // …and the same for *Edit images* (#369) and the local intros (#370): each is one landing
+        // from the worker, and each grows or settles a surface without a keypress.
+        if app.bridge.metadata_pump_images() {
+            crate::ui::idle::invalidate();
+        }
+        if app.bridge.metadata_pump_intros() {
+            crate::ui::idle::invalidate();
+        }
 }
 
 /// The draw phase, entered only on a presenting frame: `clear_opaque_region` at entry, the
@@ -2614,7 +2622,8 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 | AppArg::CollectionAbout
                 | AppArg::PrePlayback(_)
                 | AppArg::PrePlaybackMenu(_)
-                | AppArg::Identify(_) => crate::focusprobe::Screen::Home,
+                | AppArg::Identify(_)
+                | AppArg::Images(_) => crate::focusprobe::Screen::Home,
         };
         // The probe reads the OWNER, and answers the resting cursor when no player is mounted —
         // which is what every non-player screen used to read off `App`'s second copy.

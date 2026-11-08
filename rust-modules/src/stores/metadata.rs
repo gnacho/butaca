@@ -201,6 +201,25 @@ pub(crate) enum MetadataCmd {
         rk: String,
         hit: crate::metadata::IdentifyHit,
     },
+    /// **Edit images' first half** (#369): ask the server for the pictures its metadata providers
+    /// already hold for this item. The surface asks on mount, for [`Self::IdentifySearch`]'s
+    /// reason.
+    ImagesLoad {
+        sid: ServerId,
+        rk: String,
+    },
+    /// **Edit images' second half**: make one of those pictures the item's image. A WRITE on the
+    /// server's own artwork, reached only from a press on a tile. The picture travels whole (never
+    /// an index): a newer page replaces the grid, and an index would then name a different URL than
+    /// the one the viewer saw.
+    ImagesApply {
+        sid: ServerId,
+        rk: String,
+        img: crate::metadata::RemoteImage,
+    },
+    /// **The local intros** (#370): read the clips the Local Intros plugin would play before this
+    /// item. Read-only, and asked once per mount by the pre-playback window.
+    IntrosLoad { sid: ServerId, rk: String },
 }
 
 /// One Metadata owner: logical state, the worker adapter every current fetch captures, and
@@ -293,7 +312,9 @@ impl MetadataStore {
         let alt = crate::metadata::pump_alt_sources_with_gate(&mut self.state, &self.adapter, gate);
         if alt { self.bump(); }
         let identify = self.pump_identify(gate);
-        detail || season || alt || identify
+        let images = self.pump_images(gate);
+        let intros = self.pump_intros(gate);
+        detail || season || alt || identify || images || intros
     }
 
     /// The async detail landing alone — `app/run.rs`'s own call site, pumped before season.
@@ -334,6 +355,20 @@ impl MetadataStore {
         changed
     }
 
+    /// The *Edit images* surface's landing (#369): a landed page of the provider's pictures, or a
+    /// download's verdict.
+    pub(crate) fn pump_images(&mut self, gate: &crate::ui::landgate::Gate) -> bool {
+        let changed = crate::metadata::pump_images(&mut self.state, &self.adapter, gate);
+        if changed { self.bump(); }
+        changed
+    }
+
+    /// The local intros' landing (#370).
+    pub(crate) fn pump_intros(&mut self, gate: &crate::ui::landgate::Gate) -> bool {
+        let changed = crate::metadata::pump_intros(&mut self.state, &self.adapter, gate);
+        if changed { self.bump(); }
+        changed
+    }
     /// Borrowed read handle, shaped like `crate::person::PersonStore::view`.
     pub(crate) fn view(&self) -> crate::metadata::MetadataView<'_> {
         crate::metadata::MetadataView::new(self)

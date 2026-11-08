@@ -979,5 +979,42 @@
   "widgets.identify.apply_failed": {
     "value": "The server did not accept the change",
     "description": "Identify sheet: the server refused the metadata write, most often because the account is not an administrator."
+  },
+  "widgets.preplay.menu.edit_images": {
+    "value": "Edit images",
+    "description": "Pre-playback window menu: opens the grid of pictures the metadata providers already hold for the item, so the viewer can make one of them the item's own."
+  },
+  "widgets.images.loading": {
+    "value": "Looking for pictures…",
+    "description": "Edit-images grid: the provider lookup is still out, so the grid is not empty, it is not yet known."
+  },
+  "widgets.images.empty": {
+    "value": "No pictures found",
+    "description": "Edit-images grid: the lookup answered and no metadata provider offered a picture for this item."
+  },
+  "widgets.images.failed": {
+    "value": "The server did not answer",
+    "description": "Edit-images grid: the lookup itself failed (the server was unreachable or refused it), which is not the same answer as no pictures."
+  },
+  "widgets.images.applying": {
+    "value": "Applying…",
+    "description": "Edit-images grid: the server is fetching the chosen picture and making it the item's own."
+  },
+  "widgets.images.applied": {
+    "value": "Applied. The item will be refreshed.",
+    "description": "Edit-images grid: the server accepted the chosen picture; the item is being re-read so the new artwork is drawn."
+  },
+  "widgets.images.apply_failed": {
+    "value": "The server did not accept the change",
+    "description": "Edit-images grid: the server refused the picture write, most often because the account is not an administrator."
+  },
+  "widgets.images.page": {
+    "value": "Showing {shown} of {total}",
+    "args": {"shown": "i64", "total": "i64"},
+    "description": "Edit-images grid: the server holds more pictures than the grid asked for, and this says how many are on screen of how many there are."
+  },
+  "widgets.preplay.watch_intro": {
+    "value": "Watch intro",
+    "description": "Pre-playback window: plays the intro the Local Intros plugin offered for this item. The intro is its own item, so the film is started afterwards by the ordinary Play action."
   }
 }

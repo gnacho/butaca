@@ -246,5 +246,14 @@
   "widgets.identify.failed": "Сервер не адказаў",
   "widgets.identify.applying": "Ужыванне…",
   "widgets.identify.applied": "Ужыта. Элемент будзе абноўлены.",
-  "widgets.identify.apply_failed": "Сервер не прыняў змену"
+  "widgets.identify.apply_failed": "Сервер не прыняў змену",
+  "widgets.preplay.menu.edit_images": "Змяніць выявы",
+  "widgets.images.loading": "Пошук выяў…",
+  "widgets.images.empty": "Выявы не знойдзены",
+  "widgets.images.failed": "Сервер не адказаў",
+  "widgets.images.applying": "Ужываецца…",
+  "widgets.images.applied": "Ужыта. Элемент будзе абноўлены.",
+  "widgets.images.apply_failed": "Сервер не прыняў змену",
+  "widgets.images.page": "Паказана {shown} з {total}",
+  "widgets.preplay.watch_intro": "Глядзець уступ"
 }

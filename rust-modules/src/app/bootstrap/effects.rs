@@ -188,6 +188,7 @@ fn content_request(request: &crate::screens::registry::ContentReq) -> Result<Val
             ContentPanel::PrePlayback { restart } => json!({"preplay":restart}),
             ContentPanel::PrePlaybackMenu { anchor } => json!({"preplay_menu":anchor}),
             ContentPanel::Identify { anchor } => json!({"identify":anchor}),
+            ContentPanel::Images { anchor } => json!({"images":anchor}),
         }}),
         // Full playback still needs its own controlled bootstrap and resource/result contract.
         ContentReq::Play { .. } => return Err("unsupported controlled playback effect"),
