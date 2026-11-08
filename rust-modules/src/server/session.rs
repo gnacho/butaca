@@ -3506,7 +3506,14 @@ fn prepare_load(read: &ReadState, mint: impl FnOnce() -> String) -> (Session, bo
     // not "a persisted session exists" (there is nothing to preserve), and — the actual fix this
     // exists for — it must not be `locked`, which is what drives locked/blocked UI/boot framing.
     let persisted = !matches!(read, ReadState::Missing | ReadState::Cleared { .. });
-    let locked = matches!(read, ReadState::Locked { .. } | ReadState::Blocked);
+    // `Blocked` is not `Locked`. Locked is a record this boot can read but must not overwrite.
+    // Blocked is a store that never answered: the canonical helper came up without a single LS2
+    // method, so every call returns `Unknown method` and the read can only ever be Blocked. While
+    // this counted as "locked" the first save was suppressed, so such an install could never
+    // create a session file at all and no preference outlived the launch (#358). Nothing readable
+    // exists to preserve, and the write path already falls back to the plaintext legacy file when
+    // the canonical commit fails, so the fallback is what should happen here.
+    let locked = matches!(read, ReadState::Locked { .. });
     let plaintext = matches!(
         read,
         ReadState::Ready {
