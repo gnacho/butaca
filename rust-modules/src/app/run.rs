@@ -2108,6 +2108,20 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                 app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
             });
             fr.underlay_moving |= moving;
+        } else if !super::bridge::host_frozen(&app.pages)
+            && crate::ui::screen::ScreenArg::chrome(&app.route()) == crate::ui::machine::Chrome::TabBar
+        {
+            // **Every other page that wears the shared bar** — today the favourites collection,
+            // which is a `Content(Collection)` page rather than a tab of its own. Without an arm
+            // here the strip's capsule, scroll and chip springs freeze at whatever the page the
+            // viewer left had them at: the selection capsule then rests mid-travel on the pill
+            // BEFORE the pressed one, which is exactly the "Favoritos leaves Series shaded"
+            // defect. One predicate (`ScreenArg::chrome`) rather than a fourth route name, so a
+            // page that starts wearing the bar cannot be forgotten the same way.
+            let (_, moving) = crate::ui::idle::scoped_motion(|| {
+                app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
+            });
+            fr.underlay_moving |= moving;
         }
         // dev: /tmp/butaca-searchosc — `crate::dev::scenarios::search_osc_tick`.
         crate::dev::scenarios::search_osc_tick(app, fr.now);
