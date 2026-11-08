@@ -1547,7 +1547,7 @@ mod tests {
         type Msg = crate::screens::registry::AppMsg;
         type Elem = u32;
         type Views<'a> = ();
-        type Init = crate::screens::family::NoInit;
+        type Init = crate::ui::fixture::FixtureArg;
         type Memory = ();
     }
 
