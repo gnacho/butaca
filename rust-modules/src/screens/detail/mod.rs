@@ -182,11 +182,6 @@ pub(crate) struct DetailScreen {
     /// (`screens/person.rs`'s `PersonCmd::Close` has the identical un-latched shape; reported
     /// separately rather than fixed here.)
     teardown_cleared: bool,
-    /// **A poster press is waiting for this page's item to land** (issue #367): armed at mount by
-    /// `AppMounter::poster_preplay`, spent once on the first landing that actually IS this page's
-    /// item, and cleared whether or not a window could be opened. Never hashed: it is one-shot
-    /// mount bookkeeping, not a decision the viewer made.
-    preplay_on_land: bool,
 
     // Render state.
     scroll: Spring,
@@ -380,7 +375,6 @@ impl DetailScreen {
             key_by_local: Default::default(),
             local_by_key: Default::default(),
             return_pending: false,
-            preplay_on_land: false,
             pending_season: None,
             season_settle: 0.0,
             preview_dwell: 0.0,
@@ -1607,9 +1601,6 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                     self.start_reconciliation(fx, meta);
                 }
                 self.reveal_focus(cx.focus.current, cx.measure, meta);
-                // A poster press whose item is already in the store opens the window right here,
-                // before the refetch this enter queues can change what the viewer is looking at.
-                self.land_preplay(fx, meta);
                 fx.invalidate(Provenance::Input);
                 Handled::Yes
             }
@@ -1625,8 +1616,6 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                     }
                 }
                 self.pump_restore(meta, fx);
-                self.land_preplay(fx, meta);
-                self.abandon_preplay(meta);
                 self.reveal_focus(cx.focus.current, cx.measure, meta);
                 fx.invalidate(Provenance::Landing(fx.from()));
                 Handled::Yes
@@ -3494,49 +3483,6 @@ impl DetailScreen {
         self.detail(meta)
             .is_some_and(|d| !d.is_show && d.has_own_file())
             && self.selected().is_none()
-    }
-
-    /// **Arm the pre-playback window for a press that lands on this page** (issue #367): the other
-    /// half of [`Self::play_hero`]'s Play rule, for the press that arrives as a card.
-    ///
-    /// A film's poster carries an item id, so the page is what builds the window: the press asks
-    /// for the page, the page fetches the item, and the window opens over it the moment that item
-    /// lands instead of the viewer having to find Play again. What arms it is the PRESS, not the
-    /// page (`AppMounter::poster_preplay`), so a press that already plays, a resume tile that
-    /// promises to resume, a show, a season, an episode and a page that already holds its item
-    /// (the item's own page, a return from playback) all keep behaving exactly as they did.
-    pub(crate) fn open_preplay_when_loaded(&mut self) {
-        self.preplay_on_land = true;
-    }
-
-    /// Spend the arm from [`Self::open_preplay_when_loaded`] on the landing that IS this page's
-    /// item.
-    ///
-    /// The window reads `metadata::current()` unfiltered, which its module doc justifies by "the
-    /// page whose Play opened it is the item's own page". That is still the contract: the filtered
-    /// read [`Self::detail`] is the gate, so the window can only ever open while `current()` really
-    /// is the item the press named.
-    fn land_preplay<H: ContentLike>(&mut self, fx: &mut Effects<'_, H>, meta: crate::metadata::MetadataView<'_>) {
-        if !self.preplay_on_land || self.detail(meta).is_none() {
-            return;
-        }
-        self.preplay_on_land = false;
-        if self.preplay_available(meta) {
-            self.content(fx, ContentReq::Panel(ContentPanel::PrePlayback { restart: false }));
-        }
-    }
-
-    /// **Spend the arm on the fetch that settled without the item.** A failed or refused request
-    /// keeps whatever page was open before in the store, so nothing is going to land and the arm
-    /// must not survive to fire on some unrelated refresh of the same item much later. Only the
-    /// landing cycle answers this: at mount the record still describes the previous request.
-    fn abandon_preplay(&mut self, meta: crate::metadata::MetadataView<'_>) {
-        if self.preplay_on_land
-            && self.detail(meta).is_none()
-            && meta.detail_request_status(self.sid, &self.rk) == Some(false)
-        {
-            self.preplay_on_land = false;
-        }
     }
 
     fn named_show(&self, meta: crate::metadata::MetadataView<'_>) -> bool {
