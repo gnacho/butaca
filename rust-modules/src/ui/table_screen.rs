@@ -220,7 +220,7 @@ where
 /// rather than a method so the host suite can grade the values without a paint pass: a host unit
 /// build links neither GL nor SDL2_ttf (`ui/CLAUDE.md`'s boundary), `TableView::draw` reaches both,
 /// and the hover/activate VALUES these stops carry were asserted nowhere in this tree before. The
-/// rect is `row_frame`'s — the same walk `place` and the painter share.
+/// rect is `row_frame`'s, the same walk `place` and the painter share.
 pub(crate) fn row_stops<H: Host>(part: &TablePart<'_>, f: &mut DrawFrame<'_, '_, H>, rect: Rect)
 where
     H::Elem: IndexElem,
@@ -1034,7 +1034,7 @@ mod tests {
     /// **Rule 11's VALUES, asserted where they are assigned** (#359). `screens::legal`'s pointer test
     /// names this gap: nothing in the tree proved that the shared table and band stops HOVER
     /// (`Hover::Focus`, the very face the arrow keys give) and ACTIVATE with the policy their element
-    /// kind wants. These are the functions `draw` calls, so changing either policy fails here — and
+    /// kind wants. These are the functions `draw` calls, so changing either policy fails here, and
     /// every Settings-family page (Settings, Privacy, Legal, Preferences, servers, sign-in) inherits
     /// its hover from exactly these two loops.
     #[test]
