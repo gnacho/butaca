@@ -2496,11 +2496,14 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
         &hero.title
     };
     let title_h = hero_logo::band_h(LogoRung::Hero);
-    let kicker = CString::new(match hero.kind {
-        1 | 3 => crate::i18n::msg::browse_kind_show(),
-        _ => crate::i18n::msg::browse_kind_movie(),
-    }).unwrap_or_default();
-    let kicker_h = crate::text::text_height(theme::size::CAPTION, 1) + theme::space::SM;
+    // **No `Película` kicker and the same facts the detail hero states** (the owner's pass:
+    // "igualar la vista de películas en Inicio y en Películas"). The year, the runtime and the age
+    // rating are the detail page's identity line, so the billboard of the same film says the same
+    // thing instead of a gold word above the title.
+    let runtime = (hero.dur_ns >= 60_000_000_000).then(|| {
+        crate::ui::fmt::dur_long(hero.dur_ns / 1_000_000)
+    });
+    let mut parts: Vec<String> = Vec::new();
     let meta = if episode {
         let mut text = crate::ui::fmt::episode_address(i64::from(hero.season_index), i64::from(hero.ep_index)).to_string();
         if !text.is_empty() && !hero.title.is_empty() {
@@ -2509,15 +2512,18 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
         text.push_str(&hero.title);
         text
     } else {
-        format!(
-            "{} \u{b7} {}",
-            hero.year,
-            if hero.rating.is_empty() {
-                crate::i18n::msg::browse_detail_unrated()
-            } else {
-                &hero.rating
-            }
-        )
+        if hero.year > 0 {
+            parts.push(hero.year.to_string());
+        }
+        if let Some(runtime) = runtime {
+            parts.push(runtime);
+        }
+        parts.push(if hero.rating.is_empty() {
+            crate::i18n::msg::browse_detail_unrated().to_string()
+        } else {
+            hero.rating.clone()
+        });
+        parts.join(" \u{b7} ")
     };
     let meta_view = TextView::new(&meta, theme::size::BODY, theme::TEXT_SECONDARY).max_lines(1);
     let meta_h = meta_view.measure_h(HERO_COL_W);
@@ -2526,10 +2532,7 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
         .as_ref()
         .map(|v| theme::space::SM + v.measure_h(HERO_COL_W))
         .unwrap_or(0.0);
-    let mut y = hero_stack_top(title_h + kicker_h, meta_h, synopsis_h);
-    Label::new(kicker.as_ptr(), theme::size::CAPTION, theme::ACCENT)
-        .draw(p, Rect::new(MARGIN_X, y, HERO_COL_W, 0.0));
-    y += kicker_h;
+    let mut y = hero_stack_top(title_h, meta_h, synopsis_h);
     HeroLogo::new(hero.sid, hero_logo_rk(hero), title, LogoRung::Hero)
         .draw(p, Rect::new(MARGIN_X, y, HERO_COL_W, title_h), measure);
     y += title_h + theme::space::MD;

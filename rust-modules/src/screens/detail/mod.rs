@@ -5,7 +5,6 @@
 //! content decisions (season debounce/restoration and server reconciliation) and render state
 //! (springs, metrics and caches). User input cancels restoration, never the reconciliation owed.
 
-mod about;
 mod cast;
 mod episodes;
 mod extras;
@@ -84,8 +83,6 @@ const _: () = assert!(hero::HERO_ELEM_RANGE_END == season::SEASON_ELEM_RANGE_STA
 const _: () = assert!(season::SEASON_ELEM_RANGE_END == episodes::EPISODES_ELEM_RANGE_START);
 const _: () = assert!(episodes::EPISODES_ELEM_RANGE_END == related::RELATED_ELEM_RANGE_START);
 const _: () = assert!(related::RELATED_ELEM_RANGE_END == cast::CAST_ELEM_RANGE_START);
-const _: () = assert!(cast::CAST_ELEM_RANGE_END == about::ABOUT_ELEM_RANGE_START);
-const _: () = assert!(about::ABOUT_ELEM_RANGE_END == extras::EXTRAS_ELEM_RANGE_START);
 const _: () = assert!(extras::EXTRAS_ELEM_RANGE_END <= FIRST_ITEM_ELEM);
 
 #[derive(Clone)]
@@ -194,10 +191,9 @@ pub(crate) struct DetailScreen {
     cast: CardRow,
     tabs: TabStrip,
     season_pop: CtlPop<1>,
-    ctl_pop: CtlPop<5>,
-    disc_unfurl: [Spring; 4],
+    ctl_pop: CtlPop<8>,
+    disc_unfurl: [Spring; 6],
     season_metrics: season::Metrics,
-    about_rows: about::Rows,
     /// The page's own keyed ground. Deliberately a bare [`AmbientWash`] and not the shared
     /// `PageGround`, which is the browsing screens' policy: that type draws itself whenever it is
     /// not flat and dithers unconditionally, and both are wrong here. This wash must not be laid
@@ -235,6 +231,18 @@ pub(crate) struct DetailScreen {
     /// it can answer without constructing a throwaway empty owner. Derived, not logical state —
     /// deliberately absent from [`SHAPE`].
     spot_facts: SpotFacts,
+    /// **The synopsis' accordion**, one-way: the owner's pass caps the hero at five lines and the
+    /// `MORE` mark opens the whole blurb in place. Presentation only, deliberately absent from
+    /// [`SHAPE`]: no recorded flow presses the mark, and a `SHAPE` bump would invalidate every
+    /// detail fixture for a boolean that starts false on every mount.
+    synopsis_open: bool,
+    /// **The audio and subtitle track the play will start with**, chosen from the hero's two discs
+    /// (`ELEM_AUDIO`/`ELEM_SUBTITLES`). `None` is "let the ladder pick", which is what every mount
+    /// starts at; a `Some(sid)` is the file's own stream id and is handed to
+    /// [`crate::route::StartTracks`] on the press. Not hashed, for [`Self::synopsis_open`]'s
+    /// reason: nothing in the replay domain opens a picker, and the default is the ladder's.
+    audio_sid: Option<i64>,
+    sub_sid: Option<i64>,
 }
 
 /// Snapshot of every metadata-dependent read [`DetailScreen::spot`] needs, taken while a real
@@ -242,7 +250,6 @@ pub(crate) struct DetailScreen {
 #[derive(Clone, Copy, Default, PartialEq)]
 pub(crate) struct SpotFacts {
     detail: bool,
-    tracks: bool,
     hero: hero::HeroSet,
     season: Option<i64>,
 }
@@ -251,7 +258,6 @@ impl SpotFacts {
     fn of(screen: &DetailScreen, meta: crate::metadata::MetadataView<'_>) -> SpotFacts {
         SpotFacts {
             detail: screen.detail(meta).is_some(),
-            tracks: screen.tracks_available(meta),
             hero: screen.hero_set(meta),
             season: screen
                 .detail(meta)
@@ -405,9 +411,8 @@ impl DetailScreen {
             tabs: TabStrip::new(),
             season_pop: CtlPop::new(),
             ctl_pop: CtlPop::new(),
-            disc_unfurl: [Spring::at(0.0); 4],
+            disc_unfurl: [Spring::at(0.0); 6],
             season_metrics: season::Metrics::new(),
-            about_rows: about::Rows::new(),
             ground,
             selected,
             spin_ms: 0.0,
@@ -415,6 +420,9 @@ impl DetailScreen {
             layout: Cell::new(None),
             layout_pinned: Cell::new(false),
             spot_facts: SpotFacts::default(),
+            synopsis_open: false,
+            audio_sid: None,
+            sub_sid: None,
         }
     }
 
@@ -443,7 +451,7 @@ impl DetailScreen {
 
     fn engine_key(&self, local: u32) -> Option<u32> {
         if local < season::SEASON_ELEM_RANGE_START
-            || local >= about::ABOUT_ELEM_RANGE_START && local < about::ABOUT_ELEM_RANGE_END
+            || local >= extras::EXTRAS_ELEM_RANGE_START && local < extras::EXTRAS_ELEM_RANGE_END
         {
             Some(local)
         } else {
@@ -533,7 +541,7 @@ impl DetailScreen {
     pub(crate) fn spot(&self, focus: Option<FocusKey<u32>>, facts: SpotFacts) -> Spot {
         let (section, col, ep_text) = focus
             .filter(|k| k.entry == self.entry)
-            .and_then(|k| self.locate_with(k.elem, facts.detail, facts.tracks))
+            .and_then(|k| self.locate_with(k.elem, facts.detail))
             .map(|l| {
                 let col = match l {
                     Located::Hero(control) => hero::index_of(facts.hero, control).unwrap_or(0) as i32,
@@ -686,15 +694,69 @@ impl DetailScreen {
         measure: &dyn crate::ui::machine::Measure,
     ) -> crate::ui::detail_layout::HeroChain {
         let (lead, synopsis) = hero_blurb(d, self.selected());
-        let synopsis_h = crate::ui::hero_synopsis(&synopsis, &lead)
-            .with_measure(measure)
+        let synopsis_h = self
+            .synopsis_view(&synopsis, &lead, measure)
             .measure_h(crate::ui::detail_layout::HERO_TEXT_W);
         crate::ui::detail_layout::hero_chain(
             synopsis_h,
-            d.is_some_and(|detail| !detail.ratings.is_empty()),
+            // The audience score moved into the identity line beside the age rating, so the
+            // separate marks row is reserved only for a provider score the Jellyfin flavor cannot
+            // send today. Filtering it here is what keeps an empty band from opening the gap.
+            d.is_some_and(|detail| {
+                detail
+                    .ratings
+                    .iter()
+                    .any(|r| r.art != crate::metadata::RatingArt::Community)
+            }),
             d.map_or(0.0, |detail| hero::people_h(detail, measure)),
             measure,
         )
+    }
+
+    /// The hero's synopsis view, in ONE place for the chain's measure and the paint: five lines
+    /// until the viewer opens the accordion, the whole blurb after (`max_lines(0)` is "no cap").
+    fn synopsis_view<'a>(
+        &self,
+        summary: &'a str,
+        lead: &'a str,
+        measure: &'a dyn crate::ui::machine::Measure,
+    ) -> crate::ui::text_view::TextView<'a> {
+        let view = crate::ui::hero_synopsis(summary, lead).with_measure(measure);
+        if self.synopsis_open {
+            view.max_lines(0)
+        } else {
+            view
+        }
+    }
+
+    /// **Where the `MORE` mark sits**, or `None` when there is nothing to open. One expression for
+    /// the drawn mark, its pointer stop and its focus group, so the three cannot disagree about
+    /// whether the affordance exists. It hangs [`theme::space::SM`] under the synopsis block, in the
+    /// copy column's leading edge, and takes the `CAPTION` line's own height.
+    fn synopsis_more_rect(
+        &self,
+        measure: &dyn crate::ui::machine::Measure,
+        meta: crate::metadata::MetadataView<'_>,
+    ) -> Option<Rect> {
+        let d = self.detail(meta)?;
+        let (lead, summary) = hero_blurb(Some(d), self.selected());
+        if summary.is_empty() {
+            return None;
+        }
+        let view = crate::ui::hero_synopsis(&summary, &lead).with_measure(measure);
+        if self.synopsis_open || !view.truncates(crate::ui::detail_layout::HERO_TEXT_W) {
+            return None;
+        }
+        let h = view.measure_h(crate::ui::detail_layout::HERO_TEXT_W);
+        let chain = self.hero_chain(measure, meta);
+        let cy = chain.syn_y + h + theme::space::SM;
+        let w = measure.width(crate::ui::text_view::more_mark(), theme::size::CAPTION, true);
+        Some(Rect::new(
+            crate::ui::detail_layout::HERO_TEXT_X,
+            cy,
+            w.max(1.0),
+            measure.cap_h(theme::size::CAPTION),
+        ))
     }
 
     /// Pin [`layout`](Self::layout) for one walk ([`LayoutPin`]). Validates first, so a pinned
@@ -859,8 +921,6 @@ impl DetailScreen {
                 out[n] = section::SectionId::Related.raw();
                 n += 1;
             }
-            out[n] = section::SectionId::About.raw();
-            n += 1;
         }
         (out, n)
     }
@@ -915,29 +975,30 @@ impl DetailScreen {
     }
 
     fn locate(&self, elem: u32, meta: crate::metadata::MetadataView<'_>) -> Option<Located> {
-        self.locate_with(elem, self.detail(meta).is_some(), self.tracks_available(meta))
+        self.locate_with(elem, self.detail(meta).is_some())
     }
 
-    fn locate_with(&self, elem: u32, detail: bool, tracks: bool) -> Option<Located> {
+    fn locate_with(&self, elem: u32, detail: bool) -> Option<Located> {
         let local = if elem >= FIRST_ITEM_ELEM {
             // The projections describe only our currently published item.
             if !detail {
                 return None;
             }
             *self.local_by_key.get(&elem)?
-        } else if elem < season::SEASON_ELEM_RANGE_START || elem >= about::ABOUT_ELEM_RANGE_START {
+        } else if elem < season::SEASON_ELEM_RANGE_START || elem >= extras::EXTRAS_ELEM_RANGE_START {
             elem
         } else {
             return None;
         };
-        Self::locate_local(local, tracks)
+        Self::locate_local(local)
     }
 
-    /// `tracks` is [`Self::tracks_available`] — the page's own answer, threaded in because this is
-    /// an associated fn and because the About footer's element range is exactly what it decides.
-    fn locate_local(elem: u32, tracks: bool) -> Option<Located> {
+    fn locate_local(elem: u32) -> Option<Located> {
         if let Some(c) = hero::HeroCtl::of_elem(elem) {
             return Some(Located::Hero(c));
+        }
+        if elem == hero::ELEM_SYNOPSIS_MORE {
+            return Some(Located::Synopsis);
         }
         if let Some(i) = season::locate(elem) {
             return Some(Located::Season(i));
@@ -951,10 +1012,7 @@ impl DetailScreen {
         if let Some(i) = extras::locate(elem) {
             return Some(Located::Extras(i));
         }
-        if let Some(i) = cast::locate(elem) {
-            return Some(Located::Cast(i));
-        }
-        about::locate(elem, tracks).map(Located::About)
+        cast::locate(elem).map(Located::Cast)
     }
 
     fn focused_index(&self, focus: Option<FocusKey<u32>>, group: GroupId, meta: crate::metadata::MetadataView<'_>) -> Option<usize> {
@@ -1019,13 +1077,6 @@ impl DetailScreen {
             3 if !d.related.is_empty() => related::elem(clamp(intent.spot.col, d.related.len())),
             6 if !d.extras.is_empty() => extras::elem(clamp(intent.spot.col, extras::len(d))),
             4 if d.credits_len() > 0 => cast::elem(clamp(intent.spot.col, d.credits_len())),
-            5 => Some(
-                if intent.spot.col > 0 && self.tracks_available(meta) {
-                    about::LANGUAGES_ELEM
-                } else {
-                    about::CARD_ELEM
-                },
-            ),
             _ => Some(hero::ELEM_PLAY),
         }?;
         self.engine_key(local)
@@ -1047,13 +1098,32 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
         let (_, hero_n) = hero::visible_ctls(set, self.full_trailer());
         let hero_y = self.hero_chain(measure, meta).btn_y;
         let hero_last = hero::hero_btn_rect_at(set, hero_n.saturating_sub(1), hero_y, widths);
+        // The `MORE` mark lives ABOVE the action row, so the hero row's UP edge is geometric:
+        // that is the only way the arrows reach the accordion from the row they start on.
+        if let Some(rect) = self.synopsis_more_rect(measure, meta) {
+            out.push(GroupSpec {
+                id: SYNOPSIS_GROUP,
+                kind: GroupKind::Free,
+                seat: Seat::First,
+                reachable: AxisMask::BOTH,
+                edge: [EdgeRule::Geometric; 4],
+                extent: Rect::new(
+                    rect.x,
+                    rect.y - self.scroll_target,
+                    rect.w,
+                    rect.h,
+                ),
+                len: 1,
+                elem: ElemKind::Control,
+            });
+        }
         out.push(GroupSpec {
             id: hero::HERO_GROUP,
             kind: GroupKind::Row { wrap: false },
             seat: Seat::First,
             reachable: AxisMask::BOTH,
             edge: [
-                EdgeRule::Stop,
+                EdgeRule::Geometric,
                 EdgeRule::Geometric,
                 EdgeRule::Stop,
                 EdgeRule::Stop,
@@ -1151,29 +1221,6 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
                     len: d.credits_len().min(512),
                     elem: ElemKind::Card,
                 }),
-                5 => {
-                    let tracks = self.tracks_available(meta);
-                    out.push(GroupSpec {
-                        id: about::ABOUT_GROUP,
-                        kind: GroupKind::Column,
-                        seat: Seat::First,
-                        reachable: AxisMask::BOTH,
-                        edge: [
-                            EdgeRule::Geometric,
-                            EdgeRule::Stop,
-                            EdgeRule::Stop,
-                            EdgeRule::Stop,
-                        ],
-                        extent: Rect::new(
-                            crate::ui::consts::MARGIN_X,
-                            top,
-                            crate::ui::consts::SCR_W - 2.0 * crate::ui::consts::MARGIN_X,
-                            crate::ui::consts::SCR_H - crate::ui::detail_layout::TOP_MARGIN,
-                        ),
-                        len: 1 + usize::from(tracks),
-                        elem: ElemKind::Control,
-                    });
-                }
                 _ => {}
             }
         }
@@ -1182,12 +1229,12 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
     fn group_of(&self, key: &u32, cx: &Cx<'_, H>) -> Option<GroupId> {
         let meta = H::metadata(cx);
         let located = self.locate(*key, meta)?;
-        self.valid(located, meta).then(|| located.group())
+        self.valid(located, meta, cx.measure).then(|| located.group())
     }
 
     fn neighbour(&self, key: FocusKey<u32>, dir: Dir, cx: &Cx<'_, H>) -> Step<u32> {
         let meta = H::metadata(cx);
-        let Some(located) = self.locate(key.elem, meta).filter(|l| self.valid(*l, meta)) else {
+        let Some(located) = self.locate(key.elem, meta).filter(|l| self.valid(*l, meta, cx.measure)) else {
             return Step::Edge;
         };
         let moved = match located {
@@ -1228,11 +1275,9 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
                 row_move(i, self.detail(meta).map(|d| d.credits_len()).unwrap_or(0), dir)
                     .and_then(cast::elem)
             }
-            Located::About(i) => match (i, dir, self.tracks_available(meta)) {
-                (0, Dir::Down, true) => Some(about::LANGUAGES_ELEM),
-                (1, Dir::Up, _) => Some(about::CARD_ELEM),
-                _ => None,
-            },
+            // One element: every side is the group's own geometric edge rule, so a key from the
+            // mark answers `Edge` and the engine resolves the nearest stop in that direction.
+            Located::Synopsis => None,
         };
         moved
             .and_then(|local| self.engine_key(local))
@@ -1248,7 +1293,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
     fn place(&self, key: &u32, cx: &Cx<'_, H>, at: At) -> Option<Placed> {
         let meta = H::metadata(cx);
         let measure = cx.measure;
-        let located = self.locate(*key, meta).filter(|l| self.valid(*l, meta))?;
+        let located = self.locate(*key, meta).filter(|l| self.valid(*l, meta, cx.measure))?;
         let d = self.detail(meta);
         let vertical = if at == At::Drawn {
             self.scroll.pos
@@ -1273,6 +1318,11 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
                     base.scaled(crate::ui::widgets::CTRL_FOCUS_SCALE),
                     Some(i as u32),
                 )
+            }
+            Located::Synopsis => {
+                let base = self.synopsis_more_rect(measure, meta)?;
+                let base = Rect::new(base.x, base.y - vertical, base.w, base.h);
+                (base, base, Some(0))
             }
             Located::Season(i) => {
                 let base = self.season_metrics.rect(
@@ -1330,16 +1380,6 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
                     cast::rect(&self.cast, i, top, false),
                     Some(i as u32),
                 )
-            }
-            Located::About(i) => {
-                let d = d?;
-                let top = self.section_top_at(5, d, measure, at) - vertical;
-                let base = if i == 0 {
-                    self.about_rows.card_rect(d, top, measure)
-                } else {
-                    self.about_rows.languages_rect(top, measure)
-                };
-                (base, base, Some(i as u32))
             }
         };
         Some(Placed {
@@ -1422,7 +1462,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
         }
         if self
             .locate(want.elem, meta)
-            .is_some_and(|located| self.valid(located, meta))
+            .is_some_and(|located| self.valid(located, meta, cx.measure))
         {
             return want;
         }
@@ -1506,11 +1546,11 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
             ))
             .unwrap_or(cast::CAST_ELEM_RANGE_START)
         } else {
-            about::CARD_ELEM
+            hero::ELEM_PLAY
         };
         FocusKey {
             entry: self.entry,
-            elem: Self::locate_local(elem, self.tracks_available(meta))
+            elem: Self::locate_local(elem)
                 .and_then(|located| self.key_of(located))
                 .unwrap_or(hero::ELEM_PLAY),
         }
@@ -1518,7 +1558,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
 }
 
 impl DetailScreen {
-    fn valid(&self, located: Located, meta: crate::metadata::MetadataView<'_>) -> bool {
+    fn valid(&self, located: Located, meta: crate::metadata::MetadataView<'_>, measure: &dyn crate::ui::machine::Measure) -> bool {
         let d = self.detail(meta);
         match located {
             // A control other than Play is never valid while full-trailer mode has narrowed the
@@ -1527,6 +1567,7 @@ impl DetailScreen {
             Located::Hero(c) => {
                 hero::focusable(c, self.full_trailer()) && hero::index_of(self.hero_set(meta), c).is_some()
             }
+            Located::Synopsis => self.synopsis_more_rect(measure, meta).is_some(),
             Located::Season(i) => d.is_some_and(|d| i < d.seasons.len().min(64)),
             Located::Episode(i, _) => {
                 d.is_some_and(|d| i < d.episodes.len().min(episodes::MAX_ITEMS))
@@ -1534,9 +1575,6 @@ impl DetailScreen {
             Located::Related(i) => d.is_some_and(|d| i < d.related.len().min(512)),
             Located::Extras(i) => d.is_some_and(|d| i < extras::len(d)),
             Located::Cast(i) => d.is_some_and(|d| i < d.credits_len().min(512)),
-            Located::About(0) => d.is_some(),
-            Located::About(1) => d.is_some() && self.tracks_available(meta),
-            Located::About(_) => false,
         }
     }
 }
@@ -1609,10 +1647,8 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                 if *ord == StoreId::Metadata.ord() {
                     self.sync_keys(meta);
                     self.season_metrics.invalidate();
-                    self.about_rows.invalidate();
                     if let Some(detail) = self.detail(meta) {
                         self.season_metrics.update(detail, cx.measure);
-                        self.about_rows.update(detail);
                     }
                 }
                 self.pump_restore(meta, fx);
@@ -1816,6 +1852,18 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
             }
             // The *Also available* surface committed a row. It names the destination; this page
             // performs the navigation, exactly as it did while the panel reported an `Action`.
+            ScreenEvent::App(AppMsg::DetailTracks { audio_sid, sub_sid }) => {
+                // The hero's two discs committed a language. The page keeps it until Play, which
+                // hands it to `StartTracks`; nothing else in the app moves.
+                if let Some(sid) = *audio_sid {
+                    self.audio_sid = Some(sid);
+                }
+                if let Some(sid) = *sub_sid {
+                    self.sub_sid = Some(sid);
+                }
+                fx.invalidate(Provenance::Input);
+                Handled::Yes
+            }
             ScreenEvent::App(AppMsg::AltSourceOpen(arg)) => {
                 self.content(fx, ContentReq::Present(arg.clone()));
                 Handled::Yes
@@ -2024,14 +2072,6 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
                             Some(Located::Cast(i)) => Some(i),
                             _ => None,
                         },
-                        f.measure,
-                    ),
-                    5 => self.about_rows.draw(
-                        below_hero,
-                        d,
-                        top,
-                        f.focus.current.map(|k| k.elem),
-                        self.tracks_available(meta),
                         f.measure,
                     ),
                     _ => {}
@@ -2280,29 +2320,11 @@ impl DetailScreen {
                 None,
             );
         }
-        if let Some(d) = d {
-            if d.kind != "episode" {
-                let kicker = std::ffi::CString::new(if d.is_show {
-                    crate::i18n::msg::browse_kind_tv_show()
-                } else {
-                    crate::i18n::msg::browse_kind_movie()
-                })
-                .unwrap_or_default();
-                let kicker_h = crate::text::text_height(theme::size::CAPTION, 1);
-                crate::ui::label::Label::new(kicker.as_ptr(), theme::size::CAPTION, theme::KICKER_INK)
-                    .draw(logo_alpha, Rect::new(
-                        crate::ui::detail_layout::HERO_TEXT_X,
-                        band.y - kicker_h - theme::space::SM,
-                        crate::ui::detail_layout::HERO_TEXT_W,
-                        0.0,
-                    ));
-            }
-        }
         HeroLogo::new(self.sid, &rk, title, LogoRung::lerp(LogoRung::Hero, LogoRung::Compact, t))
             .draw(logo_alpha, band, cx.measure);
 
         let (lead, synopsis) = hero_blurb(d, self.selected());
-        let synopsis_view = crate::ui::hero_synopsis(&synopsis, &lead).with_measure(measure);
+        let synopsis_view = self.synopsis_view(&synopsis, &lead, measure);
         let chain = self.hero_chain(measure, meta);
         // Two gates, and the difference is the whole behaviour. `prose` recedes the moment a
         // picture is up: the identity line and the rating marks are how you decide whether to
@@ -2320,9 +2342,28 @@ impl DetailScreen {
                 synopsis_alpha,
                 Rect::new(crate::ui::detail_layout::HERO_TEXT_X, chain.syn_y, HERO_TEXT_W, 0.0),
             );
+            // The accordion's mark, in the synopsis' own ink family: pressable text is a text
+            // MARK in this app (`text_view::more_mark`), and it is drawn only while the blurb is
+            // cut — a short one draws nothing at all, which is what makes the mark mean
+            // "there is more" rather than "press here".
+            if let Some(rect) = self.synopsis_more_rect(measure, meta) {
+                let ink = if cx.focus.current.is_some_and(|k| {
+                    k.entry == self.entry && k.elem == hero::ELEM_SYNOPSIS_MORE
+                }) {
+                    theme::ACCENT
+                } else {
+                    theme::TEXT_TERTIARY
+                };
+                crate::ui::label::Label::new(
+                    crate::ui::text_view::more_mark().as_ptr(),
+                    theme::size::CAPTION,
+                    ink,
+                )
+                .bold()
+                .draw(synopsis_alpha, rect);
+            }
         }
         if let Some(d) = d {
-            hero::draw_facts(chrome, d, chain.facts_y, cx.measure);
             hero::draw_people(chrome, d, chain.people_y, measure);
         }
         // Full-trailer mode takes the action row with the rest of the page: the viewer asked for
@@ -2349,6 +2390,13 @@ impl DetailScreen {
         let ordinal = (d.kind == "episode" && d.season > 0 && d.index > 0)
             .then(|| crate::ui::fmt::episode_ordinal(d.season, d.index))
             .unwrap_or_default();
+        // **One line says what the item is and how long it runs.** The year (never the full
+        // release date) and the runtime moved up here from the facts row the owner's pass removed,
+        // so the identity line reads `Película · 2012 · 1 h 52 min · 12` instead of a record under
+        // a heading. An episode keeps its show and address, which is the only way to tell two of
+        // them apart.
+        let year = hero::hero_year(d);
+        let extent = hero::hero_extent(d).unwrap_or_default();
         let mut parts: Vec<&str> = Vec::new();
         if d.kind == "episode" {
             if !d.show_title.is_empty() {
@@ -2359,6 +2407,12 @@ impl DetailScreen {
             }
         } else {
             parts.push(if d.is_show { crate::i18n::msg::browse_kind_tv_show() } else { crate::i18n::msg::browse_kind_movie() });
+        }
+        if !year.is_empty() {
+            parts.push(&year);
+        }
+        if !extent.is_empty() {
+            parts.push(&extent);
         }
         if !d.rating.is_empty() {
             parts.push(&d.rating);
@@ -2378,6 +2432,23 @@ impl DetailScreen {
         }
         let (top, base) = crate::text::text_cap_band(theme::size::BODY, 0);
         let cy = y + (top + base) * 0.5;
+        // **The audience score beside the age rating** (the owner's pass): a star and the number,
+        // with no `SCORE` caption anywhere. It is the same mark the pre-playback window used for
+        // this number, so the vocabulary did not change with its home.
+        if let Some(score) = hero::community_score(d) {
+            let d_px = 24.0;
+            let star = Rect::new(x, cy - d_px * 0.5, d_px, d_px);
+            crate::ui::icons::draw(p, crate::ui::icons::Icon::StarFill, star, theme::TEXT_PRIMARY);
+            x += d_px + theme::space::XS;
+            if let Ok(text) = std::ffi::CString::new(crate::ui::fmt::rating_score(
+                crate::metadata::RatingArt::Community,
+                score,
+            )) {
+                let ty = crate::text::text_vcenter_y(theme::size::LABEL, 1, cy);
+                x += p.text(text.as_ptr(), x, ty, theme::size::LABEL, theme::TEXT_PRIMARY, 0, 1);
+            }
+            x += theme::space::SM;
+        }
         if let Some(res) = crate::ui::fmt::resolution(&d.video_resolution, d.width, d.height) {
             x += crate::ui::widgets::badge(
                 p,
@@ -2422,6 +2493,13 @@ impl DetailScreen {
         let mut x = crate::ui::detail_layout::HERO_TEXT_X;
         let mut i = 0;
         while i < d.ratings.len() {
+            // The audience score is drawn beside the age rating, not in this row (the owner's
+            // pass). Skipping it here is what removes the `SCORE` caption: it was this entry's
+            // provider name and nothing else ever carried it.
+            if d.ratings[i].art == crate::metadata::RatingArt::Community {
+                i += 1;
+                continue;
+            }
             let provider = d.ratings[i].art.provider();
             let end = i + d.ratings[i..].partition_point(|r| r.art.provider() == provider);
             let scores: Vec<String> = d.ratings[i..end]
@@ -2529,6 +2607,11 @@ impl DetailScreen {
                             }
                         }
                         hero::HeroCtl::MarkUnwatched => crate::ui::icons::Icon::Minus,
+                        // The language pair the owner asked for: ONE note for the audio (the
+                        // library's `audio.svg` is a double one and read as a stereo mark, not a
+                        // language one) and the caption box for the subtitles.
+                        hero::HeroCtl::Audio => crate::ui::icons::Icon::Note,
+                        hero::HeroCtl::Subtitles => crate::ui::icons::Icon::Cc,
                         _ => unreachable!(),
                     };
                     let mut button = CircleButton::new(c"".as_ptr())
@@ -2627,9 +2710,6 @@ impl DetailScreen {
                 (0..d.credits_len().min(512))
                     .filter_map(|i| cast::elem(i).map(|e| (e, Activate::Press))),
             );
-            if self.tracks_available(meta) {
-                elems.push((about::LANGUAGES_ELEM, Activate::Press));
-            }
         }
         for (elem, activate) in elems {
             let Some(elem) = self.engine_key(elem) else { continue };
@@ -2755,62 +2835,62 @@ fn hero_blurb<'a>(
     )
 }
 
+/// The synopsis accordion's own focus group: ONE element, the `MORE` mark under the prose. Its
+/// own group rather than a slot on the action row, because it is not a control in that row — it
+/// sits above it, in the copy column, and only exists while the blurb is cut.
+pub(crate) const SYNOPSIS_GROUP: GroupId = GroupId(6);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Located {
     Hero(hero::HeroCtl),
+    Synopsis,
     Season(usize),
     Episode(usize, episodes::Row),
     Related(usize),
     Extras(usize),
     Cast(usize),
-    About(usize),
 }
 
 impl Located {
     fn local_key(self) -> Option<u32> {
         match self {
             Self::Hero(control) => Some(control.elem()),
+            Self::Synopsis => Some(hero::ELEM_SYNOPSIS_MORE),
             Self::Season(index) => season::elem(index),
             Self::Episode(index, row) => episodes::elem(index, row),
             Self::Related(index) => related::elem(index),
             Self::Extras(index) => extras::elem(index),
             Self::Cast(index) => cast::elem(index),
-            Self::About(0) => Some(about::CARD_ELEM),
-            Self::About(_) => Some(about::LANGUAGES_ELEM),
         }
     }
     fn section(self) -> i32 {
         match self {
-            Self::Hero(_) => 0,
+            Self::Hero(_) | Self::Synopsis => 0,
             Self::Season(_) => 1,
             Self::Episode(_, _) => 2,
             Self::Related(_) => 3,
             Self::Extras(_) => 6,
             Self::Cast(_) => 4,
-            Self::About(_) => 5,
         }
     }
 
     fn group(self) -> GroupId {
         match self {
             Self::Hero(_) => hero::HERO_GROUP,
+            Self::Synopsis => SYNOPSIS_GROUP,
             Self::Season(_) => season::SEASON_GROUP,
             Self::Episode(_, _) => episodes::EPISODES_GROUP,
             Self::Related(_) => related::RELATED_GROUP,
             Self::Extras(_) => extras::EXTRAS_GROUP,
             Self::Cast(_) => cast::CAST_GROUP,
-            Self::About(_) => about::ABOUT_GROUP,
         }
     }
 
     fn index(self) -> usize {
         match self {
             Self::Hero(c) => c.elem() as usize,
+            Self::Synopsis => 0,
             Self::Season(i) | Self::Episode(i, _) | Self::Related(i) | Self::Extras(i) | Self::Cast(i) => i,
-            Self::About(0) => 0,
-            // Legacy Spot/focusprobe vocabulary keeps the four visual About columns numbered
-            // Card=0, Information=1, Languages=2, Accessibility=3 even though only two are stops.
-            Self::About(_) => 2,
         }
     }
 }
@@ -2978,7 +3058,6 @@ impl DetailScreen {
         let loaded = d.is_some();
         if let Some(d) = d {
             self.season_metrics.update(d, cx.measure);
-            self.about_rows.update(d);
         }
 
         let focused = cx
@@ -3431,12 +3510,18 @@ impl DetailScreen {
         let favorite = self.detail(meta).map(|d| d.is_favorite);
         #[cfg(any())]
         let favorite = None;
+        let (audio, subs) = self
+            .detail(meta)
+            .map(|d| (d.audio.len() > 1, !d.subs.is_empty()))
+            .unwrap_or((false, false));
         hero::HeroSet {
             restart,
             trailer: false,
             alt: self.alt_available(meta),
             mark,
             favorite,
+            audio,
+            subs,
         }
     }
 
@@ -3456,35 +3541,6 @@ impl DetailScreen {
     /// **Is there a file for the *Track information* sheet to describe?** — the Languages column's
     /// press gate, and the page's own answer about the page's own item.
     ///
-    /// The RULE is the data's ([`crate::metadata::Detail::has_own_file`], which explains why it is
-    /// `part` and not `is_show`); what this adds is WHOSE item it is applied to. [`Self::detail`] FILTERS the
-    /// store landing by this page's `(sid, rk)`, where the panel's own `is_available()` read
-    /// `metadata::current()` unfiltered — so a Detail page whose fetch had not landed yet answered
-    /// from whatever item was loaded last, which on the way back from a Person page is a different
-    /// film, and which decided the About footer's column count and the element ladder under it.
-    ///
-    /// It is false for the whole mount fetch, which costs nothing: the About footer is drawn from a
-    /// loaded item, so there is no frame on which the Languages column is on screen and this is
-    /// still false. The column does not appear or vanish with the answer — it is always the third
-    /// of four — so a press that arrives early is refused rather than landing on a control that has
-    /// moved.
-    pub(crate) fn tracks_available(&self, meta: crate::metadata::MetadataView<'_>) -> bool {
-        self.detail(meta).is_some_and(crate::metadata::Detail::has_own_file)
-    }
-
-    /// **Is the pre-playback window what this page's Play opens right now?** (issue #367)
-    ///
-    /// The SAME rule [`Self::play_hero`] applies, in one place so the press and the headless
-    /// trigger cannot drift: a LEAF the page holds in full (a movie, or an episode's own page) with
-    /// no alternative source selected. A show's page plays its on-deck episode, which is not the
-    /// item the page holds, and a selected alternative copy's tracks are not the ones this page
-    /// landed — both keep playing directly.
-    pub(crate) fn preplay_available(&self, meta: crate::metadata::MetadataView<'_>) -> bool {
-        self.detail(meta)
-            .is_some_and(|d| !d.is_show && d.has_own_file())
-            && self.selected().is_none()
-    }
-
     fn named_show(&self, meta: crate::metadata::MetadataView<'_>) -> bool {
         self.detail(meta).is_some_and(hero::watch_names_show)
     }
@@ -3554,9 +3610,6 @@ impl DetailScreen {
                     );
                 }
             }
-            Some(Located::About(1)) => {
-                self.content(fx, ContentReq::Panel(ContentPanel::Tracks { page: 1 }))
-            }
             _ => {}
         }
         fx.invalidate(Provenance::Input);
@@ -3617,6 +3670,35 @@ impl DetailScreen {
                     );
                 }
             }
+            // **The two language discs** (the owner's pass): each opens the track picker under
+            // itself, with the id the play would use today so the menu can check it.
+            hero::HeroCtl::Audio | hero::HeroCtl::Subtitles => {
+                let audio = ctl == hero::HeroCtl::Audio;
+                let set = self.hero_set(meta);
+                let Some(i) = hero::index_of(set, ctl) else { return };
+                let widths = hero::hero_widths(
+                    cx.measure,
+                    set,
+                    set.restart,
+                    self.disc_unfurl.map(|s| s.pos),
+                    self.named_show(meta),
+                );
+                let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
+                rect.y -= self.scroll.pos;
+                let chosen = if audio {
+                    self.audio_sid.unwrap_or(0)
+                } else {
+                    self.sub_sid.unwrap_or(-1)
+                };
+                self.content(
+                    fx,
+                    ContentReq::Panel(ContentPanel::TrackPick {
+                        audio,
+                        chosen,
+                        anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
+                    }),
+                );
+            }
             hero::HeroCtl::Favorite => {
                 if let Some(d) = self.detail(meta) {
                     let on = !d.is_favorite;
@@ -3676,15 +3758,6 @@ impl DetailScreen {
                     fx,
                 ),
             }
-        } else if self.preplay_available(meta) {
-            // **The pre-playback window, not the film** (issue #367, under #355). The item this
-            // page holds is the item the press would start, so the window can show its own facts
-            // and offer its own tracks; the window's OK is what plays.
-            self.content(
-                fx,
-                ContentReq::Panel(ContentPanel::PrePlayback { restart: from_start }),
-            );
-            true
         } else {
             let play = self.selected().map_or_else(
                 || PlayIntent::Item {
@@ -3699,7 +3772,13 @@ impl DetailScreen {
                 |m| PlayIntent::Movie(m.clone()),
             );
             let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
-            self.content(fx, ContentReq::Play { play, resume_ns, tracks: crate::route::StartTracks::NONE });
+            // **The hero's two discs decided this**, if they were used at all: `None` on either
+            // half is the ladder's own answer, which is what every play before the picker did.
+            let tracks = crate::route::StartTracks {
+                audio_sid: self.audio_sid.unwrap_or(0),
+                sub_sid: self.sub_sid.unwrap_or(-1),
+            };
+            self.content(fx, ContentReq::Play { play, resume_ns, tracks });
             true
         }
     }

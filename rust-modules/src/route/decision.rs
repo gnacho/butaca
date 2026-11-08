@@ -5192,10 +5192,12 @@ impl ResolveEnv {
     }
 }
 
+#[allow(dead_code)] // The hero's facts row showed it; the owner's pass removed that row. The prediction stays tested for the next surface that asks.
 pub(crate) fn playback_preview(d: &crate::metadata::Detail) -> Option<Preview> {
     playback_preview_with_capability(d, None)
 }
 
+#[allow(dead_code)] // See `playback_preview`.
 fn playback_preview_with_capability(
     d: &crate::metadata::Detail,
     capability: Option<crate::webos::caps::DvCapability>,

@@ -14,14 +14,22 @@ pub(crate) const HERO_TEXT_W: f32 = 1424.0;
 pub(crate) const POSTER_W: f32 = 280.0;
 pub(crate) const POSTER_H: f32 = 420.0;
 pub(crate) const POSTER_GAP: f32 = 24.0;
-/// The poster's top edge: the title's baseline band starts 200px above `TITLE_BOTTOM`, so the
-/// poster's head lines up with it and its foot lands on the action row.
-pub(crate) const POSTER_Y: f32 = TITLE_BOTTOM - 200.0;
+/// **The hero's one top edge.** The poster's head and the title band's head are the same line
+/// (the owner's pass: "alinear el logo con la carátula"), and the poster rose 20% of its own
+/// height from the old `366` to get there — the space the removed `Película` kicker used to spend
+/// above the title. The whole column below it moved up with it, which is what pays for the fifth
+/// synopsis line.
+pub(crate) const HERO_TOP: f32 = 282.0;
+/// The poster's top edge: the hero's own top, shared with the title band.
+pub(crate) const POSTER_Y: f32 = HERO_TOP;
 /// Where the hero's copy column begins, right of the poster. Every left-anchored row of the hero
-/// (title logo, kicker, identity, ratings, synopsis, facts, actions) starts here, so the poster
-/// never shares ink with the text.
+/// (title logo, identity, ratings, synopsis, people, actions) starts here, so the poster never
+/// shares ink with the text.
 pub(crate) const HERO_TEXT_X: f32 = MARGIN_X + POSTER_W + POSTER_GAP;
-pub(crate) const TITLE_BOTTOM: f32 = 566.0;
+/// The title band's BOTTOM edge — its anchor (`HeroLogo` places by the band's foot). Derived from
+/// [`HERO_TOP`] and the hero rung's ceiling, so the band's head can only be the poster's head:
+/// `hero_logo::band_h(Hero)` is `theme::logo::HERO_H_MAX`, a constant for exactly this reason.
+pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + theme::logo::HERO_H_MAX;
 /// The cast and crew band, which is now a BAND under the facts row rather than a column beside the
 /// copy. A 560-wide column at the right edge was what capped the copy at 943: the two shared a
 /// horizontal strip, so widening the text meant running under the names. Stacked, each gets the
@@ -57,8 +65,7 @@ pub(crate) struct HeroChain {
     pub(crate) meta_y: f32,
     pub(crate) ratings_y: f32,
     pub(crate) syn_y: f32,
-    pub(crate) facts_y: f32,
-    /// Where the cast and crew band starts: under the facts row, spanning the copy column.
+    /// Where the cast and crew band starts: under the synopsis, spanning the copy column.
     pub(crate) people_y: f32,
     pub(crate) btn_y: f32,
 }
@@ -105,14 +112,14 @@ pub(crate) fn hero_chain(
     // Same reasoning: the rating marks (`RATING_MARK_D`, 30) are centred on the caption's cap band
     // and are the row's tallest element, not the `LABEL` text (cap_h ~19.5) beside them.
     let ratings_h = widgets::RATING_MARK_D;
-    let syn_y = (if has_ratings { ratings_y + ratings_h } else { meta_y + meta_h }) + theme::space::SM;
-    let facts_y = syn_y + syn_h.max(34.0) + theme::space::MD;
-    // The facts row's own icons (`FACTS_GLYPH_D`/capsule) are sized to the `CAPTION` text itself,
-    // unlike the two rows above, so its measured height is the plain cap band — read through the
-    // `Measure` seam (`check-deps.sh`'s "textmeasure" gate: raw `crate::text::cap_h` is not
-    // reachable outside `text.rs`/`ui/text_view.rs`/`ui/text_buffer.rs`/a `Measure` impl body),
-    // the same capability `compute_hero_chain`'s caller already threads down for the synopsis.
-    let facts_h = measure.cap_h(theme::size::CAPTION);
+    // `MD`, not `SM`: the synopsis is a change of KIND (prose after the item's own labels), and
+    // with the facts row gone this rung is the only one left to say so — the ladder still has to
+    // widen on the way down (`the_hero_ladder_widens_…`).
+    let syn_y = (if has_ratings { ratings_y + ratings_h } else { meta_y + meta_h }) + theme::space::MD;
+    // **There is no facts row any more.** The date and the runtime moved into the identity line
+    // (the owner's pass) and the play-mode word (`Transmisión directa`) was removed outright, so
+    // the band it used to take is now air the synopsis and the people band spend.
+    //
     // The one rung in this chain that is a JUDGEMENT rather than a measurement, and the one place
     // the ladder steps twice. Everything above this line is information about the item and is
     // spaced by how closely it belongs together — `SM` inside the identity group, `MD` where the
@@ -126,20 +133,22 @@ pub(crate) fn hero_chain(
     // The people band sits between the facts row and the action row, so it is part of the chain
     // and the buttons move down by its measured height. When there is no cast or crew the band
     // takes no space at all and the action row keeps the rung it always had.
-    let people_y = people_top(facts_y, facts_h);
+    let people_y = people_top(syn_y, syn_h.max(34.0));
     let btn_y = if people_h > 0.0 {
         people_y + people_h + theme::space::LG
     } else {
-        facts_y + facts_h + theme::space::LG
+        syn_y + syn_h.max(34.0) + theme::space::LG
     };
-    HeroChain { meta_y, ratings_y, syn_y, facts_y, people_y, btn_y }
+    let _ = measure;
+    HeroChain { meta_y, ratings_y, syn_y, people_y, btn_y }
 }
 
-/// The top of the cast and crew band: one `SM` under the facts row's own measured bottom. It used
-/// to be anchored by its BOTTOM on the action row and grow upward, which is exactly what made it
-/// share a strip with the facts row; anchored by its top it can only ever sit below.
-pub(crate) fn people_top(facts_y: f32, facts_h: f32) -> f32 {
-    facts_y + facts_h + theme::space::SM
+/// The top of the cast and crew band: one `SM` under the block above it (the synopsis now that
+/// the facts row is gone). It used to be anchored by its BOTTOM on the action row and grow
+/// upward, which is exactly what made it share a strip with the facts row; anchored by its top it
+/// can only ever sit below.
+pub(crate) fn people_top(above_y: f32, above_h: f32) -> f32 {
+    above_y + above_h + theme::space::SM
 }
 
 pub(crate) fn base_scrim_a(y: f32, hero_vis: f32) -> f32 {
@@ -161,7 +170,6 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::machine::Measure;
 
     /// The cast and crew band sits UNDER the facts row and spans the same column, so the two can
     /// no longer share a horizontal strip at any height — the reason the copy had to stay narrow.
@@ -169,15 +177,15 @@ mod tests {
     fn the_people_band_sits_below_the_facts_row() {
         let measure = crate::ui::fixture::FixtureMeasure;
         let ch = hero_chain(76.0, true, 0.0, &measure);
-        let facts_bot = ch.facts_y + measure.cap_h(theme::size::CAPTION);
+        let syn_bot = ch.syn_y + 76.0;
         assert_eq!(
             ch.people_y,
-            facts_bot + theme::space::SM,
-            "the band starts one rung under the facts row's measured bottom"
+            syn_bot + theme::space::SM,
+            "the band starts one rung under the synopsis' measured bottom"
         );
         assert!(
-            ch.people_y > facts_bot,
-            "the band must start below the facts row, never level with it"
+            ch.people_y > syn_bot,
+            "the band must start below the synopsis, never level with it"
         );
         // And the action row clears the band by its own measured height, whatever that is.
         let with_people = hero_chain(76.0, true, 64.0, &measure);
@@ -210,14 +218,13 @@ mod tests {
     #[test]
     fn the_crew_credit_costs_the_chain_no_vertical_space() {
         let m = crate::ui::fixture::FixtureMeasure;
-        let facts_h = m.cap_h(theme::size::CAPTION);
         for syn_h in [0.0_f32, 108.0] {
             for ratings in [false, true] {
                 let ch = hero_chain(syn_h, ratings, 0.0, &m);
                 assert_eq!(
                     ch.btn_y,
-                    ch.facts_y + facts_h + theme::space::LG,
-                    "the action row hangs off the facts line's measured height, credit or no credit"
+                    ch.syn_y + syn_h.max(34.0) + theme::space::LG,
+                    "the action row hangs off the synopsis' measured height, credit or no credit"
                 );
             }
         }
@@ -235,11 +242,13 @@ mod tests {
             let some = hero_chain(syn_h, true, 0.0, &m);
 
             assert_eq!(some.meta_y, none.meta_y);
-            assert_eq!(none.syn_y, none.meta_y + meta_h + theme::space::SM);
-            assert_eq!(some.syn_y, some.ratings_y + ratings_h + theme::space::SM);
+            assert_eq!(none.syn_y, none.meta_y + meta_h + theme::space::MD);
+            assert_eq!(some.syn_y, some.ratings_y + ratings_h + theme::space::MD);
             let shift = some.syn_y - none.syn_y;
+            // The band costs its own mark height plus the rung that put it under the identity
+            // line; the synopsis sits `MD` under whichever row is above it, so that rung is the
+            // same on both sides and does not enter the shift.
             assert_eq!(shift, ratings_h + theme::space::SM);
-            assert_eq!(some.facts_y - none.facts_y, shift);
             assert_eq!(some.btn_y - none.btn_y, shift);
         }
     }
@@ -255,18 +264,16 @@ mod tests {
         let m = crate::ui::fixture::FixtureMeasure;
         let meta_h = widgets::BADGE_H;
         let ratings_h = widgets::RATING_MARK_D;
-        let facts_h = m.cap_h(theme::size::CAPTION);
 
         let some = hero_chain(syn_h, true, 0.0, &m);
         assert_eq!(some.meta_y - TITLE_BOTTOM, theme::space::SM, "logo/title -> meta");
         assert_eq!(some.ratings_y - (some.meta_y + meta_h), theme::space::SM, "meta -> ratings");
-        assert_eq!(some.syn_y - (some.ratings_y + ratings_h), theme::space::SM, "ratings -> synopsis");
-        assert_eq!(some.facts_y - (some.syn_y + syn_h.max(34.0)), theme::space::MD, "synopsis -> facts");
-        assert_eq!(some.btn_y - (some.facts_y + facts_h), theme::space::LG, "facts -> action row");
+        assert_eq!(some.syn_y - (some.ratings_y + ratings_h), theme::space::MD, "ratings -> synopsis");
+        assert_eq!(some.btn_y - (some.syn_y + syn_h.max(34.0)), theme::space::LG, "synopsis -> action row");
 
         // No ratings: the synopsis follows the meta line directly, off ITS measured bottom.
         let none = hero_chain(syn_h, false, 0.0, &m);
-        assert_eq!(none.syn_y - (none.meta_y + meta_h), theme::space::SM, "meta -> synopsis (no ratings)");
+        assert_eq!(none.syn_y - (none.meta_y + meta_h), theme::space::MD, "meta -> synopsis (no ratings)");
     }
 
     /// The ladder only ever WIDENS on the way down the hero, and it widens where the meaning
@@ -280,8 +287,8 @@ mod tests {
         let syn_h = 108.0_f32;
         let ch = hero_chain(syn_h, true, 0.0, &m);
         let within_identity = ch.ratings_y - (ch.meta_y + widgets::BADGE_H);
-        let kind_change = ch.facts_y - (ch.syn_y + syn_h);
-        let to_action = ch.btn_y - (ch.facts_y + m.cap_h(theme::size::CAPTION));
+        let kind_change = ch.syn_y - (ch.ratings_y + widgets::RATING_MARK_D);
+        let to_action = ch.btn_y - (ch.syn_y + syn_h);
 
         assert!(within_identity < kind_change, "a group must sit tighter than a change of kind");
         assert!(

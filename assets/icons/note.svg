@@ -1,0 +1,7 @@
+<!-- A SINGLE musical note: one stem with its flag and one head. The library's `audio.svg` is a
+     DOUBLE note (two heads joined by a beam) and read as a stereo/audio-track mark rather than as
+     "the language of what you hear"; the owner asked for the simple one on the detail hero's audio
+     disc. Drawn as one stroked path plus the head, on the same 2.4 stroke the Cc/Audio pair use, so
+     the three read as one family. Geometry: head r 3.4 at (8.6, 17.4), stem up from x 12 to y 4.2
+     with a flag sweeping right to 19 — inside the 24 box with 2.6 of air on every side. -->
+<svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.6" cy="17.4" r="3.4"/><path d="M12 17.4V4.2l7 3.2"/></svg>

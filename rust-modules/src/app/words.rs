@@ -51,10 +51,7 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
         | AppArg::AboutPanel
         | AppArg::PersonBio
         | AppArg::CollectionAbout
-        | AppArg::PrePlayback(_)
-        | AppArg::PrePlaybackMenu(_)
-        | AppArg::Identify(_)
-        | AppArg::Images(_) => "",
+        | AppArg::TrackPick(_) => "",
     }
 }
 /// **Every PAGE argument, one per heartbeat word** — the domain [`route_word`] is applied over to DERIVE the
