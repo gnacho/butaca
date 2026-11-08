@@ -107,6 +107,10 @@ pub(crate) struct BaseItemDto {
     /// "BoxSet", "MusicAlbum" — must be skippable by the converter, not a parse error).
     #[serde(rename = "Type")]
     pub(crate) kind: String,
+    /// The extra's kind when the item is one ("Trailer", "BehindTheScenes", "DeletedScene",
+    /// "Interview", "Scene", "Sample", "Featurette"). Absent on ordinary items.
+    #[serde(rename = "ExtraType")]
+    pub(crate) extra_type: Option<String>,
     #[serde(rename = "ProductionYear")]
     pub(crate) year: Option<i32>,
     #[serde(rename = "Overview")]

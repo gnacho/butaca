@@ -18,7 +18,7 @@
 
 use super::client::JfClient;
 use super::dto::{BaseItemDto, MediaSourceDto, PersonDto};
-use crate::metadata::{Cast, Chapter, Detail, Dovi, Episode, Rating, RatingArt, Season, Stream};
+use crate::metadata::{Cast, Chapter, Detail, Dovi, Episode, Extra, Rating, RatingArt, Season, Stream};
 use crate::registry::ServerId;
 
 /// The whole detail fetch for one item — `metadata::fetch_full`'s Jellyfin arm. `None` is the
@@ -33,6 +33,9 @@ pub(crate) fn fetch_full(c: &JfClient, sid: ServerId, rk: &str) -> Option<Detail
         return None;
     };
     let mut d = detail_from_dto(&it, sid);
+    // The extras shelf: the server's special features and this item's own trailers. A failure is
+    // an empty shelf, never a failed page, which is the contract the rest of this fetch follows.
+    d.extras = extras_from_dto(c.extras(rk));
     if d.is_show {
         d.on_deck = c
             .next_up(rk)
@@ -207,6 +210,45 @@ fn item_kind(kind: &str) -> Option<&'static str> {
     }
 }
 
+/// An item's extras as the extras shelf's rows. Jellyfin names the kind in `ExtraType`, and a
+/// trailer is also its own item kind, so both spellings are read.
+fn extras_from_dto(items: Vec<BaseItemDto>) -> Vec<Extra> {
+    items
+        .into_iter()
+        .map(|it| {
+            let subtype = match (it.kind.as_str(), it.extra_type.as_deref().unwrap_or("")) {
+                ("Trailer", _) | (_, "Trailer") => "trailer",
+                (_, "BehindTheScenes") => "behindTheScenes",
+                (_, "DeletedScene") => "deletedScene",
+                (_, "Interview") => "interview",
+                (_, "Scene" | "Sample") => "sceneOrSample",
+                (_, "Featurette") => "featurette",
+                _ => "",
+            }
+            .to_string();
+            let (vcodec, acodec) = super::convert::codecs(&it);
+            let source = it.media_sources.as_ref().and_then(|s| s.first());
+            Extra {
+                rk: it.id.clone(),
+                title: it.name.clone(),
+                extra_type: if subtype == "trailer" { 1 } else { 0 },
+                subtype,
+                // A source that names no part still has the item id, which Jellyfin accepts.
+                part: source
+                    .map(|s| s.id.clone())
+                    .unwrap_or_else(|| it.id.clone()),
+                vcodec,
+                acodec,
+                dur_ms: it.run_time_ticks.unwrap_or(0) / 10_000,
+                bitrate: source.and_then(|s| s.bitrate).unwrap_or(0) / 1000,
+                thumb: match it.image_tags.get("Primary") {
+                    Some(t) => format!("/Items/{}/Images/Primary?tag={t}", it.id),
+                    None => String::new(),
+                },
+            }
+        })
+        .collect()
+}
 /// The date part of Jellyfin's ISO timestamp — the only part the UI draws ("1976-11-12").
 fn date_part(iso: &str) -> String {
     iso.split('T').next().unwrap_or(iso).to_string()
@@ -724,6 +766,37 @@ mod tests {
             {"Type": "Audio", "Codec": "aac", "Index": 1, "Language": "spa"}
         ]}]
     }"#;
+
+    /// The extras shelf reads Jellyfin's own kind names into the app's subtypes, and an extra with
+    /// no media source still plays by its item id.
+    #[test]
+    fn extras_carry_their_subtype_part_length_and_rate() {
+        let items: Vec<BaseItemDto> = serde_json::from_str(
+            r#"[
+                {"Id":"sf1","Name":"Making of","Type":"Video","ExtraType":"BehindTheScenes",
+                 "RunTimeTicks":600000000,"ImageTags":{"Primary":"p1"},
+                 "MediaSources":[{"Id":"ms1","Bitrate":4000000,"MediaStreams":[
+                    {"Type":"Video","Codec":"h264"},{"Type":"Audio","Codec":"aac"}]}]},
+                {"Id":"t1","Name":"Trailer","Type":"Trailer"},
+                {"Id":"d1","Name":"Gag reel","Type":"Video","ExtraType":"DeletedScene"},
+                {"Id":"f1","Name":"The shoot","Type":"Video","ExtraType":"Featurette"}
+            ]"#,
+        )
+        .unwrap();
+        let extras = extras_from_dto(items);
+        assert_eq!(extras.len(), 4);
+        assert_eq!(extras[0].subtype, "behindTheScenes");
+        assert_eq!(extras[0].part, "ms1");
+        assert_eq!(extras[0].dur_ms, 60_000);
+        assert_eq!(extras[0].bitrate, 4_000, "bps in, kbps out");
+        assert_eq!(extras[0].vcodec, "h264");
+        assert_eq!(extras[0].acodec, "aac");
+        assert!(extras[0].thumb.ends_with("?tag=p1"));
+        assert!(extras[1].is_trailer());
+        assert_eq!(extras[1].part, "t1", "no source: the item id is the part");
+        assert_eq!(extras[2].subtype, "deletedScene");
+        assert_eq!(extras[3].subtype, "featurette");
+    }
 
     /// #370: the plugin's cached sources become the hero's named rows, on the app's one 0-10
     /// scale. A source this client cannot NAME is dropped rather than captioned with the plugin's
