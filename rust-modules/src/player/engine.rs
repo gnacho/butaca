@@ -2226,7 +2226,73 @@ pub(crate) fn try_prime(mt: &MainThread, eng: &mut Engine) {
 /// with them `pub(crate)`, reverting `pump` to two separate lane calls restored the livelock while
 /// the regression test — which calls this wrapper — stayed green. Private, that revert does not
 /// compile.
+/// How long a picture may sit still before the log says so. Long enough that a normal rebuffer
+/// (the `primed:` line covers those) is not reported, short enough to catch a stop the viewer
+/// noticed.
+const STALL_REPORT_MS: u64 = 8_000;
+
+/// **A picture that stops advancing is the one fault this transport cannot report.** There is no
+/// error, no closed socket and no refused buffer: the presented position simply stops, the queues
+/// stay empty and the HUD sits on a frame. #74 and #87 found the play rate decaying to zero with
+/// no `ff:` error, a forward buffer under a second, and one class (a body that ended short) now
+/// repaired by a reopen. A stop that still happens after that line is a different class, and
+/// nothing in the log says which.
+///
+/// One line, **once per stall**, carrying the three numbers the issue asks for: the forward
+/// buffers, the runway, and whether the producer already pushed EOS. `paused` resets the watch, so
+/// a viewer who pauses does not produce a stall report.
+pub(crate) struct StallWatch {
+    at_ns: i64,
+    since_ms: Option<u64>,
+    reported: bool,
+}
+
+impl StallWatch {
+    pub(crate) const fn new() -> Self {
+        Self { at_ns: i64::MIN, since_ms: None, reported: false }
+    }
+
+    /// One call per frame. Returns `true` exactly once per stall.
+    pub(crate) fn observe(&mut self, now_ms: u64, pos_ns: i64, paused: bool) -> bool {
+        if paused || pos_ns != self.at_ns {
+            self.at_ns = pos_ns;
+            self.since_ms = if paused { None } else { Some(now_ms) };
+            self.reported = false;
+            return false;
+        }
+        let Some(since) = self.since_ms else { return false };
+        if self.reported || now_ms.saturating_sub(since) < STALL_REPORT_MS {
+            return false;
+        }
+        self.reported = true;
+        true
+    }
+}
+
+// The engine has one player thread, so the watch lives beside the frame entry rather than inside
+// `Engine`, whose construction sites are many and none of which is this module's business.
+thread_local! {
+    static STALL: std::cell::RefCell<StallWatch> = const { std::cell::RefCell::new(StallWatch::new()) };
+}
+
 pub(crate) fn feed_both_lanes(mt: &MainThread, eng: &mut Engine) {
+    let now_ms = crate::diag::heartbeat::now_us() / 1_000;
+    let pos_ns = SHARED.playpos_ns.load(std::sync::atomic::Ordering::Relaxed);
+    let paused = TX.paused.load(std::sync::atomic::Ordering::Acquire);
+    let stalled = STALL.with(|w| w.borrow_mut().observe(now_ms, pos_ns, paused));
+    if stalled {
+        let vbuf = (eng.max_fed_video_pts - eng.seek_base_pts).max(0);
+        let abuf = (eng.max_fed_audio_pts - eng.seek_base_pts).max(0);
+        log(&format!(
+            "stall: pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={}",
+            pos_ns / 1_000_000,
+            STALL_REPORT_MS / 1_000,
+            vbuf / 1_000_000,
+            abuf / 1_000_000,
+            SHARED.hls_prime_runway_ms.load(std::sync::atomic::Ordering::Relaxed),
+            eng.eos_pushed,
+        ));
+    }
     feed_stream(mt, eng);
     feed_audio_lane(mt, eng);
     try_prime(mt, eng);
@@ -4568,5 +4634,46 @@ mod load_refusal_tests {
             super::super::FailureKind::TvPipeline,
             "and the verdict must name the television's pipeline, not a generic stop"
         );
+    }
+}
+
+#[cfg(test)]
+mod stall_watch_tests {
+    use super::{StallWatch, STALL_REPORT_MS};
+
+    #[test]
+    fn a_moving_picture_never_reports() {
+        let mut w = StallWatch::new();
+        for ms in 0..40 {
+            assert!(!w.observe(ms * 1_000, (ms as i64) * 1_000_000_000, false));
+        }
+    }
+
+    #[test]
+    fn a_still_picture_reports_once_per_stall() {
+        let mut w = StallWatch::new();
+        assert!(!w.observe(0, 5_000_000_000, false));
+        assert!(!w.observe(STALL_REPORT_MS - 1, 5_000_000_000, false), "not yet");
+        assert!(w.observe(STALL_REPORT_MS, 5_000_000_000, false), "the stall is reported");
+        assert!(!w.observe(STALL_REPORT_MS + 5_000, 5_000_000_000, false), "and only once");
+    }
+
+    #[test]
+    fn a_picture_that_moves_again_rearms_the_watch() {
+        let mut w = StallWatch::new();
+        assert!(!w.observe(0, 1, false));
+        assert!(w.observe(STALL_REPORT_MS, 1, false));
+        assert!(!w.observe(STALL_REPORT_MS + 1, 2, false), "movement clears the report");
+        assert!(w.observe(STALL_REPORT_MS * 2 + 1, 2, false), "a new stall reports again");
+    }
+
+    #[test]
+    fn a_paused_picture_is_not_a_stall() {
+        let mut w = StallWatch::new();
+        assert!(!w.observe(0, 7, false));
+        for ms in 1..40 {
+            assert!(!w.observe(ms * 1_000, 7, true), "paused is not stalled");
+        }
+        assert!(!w.observe(60_000, 7, false), "the clock restarts on resume");
     }
 }
