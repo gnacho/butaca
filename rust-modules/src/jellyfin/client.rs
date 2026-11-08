@@ -552,12 +552,58 @@ impl JfClient {
         self.post_status(&format!("/Items/RemoteSearch/Apply/{item_id}"), &body)
     }
 
+    /// **Edit images, first half**: the pictures the metadata providers already have for one image
+    /// type of one item, `GET /Items/{itemId}/RemoteImages?type=…&startIndex=…&limit=…`. Verified
+    /// against Jellyfin's own OpenAPI, which is the shape on 10.9 through 13.x. `includeAllLanguages`
+    /// is left at the server's default (false): the picker is a television in one language, and a
+    /// poster in a language the household does not read is not a candidate worth decoding.
+    pub(crate) fn remote_images(
+        &self,
+        item_id: &str,
+        kind: &str,
+        start: i32,
+        limit: i32,
+    ) -> Option<super::dto::RemoteImageResultDto> {
+        self.get_json(&format!(
+            "/Items/{item_id}/RemoteImages?type={kind}&startIndex={start}&limit={limit}"
+        ))
+    }
+
+    /// **Edit images, second half**: `POST /Items/{itemId}/RemoteImages/Download?type=…&imageUrl=…`
+    /// — the server fetches the provider's picture ITSELF and makes it the item's image of that
+    /// type. The URL is the one the list answered with, percent-encoded here because it carries
+    /// its own `?`/`&`. Every parameter rides the query string and the body is empty, which is
+    /// what [`request_status`](Self::request_status) is for. The endpoint requires elevation, so
+    /// an ordinary viewer's account is a plain `false`.
+    pub(crate) fn download_remote_image(&self, item_id: &str, kind: &str, image_url: &str) -> bool {
+        self.request_status(
+            &format!(
+                "/Items/{item_id}/RemoteImages/Download?type={kind}&imageUrl={}",
+                crate::catalog::urlenc_str(image_url)
+            ),
+            http::Method::Post,
+        )
+    }
+
+    /// **The local intros** (`GET /Items/{itemId}/Intros`), the `IIntroProvider` seam the Local
+    /// Intros plugin plugs into. `Fields=MediaSources` rides along because the intro is played as
+    /// its own item and `request_play` addresses the media source, not the item.
+    ///
+    /// `Some(vec![])` and `None` mean different things here: an empty list is "this server has no
+    /// intro for this item" (the ordinary answer without the plugin, which installs no provider
+    /// and leaves the route answering `Items: []`), `None` is a request that failed.
+    pub(crate) fn intros(&self, item_id: &str) -> Option<Vec<super::dto::BaseItemDto>> {
+        let user_id = self.user_id()?;
+        let result: super::dto::IntrosResult = self.get_json(&format!(
+            "/Items/{item_id}/Intros?UserId={user_id}&Fields=MediaSources"
+        ))?;
+        Some(result.items)
+    }
+
     /// The library list — Jellyfin's counterpart of `/library/sections`.
     pub(crate) fn views(&self) -> Option<ViewsResult> {        let user_id = self.user_id()?;
         self.get_json(&format!("/Users/{user_id}/Views"))
-    }
-
-    /// The fields every LISTING asks for. MediaSources rides along because the direct-play gate
+    }    /// The fields every LISTING asks for. MediaSources rides along because the direct-play gate
     /// and the codec badges both read it off the row; Overview feeds the hero's blurb. Kept as
     /// one constant so no two listing queries can drift into requesting different row shapes.
     const LISTING_FIELDS: &'static str = "Overview,MediaSources,OfficialRating,CommunityRating";
@@ -819,7 +865,17 @@ impl JfClient {
     /// GET raw bytes (the poster/artwork pipeline's fetch — the Jellyfin counterpart of
     /// `server::Client::get_bytes`). The built image path carries its `api_key`, so no header is
     /// needed and none is sent: the path IS the credential, same as the retired shape.
+    ///
+    /// **An absolute URL is dialled as it stands, and headerless.** A remote image a metadata
+    /// provider offered (*Edit images*) is NOT on this server: it is a picture on TheMovieDb's CDN
+    /// or whatever host the provider named. Sending this client's credentials there would leak the
+    /// household's token to a third party, so the absolute arm sends no headers at all — it is a
+    /// plain public GET, which is exactly what the provider's own client does.
     pub(crate) fn get_bytes(&self, built_path: &str) -> Option<Vec<u8>> {
+        if let Some((origin, path)) = absolute_http_url(built_path) {
+            let reply = http::request(&origin, path, http::Method::Get, &[], None)?;
+            return reply.ok().then_some(reply.body);
+        }
         let reply = http::request(&self.origin, built_path, http::Method::Get, &[], None)?;
         reply.ok().then_some(reply.body)
     }
@@ -1374,6 +1430,23 @@ fn method_name(m: http::Method) -> &'static str {
     }
 }
 
+/// **Is this path already an absolute http(s) URL, and what does it dial?** The poster pipeline's
+/// keys are ordinarily server-relative (`/Items/{id}/Images/Primary?tag=…`), and the ONE thing that
+/// arrives absolute is a metadata provider's remote image (*Edit images*, issue #369), whose URL
+/// points at the provider's own CDN rather than at this server. `origin::split` is the parser that
+/// already exists for exactly this: an origin plus everything after the authority.
+///
+/// `None` for anything else, INCLUDING a bare `//host/path` or a scheme this app does not speak, so
+/// a relative image path can never be mistaken for a host to dial.
+pub(crate) fn absolute_http_url(url: &str) -> Option<(crate::origin::Origin, &str)> {
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return None;
+    }
+    let (origin, path) = crate::origin::split(url);
+    (!path.is_empty()).then_some((origin, path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1677,6 +1750,107 @@ mod tests {
         assert!(reqs[1].contains("\"Year\":1979"));
         assert!(reqs[2].starts_with("POST /Items/RemoteSearch/Apply/mv-1 HTTP/1.1"));
         assert!(reqs[2].contains("\"Tmdb\":\"348\""), "the ids Apply looks the item up by");
+    }
+
+    /// **Edit images' two calls.** The list asks for ONE image type and a bounded page (the picker
+    /// draws every tile at once), and answers the provider's full URL plus its smaller copy. The
+    /// download sends the full URL back PERCENT-ENCODED — it carries its own query — and no body,
+    /// because every parameter rides the query string.
+    #[test]
+    fn remote_images_lists_a_page_and_downloads_the_chosen_url() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Images":[{"Url":"https://img.example/original/a.jpg",
+                      "ThumbnailUrl":"https://img.example/w300/a.jpg",
+                      "Type":"Primary","ProviderName":"TheMovieDb","Width":1000,"Height":1500,
+                      "Language":"en"}],"TotalRecordCount":31,"Providers":["TheMovieDb"]}"#),
+            (204, ""),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let page = client.remote_images("mv-1", "Primary", 0, 12).expect("the page parses");
+        assert_eq!(page.total_record_count, 31);
+        assert_eq!(page.images[0].thumbnail_url.as_deref(), Some("https://img.example/w300/a.jpg"));
+        assert!(client.download_remote_image("mv-1", "Primary", &page.images[0].url));
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[1].starts_with(
+            "GET /Items/mv-1/RemoteImages?type=Primary&startIndex=0&limit=12 HTTP/1.1"
+        ));
+        let dl = &reqs[2];
+        assert!(dl.starts_with("POST /Items/mv-1/RemoteImages/Download?type=Primary&imageUrl="));
+        assert!(
+            dl.contains("imageUrl=https%3A%2F%2Fimg.example%2Foriginal%2Fa.jpg"),
+            "the provider URL travels percent-encoded, exactly as the list answered it"
+        );
+        assert!(!dl.contains("api_key"), "the server's token never rides a provider URL");
+    }
+
+    /// **Intros** is the ordinary item envelope (`BaseItemDtoQueryResult`), not a bare array: a
+    /// server without the plugin answers `Items: []`, which the caller reads as "no intro".
+    #[test]
+    fn intros_read_the_item_envelope_and_fold_an_empty_answer() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Items":[{"Id":"intro-1","Name":"Studio logo","Type":"Movie",
+                      "MediaSources":[{"Id":"src-1","MediaStreams":[
+                        {"Type":"Video","Codec":"h264","Index":0},
+                        {"Type":"Audio","Codec":"aac","Index":1}]}]}],
+                      "TotalRecordCount":1,"StartIndex":0}"#),
+            (200, r#"{"Items":[],"TotalRecordCount":0,"StartIndex":0}"#),
+            (404, ""),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let one = client.intros("mv-1").expect("the envelope parses");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].id, "intro-1");
+        assert_eq!(
+            one[0].media_sources.as_ref().unwrap()[0].id, "src-1",
+            "the media source is what request_play addresses"
+        );
+        assert!(client.intros("mv-2").expect("an empty list is an answer").is_empty());
+        assert!(client.intros("mv-3").is_none(), "a 404 is not an answer");
+
+        let reqs = server.finish();
+        assert!(reqs[1].starts_with("GET /Items/mv-1/Intros?UserId=u-1&Fields=MediaSources HTTP/1.1"));
+    }
+
+    /// **An absolute provider URL is dialled as it stands, headerless.** The credential rule is the
+    /// point: a remote image lives on somebody else's host, and this client's token must never
+    /// travel there. A server-relative path keeps its ordinary shape (that arm is graded by every
+    /// other test in this module).
+    #[test]
+    fn an_absolute_image_url_is_dialled_headerless() {
+        let target = MockServer::start(vec![(200, "JPEGBYTES")]);
+        let server = MockServer::start(vec![(200, AUTH_OK)]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let url = format!("http://127.0.0.1:{}/t/p/w300/a.jpg", target.port);
+        assert_eq!(client.get_bytes(&url).as_deref(), Some(b"JPEGBYTES".as_slice()));
+
+        let reqs = target.finish();
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].starts_with("GET /t/p/w300/a.jpg HTTP/1.1"));
+        assert!(!reqs[0].contains("Authorization"), "no credential reaches a provider host");
+        assert!(!reqs[0].contains("api_key"));
+    }
+
+    /// The absolute-URL test is exact about what it accepts: only `http://` and `https://` are
+    /// hosts to dial. A relative image path, a protocol-relative one and a scheme this app does not
+    /// speak are all "not an absolute URL", so they take the ordinary server-relative arm.
+    #[test]
+    fn only_a_plain_http_url_counts_as_absolute() {
+        assert!(absolute_http_url("https://img.example/a.jpg").is_some());
+        assert!(absolute_http_url("HTTP://img.example/a.jpg").is_some());
+        assert!(absolute_http_url("/Items/x/Images/Primary?tag=1").is_none());
+        assert!(absolute_http_url("//img.example/a.jpg").is_none());
+        assert!(absolute_http_url("file:///etc/passwd").is_none());
+        assert!(absolute_http_url("https://img.example").is_none(), "no path, nothing to dial");
     }
 
     /// The Library grid's query puts every menu on the query string: sort + direction always

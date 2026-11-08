@@ -150,7 +150,7 @@ pub(crate) fn boxset_from_dto(it: &BaseItemDto, sid: ServerId) -> Option<Catalog
 /// First video and first audio codec ids, from the first MediaSource that carries streams.
 /// `(unknown, unknown)` is honest — a listing fetched without `Fields=MediaSources` is not a
 /// file without codecs, and the direct-play gate re-reads them from the detail fetch anyway.
-fn codecs(it: &BaseItemDto) -> (String, String) {
+pub(crate) fn codecs(it: &BaseItemDto) -> (String, String) {
     let mut v = String::new();
     let mut a = String::new();
     if let Some(sources) = &it.media_sources {

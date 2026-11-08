@@ -64,6 +64,9 @@ pub enum Icon {
     CheckCircleFill,
     /// See [`Icon::CheckCircleFill`].
     MinusCircleFill,
+    /// A framed picture: the *Edit images* row of the pre-playback window's menu (#369), and the
+    /// mark a grid of the provider's pictures leads with.
+    Image,
     /// The favorite heart, outline face (not favorited) — the Jellyfin flavor's detail hero.
     Heart,
     /// The heart's filled face (the item IS favorited).
@@ -298,6 +301,7 @@ fn src(id: Icon) -> &'static str {
         Icon::Cc => include_str!("../../../assets/icons/cc.svg"),
         Icon::Audio => include_str!("../../../assets/icons/audio.svg"),
         Icon::Check => include_str!("../../../assets/icons/check.svg"),
+        Icon::Image => include_str!("../../../assets/icons/image.svg"),
         Icon::Heart => include_str!("../../../assets/icons/heart.svg"),
         Icon::HeartFill => include_str!("../../../assets/icons/heart-fill.svg"),
         Icon::Chevron => include_str!("../../../assets/icons/chevron.svg"),

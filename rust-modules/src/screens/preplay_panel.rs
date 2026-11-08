@@ -159,24 +159,38 @@ fn more_rect(col: Rect) -> Rect {
 /// Where each row of the options column is drawn, in ladder order. **ONE function for the painter
 /// and the focus model**: the capsule a person aims at, the one the pointer's stop covers and the
 /// one `place` answers are then the same rectangle, and the stops can never drift off the pills.
-fn option_rects() -> [(OptionRow, Rect); 4] {
+///
+/// The ladder is [`ladder`]'s: four rows, or five when the server offered an intro (#370), which
+/// takes the slot the section gap would have left empty between the language choices and the
+/// primary action. That row is the ONLY optional one, and it moves nothing above it, so a window
+/// with no intro draws exactly the column it always drew.
+fn option_rects(has_intro: bool) -> Vec<(OptionRow, Rect)> {
     let col = options_rect();
     let top = col.y + MORE_H + SECTION_GAP + HEAD_H + theme::space::XS;
     let audio = Rect::new(col.x, top, col.w, OPT_H);
     let subs = Rect::new(col.x, audio.y + OPT_H + OPT_GAP + HEAD_H + theme::space::XS, col.w, OPT_H);
-    let action = Rect::new(col.x, subs.y + OPT_H + OPT_GAP + SECTION_GAP, col.w, ACT_H);
-    [
+    let mut out = vec![
         (OptionRow::More, more_rect(col)),
         (OptionRow::Audio, audio),
         (OptionRow::Subtitles, subs),
-        (OptionRow::Action, action),
-    ]
+    ];
+    let mut y = subs.y + OPT_H + OPT_GAP + SECTION_GAP;
+    if has_intro {
+        out.push((OptionRow::Intro, Rect::new(col.x, y, col.w, OPT_H)));
+        y += OPT_H + OPT_GAP;
+    }
+    out.push((OptionRow::Action, Rect::new(col.x, y, col.w, ACT_H)));
+    out
 }
 
-/// Where one row is drawn: the entry of [`option_rects`] for it (the array is in `index()` order),
-/// so a `place` and a pill cannot disagree.
-fn option_rect(row: OptionRow) -> Rect {
-    option_rects()[row.index()].1
+/// Where one row is drawn: the entry of [`option_rects`] for it, so a `place` and a pill cannot
+/// disagree.
+fn option_rect(row: OptionRow, has_intro: bool) -> Rect {
+    option_rects(has_intro)
+        .into_iter()
+        .find(|(r, _)| *r == row)
+        .map(|(_, rect)| rect)
+        .unwrap_or_else(|| option_rects(has_intro)[0].1)
 }
 
 // ---- the choice model (PURE — this half is what the host suite grades) -------------------------
@@ -186,43 +200,69 @@ fn option_rect(row: OptionRow) -> Rect {
 /// **`More` is the first row, not a chrome glyph**: the three-dot control at the head of the column
 /// is where the remote reaches the item's own actions (#369), and putting it in the ladder means
 /// UP from the audio row lands on it rather than it being a control with no way to reach it. OK on
-/// it opens the menu; OK on the other three starts the film.
+/// it opens the menu; OK on the language rows starts the film; OK on `Intro` plays the intro and
+/// leaves the film for the press that follows it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum OptionRow {
     More,
     Audio,
     Subtitles,
+    /// *Watch intro* (#370). PRESENT only when the server answered with an intro: a row that plays
+    /// nothing is a lie the viewer discovers by pressing it, so the ladder leaves it out entirely.
+    Intro,
     Action,
 }
 
-impl OptionRow {
-    pub(crate) const ALL: [Self; 4] = [Self::More, Self::Audio, Self::Subtitles, Self::Action];
+/// The ladder WITHOUT an intro: the column this window has always drawn.
+pub(crate) const LADDER: [OptionRow; 4] =
+    [OptionRow::More, OptionRow::Audio, OptionRow::Subtitles, OptionRow::Action];
+/// The ladder WITH one: the intro sits between the language choices and the primary action,
+/// which is the empty section gap it borrows.
+pub(crate) const LADDER_INTRO: [OptionRow; 5] = [
+    OptionRow::More,
+    OptionRow::Audio,
+    OptionRow::Subtitles,
+    OptionRow::Intro,
+    OptionRow::Action,
+];
 
-    pub(crate) fn index(self) -> usize {
+/// The rows this window draws, in ladder order. ONE function, because the focus model, the painter
+/// and the hit stops must agree about how many rungs there are.
+pub(crate) fn ladder(has_intro: bool) -> &'static [OptionRow] {
+    if has_intro { &LADDER_INTRO } else { &LADDER }
+}
+
+impl OptionRow {
+    /// The row's STABLE code, which is what a recorded state carries. Deliberately not its ladder
+    /// position: the position moves when the optional intro row appears, and a replay must be able
+    /// to say "the cursor is on Play" without knowing whether that server had an intro.
+    pub(crate) fn code(self) -> u32 {
         match self {
             Self::More => 0,
             Self::Audio => 1,
             Self::Subtitles => 2,
-            Self::Action => 3,
+            Self::Intro => 3,
+            Self::Action => 4,
         }
     }
 
-    pub(crate) fn from_index(i: usize) -> Self {
-        Self::ALL[i.min(Self::ALL.len() - 1)]
+    /// Where the row stands in `has_intro`'s ladder — the focus engine's element index.
+    pub(crate) fn position(self, has_intro: bool) -> usize {
+        ladder(has_intro)
+            .iter()
+            .position(|r| *r == self)
+            .unwrap_or(0)
     }
+}
 
-    /// One rung DOWN the ladder (or UP), clamped at both ends. **The ends do not wrap**: one press
-    /// from the action would otherwise skip the whole column and land on the menu control. One
-    /// function for the keyboard's ladder and the engine's, so the two cannot disagree about where
-    /// the ends are.
-    pub(crate) fn stepped(self, down: bool) -> Self {
-        let i = self.index();
-        Self::from_index(if down {
-            (i + 1).min(Self::ALL.len() - 1)
-        } else {
-            i.saturating_sub(1)
-        })
-    }
+/// One rung DOWN the ladder (or UP). **The ends do not wrap**: one press from the action would
+/// otherwise skip the whole column and land on the menu control. `None` is the end. One function
+/// for the keyboard's ladder and the engine's, so the two cannot disagree about where the ends are.
+pub(crate) fn stepped(row: OptionRow, down: bool, has_intro: bool) -> Option<OptionRow> {
+    let ladder = ladder(has_intro);
+    let i = row.position(has_intro);
+    let next = if down { i + 1 } else { i.checked_sub(1)? };
+    ladder.get(next).copied()
 }
 
 /// The audio tracks a viewer may pick from: every one the file carries, in server order. Unlike
@@ -471,6 +511,10 @@ pub(crate) struct PrePlaybackScreen {
     /// where the item is first known, and never again — a refresh landing under an open window
     /// must not silently move the viewer's cursor back to the server's default.
     seeded: bool,
+    /// The intro the server offered for this item (#370), when the Local Intros plugin answered
+    /// with one. `None` draws NOTHING: no row, no placeholder, no empty capsule. Every way of not
+    /// getting an answer is the same answer here (`crate::jellyfin::intros`).
+    intro: Option<crate::metadata::Intro>,
 }
 
 impl PrePlaybackScreen {
@@ -482,7 +526,65 @@ impl PrePlaybackScreen {
             audio: 0,
             sub: None,
             seeded: false,
+            intro: None,
         }
+    }
+
+    /// Does this window draw the intro row? `intro` is set from the store, and the ladder is
+    /// derived from it, so "the row exists" and "there is something to play" are one fact.
+    fn has_intro(&self) -> bool {
+        self.intro.is_some()
+    }
+
+    /// Take the store's answer for THIS item, and answer whether it changed what is drawn. An
+    /// answer about another item is not this window's to draw, for `screens::identify`'s reason.
+    ///
+    /// **The row can arrive under a live cursor.** The window opens on the primary action and the
+    /// server answers a moment later, so the rung is inserted BELOW the cursor and the cursor keeps
+    /// its row: the pill stays on Play, and OK still starts the film. The one visible consequence is
+    /// that the engine's element index now names the new rung, so the first UP press from Play
+    /// lands above it and the intro is reached from the subtitles row instead. Nothing is activated
+    /// wrongly, and the alternative — moving the cursor to a row the viewer did not choose — is the
+    /// landing-that-moves-ground bug `screens/CLAUDE.md` names.
+    fn refresh_intro(&mut self, meta: crate::metadata::MetadataView<'_>) -> bool {
+        let next = meta.current().and_then(|d| {
+            let state = meta.intros();
+            if !state.is_about(d.sid, &d.rk) {
+                return None;
+            }
+            state.first().cloned()
+        });
+        if next == self.intro {
+            return false;
+        }
+        self.intro = next;
+        // The row that just left may have been the one holding the cursor: put it back on the
+        // primary action rather than leaving the engine on a rung that no longer exists.
+        if !ladder(self.has_intro()).contains(&self.row) {
+            self.row = OptionRow::Action;
+        }
+        true
+    }
+
+    /// Ask the server for this item's intros, ONCE per mount, which is what makes re-opening the
+    /// window a fresh read (a plugin installed while the app runs is then picked up).
+    fn request_intro<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLike>(
+        &self,
+        cx: &crate::ui::machine::Cx<'_, H>,
+        fx: &mut crate::ui::machine::Effects<'_, H>,
+    ) {
+        use crate::screens::registry::AppFx;
+        use crate::stores::metadata::MetadataCmd;
+        use crate::stores::{StoreCmd, StoreId};
+        use crate::ui::machine::Fx;
+        let Some(d) = H::metadata(cx).current() else { return };
+        fx.push(Fx::App(AppFx::Store(
+            StoreId::Metadata,
+            StoreCmd::Metadata(MetadataCmd::IntrosLoad {
+                sid: d.sid,
+                rk: d.rk.clone(),
+            }),
+        )));
     }
 
     /// Take the item's current tracks as the starting choice, once.
@@ -537,6 +639,40 @@ impl PrePlaybackScreen {
         })));
     }
 
+    /// **OK on *Watch intro*** (#370): play the intro as its OWN item.
+    ///
+    /// This app resolves one item and has no queue to splice an intro into (`route::request_play`
+    /// starts exactly what it is given), so the honest shape is this one: the intro plays in the
+    /// ordinary player, and its end or a BACK out runs the ordinary player exit, which returns to
+    /// the page this window was opened over. Nothing here claims the film follows it, and the
+    /// window is not left standing behind the player.
+    ///
+    /// The intro is a real item, so playing it is a real playback: the server records it against
+    /// the household's viewing history exactly as it would for any other clip. That is the price
+    /// of not lying about what happened, and it is what the plugin's own client does.
+    fn play_intro<H: crate::screens::registry::AppLike>(
+        &self,
+        d: &Detail,
+        fx: &mut crate::ui::machine::Effects<'_, H>,
+    ) {
+        use crate::screens::registry::{AppFx, ContentReq};
+        use crate::ui::machine::Fx;
+        let Some(intro) = self.intro.as_ref() else { return };
+        fx.push(Fx::App(AppFx::Content(ContentReq::Play {
+            play: crate::screens::registry::PlayIntent::Item {
+                sid: crate::route::item_sid(d.sid),
+                rk: intro.rk.clone(),
+                part: intro.part.clone(),
+                vcodec: intro.vcodec.clone(),
+                acodec: intro.acodec.clone(),
+                title: intro.title.clone(),
+                context: String::new(),
+            },
+            resume_ns: 0,
+            tracks: crate::route::StartTracks::NONE,
+        })));
+    }
+
     /// OK on the three-dot control: present the item's own menu over this window. The control's
     /// drawn rect rides on the request, so the menu hangs off it exactly where it was pressed , 
     /// and the loop presents it on this window's own stack, leaving the window up behind it.
@@ -575,8 +711,8 @@ impl PrePlaybackScreen {
                 moved
             }
             OptionRow::Action => false,
-            // The menu control holds no value to cycle: LEFT/RIGHT there move nothing.
-            OptionRow::More => false,
+            // The intro and the menu control hold no value to cycle: LEFT/RIGHT there move nothing.
+            OptionRow::Intro | OptionRow::More => false,
         }
     }
 
@@ -590,13 +726,14 @@ impl PrePlaybackScreen {
         f: &mut crate::ui::screen::DrawFrame<'_, '_, H>,
     ) {
         let p = f.painter;
-        for (row, rect) in option_rects() {
+        let has_intro = self.has_intro();
+        for (row, rect) in option_rects(has_intro) {
             f.stop(
                 p,
                 crate::ui::screen::Stop {
                     key: crate::ui::machine::FocusKey {
                         entry: self.entry,
-                        elem: row.index() as u32,
+                        elem: row.position(has_intro) as u32,
                     },
                     rect,
                     rest_rect: rect,
@@ -901,7 +1038,8 @@ impl PrePlaybackScreen {
 
         // The headings sit above their capsules at the ladder's own gaps, so the pills and the
         // stops come from ONE walk (`option_rects`).
-        let audio = option_rect(OptionRow::Audio);
+        let has_intro = self.has_intro();
+        let audio = option_rect(OptionRow::Audio, has_intro);
         head_at(
             p,
             crate::i18n::msg::widgets_tracks_audio(),
@@ -913,7 +1051,7 @@ impl PrePlaybackScreen {
             p, OptionRow::Audio, &audio_text, audio, !audio_rows.is_empty(), measure,
         );
 
-        let subs_rect = option_rect(OptionRow::Subtitles);
+        let subs_rect = option_rect(OptionRow::Subtitles, has_intro);
         head_at(
             p,
             crate::i18n::msg::widgets_tracks_subtitles(),
@@ -925,6 +1063,13 @@ impl PrePlaybackScreen {
             p, OptionRow::Subtitles, &sub_text, subs_rect, !subs.is_empty(), measure,
         );
 
+        // ---- the local intro (#370) ---------------------------------------------------------
+        // Drawn only when the server offered one: a row that plays nothing is a lie the viewer
+        // discovers by pressing it, and this window has no placeholder for anything.
+        if has_intro {
+            self.intro_row(p, option_rect(OptionRow::Intro, has_intro), measure);
+        }
+
         // ---- the primary action ------------------------------------------------------------
         let action = if self.arg.restart || crate::metadata::resume_ns(d.resume_ms, d.dur_ms) <= 0 {
             crate::i18n::msg::browse_detail_play()
@@ -932,7 +1077,7 @@ impl PrePlaybackScreen {
             crate::i18n::msg::browse_detail_resume()
         };
         let focused = self.row == OptionRow::Action;
-        let rect = option_rect(OptionRow::Action);
+        let rect = option_rect(OptionRow::Action, has_intro);
         let (fill, ink) = if focused {
             (theme::ACCENT, theme::ACCENT_INK)
         } else {
@@ -953,6 +1098,46 @@ impl PrePlaybackScreen {
                 1,
                 1,
             );
+        }
+    }
+
+    /// **One intro row** (#370): a play mark and *Watch intro*, in the capsule every other rung of
+    /// this column wears. It carries no value and no chevrons because there is nothing to cycle:
+    /// OK plays it, and that is the whole row.
+    fn intro_row(
+        &self,
+        p: Painter,
+        rect: Rect,
+        measure: &dyn crate::ui::machine::Measure,
+    ) {
+        let focused = self.row == OptionRow::Intro;
+        p.rrect(
+            rect,
+            OPT_H * 0.5,
+            OPT_H * 0.5,
+            if focused {
+                theme::OVERLAY_FOCUS_PILL
+            } else {
+                theme::CONTROL_IDLE_FILL
+            },
+        );
+        let ink = if focused { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+        const GLYPH: f32 = 22.0;
+        let gx = rect.x + theme::space::MD;
+        crate::ui::icons::draw(
+            p,
+            Icon::Play,
+            Rect::new(gx, rect.y + (rect.h - GLYPH) * 0.5, GLYPH, GLYPH),
+            ink,
+        );
+        let text = crate::i18n::msg::widgets_preplay_watch_intro();
+        let tx = gx + GLYPH + theme::space::XS;
+        let tw = (rect.x + rect.w - theme::space::MD - tx).max(0.0);
+        let ty = crate::text::text_vcenter_y(theme::size::LABEL, 1, rect.y + rect.h * 0.5);
+        if let Ok(cs) = CString::new(crate::text::elide_by(text, tw, false, |t| {
+            measure.width_str(t, theme::size::LABEL, true)
+        })) {
+            p.text(cs.as_ptr(), tx, ty, theme::size::LABEL, ink, 1, 0);
         }
     }
 
@@ -1057,6 +1242,25 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
         use crate::ui::machine::{Edge, Fx, Handled, InputKind, Key, NavOp};
         use crate::ui::screen::ScreenEvent;
         match ev {
+            // The window reads the item's intros on the way IN (#370), once per mount: the store
+            // answers with a row's worth of data or with nothing, and nothing is drawn for nothing.
+            ScreenEvent::Mount => {
+                self.refresh_intro(H::metadata(cx));
+                self.request_intro(cx, fx);
+                Handled::Yes
+            }
+            ScreenEvent::Enter(_) => {
+                self.refresh_intro(H::metadata(cx));
+                Handled::Yes
+            }
+            ScreenEvent::StoreChanged(ord, _) => {
+                if *ord == crate::stores::StoreId::Metadata.ord()
+                    && self.refresh_intro(H::metadata(cx))
+                {
+                    fx.invalidate(crate::ui::present::Provenance::Landing(fx.from()));
+                }
+                Handled::Yes
+            }
             ScreenEvent::Input(input) => match input.kind {
                 InputKind::Key {
                     key: Key::Back,
@@ -1089,6 +1293,8 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                     self.seed(d);
                     if self.row == OptionRow::More {
                         self.open_menu(fx);
+                    } else if self.row == OptionRow::Intro {
+                        self.play_intro(d, fx);
                     } else {
                         self.commit(d, fx);
                     }
@@ -1126,7 +1332,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
             // one of the four rows is chrome the container composes (the shared Back control), and
             // it lights ITSELF: the rows keep the cursor they had.
             ScreenEvent::FocusMoved { to, .. } => {
-                if let Some(row) = OptionRow::ALL.get(to.elem as usize) {
+                if let Some(row) = ladder(self.has_intro()).get(to.elem as usize) {
                     self.row = *row;
                     fx.invalidate(crate::ui::present::Provenance::Input);
                 }
@@ -1134,10 +1340,9 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
             }
             // A click on a row runs it, exactly as OK does on the row it parks.
             ScreenEvent::Activate(elem) => {
-                // Only a ROW activates here. `from_index`'s clamp would turn a foreign key (the
-                // shared Back control's) into the primary action, which is the one thing a click on
-                // the way OUT must never do.
-                let Some(row) = OptionRow::ALL.get(*elem as usize).copied() else {
+                // Only a ROW activates here. Clamping a foreign key (the shared Back control's)
+                // into the primary action is the one thing a click on the way OUT must never do.
+                let Some(row) = ladder(self.has_intro()).get(*elem as usize).copied() else {
                     return Handled::No;
                 };
                 let meta = H::metadata(cx);
@@ -1149,6 +1354,8 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                 self.row = row;
                 if self.row == OptionRow::More {
                     self.open_menu(fx);
+                } else if self.row == OptionRow::Intro {
+                    self.play_intro(d, fx);
                 } else {
                     self.commit(d, fx);
                 }
@@ -1178,12 +1385,12 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
             // language rows' own (it changes a value), so it never leaves this column.
             edge: [crate::ui::screen::EdgeRule::Stop; 4],
             extent: options_rect(),
-            len: OptionRow::ALL.len(),
+            len: ladder(self.has_intro()).len(),
             elem: crate::ui::screen::ElemKind::Control,
         });
     }
     fn group_of(&self, key: &u32, _cx: &crate::ui::machine::Cx<'_, H>) -> Option<crate::ui::machine::GroupId> {
-        ((*key as usize) < OptionRow::ALL.len()).then_some(crate::ui::machine::GroupId(0))
+        ((*key as usize) < ladder(self.has_intro()).len()).then_some(crate::ui::machine::GroupId(0))
     }
     fn neighbour(
         &self,
@@ -1198,15 +1405,16 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
                 return crate::ui::screen::Step::Edge
             }
         };
-        let from = OptionRow::from_index(key.elem as usize);
-        let to = from.stepped(down);
-        if to == from {
-            crate::ui::screen::Step::Edge
-        } else {
-            crate::ui::screen::Step::Move(crate::ui::machine::FocusKey {
+        let has_intro = self.has_intro();
+        let Some(from) = ladder(has_intro).get(key.elem as usize).copied() else {
+            return crate::ui::screen::Step::Edge;
+        };
+        match stepped(from, down, has_intro) {
+            Some(to) => crate::ui::screen::Step::Move(crate::ui::machine::FocusKey {
                 entry: key.entry,
-                elem: to.index() as u32,
-            })
+                elem: to.position(has_intro) as u32,
+            }),
+            None => crate::ui::screen::Step::Edge,
         }
     }
     fn place(
@@ -1215,13 +1423,14 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
         _cx: &crate::ui::machine::Cx<'_, H>,
         _at: crate::ui::screen::At,
     ) -> Option<crate::ui::screen::Placed> {
-        let row = OptionRow::ALL.get(*key as usize)?;
-        let rect = option_rect(*row);
+        let has_intro = self.has_intro();
+        let row = ladder(has_intro).get(*key as usize)?;
+        let rect = option_rect(*row, has_intro);
         Some(crate::ui::screen::Placed {
             rect,
             rest_rect: rect,
             clip: panel_rect(),
-            index: Some(row.index() as u32),
+            index: Some(row.position(has_intro) as u32),
         })
     }
     fn reconcile(
@@ -1231,12 +1440,12 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
     ) -> crate::ui::machine::FocusKey<u32> {
         // A key that is not one of the four rows bounces back to the row this window is drawing
         // lit, which is the row the engine last landed on.
-        if (want.elem as usize) < OptionRow::ALL.len() {
+        if (want.elem as usize) < ladder(self.has_intro()).len() {
             want
         } else {
             crate::ui::machine::FocusKey {
                 entry: self.entry,
-                elem: self.row.index() as u32,
+                elem: self.row.position(self.has_intro()) as u32,
             }
         }
     }
@@ -1248,14 +1457,14 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for P
     ) -> crate::ui::machine::FocusKey<u32> {
         crate::ui::machine::FocusKey {
             entry: self.entry,
-            elem: self.row.index() as u32,
+            elem: self.row.position(self.has_intro()) as u32,
         }
     }
 }
 
 impl crate::ui::machine::LogicalState for PrePlaybackScreen {
     fn write(&self, c: &mut crate::ui::machine::Canon) {
-        c.u32(self.row.index() as u32)
+        c.u32(self.row.code())
             .u32(self.audio as u32)
             .u32(self.sub.map_or(u32::MAX, |i| i as u32));
     }
@@ -1493,27 +1702,36 @@ mod tests {
 
         let mut row = OptionRow::Action;
         assert_eq!(row, OptionRow::Action, "the primary action holds the cursor");
-        row = row.stepped(false);
+        row = stepped(row, false, false).expect("UP from the action is a rung");
         assert_eq!(row, OptionRow::Subtitles);
-        row = row.stepped(false);
+        row = stepped(row, false, false).expect("UP from the subtitles is a rung");
         assert_eq!(row, OptionRow::Audio);
-        row = row.stepped(false);
+        row = stepped(row, false, false).expect("UP from the audio is a rung");
         assert_eq!(row, OptionRow::More, "UP from the audio row reaches the menu control");
-        assert_eq!(row.stepped(false), row, "clamped at the top");
-        row = row.stepped(true);
+        assert_eq!(stepped(row, false, false), None, "clamped at the top");
+        row = stepped(row, true, false).expect("DOWN from the menu control is a rung");
         assert_eq!(row, OptionRow::Audio);
-        row = row.stepped(true);
-        row = row.stepped(true);
+        row = stepped(row, true, false).expect("DOWN from the audio is a rung");
+        assert_eq!(row, OptionRow::Subtitles);
+        row = stepped(row, true, false).expect("DOWN from the subtitles is a rung");
         assert_eq!(row, OptionRow::Action);
-        assert_eq!(row.stepped(true), row, "clamped at the bottom");
+        assert_eq!(stepped(row, true, false), None, "clamped at the bottom");
+        // With an intro the ladder gains ONE rung between the language choices and Play, and
+        // nothing above it moves: a window whose server has no intro draws the column it always
+        // drew, in the same places.
+        let with_intro = |row, down| stepped(row, down, true);
+        assert_eq!(with_intro(OptionRow::Subtitles, true), Some(OptionRow::Intro));
+        assert_eq!(with_intro(OptionRow::Intro, true), Some(OptionRow::Action));
+        assert_eq!(with_intro(OptionRow::Action, false), Some(OptionRow::Intro));
+        assert_eq!(with_intro(OptionRow::More, true), Some(OptionRow::Audio));
 
         // …and the engine's walk over the screen answers the same ladder, which is what the
         // dispatcher hands a D-pad press and a pointer hover alike.
         let screen = PrePlaybackScreen::new(ENTRY, PrePlaybackArg { restart: false });
-        let cx = fixture_cx(Some(OptionRow::Action.index() as u32));
+        let cx = fixture_cx(Some(OptionRow::Action.position(false) as u32));
         let owner = InputOwner::Entry(ENTRY);
         let mut engine: FocusEngine<u32> = FocusEngine::new();
-        let key = |row: OptionRow| FocusKey { entry: ENTRY, elem: row.index() as u32 };
+        let key = |row: OptionRow| FocusKey { entry: ENTRY, elem: row.position(false) as u32 };
         engine.set(owner, key(OptionRow::Action), Some(GroupId(0)), crate::ui::screen::By::Restore);
         for want in [OptionRow::Subtitles, OptionRow::Audio, OptionRow::More] {
             let out = engine.move_dir(owner, &screen, &[], Dir::Up, &cx);
@@ -1709,7 +1927,7 @@ mod tests {
         let mut f = DrawFrame::new(&cx, crate::ui::Painter::root());
         screen.record_stops(&mut f);
         let stops = f.into_stops();
-        assert_eq!(stops.len(), OptionRow::ALL.len(), "one stop per rung of the ladder");
+        assert_eq!(stops.len(), ladder(false).len(), "one stop per rung of the ladder");
         for (i, stop) in stops.iter().enumerate() {
             assert_eq!(stop.key.elem, i as u32, "the stop's key is its row");
             assert!(matches!(stop.hover, Hover::Focus), "a row hovers: the pointer parks focus");
@@ -1718,24 +1936,24 @@ mod tests {
                 .expect("every row is a focusable element");
             let same = |a: Rect, b: Rect| [a.x, a.y, a.w, a.h] == [b.x, b.y, b.w, b.h];
             assert!(same(placed.rect, stop.rect), "the stop covers the capsule the row is drawn in");
-            assert!(same(placed.rect, option_rect(OptionRow::from_index(i))));
+            assert!(same(placed.rect, option_rect(ladder(false)[i], false)));
         }
 
         let mut map: HitMap<u32> = HitMap::new();
         map.fill(stops);
         map.swap();
         // Two rows far apart in the column, so a geometry bug that merged them would still show.
-        let audio = option_rect(OptionRow::Audio);
-        let action = option_rect(OptionRow::Action);
+        let audio = option_rect(OptionRow::Audio, false);
+        let action = option_rect(OptionRow::Action, false);
         assert!(audio.y + audio.h <= action.y, "the rows are separate bands");
         assert_eq!(
             map.resolve(Some(ENTRY), PointerKind::Move, audio.cx(), audio.cy(), None).focus.map(|k| k.elem),
-            Some(OptionRow::Audio.index() as u32),
+            Some(OptionRow::Audio.position(false) as u32),
             "hovering the audio row parks the audio row"
         );
         assert_eq!(
             map.resolve(Some(ENTRY), PointerKind::Move, action.cx(), action.cy(), None).focus.map(|k| k.elem),
-            Some(OptionRow::Action.index() as u32),
+            Some(OptionRow::Action.position(false) as u32),
             "…and a different row parks a different row"
         );
         // The facts column is not a control: a pointer there parks nothing and clicks nothing.
@@ -1746,7 +1964,7 @@ mod tests {
         let click = map.resolve(Some(ENTRY), PointerKind::Click, action.cx(), action.cy(), None);
         assert_eq!(
             click.activate.map(|(k, act)| (k.elem, act)),
-            Some((OptionRow::Action.index() as u32, Activate::Immediate))
+            Some((OptionRow::Action.position(false) as u32, Activate::Immediate))
         );
     }
 

@@ -292,6 +292,59 @@ pub(crate) struct ChapterDto {    #[serde(rename = "Name")]
     pub(crate) start_position_ticks: i64,
 }
 
+/// `GET /Items/{itemId}/RemoteImages`: the pictures the metadata providers have for one image
+/// type of one item, as the server already knows them (issue #369, *Edit images*). Only what the
+/// picker draws is declared: the URL it fetches the thumbnail from, the type the server filed it
+/// under, the provider that offered it, and the pixel size the provider reports.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RemoteImageResultDto {
+    #[serde(rename = "Images", default)]
+    pub(crate) images: Vec<RemoteImageInfoDto>,
+    /// How many the server holds IN TOTAL, which may exceed the page asked for. The picker says
+    /// so rather than letting a bounded page read as the whole set.
+    #[serde(rename = "TotalRecordCount", default)]
+    pub(crate) total_record_count: i32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct RemoteImageInfoDto {
+    /// The provider's own absolute URL. It is NOT on this server: the thumbnail fetch dials it
+    /// as it stands (see `JfClient::get_bytes`), and `RemoteImages/Download` takes it back.
+    #[serde(rename = "Url", default)]
+    pub(crate) url: String,
+    /// The provider's own SMALLER copy of the same picture, when it publishes one (the server
+    /// fills this for TheMovieDb: `…/original/…` becomes `…/w300/…`). The picker draws this and
+    /// keeps `Url` for the download, so a grid of twenty posters does not decode twenty
+    /// full-resolution JPEGs on a television.
+    #[serde(rename = "ThumbnailUrl", default)]
+    pub(crate) thumbnail_url: Option<String>,
+    /// "Primary" | "Backdrop" | "Logo" | "Art" | "Banner" | "Thumb" | "Disc".
+    #[serde(rename = "Type", default)]
+    pub(crate) kind: String,
+    #[serde(rename = "ProviderName", default)]
+    pub(crate) provider_name: String,
+    #[serde(rename = "Width", default)]
+    pub(crate) width: i32,
+    #[serde(rename = "Height", default)]
+    pub(crate) height: i32,
+    /// The picture's language as the provider tags it ("en", "es", …). Absent for the ones that
+    /// carry no language at all, which is most posters.
+    #[serde(rename = "Language", default)]
+    pub(crate) language: Option<String>,
+}
+
+/// `GET /Items/{itemId}/Intros` — the `IIntroProvider` seam the Local Intros plugin plugs into
+/// (issue #370). Verified against Jellyfin's own OpenAPI (`BaseItemDtoQueryResult`, stable and
+/// 13.x alike): the answer is the ordinary `{ Items: [...] }` envelope, and a server WITHOUT the
+/// plugin answers `Items: []` rather than a 404, because the route is core and the plugin only
+/// supplies the providers. `StartIndex`/`TotalRecordCount` are not read: the endpoint takes no
+/// paging and answers the whole list.
+#[derive(Debug, Deserialize)]
+pub(crate) struct IntrosResult {
+    #[serde(rename = "Items", default)]
+    pub(crate) items: Vec<BaseItemDto>,
+}
+
 /// `GET /MediaSegments/{itemId}` (Jellyfin 10.9+) — intro/credits ranges, the counterpart of
 /// the retired `Marker[]`. Absent endpoint (older server, plugin not installed) is a 404, which the
 /// fetch folds to an empty list: a show simply shows no Skip pill.

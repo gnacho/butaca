@@ -86,6 +86,14 @@ impl<'a> MetadataView<'a> {
     pub(crate) fn identify(&self) -> &'a IdentifyState {
         &self.state.identify
     }
+    /// The *Edit images* surface's data for the loaded item (#369).
+    pub(crate) fn images(&self) -> &'a ImagesState {
+        &self.state.images
+    }
+    /// The loaded item's local intros (#370), the pre-playback window's optional row.
+    pub(crate) fn intros(&self) -> &'a IntrosState {
+        &self.state.intros
+    }
 }
 
 /// One Metadata owner's main-thread-only logical state (`docs/stores-as-machines.md`). Production
@@ -102,6 +110,10 @@ pub(crate) struct MetadataState {
     alt: AltStore,
     /// The Identify surface's data for the loaded item (#369), see [`IdentifyState`].
     identify: IdentifyState,
+    /// The *Edit images* surface's data for the loaded item (#369), see [`ImagesState`].
+    images: ImagesState,
+    /// The loaded item's local intros (#370), see [`IntrosState`].
+    intros: IntrosState,
 }
 
 /// The `Arc`'d worker half of one Metadata owner: the detail/season/alt-sources landing mailboxes,
@@ -125,6 +137,14 @@ pub(crate) struct MetadataAdapter {
     /// discarded rather than installed.
     identify_gen: std::sync::atomic::AtomicU32,
     identify: crate::stores::Fetch<IdentifyMail>,
+    /// *Edit images*' mailbox and generation (#369), the same one-mailbox shape as Identify's: the
+    /// provider's pictures and the download's verdict share it.
+    images_gen: std::sync::atomic::AtomicU32,
+    images: crate::stores::Fetch<ImagesMail>,
+    /// The local intros' mailbox and generation (#370). No verdict shares it: an intro is never
+    /// written, only read and played.
+    intros_gen: std::sync::atomic::AtomicU32,
+    intros: crate::stores::Fetch<IntrosMail>,
     tracker: std::sync::Mutex<record::Tracker>,
     /// TEST ONLY: the detail fetches [`request_detail`] admitted, parked here instead of on a
     /// worker thread — see [`MetadataAdapter::run_held_detail_fetches_for_test`].
@@ -148,6 +168,10 @@ impl Default for MetadataAdapter {
             season_result: std::sync::Mutex::new(None),
             identify_gen: std::sync::atomic::AtomicU32::new(0),
             identify: crate::stores::Fetch::IDLE,
+            images_gen: std::sync::atomic::AtomicU32::new(0),
+            images: crate::stores::Fetch::IDLE,
+            intros_gen: std::sync::atomic::AtomicU32::new(0),
+            intros: crate::stores::Fetch::IDLE,
             tracker: std::sync::Mutex::new(record::Tracker::new(false)),
             #[cfg(test)]
             held_detail: std::sync::Mutex::new(Vec::new()),
@@ -1603,6 +1627,9 @@ fn clear(state: &mut MetadataState, adapter: &MetadataAdapter) {
     alt_clear(state);
     // Identify's candidates are that item's too (#369): the write they would perform names its id.
     state.identify = IdentifyState::default();
+    // …and so are the provider's pictures and the local intros (#369, #370).
+    state.images = ImagesState::default();
+    state.intros = IntrosState::default();
 }
 
 /// The server/profile switch: unlike `clear()`, this drops the COMPLETE owned state — the `now`
@@ -1620,6 +1647,8 @@ fn reset(state: &mut MetadataState, adapter: &MetadataAdapter) {
     state.skipped.clear();
     alt_clear(state);
     state.identify = IdentifyState::default();
+    state.images = ImagesState::default();
+    state.intros = IntrosState::default();
 }
 
 /// TEST ONLY — install `d` as the loaded item, bypassing the fetch and its mailbox. The screens'
@@ -2630,6 +2659,19 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
         }
         MetadataCmd::IdentifyApply { sid, rk, hit } => {
             request_identify_apply(state, adapter, sid, &rk, hit);
+            true
+        }
+        // *Edit images* and the local intros (#369, #370): the same request-not-write shape.
+        MetadataCmd::ImagesLoad { sid, rk } => {
+            request_images(state, adapter, sid, &rk);
+            true
+        }
+        MetadataCmd::ImagesApply { sid, rk, img } => {
+            request_images_apply(state, adapter, sid, &rk, img);
+            true
+        }
+        MetadataCmd::IntrosLoad { sid, rk } => {
+            request_intros(state, adapter, sid, &rk);
             true
         }
     }
@@ -3680,6 +3722,330 @@ pub(crate) fn pump_identify(
     }
 }
 
+// ---- Edit images (#369) ------------------------------------------------------------------------
+//
+// The pictures the metadata providers already hold for the LOADED item, and the phase of the one
+// write this client can perform on an item's artwork. It sits beside `current` for `identify`'s
+// reason (that is the item it describes) and is addressed by `(sid, rk)` for `alt`'s (an answer
+// landing one round trip later must not be installed onto another page's item).
+//
+// The two calls and the picture model are `crate::jellyfin::images`'s; this is the state a screen
+// reads and the main-thread request/pump pair around the worker.
+
+pub(crate) use crate::jellyfin::images::RemoteImage;
+pub(crate) use crate::jellyfin::intros::Intro;
+
+/// What the *Edit images* surface is showing. One phase at a time, for [`IdentifyStatus`]'s
+/// reason: a grid and a refusal are different answers and the surface words them differently.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum ImagesStatus {
+    /// Nothing has been asked for: the surface has never been opened for this item.
+    #[default]
+    Idle,
+    /// The list is out. The surface says so rather than drawing an empty grid, which would read as
+    /// "no pictures" before the server has answered.
+    Loading,
+    /// The list landed, possibly EMPTY, which the surface words as "no pictures".
+    Ready,
+    /// The list itself failed (transport, auth, or an answer that would not parse).
+    Failed,
+    /// A picture is being downloaded by the server.
+    Applying,
+    /// The server took the download; the item is being re-fetched.
+    Applied,
+    /// The server refused the download, most often an account without elevation, which
+    /// `POST /Items/{itemId}/RemoteImages/Download` requires.
+    ApplyFailed,
+}
+
+/// The *Edit images* surface's data for the loaded item. The GRID CURSOR is the surface's own (it
+/// is per-instance logical state); this is the shared answer a re-mount reads back.
+#[derive(Default)]
+pub(crate) struct ImagesState {
+    key: Option<(crate::registry::ServerId, String)>,
+    status: ImagesStatus,
+    images: Vec<RemoteImage>,
+    /// How many the server holds in total, which may exceed the page this client asked for.
+    total: i32,
+}
+
+impl ImagesState {
+    pub(crate) fn key(&self) -> Option<(crate::registry::ServerId, String)> {
+        self.key.clone()
+    }
+    pub(crate) fn status(&self) -> ImagesStatus {
+        self.status
+    }
+    pub(crate) fn images(&self) -> &[RemoteImage] {
+        &self.images
+    }
+    pub(crate) fn total(&self) -> i32 {
+        self.total
+    }
+    /// Does this answer describe `(sid, rk)`? [`IdentifyState::is_about`]'s rule: a surface
+    /// mounted for one item must not draw another's pictures.
+    pub(crate) fn is_about(&self, sid: crate::registry::ServerId, rk: &str) -> bool {
+        self.key
+            .as_ref()
+            .is_some_and(|(s, r)| crate::registry::same_item((*s, r), (sid, rk)))
+    }
+
+    fn begin(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.key = Some((sid, rk.to_string()));
+        self.status = ImagesStatus::Loading;
+        self.images.clear();
+        self.total = 0;
+    }
+
+    /// A landed list. `None` is the request FAILING, which is not the same answer as an empty
+    /// page; a landing that arrives after the surface moved on is dropped.
+    fn land_images(&mut self, page: Option<crate::jellyfin::images::RemoteImages>) -> bool {
+        if self.status != ImagesStatus::Loading {
+            return false;
+        }
+        match page {
+            Some(page) => {
+                self.images = page.images;
+                self.total = page.total;
+                self.status = ImagesStatus::Ready;
+            }
+            None => self.status = ImagesStatus::Failed,
+        }
+        true
+    }
+
+    fn applying(&mut self) {
+        if matches!(self.status, ImagesStatus::Ready | ImagesStatus::ApplyFailed) {
+            self.status = ImagesStatus::Applying;
+        }
+    }
+
+    fn land_applied(&mut self, ok: bool) -> bool {
+        if self.status != ImagesStatus::Applying {
+            return false;
+        }
+        self.status = if ok { ImagesStatus::Applied } else { ImagesStatus::ApplyFailed };
+        true
+    }
+
+    /// Nothing was spawned, so nothing will ever land: settle the surface now rather than leave it
+    /// on a spinner forever ([`IdentifyState::fail`]'s one-event rule).
+    fn fail(&mut self) {
+        if self.status == ImagesStatus::Loading {
+            self.status = ImagesStatus::Failed;
+        }
+    }
+}
+
+/// One worker's answer, tagged with the generation it belongs to so a late one is discarded.
+enum ImagesAnswer {
+    /// `None` is the list request failing.
+    List(Option<crate::jellyfin::images::RemoteImages>),
+    Applied(bool),
+}
+
+type ImagesMail = (u32, ImagesAnswer);
+
+/// MAIN THREAD, NON-BLOCKING. Supersede any list in flight and ask the server for the loaded
+/// item's remote `Primary` pictures.
+fn request_images(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+) {
+    request_images_with_spawn(state, adapter, sid, rk, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        crate::task::spawn_small("images", move || {
+            let page = crate::jellyfin::images::list(sid, &rk);
+            adapter.images.post((gen, ImagesAnswer::List(page)), |old| old.0 < gen);
+        })
+    });
+}
+
+/// The shared admission/spawn path, split out so a test injects the spawn outcome and posts the
+/// answer itself ([`request_identify_with_spawn`]'s seam, for its reason).
+fn request_images_with_spawn(
+    state: &mut MetadataState,
+    adapter: &MetadataAdapter,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    spawn: impl FnOnce(u32) -> bool,
+) {
+    use std::sync::atomic::Ordering;
+    state.images.begin(sid, rk);
+    let gen = adapter.images_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    adapter.images.clear();
+    adapter.images.claim();
+    if !spawn(gen) {
+        adapter.images.release();
+        state.images.fail();
+    }
+}
+
+/// MAIN THREAD, NON-BLOCKING. Make one picture the item's `Primary` image. A WRITE on the server's
+/// own record, reached only from a press on a tile.
+fn request_images_apply(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    img: RemoteImage,
+) {
+    state.images.applying();
+    request_images_apply_with_spawn(state, adapter, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        crate::task::spawn_small("images", move || {
+            let ok = crate::jellyfin::images::apply(sid, &rk, &img);
+            adapter.images.post((gen, ImagesAnswer::Applied(ok)), |old| old.0 < gen);
+        })
+    });
+}
+
+fn request_images_apply_with_spawn(
+    state: &mut MetadataState,
+    adapter: &MetadataAdapter,
+    spawn: impl FnOnce(u32) -> bool,
+) {
+    use std::sync::atomic::Ordering;
+    let gen = adapter.images_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    adapter.images.clear();
+    adapter.images.claim();
+    if !spawn(gen) {
+        adapter.images.release();
+        state.images.land_applied(false);
+    }
+}
+
+/// MAIN THREAD, once a frame, ROUTE-UNCONDITIONAL ([`pump_identify`]'s contract: the surface that
+/// asked may be gone by the time the answer lands, and what it lands in is the store's state).
+pub(crate) fn pump_images(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    gate: &crate::ui::landgate::Gate,
+) -> bool {
+    use std::sync::atomic::Ordering;
+    let taken = crate::stores::take_landing(gate, crate::stores::StoreId::Metadata, || {
+        adapter.images.take()
+    });
+    let Some((gen, answer)) = taken else { return false };
+    if gen != adapter.images_gen.load(Ordering::SeqCst) {
+        return false; // superseded while in flight
+    }
+    match answer {
+        ImagesAnswer::List(page) => state.images.land_images(page),
+        ImagesAnswer::Applied(ok) => {
+            let changed = state.images.land_applied(ok);
+            if ok {
+                // The item's image tag changed on the server, so the page's own poster is stale:
+                // ask for the item again and `pump_detail` installs the new tag (which is what
+                // makes the artwork cache fetch the new picture rather than the old one).
+                if let Some((sid, rk)) = state.images.key() {
+                    request_detail(adapter, sid, &rk);
+                }
+            }
+            changed
+        }
+    }
+}
+
+// ---- Local intros (#370) -----------------------------------------------------------------------
+//
+// The clip the Local Intros plugin would play before the loaded item, read once per item. It has
+// no write and no failure phase: every way of not getting an answer means the same thing to the
+// pre-playback window, which is "there is no intro to offer" (see `crate::jellyfin::intros`).
+
+/// The loaded item's intros, in the server's order.
+#[derive(Default)]
+pub(crate) struct IntrosState {
+    key: Option<(crate::registry::ServerId, String)>,
+    items: Vec<Intro>,
+}
+
+impl IntrosState {
+    /// Does this answer describe `(sid, rk)`? [`IdentifyState::is_about`]'s rule.
+    pub(crate) fn is_about(&self, sid: crate::registry::ServerId, rk: &str) -> bool {
+        self.key
+            .as_ref()
+            .is_some_and(|(s, r)| crate::registry::same_item((*s, r), (sid, rk)))
+    }
+    /// The intro a press would play: the first one the server listed, which is the order the
+    /// plugin decided on. `None` is the ordinary "this server has no intro for this item".
+    pub(crate) fn first(&self) -> Option<&Intro> {
+        self.items.first()
+    }
+
+    fn begin(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.key = Some((sid, rk.to_string()));
+        self.items.clear();
+    }
+
+    fn land(&mut self, items: Vec<Intro>) -> bool {
+        self.items = items;
+        true
+    }
+}
+
+type IntrosMail = (u32, Vec<Intro>);
+
+/// MAIN THREAD, NON-BLOCKING. Ask the server for the loaded item's intros. The list is asked for
+/// once per mount, so a second opening re-reads it: a plugin installed while the app runs is then
+/// picked up without a restart.
+fn request_intros(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+) {
+    request_intros_with_spawn(state, adapter, sid, rk, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        crate::task::spawn_small("intros", move || {
+            let items = crate::jellyfin::intros::list(sid, &rk);
+            adapter.intros.post((gen, items), |old| old.0 < gen);
+        })
+    });
+}
+
+/// The shared admission/spawn path, split out for [`request_identify_with_spawn`]'s reason.
+fn request_intros_with_spawn(
+    state: &mut MetadataState,
+    adapter: &MetadataAdapter,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    spawn: impl FnOnce(u32) -> bool,
+) {
+    use std::sync::atomic::Ordering;
+    state.intros.begin(sid, rk);
+    let gen = adapter.intros_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    adapter.intros.clear();
+    adapter.intros.claim();
+    if !spawn(gen) {
+        // Nothing will land, and "nothing landed" already means "no intro": the empty list `begin`
+        // installed is the answer the window draws, so there is nothing to settle.
+        adapter.intros.release();
+    }
+}
+
+/// MAIN THREAD, once a frame, ROUTE-UNCONDITIONAL ([`pump_identify`]'s contract).
+pub(crate) fn pump_intros(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    gate: &crate::ui::landgate::Gate,
+) -> bool {
+    use std::sync::atomic::Ordering;
+    let taken = crate::stores::take_landing(gate, crate::stores::StoreId::Metadata, || {
+        adapter.intros.take()
+    });
+    let Some((gen, items)) = taken else { return false };
+    if gen != adapter.intros_gen.load(Ordering::SeqCst) {
+        return false; // superseded while in flight
+    }
+    state.intros.land(items)
+}
+
 #[cfg(test)]
 mod trailer_tests {    use super::*;
     #[test]
@@ -3768,4 +4134,8 @@ mod season_mailbox_tests;
 #[cfg(test)]
 #[path = "metadata_identify_tests.rs"]
 mod identify_tests;
+
+#[cfg(test)]
+#[path = "metadata_images_tests.rs"]
+mod images_tests;
 

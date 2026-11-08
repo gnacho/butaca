@@ -14,10 +14,14 @@
 //!   detail page already presents. It is the entry that proves the menu, because it needs no write.
 //! * **Identify** opens `ContentPanel::Identify`, the provider-match list. Jellyfin's lookup routes
 //!   cover `Movie` and not `Episode`, so the row exists **only for a movie**, see [`identify_offered`].
-//! * **Edit images** and **Edit subtitles** are NOT here. Both are uploads: they take a file the
-//!   viewer chooses, and a webOS television has no file picker this app can reach, so there is no
-//!   source for the bytes. An entry that cannot work is a lie the viewer discovers by pressing it,
-//!   so the row is not drawn at all.
+//! * **Edit images** opens `ContentPanel::Images`, the pictures the metadata providers already hold
+//!   for the item (#369). It is NOT an upload: the viewer picks from what the server knows and the
+//!   SERVER fetches the picture, which is the only shape a television can offer, and it is offered
+//!   for every item the window can describe (the route is addressed by item id, not by kind).
+//! * **Edit subtitles** is NOT here. It is an upload: it takes a file the viewer chooses, and a
+//!   webOS television has no file picker this app can reach, so there is no source for the bytes.
+//!   An entry that cannot work is a lie the viewer discovers by pressing it, so the row is not
+//!   drawn at all.
 //!
 //! Like every other menu here it only REPORTS: it names the surface it wants on its own effects and
 //! lets the loop present it. It mutates no server state and no page.
@@ -96,6 +100,8 @@ pub(crate) enum Action {
     MediaInfo,
     /// *Identify*, the metadata providers' candidate list.
     Identify,
+    /// *Edit images*, the pictures the metadata providers already hold for the item.
+    EditImages,
 }
 
 /// **Does this item offer Identify?** Only a MOVIE does, and that is the server's shape rather than
@@ -115,6 +121,11 @@ pub(crate) fn rows_for(d: &Detail) -> Vec<Action> {
     if identify_offered(d) {
         rows.push(Action::Identify);
     }
+    // Every item has an id, and the remote-image routes are addressed by it: an episode's own
+    // still is as replaceable as a film's poster.
+    if !d.rk.is_empty() {
+        rows.push(Action::EditImages);
+    }
     rows
 }
 
@@ -123,6 +134,7 @@ fn icon_for(action: Action) -> Icon {
     match action {
         Action::MediaInfo => Icon::Info,
         Action::Identify => Icon::Search,
+        Action::EditImages => Icon::Image,
     }
 }
 
@@ -131,6 +143,7 @@ fn label_for(action: Action) -> &'static str {
     match action {
         Action::MediaInfo => crate::i18n::msg::widgets_preplay_menu_media_info(),
         Action::Identify => crate::i18n::msg::widgets_preplay_menu_identify(),
+        Action::EditImages => crate::i18n::msg::widgets_preplay_menu_edit_images(),
     }
 }
 
@@ -235,6 +248,9 @@ impl PrePlaybackMenuScreen {
         let panel = match action {
             Action::MediaInfo => ContentPanel::Tracks { page: 1 },
             Action::Identify => ContentPanel::Identify {
+                anchor: self.arg.anchor,
+            },
+            Action::EditImages => ContentPanel::Images {
                 anchor: self.arg.anchor,
             },
         };
@@ -368,6 +384,7 @@ impl LogicalState for PrePlaybackMenuScreen {
             c.u32(match action {
                 Action::MediaInfo => 0,
                 Action::Identify => 1,
+                Action::EditImages => 2,
             });
         }
         c.u32(self.table.sel as u32);
@@ -432,6 +449,7 @@ mod tests {
     fn movie() -> Detail {
         Detail {
             kind: "movie".into(),
+            rk: "mv-1".into(),
             ..Default::default()
         }
     }
@@ -508,7 +526,7 @@ mod tests {
         let mut f = DrawFrame::new(&context, crate::ui::Painter::root());
         screen.record_stops(&mut f);
         let stops = f.into_stops();
-        assert_eq!(stops.len(), 2, "the movie's two rows");
+        assert_eq!(stops.len(), 3, "the movie's three rows");
         for stop in &stops {
             assert!(matches!(stop.hover, Hover::Focus), "a row hovers: the pointer parks focus");
             assert!(matches!(stop.activate, Activate::Immediate), "a click opens the row at once");
@@ -542,15 +560,23 @@ mod tests {
     /// cannot work is not drawn, so the row set is a statement rather than a wish list.
     #[test]
     fn the_menu_offers_the_entries_that_can_work_and_no_others() {
-        assert_eq!(rows_for(&movie()), vec![Action::MediaInfo, Action::Identify]);
-        // Media information is always there: it reads the item's own file.
+        assert_eq!(
+            rows_for(&movie()),
+            vec![Action::MediaInfo, Action::Identify, Action::EditImages]
+        );
+        // Media information is always there: it reads the item's own file. Edit images is there
+        // for any item with an id, because the route is addressed by it.
         let episode = Detail {
             kind: "episode".into(),
             ..movie()
         };
-        assert_eq!(rows_for(&episode), vec![Action::MediaInfo]);
+        assert_eq!(rows_for(&episode), vec![Action::MediaInfo, Action::EditImages]);
         assert!(!identify_offered(&episode), "Jellyfin has no episode lookup route");
         assert!(identify_offered(&movie()));
+        // An item with no id (nothing landed, or a landing about another item) offers no picture
+        // to replace: the write would name no item.
+        let anonymous = Detail::default();
+        assert_eq!(rows_for(&anonymous), vec![Action::MediaInfo]);
     }
 
     /// The panel hangs UNDER its control and never over it, is right-aligned with it, and stays

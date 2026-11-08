@@ -513,6 +513,12 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     if srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         let c = crate::jellyfin::client()?;
         let s = memo.get_or_build(srv.raw(), path, w, h, png, 0, || {
+            // A metadata provider's remote image (*Edit images*, issue #369) arrives as an
+            // absolute URL on the provider's own host. There is no image path to build and no
+            // token to add: `get_bytes` dials it as it stands, headerless.
+            if crate::jellyfin::client::absolute_http_url(path).is_some() {
+                return path.to_owned();
+            }
             let n = crate::surface::render_scale() as i64;
             c.image_path(path, w as i64 * n, h as i64 * n, png).unwrap_or_default()
         });
