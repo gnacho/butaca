@@ -2921,7 +2921,7 @@ pub(crate) fn draw_back_control(p: Painter, focused: bool) {
     button.draw(&Env::inert(), p);
 }
 
-/// Where [`draw_back_control`] paints — the box the keyboard lands on and the pointer clicks.
+/// Where [`draw_back_control`] paints - the box the keyboard lands on and the pointer clicks.
 /// One expression for the drawn control and its stop, as [`CHIP_FRAME`] is for the chip.
 pub(crate) fn back_control_frame() -> Rect {
     CHIP_FRAME

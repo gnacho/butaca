@@ -75,7 +75,7 @@ impl<'a> Header<'a> {
         self.layout.draw_narrative(p, self.crumb, self.title, self.copy, self.copy_size, measure, focused);
     }
 
-    /// The crumb's box — what the pointer clicks and what the keyboard lands on — or `None` when
+    /// The crumb's box - what the pointer clicks and what the keyboard lands on - or `None` when
     /// this header draws no crumb. One expression for the drawn mark and its two targets.
     pub fn crumb_rect(&self, measure: &dyn Measure) -> Option<Rect> {
         self.crumb.map(|back| self.layout.crumb_rect(back, measure))
@@ -484,7 +484,7 @@ impl<'a> TableScreen<'a> {
         self.table.paint(p, measure);
     }
 
-    /// The crumb's box (see [`Header::crumb_rect`]) — what this screen answers as its Back control.
+    /// The crumb's box (see [`Header::crumb_rect`]) - what this screen answers as its Back control.
     pub fn crumb_rect(&self, measure: &dyn Measure) -> Option<Rect> {
         self.header.crumb_rect(measure)
     }
@@ -552,7 +552,7 @@ where
         composed_draw(self, f);
         // The header's two targets. Both are focus stops: the crumb's group is composed by the
         // dispatcher (`dispatch::BACK`) from `Screen::back_control`, and the Home word is pointer
-        // only — the keyboard already reaches the top of the app with BACK. Their rectangles come
+        // only - the keyboard already reaches the top of the app with BACK. Their rectangles come
         // from the same functions the drawing uses, so the clickable box is the drawn one.
         let p = f.painter;
         let entry = self.table.entry;
@@ -751,7 +751,7 @@ impl<'a> DocumentScreen<'a> {
         self.doc.paint(p);
     }
 
-    /// The crumb's box (see [`Header::crumb_rect`]) — what this screen answers as its Back control.
+    /// The crumb's box (see [`Header::crumb_rect`]) - what this screen answers as its Back control.
     pub fn crumb_rect(&self, measure: &dyn Measure) -> Option<Rect> {
         self.header.crumb_rect(measure)
     }

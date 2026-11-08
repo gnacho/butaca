@@ -982,7 +982,7 @@ impl RouteLayout {
 
     /// The crumb as it is DRAWN. `focused` is the D-pad's: the crumb is a focus stop on every
     /// route (the dispatcher composes it as one chrome group, `dispatch::BACK`), so it wears the
-    /// pill family's focus face — the accent capsule with the dark ink over it — rather than a
+    /// pill family's focus face - the accent capsule with the dark ink over it - rather than a
     /// treatment invented for one control. Nothing moves when it lights: the capsule is the band
     /// the crumb already occupies, so focus never reflows the title under it.
     fn draw_crumb(self, p: Painter, top: f32, back_to: &str, measure: &dyn Measure, focused: bool) {

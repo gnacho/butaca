@@ -48,7 +48,7 @@ use super::{Painter, Rect};
 /// A removed pill therefore cannot renumber another destination or collide with a page's tile.
 pub const STRIP_BASE: u32 = 0xFFFF_0000;
 
-/// The Back control's group id — the second chrome group the dispatcher composes above the page's
+/// The Back control's group id - the second chrome group the dispatcher composes above the page's
 /// own, the twin of `containers::tabs::STRIP`. One element, addressed by
 /// `ui::table_screen::CRUMB_ELEM` (`screens::registry::HEADER_CRUMB` on the screen side), and it
 /// exists so a viewer whose remote's BACK key is broken can still leave a page with the arrows.
@@ -86,7 +86,7 @@ fn back_group(rect: Rect) -> GroupSpec {
 
 /// The input owner's page COMPOSED with the container's strip (§6.2): the strip is a `Row`
 /// group above the page's own, contributed only while the page allows it. The page's Back control
-/// is composed the same way, as one `Free` group — a chrome element the WRAPPER dispatches, so
+/// is composed the same way, as one `Free` group - a chrome element the WRAPPER dispatches, so
 /// every screen gets the ladder at once instead of each one growing a rule of its own.
 struct PageWithStrip<'a, H: Host> {
     page: &'a dyn Screen<H>,
@@ -102,7 +102,7 @@ impl<H: Host> PageWithStrip<'_, H>
 where
     H::Elem: IndexElem,
 {
-    /// The Back control's element — the same key the page publishes as its pointer stop, so the
+    /// The Back control's element - the same key the page publishes as its pointer stop, so the
     /// arrows and the pointer name one control.
     fn back_key(&self) -> FocusKey<H::Elem> {
         FocusKey {
@@ -112,7 +112,7 @@ where
     }
 
     /// The Back control's rectangle when the crumb group is part of THIS query's model, and
-    /// `None` when it is not — the one expression `groups`, `group_of`, `place`, `reconcile` and
+    /// `None` when it is not - the one expression `groups`, `group_of`, `place`, `reconcile` and
     /// `seat` share, so an element the model does not hold can never be placed, seated or
     /// reconciled onto. See [`Self::groups`] for the "page with nothing of its own" case.
     fn back_rect(&self, cx: &Cx<'_, H>) -> Option<Rect> {
@@ -142,7 +142,7 @@ where
         // one it does not have, and a page that has mounted but not LANDED yet has no group at all
         // on purpose: its rows arrive async and the page seats its own first landing. A crumb group
         // that is always non-empty would silently take that seat and report a `By::Restore` move
-        // the page never asked for — the 12-filmography-detail-return anchor caught exactly that on
+        // the page never asked for - the 12-filmography-detail-return anchor caught exactly that on
         // Detail's mount. So the crumb joins the model only while the page has something of its own
         // to stand on, which is also the only state in which the arrows have a stop to leave.
         let page_has_a_stop = out[page_from..].iter().any(|s| s.len > 0);
@@ -2732,7 +2732,7 @@ mod edge_back_tests {
     #[derive(Default)]
     struct EdgeBackState {
         read_memory: Option<u32>,
-        /// How many `Activate(CRUMB_ELEM)` the page was handed — the Back control's press.
+        /// How many `Activate(CRUMB_ELEM)` the page was handed - the Back control's press.
         back_hits: u32,
         /// The screen's own inner stack depth; 1 is its root, where BACK is declined.
         depth: usize,
@@ -3310,7 +3310,7 @@ mod edge_back_tests {
 
     /// **A page that has not landed yet keeps its old mount.** The crumb group is chrome, and the
     /// engine's last-resort fallback takes the first non-empty group when a page names one it does
-    /// not have — so a crumb that joined the model here would take a seat the page's own landing
+    /// not have - so a crumb that joined the model here would take a seat the page's own landing
     /// was going to claim and report a `By::Restore` move nobody asked for. The
     /// 12-filmography-detail-return anchor caught it on Detail's mount; this pins it.
     #[test]

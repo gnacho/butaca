@@ -1128,7 +1128,7 @@ impl Screen<InnerHost> for RootPage {
         None
     }
     fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
-        // the root's crumb reads "Home" — the place BACK goes, which is the app's top
+        // the root's crumb reads "Home" - the place BACK goes, which is the app's top
         self.view().crumb_rect(cx.measure)
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}

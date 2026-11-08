@@ -1369,7 +1369,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
     }
     fn back_control(&self, cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
         // The disc is drawn with the transport's scrim, so it is a stop on exactly the frames the
-        // HUD is up and no failure read-out owns the picture — the same gate `record_stops` uses.
+        // HUD is up and no failure read-out owns the picture - the same gate `record_stops` uses.
         let ps = H::session(cx);
         (self.hud_drawn(ps, cx.tick.ms) && !crate::ui::player_hud::readout_owns_frame(self.busy))
             .then(crate::ui::widgets::back_control_frame)
