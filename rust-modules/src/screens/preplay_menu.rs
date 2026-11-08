@@ -190,6 +190,38 @@ impl PrePlaybackMenuScreen {
         panel_at(Rect::new(x, y, w, h), self.table.measured_height())
     }
 
+    /// **The rows as pointer stops** (rule 11: hover parks focus, a click activates). Split out of
+    /// `draw` for `PlayerScreen::record_stops`'s reason: a host unit build links no GL and no
+    /// SDL2_ttf, so the suite can grade these without the paint pass that would issue both. They
+    /// ride the SETTLED geometry, like every other surface's: at rest (`appear == 1`) the drawn and
+    /// settled rects coincide exactly.
+    pub(crate) fn record_stops<H: AppLike<Memory = crate::screens::registry::PageMemory>>(
+        &self,
+        f: &mut DrawFrame<'_, '_, H>,
+    ) {
+        let hit_p = f.painter.alpha(f.page_alpha);
+        for elem in 0..self.actions.len() as u32 {
+            if let Some(placed) = <Self as Focusable<H>>::place(self, &elem, f.cx, At::Drawn) {
+                f.stop(
+                    hit_p,
+                    Stop {
+                        key: FocusKey {
+                            entry: self.entry,
+                            elem,
+                        },
+                        rect: placed.rect,
+                        rest_rect: placed.rest_rect,
+                        clip: placed.clip,
+                        // The row lights in the SAME face the arrows give it: the pointer parks
+                        // focus through the engine, so there is no second hover style here.
+                        hover: Hover::Focus,
+                        activate: Activate::Immediate,
+                    },
+                );
+            }
+        }
+    }
+
     fn dismiss<H: AppLike>(&self, fx: &mut Effects<'_, H>) {
         fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
     }
@@ -374,27 +406,7 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + crate::screens:
             crate::ui::widgets::panel_ground(p, r, PANEL_RAD, field);
             self.table.draw(p, r, measure);
         });
-        // The hit map's stops ride the SETTLED geometry, like every other surface here: at rest
-        // (`appear == 1`) the drawn and settled rects coincide exactly.
-        let hit_p = f.painter.alpha(appear);
-        for elem in 0..self.actions.len() as u32 {
-            if let Some(placed) = <Self as Focusable<H>>::place(self, &elem, f.cx, At::Drawn) {
-                f.stop(
-                    hit_p,
-                    Stop {
-                        key: FocusKey {
-                            entry: self.entry,
-                            elem,
-                        },
-                        rect: placed.rect,
-                        rest_rect: placed.rest_rect,
-                        clip: placed.clip,
-                        hover: Hover::Focus,
-                        activate: Activate::Immediate,
-                    },
-                );
-            }
-        }
+        self.record_stops(f);
     }
     fn render(&self) -> RenderStrategy {
         RenderStrategy::Page
@@ -422,6 +434,108 @@ mod tests {
             kind: "movie".into(),
             ..Default::default()
         }
+    }
+
+    // ---- the pointer (#359) --------------------------------------------------------------------
+
+    struct HostFixture;
+    impl crate::ui::machine::Host for HostFixture {
+        type Arg = crate::ui::fixture::FixtureArg;
+        type Fx = AppFx;
+        type Msg = crate::screens::registry::AppMsg;
+        type Elem = u32;
+        type Views<'a> = ();
+        type Init = crate::screens::family::NoInit;
+        type Memory = crate::screens::registry::PageMemory;
+    }
+
+    thread_local! {
+        // TEST ONLY, `screens::detail::tests`' pattern: the store has to live somewhere for the
+        // free helpers below, and a per-owner one would be a second mechanism for reaching it.
+        static TEST_METADATA: std::cell::UnsafeCell<crate::stores::metadata::MetadataStore> =
+            std::cell::UnsafeCell::new(crate::stores::metadata::MetadataStore::default());
+    }
+
+    fn test_store() -> &'static mut crate::stores::metadata::MetadataStore {
+        TEST_METADATA.with(|cell| unsafe { &mut *cell.get() })
+    }
+
+    impl crate::screens::registry::MetadataLike for HostFixture {
+        fn metadata<'a>(_cx: &Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
+            test_store().view()
+        }
+    }
+
+    const ENTRY: EntryId = EntryId(5);
+
+    fn cx(focus: Option<u32>) -> Cx<'static, HostFixture> {
+        Cx {
+            views: (),
+            tick: crate::ui::machine::Tick::default(),
+            measure: &crate::ui::fixture::FixtureMeasure,
+            press: crate::ui::machine::PressRead::default(),
+            focus: crate::ui::machine::FocusRead {
+                current: focus.map(|elem| FocusKey { entry: ENTRY, elem }),
+                ..Default::default()
+            },
+            owner: crate::ui::machine::InputOwner::Entry(ENTRY),
+        }
+    }
+
+    /// A mounted menu on a MOVIE, which is the item that offers both rows.
+    fn menu() -> (PrePlaybackMenuScreen, crate::testlock::Serial) {
+        let guard = crate::testlock::serial();
+        crate::metadata::set_current_for_test(test_store().state_mut(), Some(movie()));
+        let context = cx(None);
+        let arg = PrePlaybackMenuArg { host: crate::ui::machine::InstanceId(1), anchor: [1400.0f32.to_bits(), 120.0f32.to_bits(), 96.0f32.to_bits(), 56.0f32.to_bits()] };
+        (PrePlaybackMenuScreen::new(
+            ENTRY,
+            arg,
+            <HostFixture as crate::screens::registry::MetadataLike>::metadata(&context),
+        ), guard)
+    }
+
+    /// **Rule 11 on the three-dot menu** (#359): both rows are stops that HOVER like every other
+    /// stop in the app, and the row a hover parks is the row the pill is drawn on, because the
+    /// screen takes its selection from the engine's `FocusMoved` rather than keeping its own.
+    #[test]
+    fn a_hover_parks_the_row_and_the_pill_follows_it() {
+        use crate::ui::hit::{HitMap, PointerKind};
+        use crate::ui::screen::DrawFrame;
+
+        let (mut screen, _guard) = menu();
+        let context = cx(None);
+        let mut f = DrawFrame::new(&context, crate::ui::Painter::root());
+        screen.record_stops(&mut f);
+        let stops = f.into_stops();
+        assert_eq!(stops.len(), 2, "the movie's two rows");
+        for stop in &stops {
+            assert!(matches!(stop.hover, Hover::Focus), "a row hovers: the pointer parks focus");
+            assert!(matches!(stop.activate, Activate::Immediate), "a click opens the row at once");
+        }
+        let mut map: HitMap<u32> = HitMap::new();
+        map.fill(stops);
+        map.swap();
+        let second = screen.table.row_frame(screen.frame(), 1).expect("row 1 is drawn");
+        assert_eq!(
+            map.resolve(Some(ENTRY), PointerKind::Move, second.cx(), second.cy(), None).focus.map(|k| k.elem),
+            Some(1),
+            "hovering row 1 parks row 1"
+        );
+        // …and the pill lands on the row the pointer parked: the drawn face IS the focus face.
+        let event = ScreenEvent::FocusMoved {
+            from: Some(FocusKey { entry: ENTRY, elem: 0 }),
+            to: FocusKey { entry: ENTRY, elem: 1 },
+            by: crate::ui::screen::By::Pointer,
+        };
+        let mut effects = Vec::new();
+        let mut present = crate::ui::present::Present::new();
+        let handled = {
+            let mut sink = Effects::new(&mut effects, crate::ui::machine::MachineId::Input, &mut present);
+            screen.step(&event, &context, &mut sink)
+        };
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(screen.table.sel, 1, "the hovered row is the row drawn lit");
     }
 
     /// The four entries the issue names, and the two that are absent on purpose: an entry that
