@@ -1042,7 +1042,8 @@ impl RootPage {
                 Some(crate::i18n::msg::browse_chrome_home()),
                 crate::i18n::msg::settings_title(),
                 crate::i18n::msg::settings_root_jellyfin_copy(),
-            ),
+            )
+            .with_back_disc(),
             &self.table,
             GroupId(0),
             self.entry,
@@ -1246,7 +1247,7 @@ impl LanguagePage {
             crate::i18n::msg::settings_language_copy()
         };
         TableScreen::new(Header::new(RouteLayout::screen(), Some(crate::i18n::msg::settings_title()),
-            crate::i18n::msg::settings_language_title(), copy), &self.table, GroupId(0), self.entry).with_home()
+            crate::i18n::msg::settings_language_title(), copy).with_back_disc(), &self.table, GroupId(0), self.entry).with_home()
     }
 
     fn activate(&mut self, row: u32, fx: &mut Effects<'_, InnerHost>) {
