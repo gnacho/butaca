@@ -756,9 +756,13 @@ mod tests {
         let _session = crate::server::session::TempSession::new("prefs-recently-added");
         crate::route::restore_show_recently_added(false);
         let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
-        // #322 split the rows into groups, so the switch is the last ACTION, not the last row of
-        // the first section.
-        let last = page.actions.len() as i32 - 1;
+        // #322 split the rows into groups, and the screensaver switch now follows this one, so
+        // the row is found by what it IS rather than by being last.
+        let last = page
+            .actions
+            .iter()
+            .position(|action| matches!(action, Action::ToggleRecentlyAdded))
+            .expect("the recently-added switch is an action") as i32;
         let row = page.table.sections.iter().flat_map(|s| s.rows.iter()).find(|r| r.label == crate::i18n::msg::settings_library_recently_added()).expect("the switch is in the table");
         assert_eq!(row.label, crate::i18n::msg::settings_library_recently_added());
         assert_eq!(row.toggle, Some(false), "off by default");

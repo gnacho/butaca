@@ -15,7 +15,7 @@
 //! **This is not an upload.** The viewer picks from what the server already knows about the item,
 //! which is the only shape a television can offer: a webOS set has no file picker this app can
 //! reach, so a local file would have no source for its bytes (the argument
-//! `screens::preplay_menu` makes for *Edit subtitles* still holding).
+//! the item menu makes for *Edit subtitles* still holding).
 //!
 //! **One image type, `Primary`.** The API takes a `type` on both calls and the picker is built for
 //! the poster, which is the picture a person means by "change the cover". Offering Backdrop, Logo

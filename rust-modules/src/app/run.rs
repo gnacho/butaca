@@ -2639,10 +2639,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 | AppArg::AboutPanel
                 | AppArg::PersonBio
                 | AppArg::CollectionAbout
-                | AppArg::PrePlayback(_)
-                | AppArg::PrePlaybackMenu(_)
-                | AppArg::Identify(_)
-                | AppArg::Images(_) => crate::focusprobe::Screen::Home,
+                | AppArg::TrackPick(_) => crate::focusprobe::Screen::Home,
         };
         // The probe reads the OWNER, and answers the resting cursor when no player is mounted —
         // which is what every non-player screen used to read off `App`'s second copy.
