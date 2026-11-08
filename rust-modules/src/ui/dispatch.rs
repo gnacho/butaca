@@ -111,8 +111,19 @@ where
         }
     }
 
+    /// The Back control's rectangle when the crumb group is part of THIS query's model, and
+    /// `None` when it is not — the one expression `groups`, `group_of`, `place`, `reconcile` and
+    /// `seat` share, so an element the model does not hold can never be placed, seated or
+    /// reconciled onto. See [`Self::groups`] for the "page with nothing of its own" case.
+    fn back_rect(&self, cx: &Cx<'_, H>) -> Option<Rect> {
+        let back = self.back?;
+        let mut groups = Vec::new();
+        self.page.groups(cx, &mut groups);
+        groups.iter().any(|s| s.len > 0).then_some(back)
+    }
+
     fn is_back(&self, key: &H::Elem) -> bool {
-        self.back.is_some() && key.index() == Some(super::table_screen::CRUMB_ELEM)
+        key.index() == Some(super::table_screen::CRUMB_ELEM)
     }
 }
 
@@ -124,17 +135,24 @@ where
         if let Some((spec, _)) = &self.strip {
             out.push(*spec);
         }
+        let page_from = out.len();
         self.page.groups(cx, out);
-        // LAST, and that placement is load-bearing: the engine's no-focus fallback and every
-        // `resolve_group` miss take the first non-empty group, and chrome must never win a seat
-        // the page's own content was going to get. Same reason the strip is first.
-        if let Some(rect) = self.back {
+        // **Chrome never wins a seat the page's own content was going to get.** The engine's
+        // last-resort fallback (`resolve_group`) takes the first non-empty group when a page names
+        // one it does not have, and a page that has mounted but not LANDED yet has no group at all
+        // on purpose: its rows arrive async and the page seats its own first landing. A crumb group
+        // that is always non-empty would silently take that seat and report a `By::Restore` move
+        // the page never asked for — the 12-filmography-detail-return anchor caught exactly that on
+        // Detail's mount. So the crumb joins the model only while the page has something of its own
+        // to stand on, which is also the only state in which the arrows have a stop to leave.
+        let page_has_a_stop = out[page_from..].iter().any(|s| s.len > 0);
+        if let Some(rect) = self.back.filter(|_| page_has_a_stop) {
             out.push(back_group(rect));
         }
     }
     fn group_of(&self, key: &H::Elem, cx: &Cx<'_, H>) -> Option<GroupId> {
         if self.is_back(key) {
-            return Some(BACK);
+            return self.back_rect(cx).map(|_| BACK);
         }
         match key.index() {
             Some(i) if i >= STRIP_BASE => self.strip.as_ref()
@@ -165,7 +183,7 @@ where
     }
     fn place(&self, key: &H::Elem, cx: &Cx<'_, H>, at: At) -> Option<Placed> {
         if self.is_back(key) {
-            let rect = self.back?;
+            let rect = self.back_rect(cx)?;
             return Some(Placed { rect, rest_rect: rect, clip: Rect::FULL, index: None });
         }
         match (key.index(), &self.strip) {
@@ -184,7 +202,9 @@ where
     }
     fn reconcile(&self, want: FocusKey<H::Elem>, cx: &Cx<'_, H>) -> FocusKey<H::Elem> {
         if self.is_back(&want.elem) {
-            return want;
+            // keep it while it is a stop; once the page's own content vanishes the crumb leaves
+            // the model and the page's own repair takes the cursor back
+            return if self.back_rect(cx).is_some() { want } else { self.page.reconcile(want, cx) };
         }
         match (want.elem.index(), &self.strip) {
             (Some(i), Some((_, members))) if i >= STRIP_BASE =>
@@ -196,7 +216,7 @@ where
         }
     }
     fn seat(&self, g: GroupId, from: Placed, cx: &Cx<'_, H>) -> FocusKey<H::Elem> {
-        if g == BACK && self.back.is_some() {
+        if g == BACK && self.back_rect(cx).is_some() {
             return self.back_key();
         }
         match &self.strip {
@@ -2703,6 +2723,9 @@ mod edge_back_tests {
     const DEPTH_BASE: u32 = 900;
     /// `FixtureArg::Page(BACK_PAGE)` mounts a screen that shows a Back control at [`BACK_RECT`].
     const BACK_PAGE: u32 = 777;
+    /// `FixtureArg::Page(EMPTY_PAGE)` mounts the same screen before its rows have landed: it shows
+    /// the Back control and contributes no group of its own.
+    const EMPTY_PAGE: u32 = 778;
     /// Above and to the left of [`EXTENT`], like a route's crumb.
     const BACK_RECT: Rect = Rect::new(96.0, 142.0, 200.0, 30.0);
 
@@ -2740,12 +2763,17 @@ mod edge_back_tests {
         state: EdgeBackState,
         /// The rectangle this page draws its Back control at, `None` for a page that shows none.
         back: Option<Rect>,
+        /// A page that has mounted but not landed: it contributes no group of its own.
+        empty: bool,
     }
 
     const EXTENT: Rect = Rect::new(600.0, 200.0, 720.0, 600.0);
 
     impl Focusable<FixtureHost> for EdgeBackScreen {
         fn groups(&self, _cx: &Cx<'_, FixtureHost>, out: &mut Vec<GroupSpec>) {
+            if self.empty {
+                return;
+            }
             out.push(GroupSpec {
                 id: G,
                 kind: GroupKind::Column,
@@ -2879,7 +2907,9 @@ mod edge_back_tests {
                     depth,
                     ..EdgeBackState::default()
                 },
-                back: (*arg == FixtureArg::Page(BACK_PAGE)).then_some(BACK_RECT),
+                back: matches!(arg, FixtureArg::Page(BACK_PAGE) | FixtureArg::Page(EMPTY_PAGE))
+                    .then_some(BACK_RECT),
+                empty: *arg == FixtureArg::Page(EMPTY_PAGE),
             })
         }
     }
@@ -3276,6 +3306,37 @@ mod edge_back_tests {
         let view = Dispatcher::<FixtureHost>::owner_view(&d.nav, home, &cx).unwrap();
         view.groups(&cx, &mut groups);
         assert!(!groups.iter().any(|g| g.id == BACK), "no crumb, no chrome group");
+    }
+
+    /// **A page that has not landed yet keeps its old mount.** The crumb group is chrome, and the
+    /// engine's last-resort fallback takes the first non-empty group when a page names one it does
+    /// not have — so a crumb that joined the model here would take a seat the page's own landing
+    /// was going to claim and report a `By::Restore` move nobody asked for. The
+    /// 12-filmography-detail-return anchor caught it on Detail's mount; this pins it.
+    #[test]
+    fn a_page_with_nothing_of_its_own_contributes_no_crumb_group() {
+        let _guard = crate::testlock::serial();
+        let (mut d, mut rig) = booted();
+        d.request(MachineId::Nav, NavOp::Push(FixtureArg::Page(EMPTY_PAGE)));
+        d.frame(&mut rig, tick(16), vec![], vec![], &mut NoTap);
+        let top = d.nav.top_page().unwrap().id;
+        let Split { views, measure, .. } = rig.split();
+        let cx = Cx {
+            views,
+            tick: tick(16),
+            measure,
+            press: PressRead::default(),
+            focus: FocusRead::default(),
+            owner: InputOwner::Entry(top),
+        };
+        let view = Dispatcher::<FixtureHost>::owner_view(&d.nav, top, &cx).unwrap();
+        let mut groups = Vec::new();
+        view.groups(&cx, &mut groups);
+        assert!(groups.is_empty(), "no content, no chrome: {:?}", groups.len());
+        assert_eq!(view.group_of(&super::super::table_screen::CRUMB_ELEM, &cx), None);
+        assert!(view.place(&super::super::table_screen::CRUMB_ELEM, &cx, At::SpringTarget).is_none(),
+            "an element the model does not hold cannot be placed");
+        assert_eq!(d.focus(), None, "the page seats nothing, as it did before the crumb existed");
     }
 
     fn elem_of(d: &Dispatcher<FixtureHost>, entry: EntryId) -> Option<u32> {
