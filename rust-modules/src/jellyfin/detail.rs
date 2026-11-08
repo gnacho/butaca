@@ -235,6 +235,7 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
     };
 
     let is_favorite = it.user_data.as_ref().map(|ud| ud.is_favorite).unwrap_or(false);
+    let blur = super::convert::blur_corners(it);
     let mut d = Detail {
         sid,
         rk: it.id.clone(),
@@ -289,8 +290,8 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
             Some(t) => format!("/Items/{}/Images/Primary?tag={t}", it.id),
             None => String::new(),
         },
-        blur: [[0.0; 3]; 4],
-        has_blur: false, // BlurHash, not corner colours — see convert::movie_from_dto
+        blur: blur.unwrap_or([[0.0; 3]; 4]),
+        has_blur: blur.is_some(),
         genres: it.genres.clone(),
         countries: it.production_locations.clone(),
         cast: cast_from_people(&it.people),

@@ -130,6 +130,11 @@ pub(crate) struct BaseItemDto {
     /// `Deserialize`.)
     #[serde(rename = "ImageTags", default)]
     pub(crate) image_tags: std::collections::BTreeMap<String, String>,
+    /// Per-image-type BlurHash strings: image type (`Primary`, `Backdrop`) to image tag to hash.
+    /// The hash identifies the picture it was computed from, so a new image is a new hash.
+    #[serde(rename = "ImageBlurHashes", default)]
+    pub(crate) image_blur_hashes:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     #[serde(rename = "BackdropImageTags", default)]
     pub(crate) backdrop_tags: Vec<String>,
     /// Episode/season only: the containing series.

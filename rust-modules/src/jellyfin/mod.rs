@@ -68,6 +68,7 @@ pub(crate) use mock_server::MockServer;
 pub(crate) mod boot;
 pub(crate) mod browse;
 pub(crate) mod client;
+mod blurhash;
 mod convert;
 pub(crate) mod detail;
 pub(crate) mod discovery;
