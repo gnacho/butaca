@@ -359,7 +359,7 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // very frame it moves on, and the close can leave the loop cleanly. Active playback
     // (`fr.player` + presenting + not paused) is never idle; a paused frame and a menu get
     // the owner's 3-minute and 2-minute thresholds respectively.
-    {
+    if crate::route::idle_screen() {
         let paused = crate::app::lifecycle::paused();
         let playing = fr.player && !paused && crate::player::is_playing(&app.player.session);
         match crate::ui::idle_screen::stage(fr.now, app.last_input, playing, paused) {
@@ -378,6 +378,11 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
                 app.idle_pos = None;
             }
         }
+    } else if app.idle_pos.is_some() {
+        // The switch was turned off from Settings while the clock was up: drop it now rather
+        // than waiting for an input that is what the idle screen exists to avoid.
+        app.idle_pos = None;
+        crate::ui::idle::invalidate();
     }
     // ---- whole-frame present gate (`ui::idle`) --------------------------------------
     // A screen with nothing moving on it does not need to be re-sent to the panel. This
