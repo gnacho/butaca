@@ -718,6 +718,11 @@ class CatalogLibrary(Library):
             "MediaType": "Video",
             "IsFolder": False,
             "UserData": self._user_data(),
+            # The two numbers a film's hero states: an age rating and the audience score. Derived
+            # from the id, so a capture shows the same ones twice and no catalog entry has to be
+            # hand-edited to have a star.
+            "OfficialRating": OFFICIAL_RATINGS[int(item_id, 16) % len(OFFICIAL_RATINGS)],
+            "CommunityRating": round(5.0 + (int(item_id, 16) % 45) / 10.0, 1),
         }
         if "originallyAvailableAt" in rec:
             item["PremiereDate"] = iso_date(rec["originallyAvailableAt"])
