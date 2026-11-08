@@ -671,6 +671,7 @@ impl FilmographyScreen {
             &copy,
             theme::size::LABEL,
             f.measure,
+            crate::ui::widgets::back_control_focused(f),
         );
         crate::ui::widgets::back_control_stop_at(
             f,
@@ -1029,6 +1030,10 @@ impl<H: ContentLike + PersonLike> Screen<H> for FilmographyScreen {
 
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         Some(Cow::Owned(self.name.clone()))
+    }
+
+    fn back_control(&self, cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        Some(route_layout(cx.measure).crumb_rect(&self.name, cx.measure))
     }
 
     fn back_chrome(&self) -> crate::ui::screen::BackChrome {

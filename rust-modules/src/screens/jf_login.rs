@@ -636,6 +636,10 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> {
         None
     }
+    fn back_control(&self, _cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        self.has_back_destination()
+            .then(crate::ui::widgets::back_control_frame)
+    }
     fn prepare(&mut self, _b: &mut crate::ui::frame::Budget, _cx: &Cx<'_, H>) {
         self.prepare_logo();
     }
@@ -743,7 +747,7 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
                 .draw(&env, p);
         }
         if self.has_back_destination() {
-            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::draw_back_control(p, crate::ui::widgets::back_control_focused(f));
             crate::ui::widgets::back_control_stop(
                 f,
                 self.entry,

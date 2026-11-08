@@ -275,6 +275,23 @@ pub trait Screen<H: Host>: Machine<H, Ev = ScreenEvent<H>> + Focusable<H> {
     fn back_chrome(&self) -> BackChrome {
         BackChrome::Shared
     }
+    /// **Where this page's Back control is DRAWN, when it shows one** - the crumb's measured box
+    /// on a route with its own narrative column, the shared disc's frame on a page that wears
+    /// [`crate::ui::widgets::back_control_frame`].
+    ///
+    /// The dispatcher composes this rectangle into the focus model as ONE chrome group
+    /// (`dispatch::BACK`) above the page's own, so a viewer whose remote's BACK key is broken can
+    /// still leave the page with the arrows: the first UP/DOWN/RIGHT off the content lands on it,
+    /// OK runs exactly what a click on it runs, and DOWN walks back into the content. That is why
+    /// this is a RECT and not a group: a screen states a fact it already knows - the box it paints
+    /// and publishes as a pointer stop - and the ladder that reaches it is written once, in the
+    /// dispatcher, instead of in every screen.
+    ///
+    /// `None` (the default) means the page shows no Back control, and no stop is invented for it:
+    /// a root tab page wears the profile chip in that spot, not a way out.
+    fn back_control(&self, _cx: &Cx<'_, H>) -> Option<Rect> {
+        None
+    }
     /// RENDER resources only.
     fn prepare(&mut self, b: &mut Budget, cx: &Cx<'_, H>);
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>);

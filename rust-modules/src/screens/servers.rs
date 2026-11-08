@@ -188,6 +188,9 @@ impl Screen<InnerHost> for ServersPage {
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
         Some(Cow::Borrowed(crate::i18n::msg::settings_title()))
     }
+    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
+        self.view().crumb_rect(cx.measure)
+    }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
         let mut v = self.view();

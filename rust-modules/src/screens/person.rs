@@ -1669,13 +1669,17 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> {
         None
     }
+    fn back_control(&self, _cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        // The disc is drawn on both arms of `draw`, so it is always a stop here.
+        Some(crate::ui::widgets::back_control_frame())
+    }
     fn prepare(&mut self, _b: &mut crate::ui::frame::Budget, _cx: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         let p = f.painter.alpha(f.page_alpha);
         let cur = f.focus.current.map(|k| k.elem);
         let env = Env::inert();
         let Some(person) = self.person(f.cx) else {
-            crate::ui::widgets::draw_back_control(p);
+            crate::ui::widgets::draw_back_control(p, crate::ui::widgets::back_control_focused(f));
             crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
             return;
         };
@@ -1684,7 +1688,7 @@ impl<H: ContentLike + PersonLike> Screen<H> for PersonScreen {
         let live = self.live_flow(person, cur);
         col.draw(&live, &env, p, f.measure);
         self.draw_shelf_state(p, &env, person);
-        crate::ui::widgets::draw_back_control(p);
+        crate::ui::widgets::draw_back_control(p, crate::ui::widgets::back_control_focused(f));
 
         self.record_stops(f, person, cur);
     }

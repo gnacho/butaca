@@ -808,6 +808,12 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
         None
     }
+    fn back_control(&self, cx: &Cx<'_, H>) -> Option<crate::ui::Rect> {
+        // The surface IS its top page to the outside: the crumb on screen is that page's, drawn
+        // through the surface's entrance cascade, so the box the arrows land on is the same one.
+        let icx = inner_cx(cx);
+        self.top()?.screen.back_control(&icx)
+    }
     fn back_chrome(&self) -> crate::ui::screen::BackChrome {
         crate::ui::screen::BackChrome::Existing
     }
@@ -1121,6 +1127,10 @@ impl Screen<InnerHost> for RootPage {
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
         None
     }
+    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
+        // the root's crumb reads "Home" - the place BACK goes, which is the app's top
+        self.view().crumb_rect(cx.measure)
+    }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
         let mut v = self.view();
@@ -1318,6 +1328,9 @@ impl Screen<InnerHost> for LanguagePage {
     fn name(&self) -> &'static str { "language" }
     fn state(&self) -> &dyn LogicalState { &self.state }
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> { Some(Cow::Borrowed(crate::i18n::msg::settings_title())) }
+    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
+        self.view().crumb_rect(cx.measure)
+    }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
         crate::ui::screen::Part::<InnerHost>::draw(&mut self.view(), f, Rect::FULL);

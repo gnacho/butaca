@@ -210,6 +210,9 @@ impl Screen<InnerHost> for LegalIndex {
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
         Some(Cow::Borrowed(crate::i18n::msg::settings_title()))
     }
+    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
+        self.view().crumb_rect(cx.measure)
+    }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
         let mut v = self.view();
@@ -405,6 +408,9 @@ impl Screen<InnerHost> for DocumentPage {
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
         Some(Cow::Borrowed(self.crumb))
     }
+    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
+        Some(RouteLayout::screen().crumb_rect(self.crumb, cx.measure))
+    }
     fn prepare(&mut self, _b: &mut Budget, cx: &Cx<'_, InnerHost>) {
         let code = self.guide().map(|guide| guide.layout(self.document_frame(), cx.measure).code);
         if let (Some(qr), Some(code)) = (&mut self.qr, code) {
@@ -417,7 +423,7 @@ impl Screen<InnerHost> for DocumentPage {
             let layout = guide.draw(f.painter, document_frame, f.measure);
             if let Some(qr) = &self.qr { qr.draw(f.painter, layout.code); }
             Header::new(RouteLayout::screen(), Some(self.crumb), self.title, self.subtitle)
-                .paint(f.painter, f.measure);
+                .paint(f.painter, f.measure, crate::ui::widgets::back_control_focused(f));
             return;
         }
         let Self { reader, crumb, title, subtitle, body, entry, .. } = self;

@@ -79,8 +79,9 @@ LEFT do the same thing there (`ui/consts.rs`, the `Key::Left` doc). This asymmet
 The Magic Remote's pointer is supported everywhere as a peer of the D-pad: motion, hover, click and
 the scroll wheel all reach the same handlers the keys do, and the remote reports pointer auto-hide
 (keycode `0x1e4`) so the UI can drop back to D-pad focus cleanly. **An IR remote with only a
-four-way pad reaches every D-pad-focusable control.** The visible Back disc is the deliberate
-pointer-only exception, and its action remains available on physical BACK.
+four-way pad reaches every D-pad-focusable control.** The visible Back control is a D-pad stop
+like any other: the crumb and the disc are one control, the arrows land on it, and OK runs exactly
+what a click on it runs, so physical BACK is a shortcut rather than the only way out.
 
 ---
 
@@ -131,8 +132,9 @@ carries no such ambiguity (`app.rs`, the `Key::Exit` arm). Device-verified 2026-
 
 Every focusable control has three visually distinct states — **idle**, **focused** and
 **pressed**. Focus is drawn as a scale-up on a critically damped spring plus a glow; press is a
-separate depression (`ui/press.rs`). **Every D-pad-focusable action control responds to OK.** The
-visible Back disc is pointer-only, with physical BACK as its remote-key path.
+separate depression (`ui/press.rs`). **Every D-pad-focusable action control responds to OK**, the
+visible Back control included: it is a stop the four-way pad reaches, and OK on it leaves the page
+exactly where a click does. Physical BACK remains the shortcut.
 
 Two focus stops do not, and both are deliberate rather than dead: the tab pill for the page you are
 *already on* (OK on Home's own pill, standing on Home, is a documented no-op), and the person page's
@@ -478,9 +480,10 @@ grounds are below, and they are the reason this document exists.
    scrubber and a state read-out rather than a persistent focusable `<< ⏸ >>` row. *(Tier: observed
    behaviour of a third-party shipping app, not an LG statement. It is offered as precedent that the
    idiom passes QA on these sets, not as a rule LG has written down.)*
-4. **Every D-pad-focusable action control is fully operable by four-way + OK**, with physical BACK
-   providing the same navigation as the visible Back control (§3). The visible Back disc is
-   pointer-only. Every other action remains available through the established remote-key paths.
+4. **Every D-pad-focusable action control is fully operable by four-way + OK**, the visible Back
+   control included (§3): it is a focus stop, so a remote whose BACK key is broken still leaves the
+   page with the arrows. Every other action remains available through the established remote-key
+   paths.
    (The one gesture in the app is the card hold of §5.6; its actions are otherwise reachable from
    the detail page, with the single exception of *Remove from Deck*.)
 
