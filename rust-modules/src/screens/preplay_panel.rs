@@ -862,6 +862,7 @@ impl PrePlaybackScreen {
                 p,
                 bx,
                 cy,
+                &[],
                 crate::metadata::RatingArt::Critic.provider(),
                 &cells,
                 measure,
@@ -886,11 +887,14 @@ impl PrePlaybackScreen {
                     .iter()
                     .map(|score| widgets::RatingCell { mark: &[], value: score, suffix: "" })
                     .collect();
-                let w = widgets::rating_group_w(provider, &cells, measure);
+                // The glyph names the SOURCE, so it heads the group: Rotten Tomatoes' two
+                // percentages get the tomato and the popcorn, every other provider stays text.
+                let lead = widgets::rating_source_mark(named[i].art);
+                let w = widgets::rating_group_w(provider, lead, &cells, measure);
                 if gx + w > clip.x + clip.w {
                     break;
                 }
-                gx += widgets::rating_group(p, gx, ry, provider, &cells, measure) + 32.0;
+                gx += widgets::rating_group(p, gx, ry, lead, provider, &cells, measure) + 32.0;
                 i = end;
             }
             rows += 1.0;
