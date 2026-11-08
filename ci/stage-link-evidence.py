@@ -69,7 +69,17 @@ if not Path(str(a.source) + '.link.json').is_file():
     else:
         by_content = find_evidence_by_content(a.source) if a.source.is_file() else None
         a.source = by_content if by_content is not None else resolved
-m.check_elf(a.source)
+try:
+    m.check_elf(a.source)
+except Exception as error:
+    # A gate that exits with no words costs a whole CI cycle to interpret. Name the file it
+    # looked for and what it found instead, then fail the same way.
+    import traceback
+    traceback.print_exc()
+    for suffix in ('.link.map', '.link.trace', '.link.json'):
+        probe = Path(str(a.source) + suffix)
+        print(f'stage-link-evidence: {probe} exists={probe.is_file()}', flush=True)
+    raise SystemExit(f'stage-link-evidence: {type(error).__name__}: {error}') from error
 source = a.source.read_bytes()
 target = a.destination.read_bytes()
 if source != target:
