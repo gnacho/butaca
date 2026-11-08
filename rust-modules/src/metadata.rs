@@ -82,6 +82,10 @@ impl<'a> MetadataView<'a> {
     pub(crate) fn alt_available(&self, sid: crate::registry::ServerId, rk: &str) -> bool {
         alt_available(self.state, sid, rk)
     }
+    /// The Identify surface's data for the loaded item (#369).
+    pub(crate) fn identify(&self) -> &'a IdentifyState {
+        &self.state.identify
+    }
 }
 
 /// One Metadata owner's main-thread-only logical state (`docs/stores-as-machines.md`). Production
@@ -96,6 +100,8 @@ pub(crate) struct MetadataState {
     /// doc.
     skipped: Vec<(MarkerKind, i64)>,
     alt: AltStore,
+    /// The Identify surface's data for the loaded item (#369) — see [`IdentifyState`].
+    identify: IdentifyState,
 }
 
 /// The `Arc`'d worker half of one Metadata owner: the detail/season/alt-sources landing mailboxes,
@@ -114,6 +120,11 @@ pub(crate) struct MetadataAdapter {
     season_gen: std::sync::atomic::AtomicU32,
     season_done: std::sync::atomic::AtomicU32,
     season_result: std::sync::Mutex<Option<SeasonResult>>,
+    /// Identify's one mailbox and its generation (#369): the lookup's candidates and the apply's
+    /// verdict share the generation, so an answer to either that arrives after a newer request is
+    /// discarded rather than installed.
+    identify_gen: std::sync::atomic::AtomicU32,
+    identify: crate::stores::Fetch<IdentifyMail>,
     tracker: std::sync::Mutex<record::Tracker>,
     /// TEST ONLY: the detail fetches [`request_detail`] admitted, parked here instead of on a
     /// worker thread — see [`MetadataAdapter::run_held_detail_fetches_for_test`].
@@ -135,6 +146,8 @@ impl Default for MetadataAdapter {
             season_gen: std::sync::atomic::AtomicU32::new(0),
             season_done: std::sync::atomic::AtomicU32::new(0),
             season_result: std::sync::Mutex::new(None),
+            identify_gen: std::sync::atomic::AtomicU32::new(0),
+            identify: crate::stores::Fetch::IDLE,
             tracker: std::sync::Mutex::new(record::Tracker::new(false)),
             #[cfg(test)]
             held_detail: std::sync::Mutex::new(Vec::new()),
@@ -1558,6 +1571,8 @@ fn clear(state: &mut MetadataState, adapter: &MetadataAdapter) {
     // but a departing page should not leave another item's list in memory for the next one to be
     // handed if it ever happened to share both halves of the address.
     alt_clear(state);
+    // Identify's candidates are that item's too (#369): the write they would perform names its id.
+    state.identify = IdentifyState::default();
 }
 
 /// The server/profile switch: unlike `clear()`, this drops the COMPLETE owned state — the `now`
@@ -1574,6 +1589,7 @@ fn reset(state: &mut MetadataState, adapter: &MetadataAdapter) {
     state.playing = None;
     state.skipped.clear();
     alt_clear(state);
+    state.identify = IdentifyState::default();
 }
 
 /// TEST ONLY — install `d` as the loaded item, bypassing the fetch and its mailbox. The screens'
@@ -2576,6 +2592,16 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
         }
         #[cfg(test)]
         MetadataCmd::AltInstall { sid, rk, copies } => alt_install(state, sid, &rk, copies),
+        // Identify (#369): the lookup and the apply are requests, not writes — they spawn a worker
+        // and land through `pump_identify`. `true` because the surface's phase moved either way.
+        MetadataCmd::IdentifySearch { sid, rk } => {
+            request_identify(state, adapter, sid, &rk);
+            true
+        }
+        MetadataCmd::IdentifyApply { sid, rk, hit } => {
+            request_identify_apply(state, adapter, sid, &rk, hit);
+            true
+        }
     }
 }
 
@@ -3387,9 +3413,245 @@ mod marker_tests {
     }
 }
 
+// ---- Identify (#369) ---------------------------------------------------------------------------
+//
+// The metadata-provider match for the LOADED item: the candidates the server's providers offered,
+// and the phase of the one write this client can perform on an item's metadata. It sits beside
+// `current` because that is the item it describes, and it is addressed by `(sid, rk)` for `alt`'s
+// reason — an answer landing one round trip later must not be installed onto whatever page holds
+// the same ratingKey by then.
+//
+// The two calls themselves (and the candidate model) are `crate::jellyfin::identify`'s; this is
+// the state a screen reads and the main-thread request/pump pair around the worker.
+
+pub(crate) use crate::jellyfin::identify::IdentifyHit;
+
+/// What the Identify surface is showing. One phase at a time, because a list and a refusal are
+/// different answers and the surface words them differently.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum IdentifyStatus {
+    /// Nothing has been asked for: the surface has never been opened for this item.
+    #[default]
+    Idle,
+    /// The lookup is out. The surface says so rather than drawing an empty list, which would read
+    /// as "no match" before the server has answered.
+    Searching,
+    /// The list landed — possibly EMPTY, which the surface words as "no match found".
+    Ready,
+    /// The lookup itself failed (transport, auth, or an answer that would not parse).
+    Failed,
+    /// A candidate is being applied; the server refreshes the item's metadata in the background.
+    Applying,
+    /// The server took the apply; the item is being re-fetched.
+    Applied,
+    /// The server refused the apply — most often an account without elevation, which
+    /// `POST /Items/RemoteSearch/Apply/{itemId}` requires.
+    ApplyFailed,
+}
+
+/// The Identify surface's data for the loaded item. The CURSOR is the surface's own (it is
+/// per-instance logical state); this is the shared answer a re-mount reads back.
+#[derive(Default)]
+pub(crate) struct IdentifyState {
+    key: Option<(crate::registry::ServerId, String)>,
+    status: IdentifyStatus,
+    hits: Vec<IdentifyHit>,
+}
+
+impl IdentifyState {
+    /// The item these candidates belong to, when there is one.
+    pub(crate) fn key(&self) -> Option<(crate::registry::ServerId, String)> {
+        self.key.clone()
+    }
+    pub(crate) fn status(&self) -> IdentifyStatus {
+        self.status
+    }
+    pub(crate) fn hits(&self) -> &[IdentifyHit] {
+        &self.hits
+    }
+    /// Does this answer describe `(sid, rk)`? A surface mounted for one item must not draw
+    /// another's candidates, and the store can hold an answer for an item the viewer already left.
+    pub(crate) fn is_about(&self, sid: crate::registry::ServerId, rk: &str) -> bool {
+        self.key
+            .as_ref()
+            .is_some_and(|(s, r)| crate::registry::same_item((*s, r), (sid, rk)))
+    }
+
+    fn begin(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.key = Some((sid, rk.to_string()));
+        self.status = IdentifyStatus::Searching;
+        self.hits.clear();
+    }
+
+    /// A landed lookup. `None` is the lookup FAILING, which is not the same answer as an empty
+    /// list; a landing that arrives after the surface moved on (or after an apply) is dropped.
+    fn land_hits(&mut self, hits: Option<Vec<IdentifyHit>>) -> bool {
+        if self.status != IdentifyStatus::Searching {
+            return false;
+        }
+        match hits {
+            Some(hits) => {
+                self.hits = hits;
+                self.status = IdentifyStatus::Ready;
+            }
+            None => self.status = IdentifyStatus::Failed,
+        }
+        true
+    }
+
+    fn applying(&mut self) {
+        if matches!(self.status, IdentifyStatus::Ready | IdentifyStatus::ApplyFailed) {
+            self.status = IdentifyStatus::Applying;
+        }
+    }
+
+    fn land_applied(&mut self, ok: bool) -> bool {
+        if self.status != IdentifyStatus::Applying {
+            return false;
+        }
+        self.status = if ok { IdentifyStatus::Applied } else { IdentifyStatus::ApplyFailed };
+        true
+    }
+
+    /// Nothing was spawned, so nothing will ever land: settle the surface now rather than leave it
+    /// on a spinner forever (the same one-event rule `record::refused` keeps for the detail fetch).
+    fn fail(&mut self) {
+        if self.status == IdentifyStatus::Searching {
+            self.status = IdentifyStatus::Failed;
+        }
+    }
+}
+
+/// One worker's answer, tagged with the generation it belongs to so a late one is discarded.
+enum IdentifyAnswer {
+    /// `None` is the lookup failing.
+    Hits(Option<Vec<IdentifyHit>>),
+    Applied(bool),
+}
+
+type IdentifyMail = (u32, IdentifyAnswer);
+
+/// MAIN THREAD, NON-BLOCKING. Supersede any lookup in flight and ask the providers for candidates
+/// for `(sid, rk)`. The title and year are read HERE, off the loaded item, for two reasons: a
+/// worker must not touch the store, and the item it is about can be replaced while it is out.
+fn request_identify(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+) {
+    let (name, year) = match state.current.as_ref() {
+        Some(d) if crate::registry::same_item((d.sid, &d.rk), (sid, rk)) => (d.title.clone(), d.year),
+        _ => (String::new(), 0),
+    };
+    request_identify_with_spawn(state, adapter, sid, rk, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        let year = i32::try_from(year).unwrap_or(0);
+        crate::task::spawn_small("identify", move || {
+            let hits = crate::jellyfin::identify::search(sid, &rk, &name, year);
+            adapter.identify.post((gen, IdentifyAnswer::Hits(hits)), |old| old.0 < gen);
+        })
+    });
+}
+
+/// The shared admission/spawn path, split out so a test injects the spawn outcome and posts the
+/// answer itself instead of racing a worker thread (the same seam `request_detail_with_spawn`
+/// keeps, and for the same reason: a fetch for an unknown server returns in microseconds).
+fn request_identify_with_spawn(
+    state: &mut MetadataState,
+    adapter: &MetadataAdapter,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    spawn: impl FnOnce(u32) -> bool,
+) {
+    use std::sync::atomic::Ordering;
+    // The phase and the address are set HERE rather than by the caller, so the seam a test drives
+    // is the whole request and not half of one.
+    state.identify.begin(sid, rk);
+    let gen = adapter.identify_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    // Supersede: drop the mailbox AND release the claim a still-running worker holds. A stale
+    // landing that arrives anyway is discarded by the generation check in the pump.
+    adapter.identify.clear();
+    adapter.identify.claim();
+    if !spawn(gen) {
+        adapter.identify.release();
+        state.identify.fail();
+    }
+}
+
+/// MAIN THREAD, NON-BLOCKING. Apply one candidate to the loaded item. The apply is a WRITE on the
+/// server's own record, so it is only ever reached from a press on a candidate row.
+fn request_identify_apply(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    hit: IdentifyHit,
+) {
+    state.identify.applying();
+    request_identify_apply_with_spawn(state, adapter, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        crate::task::spawn_small("identify", move || {
+            let ok = crate::jellyfin::identify::apply(sid, &rk, &hit);
+            adapter.identify.post((gen, IdentifyAnswer::Applied(ok)), |old| old.0 < gen);
+        })
+    });
+}
+
+fn request_identify_apply_with_spawn(
+    state: &mut MetadataState,
+    adapter: &MetadataAdapter,
+    spawn: impl FnOnce(u32) -> bool,
+) {
+    use std::sync::atomic::Ordering;
+    let gen = adapter.identify_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    adapter.identify.clear();
+    adapter.identify.claim();
+    if !spawn(gen) {
+        adapter.identify.release();
+        // Nothing will land, so the surface must not sit on "applying" forever.
+        state.identify.land_applied(false);
+    }
+}
+
+/// MAIN THREAD, once a frame, ROUTE-UNCONDITIONAL (the surface that asked may be gone by the time
+/// the answer lands, and what it lands in is the store's state, not a screen's). Answers whether a
+/// reader would see any difference — the Metadata store's notice folds it exactly as the detail,
+/// season and alt pumps are folded.
+pub(crate) fn pump_identify(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    gate: &crate::ui::landgate::Gate,
+) -> bool {
+    use std::sync::atomic::Ordering;
+    let taken = crate::stores::take_landing(gate, crate::stores::StoreId::Metadata, || {
+        adapter.identify.take()
+    });
+    let Some((gen, answer)) = taken else { return false };
+    if gen != adapter.identify_gen.load(Ordering::SeqCst) {
+        return false; // superseded while in flight
+    }
+    match answer {
+        IdentifyAnswer::Hits(hits) => state.identify.land_hits(hits),
+        IdentifyAnswer::Applied(ok) => {
+            let changed = state.identify.land_applied(ok);
+            if ok {
+                // The server refreshed the item's metadata in the background, so ask for it again:
+                // the page (and the window over it) must show the match that was just applied
+                // rather than the one it was showing. `pump_detail` installs it.
+                if let Some((sid, rk)) = state.identify.key() {
+                    request_detail(adapter, sid, &rk);
+                }
+            }
+            changed
+        }
+    }
+}
+
 #[cfg(test)]
-mod trailer_tests {
-    use super::*;
+mod trailer_tests {    use super::*;
     #[test]
     fn hud_title_falls_back_to_the_parent() {
         let named = Extra {
@@ -3472,4 +3734,8 @@ mod test_support;
 #[cfg(test)]
 #[path = "metadata_season_mailbox_tests.rs"]
 mod season_mailbox_tests;
+
+#[cfg(test)]
+#[path = "metadata_identify_tests.rs"]
+mod identify_tests;
 

@@ -7899,6 +7899,42 @@ pub(crate) fn star_score(p: Painter, clip: Rect, x: f32, cy: f32, value_0_10: f6
     bx - x
 }
 
+// ---------------------------------------------------------------------------------------
+// ---- Where an anchored menu hangs.
+//
+// The two anchored-menu families in the app each wrote this rule for themselves (`item_menu` beside
+// a card, `alt_sources` under a chip) because their anchors differ in SHAPE. A control in a panel
+// corner is the third shape and the first one two surfaces share (#369's three-dot menu and its
+// Identify list), so it is one function here rather than a third and fourth copy.
+// ----
+
+/// **An anchored menu's frame**: under `anchor` when the screen has room below it, above it when it
+/// does not, and never over it — the control that opened a panel stays readable beside its own list.
+/// `align_right` puts the panel's right edge on the anchor's, for a control in a corner; otherwise
+/// the left edges line up, for a chip in a row. `w` is the panel's own width; the height is the
+/// content's, clamped to the screen's keep-out. Pure (geometry in, rect out).
+pub(crate) fn anchored_menu(anchor: Rect, w: f32, content_h: f32, align_right: bool) -> Rect {
+    // Per AXIS, for `item_menu::EDGE`'s reason: `space::XL` clears the vertical margin and misses
+    // the horizontal one, so the horizontal keep-out is the screen's own `MARGIN_X`.
+    use crate::ui::consts::{SCR_H, SCR_W};
+    const EDGE: f32 = theme::space::XL;
+    const EDGE_X: f32 = crate::ui::consts::MARGIN_X;
+    let h = content_h.clamp(120.0, SCR_H - 2.0 * EDGE);
+    let below = anchor.y + anchor.h + theme::space::MD;
+    let y = if below + h <= SCR_H - EDGE {
+        below
+    } else {
+        (anchor.y - theme::space::MD - h).max(EDGE)
+    };
+    let x = if align_right {
+        anchor.x + anchor.w - w
+    } else {
+        anchor.x
+    }
+    .clamp(EDGE_X, (SCR_W - EDGE_X - w).max(EDGE_X));
+    Rect::new(x, y, w, h)
+}
+
 #[cfg(test)]
 #[test]
 fn rating_group_measures_each_run_once_and_returns_its_drawn_width() {

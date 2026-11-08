@@ -132,24 +132,43 @@ fn options_rect() -> Rect {
     )
 }
 
+/// The three-dot control's capsule at the head of the options column: right-aligned, because the
+/// eye already reads this column's right edge (the chevrons, the action capsule) and a control in
+/// the middle of a header reads as a title.
+const MORE_W: f32 = 96.0;
+const MORE_H: f32 = 56.0;
+
+/// Where the three-dot control sits, derived from the column it heads. ONE function, so the rect
+/// it is DRAWN in and the rect the menu is anchored to cannot drift.
+fn more_rect(col: Rect) -> Rect {
+    Rect::new(col.x + col.w - MORE_W, col.y, MORE_W, MORE_H)
+}
+
 // ---- the choice model (PURE — this half is what the host suite grades) -------------------------
 
 /// Which row of the options column holds the cursor.
+///
+/// **`More` is the first row, not a chrome glyph**: the three-dot control at the head of the column
+/// is where the remote reaches the item's own actions (#369), and putting it in the ladder means
+/// UP from the audio row lands on it rather than it being a control with no way to reach it. OK on
+/// it opens the menu; OK on the other three starts the film.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum OptionRow {
+    More,
     Audio,
     Subtitles,
     Action,
 }
 
 impl OptionRow {
-    pub(crate) const ALL: [Self; 3] = [Self::Audio, Self::Subtitles, Self::Action];
+    pub(crate) const ALL: [Self; 4] = [Self::More, Self::Audio, Self::Subtitles, Self::Action];
 
     pub(crate) fn index(self) -> usize {
         match self {
-            Self::Audio => 0,
-            Self::Subtitles => 1,
-            Self::Action => 2,
+            Self::More => 0,
+            Self::Audio => 1,
+            Self::Subtitles => 2,
+            Self::Action => 3,
         }
     }
 
@@ -458,6 +477,23 @@ impl PrePlaybackScreen {
         })));
     }
 
+    /// OK on the three-dot control: present the item's own menu over this window. The control's
+    /// drawn rect rides on the request, so the menu hangs off it exactly where it was pressed —
+    /// and the loop presents it on this window's own stack, leaving the window up behind it.
+    fn open_menu<H: crate::screens::registry::AppLike>(
+        &self,
+        fx: &mut crate::ui::machine::Effects<'_, H>,
+    ) {
+        use crate::screens::registry::{AppFx, ContentPanel, ContentReq};
+        use crate::ui::machine::Fx;
+        let anchor = more_rect(options_rect());
+        fx.push(Fx::App(AppFx::Content(ContentReq::Panel(
+            ContentPanel::PrePlaybackMenu {
+                anchor: [anchor.x, anchor.y, anchor.w, anchor.h].map(f32::to_bits),
+            },
+        ))));
+    }
+
     /// LEFT/RIGHT on a language row. Answers whether anything moved.
     fn cycle_value(&mut self, d: &Detail, back: bool) -> bool {
         match self.row {
@@ -479,6 +515,8 @@ impl PrePlaybackScreen {
                 moved
             }
             OptionRow::Action => false,
+            // The menu control holds no value to cycle: LEFT/RIGHT there move nothing.
+            OptionRow::More => false,
         }
     }
 
@@ -727,7 +765,8 @@ impl PrePlaybackScreen {
         p.clip_clear();
     }
 
-    /// The right column: the two language choices and the primary action.
+    /// The right column: the item's own menu control, then the two language choices and the primary
+    /// action.
     fn paint_options(
         &self,
         p: Painter,
@@ -735,7 +774,8 @@ impl PrePlaybackScreen {
         col: Rect,
         measure: &dyn crate::ui::machine::Measure,
     ) {
-        let mut y = col.y;
+        self.paint_more(p, col);
+        let mut y = col.y + MORE_H + SECTION_GAP;
         let audio_rows = audio_choices(d);
         let audio_text = audio_rows
             .get(self.audio)
@@ -790,6 +830,40 @@ impl PrePlaybackScreen {
                 1,
             );
         }
+    }
+
+    /// The three-dot control at the head of the options column (#369): the overflow glyph in a
+    /// capsule that takes the focus fill like every other control in this window. It is the first
+    /// rung of the cursor ladder, so UP from the audio row reaches it.
+    fn paint_more(&self, p: Painter, col: Rect) {
+        let rect = more_rect(col);
+        let focused = self.row == OptionRow::More;
+        p.rrect(
+            rect,
+            MORE_H * 0.5,
+            MORE_H * 0.5,
+            if focused {
+                theme::OVERLAY_FOCUS_PILL
+            } else {
+                theme::CONTROL_IDLE_FILL
+            },
+        );
+        const GLYPH: f32 = 26.0;
+        crate::ui::icons::draw(
+            p,
+            Icon::More,
+            Rect::new(
+                rect.cx() - GLYPH * 0.5,
+                rect.y + (rect.h - GLYPH) * 0.5,
+                GLYPH,
+                GLYPH,
+            ),
+            if focused {
+                theme::TEXT_PRIMARY
+            } else {
+                theme::TEXT_SECONDARY
+            },
+        );
     }
 
     /// One language row: a capsule, its value, and the LEFT/RIGHT chevrons when it holds the
@@ -876,23 +950,27 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
                     edge: Edge::Down,
                     ..
                 } => {
-                    // OK is the primary action from ANY row: a remote's OK means "do it", and a
-                    // window whose OK did nothing on two of its three rows would be the dead key
-                    // the read-only alerts are careful to avoid. The play request carries the
+                    // OK is the primary action from every LANGUAGE row: a remote's OK means "do
+                    // it", and a window whose OK did nothing on two of its rows would be the dead
+                    // key the read-only alerts are careful to avoid. The play request carries the
                     // tracks on screen; the loop dismisses this surface before the player is pushed.
+                    //
+                    // The one exception is the three-dot control at the head of the column, whose
+                    // OK opens the item's own menu — a real surface, so still not a dead key.
                     let meta = H::metadata(cx);
-                    match meta.current() {
-                        Some(d) => {
-                            self.seed(d);
-                            self.commit(d, fx);
-                            fx.invalidate(crate::ui::present::Provenance::Input);
-                        }
-                        // Nothing landed to play: close rather than leave a dead OK on a window
+                    let Some(d) = meta.current() else {
+                        // Nothing landed to act on: close rather than leave a dead OK on a window
                         // with no item under it.
-                        None => {
-                            fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
-                        }
+                        fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
+                        return Handled::Yes;
+                    };
+                    self.seed(d);
+                    if self.row == OptionRow::More {
+                        self.open_menu(fx);
+                    } else {
+                        self.commit(d, fx);
                     }
+                    fx.invalidate(crate::ui::present::Provenance::Input);
                     Handled::Yes
                 }
                 InputKind::Key {
@@ -1213,8 +1291,9 @@ mod tests {
         assert!(credits_line(&bare).is_empty());
     }
 
-    /// The cursor walks the three rows and stops at both ends: a window that wrapped from the
-    /// action back to the audio would make one DOWN press skip the whole column.
+    /// The cursor walks the four rows and stops at both ends: a window that wrapped from the
+    /// action back to the audio would make one DOWN press skip the whole column. The three-dot
+    /// control is the ladder's TOP rung, which is what gives the remote a way to reach it.
     #[test]
     fn the_cursor_walks_the_rows_and_stops_at_the_ends() {
         let mut s = PrePlaybackScreen::new(crate::ui::machine::EntryId(1), PrePlaybackArg { restart: false });
@@ -1223,7 +1302,10 @@ mod tests {
         assert_eq!(s.row, OptionRow::Subtitles);
         assert!(s.move_row(false));
         assert_eq!(s.row, OptionRow::Audio);
+        assert!(s.move_row(false));
+        assert_eq!(s.row, OptionRow::More, "UP from the audio row reaches the menu control");
         assert!(!s.move_row(false), "clamped at the top");
+        assert!(s.move_row(true));
         assert!(s.move_row(true));
         assert!(s.move_row(true));
         assert_eq!(s.row, OptionRow::Action);

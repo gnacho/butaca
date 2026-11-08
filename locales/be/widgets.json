@@ -238,5 +238,13 @@
   "widgets.failure.play_auto": "Уключыць «Аўтаматычна» і прайграць",
   "widgets.failure.change_quality": "Змяніць якасць",
   "widgets.tracks.ends": "Сканчэнне",
-  "widgets.preplay.overview": "Агляд"
+  "widgets.preplay.overview": "Агляд",
+  "widgets.preplay.menu.media_info": "Звесткі пра медыя",
+  "widgets.preplay.menu.identify": "Ідэнтыфікаваць",
+  "widgets.identify.searching": "Пошук супадзенняў…",
+  "widgets.identify.empty": "Супадзенняў не знойдзена",
+  "widgets.identify.failed": "Сервер не адказаў",
+  "widgets.identify.applying": "Ужыванне…",
+  "widgets.identify.applied": "Ужыта. Элемент будзе абноўлены.",
+  "widgets.identify.apply_failed": "Сервер не прыняў змену"
 }

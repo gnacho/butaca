@@ -233,5 +233,13 @@
   "widgets.failure.play_auto": "Cambiar a Automático y reproducir",
   "widgets.failure.change_quality": "Cambiar calidad",
   "widgets.tracks.ends": "Termina",
-  "widgets.preplay.overview": "Sinopsis"
+  "widgets.preplay.overview": "Sinopsis",
+  "widgets.preplay.menu.media_info": "Información multimedia",
+  "widgets.preplay.menu.identify": "Identificar",
+  "widgets.identify.searching": "Buscando coincidencias…",
+  "widgets.identify.empty": "Sin coincidencias",
+  "widgets.identify.failed": "El servidor no respondió",
+  "widgets.identify.applying": "Aplicando…",
+  "widgets.identify.applied": "Aplicado. Se actualizará el elemento.",
+  "widgets.identify.apply_failed": "El servidor no aceptó el cambio"
 }
