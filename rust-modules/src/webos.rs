@@ -584,7 +584,19 @@ fn storage_activation_reply(reply: &str) -> crate::storage::wire::failure::Detai
     let code = value.as_ref().and_then(|value| value.get("errorCode"))
         .and_then(serde_json::Value::as_i64)
         .and_then(|value| i32::try_from(value).ok());
+    // A service that answers at all has been started, and starting it is the whole purpose of
+    // this hint: the helper publishes readiness from its own startup path and the authenticated
+    // socket `Hello` is the only readiness proof. The installed helper registers its service name
+    // and serves no LS2 method (`LSRegister` and no category), so `/wake` comes back as
+    // `Unknown method` on every television; calling that `ActivationRejected` reported a dead
+    // helper for a helper that was up and serving the session store (#379). A method-absent reply
+    // is therefore an answer, not a refusal.
+    let method_absent = value.as_ref()
+        .and_then(|value| value.get("errorText"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| text.contains("Unknown method"));
     match accepted {
+        _ if method_absent => Detail::new(Stage::ActivationAccepted, code),
         Some(true) => Detail::new(Stage::ActivationAccepted, code),
         Some(false) => Detail::new(Stage::ActivationRejected, code),
         None => Detail::new(Stage::ActivationInvalidReply, code),
@@ -1563,6 +1575,10 @@ mod tests {
         assert_eq!(storage_activation_reply(
             r#"{"returnValue":false,"errorCode":-1,"errorText":"private refusal"}"#),
             Detail::new(Stage::ActivationRejected, Some(-1)));
+        // The real reply the dev set gives, verbatim: the service is up and serves no method.
+        assert_eq!(storage_activation_reply(
+            r#"{"errorCode":-1,"returnValue":false,"errorText":"Unknown method \"wake\" for category \"/\""}"#),
+            Detail::new(Stage::ActivationAccepted, Some(-1)));
         assert_eq!(storage_activation_reply("not json"),
             Detail::new(Stage::ActivationInvalidReply, None));
         assert_eq!(storage_activation_reply(&"x".repeat(4097)),
