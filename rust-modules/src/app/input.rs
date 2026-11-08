@@ -176,8 +176,24 @@ pub(crate) unsafe fn activate_card(
         //
         // The show is still one press away: it is the card menu's second navigation row, and the
         // episode page's own BACK returns to the shelf.
+        //
+        // The episode page is NOT armed for the pre-playback window (issue #367): an episode tile
+        // means "show me this episode", and the window is what the FILM's poster asks for. The
+        // episode's own Play keeps opening it exactly as before, which is the same promise the
+        // page's Play button always made.
         super::bridge::open_detail(pages, bridge, mm.sid, &rk, None, ret.take());
+    } else if mm.kind == crate::catalog::KIND_MOVIE {
+        // **A press on a film's poster** (issue #367): the page it always opened, plus the window
+        // the press asked for, opened over that page as soon as the item lands. The rule is here,
+        // at the one seam where a card on a browsing surface becomes an intent, so Home's grid,
+        // Home's shelves and the Library's grid and shelves all say the same thing by construction,
+        // and no screen carries its own copy of it.
+        super::bridge::open_detail_from_card(pages, bridge, mm.sid, &rk, None, ret.take());
     } else {
+        // A show's card: its page, exactly as before. A show's page plays its on-deck episode,
+        // which is not the item the page holds, so `DetailScreen::preplay_available` is false
+        // there and there is no window to arm. Leaving it plain also keeps every other kind a
+        // card can carry on the road it already travelled.
         super::bridge::open_detail(pages, bridge, mm.sid, &rk, None, ret.take());
     }
 }

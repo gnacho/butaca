@@ -112,6 +112,7 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         refresh_gen: 0,
         restore_intent: None,
         teardown_cleared: false,
+        preplay_on_land: false,
         scroll: Spring::at(0.0),
         scroll_target: 0.0,
         episode_scroll: Spring::at(0.0),
@@ -2222,6 +2223,76 @@ fn play_item(effects: &[crate::ui::machine::Stamped<TestHost>]) -> Option<(&Play
         Fx::App(AppFx::Content(ContentReq::Play { play, resume_ns, .. })) => Some((play, *resume_ns)),
         _ => None,
     })
+}
+
+/// The pre-playback window's own request, if the page asked for one, carrying its `restart` bit.
+fn preplay_window(effects: &[crate::ui::machine::Stamped<TestHost>]) -> Option<bool> {
+    effects.iter().find_map(|effect| match &effect.fx {
+        Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlayback { restart }))) => Some(*restart),
+        _ => None,
+    })
+}
+
+/// **#367: a press on a poster opens the pre-playback window, and it opens over the item's own page.**
+///
+/// The press carries an id, so the page is what builds the window: the press arms it, the landing of
+/// the item spends the arm, and what it asks for is the window. Nothing plays here: the film starts
+/// only from the window's own OK, and a page nobody armed never opens it, which is what keeps the
+/// item's own Play and every other way onto this page behaving exactly as before.
+#[test]
+fn a_poster_press_opens_the_window_when_its_item_lands() {
+    let movie = || Detail {
+        sid: ServerId::UNSET,
+        rk: "movie".into(),
+        kind: "movie".into(),
+        title: "Movie".into(),
+        part: "/library/parts/movie".into(),
+        ..Default::default()
+    };
+    // The store holds ANOTHER item while the page mounts, which is the real shape: the press named
+    // an id and the page has yet to fetch it.
+    let _guard = install(Detail {
+        sid: ServerId::UNSET,
+        rk: "other".into(),
+        kind: "movie".into(),
+        part: "/library/parts/other".into(),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, ServerId::UNSET, "movie");
+    screen.open_preplay_when_loaded();
+    // A landing that is still the other item is not this page's: the arm waits for its own.
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1), None);
+    assert!(preplay_window(&effects).is_none(), "some other item landing is not this page's press");
+    crate::metadata::set_current_for_test(test_store().state_mut(), Some(movie()));
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 2), None);
+    assert_eq!(preplay_window(&effects), Some(false), "the poster press opens the window, not from the start");
+    assert!(play_item(&effects).is_none(), "the window is where playback is decided, never the press");
+    // Spent once: a later refresh of the same item must not open a second window over the page.
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 3), None);
+    assert!(preplay_window(&effects).is_none(), "the arm is spent by the landing it waited for");
+    clear();
+}
+
+/// The arm is the PRESS's, so a page that was never armed (the item's own page reopened, a return
+/// from playback, a deep link) keeps drawing exactly what it drew before, and a show's page has no
+/// window to offer: its Play starts an episode the page does not hold.
+#[test]
+fn only_an_armed_leaf_page_opens_the_window() {
+    let _guard = install(Detail {
+        sid: ServerId::UNSET,
+        rk: "show".into(),
+        is_show: true,
+        kind: "show".into(),
+        part: "/library/parts/show".into(),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, ServerId::UNSET, "show");
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1), None);
+    assert!(preplay_window(&effects).is_none(), "an unarmed page never opens the window");
+    screen.open_preplay_when_loaded();
+    let (_, effects) = step(&mut screen, &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 2), None);
+    assert!(preplay_window(&effects).is_none(), "a show's page plays an episode of its own, not a leaf");
+    clear();
 }
 
 #[test]

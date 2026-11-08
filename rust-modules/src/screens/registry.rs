@@ -1760,6 +1760,18 @@ pub(crate) struct DetailSeed {
 #[derive(Default)]
 pub(crate) struct AppMounter {
     pub(crate) seed: Option<DetailSeed>,
+    /// **A press on a film's poster that has not landed yet**: the `(sid, rk)` of a page that must
+    /// open the pre-playback window as soon as its item loads (issue #367).
+    ///
+    /// A press on a card carries only an item id, so the window's facts, cast, crew and tracks do
+    /// not exist until the item's own page has fetched them. The honest shape is therefore "the
+    /// press opens the page, and the page opens the window over itself the moment its item lands",
+    /// and this is the one place that says so: the card-activation seam arms it (`app::input`'s
+    /// `activate_card`, which is where a Home or Library card becomes an intent),
+    /// [`AppMounter::mount`] hands it to the page, and the page spends it on the landing. Nothing
+    /// is armed for a press that already plays, for a show, a season, an episode or a collection,
+    /// nor for a page that already holds its item, so all of those keep behaving exactly as before.
+    pub(crate) poster_preplay: Option<(crate::registry::ServerId, String)>,
     /// **Where the NEXT player instance returns to** — the entry that was on top when the push was
     /// asked for, stamped at the press and consumed by the mount exactly as `player_hud_ms` is.
     ///
@@ -1851,6 +1863,13 @@ where
                     page.restore_memory(spot, H::metadata(cx));
                 } else if let Some(seed) = self.seed.take() {
                     if seed.sid == *sid && seed.rk == *rk { page.restore(&seed.spot, H::metadata(cx)); }
+                }
+                // The arm is SPENT at the first page that mounts, matching or not: one press asks
+                // for one page, and an arm that outlived its press would open a window over a page
+                // the viewer reached some other way. A mismatch is a superseded or cancelled
+                // request, which is not a press that should still be waiting for anything.
+                if let Some((arm_sid, arm_rk)) = self.poster_preplay.take() {
+                    if arm_sid == *sid && arm_rk == *rk { page.open_preplay_when_loaded(); }
                 }
                 Box::new(page)
             }

@@ -617,6 +617,12 @@ impl Bridge {
         self.mounter.seed = Some(crate::screens::registry::DetailSeed { sid, rk: rk.to_string(), spot });
     }
 
+    /// Arm the next matching detail mount to open the pre-playback window once its item lands,
+    /// see [`crate::screens::registry::AppMounter::poster_preplay`].
+    pub(crate) fn seed_poster_preplay(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.mounter.poster_preplay = Some((sid, rk.to_string()));
+    }
+
     /// Where the next player instance returns to — see `AppMounter::player_origin`.
     pub(crate) fn seed_player_origin(&mut self, origin: crate::screens::player::Origin) {
         self.mounter.player_origin = Some(origin);
@@ -2581,6 +2587,37 @@ pub(crate) fn open_detail(
     sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
     ret: Option<ReturnState<u32, PageMemory>>,
 ) {
+    open_detail_from(d, rig, sid, rk, season, ret, false);
+}
+
+/// **A press on a FILM's poster**: the same push, plus the arm that makes the page open the
+/// pre-playback window as soon as its item loads (issue #367).
+///
+/// A card carries an id, not a `Detail`, so the window cannot be built from the press. What the
+/// press can promise is that the viewer stops on the page and the window it asked for is already
+/// open in front of it, instead of having to find Play a second time. Nothing here plays: the film
+/// still starts only from the window's own OK.
+///
+/// The caller is the CARD-ACTIVATION seam ([`super::input::activate_card`]), which is where a press
+/// on a Home shelf, the Home grid or a Library grid becomes an intent: the one place a browsing
+/// surface's card turns into "open this". Presses that travel from one page to another (a Related
+/// poster, an episode in a show's list, a filmography credit, a search result, a collection tile)
+/// and every non-press way onto a page (a boot trigger, a menu row, a deep link) keep the plain
+/// [`open_detail`]: they were never the press the owner described, and their recorded flows stay
+/// byte-identical.
+pub(crate) fn open_detail_from_card(
+    d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    ret: Option<ReturnState<u32, PageMemory>>,
+) {
+    open_detail_from(d, rig, sid, rk, season, ret, true);
+}
+
+fn open_detail_from(
+    d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    ret: Option<ReturnState<u32, PageMemory>>, preplay: bool,
+) {
     use crate::ui::screen::ScreenArg;
     let arg = AppArg::Content(ContentArg::Detail { sid, rk: rk.to_string() });
     // The page is already on its way (a second press inside the push's dip-out): the pending push
@@ -2595,6 +2632,9 @@ pub(crate) fn open_detail(
         ..Default::default()
     };
     rig.seed_detail(sid, rk, spot);
+    if preplay {
+        rig.seed_poster_preplay(sid, rk);
+    }
     match ret {
         Some(ret) => nav_push_with_return(d, arg, ret),
         None => nav_push(d, arg),
