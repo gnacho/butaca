@@ -111,6 +111,11 @@ impl JfLoginScreen {
         // `groups()` before any Tick has run, and an empty table would leave the new root with
         // nothing to seat on.
         screen.rebuild();
+        // A first boot has no server typed yet, and the LAN can answer for it. The question runs
+        // on a worker; `step` fills the field when the answer lands.
+        if screen.fields[0].trim().is_empty() {
+            crate::jellyfin::discovery::start();
+        }
         screen
     }
 
@@ -490,6 +495,17 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 for text in crate::textinput::drain() {
                     if commit_text(&mut self.fields, self.editing, &text) {
                         self.dirty = true;
+                    }
+                }
+                // A server that answered the LAN question fills an address field nobody typed in.
+                // Only a single answer is used: choosing between servers is the viewer's call,
+                // and an address already there is never replaced.
+                if let Some(found) = crate::jellyfin::discovery::take() {
+                    if self.fields[0].trim().is_empty() && self.editing != Some(0) {
+                        if let [one] = found.as_slice() {
+                            self.fields[0] = one.address.clone();
+                            self.dirty = true;
+                        }
                     }
                 }
                 // Mirror the flow's phase into the one fact the draw reads. Editing means no
