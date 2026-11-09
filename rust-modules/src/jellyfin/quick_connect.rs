@@ -199,8 +199,7 @@ pub(crate) fn take_ready() -> bool {
 
 /// Back to a clean form. Bumps the epoch so an attempt still in flight cannot come back as a
 /// success, and clears the code and the cancel flag.
-pub(crate) fn reset() {
-    EPOCH.fetch_add(1, Ordering::SeqCst);
+pub(crate) fn reset() {    EPOCH.fetch_add(1, Ordering::SeqCst);
     CANCEL.store(false, Ordering::SeqCst);
     if let Ok(mut slot) = MAIL.lock() {
         *slot = None;
@@ -209,6 +208,15 @@ pub(crate) fn reset() {
         *c = None;
     }
     set_phase(Phase::Editing);
+}
+
+/// Put the flow in the phase an attempt produces, without an attempt. The screen's BACK and OK
+/// arms are graded against `Working` and `Failed`, and neither is reachable in a host test
+/// without a server on the wire: `start` would spawn a worker that dials one. Test-only, and
+/// deliberately narrow - there is no production caller.
+#[cfg(test)]
+pub(crate) fn set_phase_for_test(p: Phase) {
+    set_phase(p);
 }
 
 #[cfg(test)]

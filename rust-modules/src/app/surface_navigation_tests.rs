@@ -368,6 +368,138 @@ fn the_settings_surface_owns_input_and_walks_its_own_stack() {
     assert_eq!(d.nav.tabs.stack.depth(), 1, "the app's page never moved");
 }
 
+/// The Settings surface's stack, walked from a test with the CURRENT page named on every frame.
+///
+/// `frame` takes the route to be on top and drives it there, so passing `Home` while a pushed page
+/// is up would root the tree back to Home - the very navigation these tests are about. This reads
+/// the argument the tree actually holds, which is a no-op for `show_page`, and keeps the closure
+/// from having to know which page each press will leave behind.
+struct SettingsWalk<'a> {
+    d: &'a mut Dispatcher<AppHost>,
+    rig: &'a mut Bridge,
+    t: u32,
+}
+
+impl SettingsWalk<'_> {
+    fn settle(&mut self) {
+        let top = self.d.top_arg().cloned().unwrap_or(AppArg::Home);
+        frame(self.d, self.rig, top, tick(self.t), vec![]);
+        self.t += 1;
+    }
+
+    fn press(&mut self, key: Key) {
+        let top = self.d.top_arg().cloned().unwrap_or(AppArg::Home);
+        frame(self.d, self.rig, top, tick(self.t), script_key(key, tick(self.t)));
+        self.t += 1;
+        self.settle();
+    }
+}
+
+/// Clears the two add-server flags and the Quick Connect phase however the test leaves them.
+struct AddServerModes;
+
+impl AddServerModes {
+    fn new() -> Self {
+        Self::clear();
+        Self
+    }
+    fn clear() {
+        crate::jellyfin::signin::set_add_mode(false);
+        crate::jellyfin::quick_connect::set_add_mode(false);
+        crate::jellyfin::quick_connect::set_phase_for_test(crate::jellyfin::quick_connect::Phase::Editing);
+    }
+}
+
+impl Drop for AddServerModes {
+    fn drop(&mut self) {
+        Self::clear();
+    }
+}
+
+/// **RED FIRST (owner, on his set): Settings → a new server → BACK does nothing.**
+///
+/// The add-server form is a page PUSHED over the Settings surface, and the surface underneath is
+/// covered for as long as it is up. Two things have to be true for BACK to be a way out and only
+/// one of them was: the login screen has to answer BACK (it does, in add-server mode), and the
+/// covered surface has to come back when the page pops. This drives the real key ladder, the real
+/// container and the real screen, so a regression in either half fails here rather than on the
+/// television.
+#[test]
+fn back_leaves_the_add_server_form_that_settings_pushed() {
+    let _g = crate::testlock::serial();
+    let _modes = AddServerModes::new();
+    let mut d = Dispatcher::<AppHost>::new();
+    let mut rig = Bridge::for_test(|| 0);
+    frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
+    open_settings(&mut d);
+    let mut walk = SettingsWalk { d: &mut d, rig: &mut rig, t: 1 };
+    walk.settle();
+    assert!(settings_up(walk.d));
+    walk.press(Key::Ok);
+    assert_eq!(overlay_word(walk.d), Some("servers"), "OK opened the server picker");
+    // With no configured servers the picker's first row is *Add by password*.
+    walk.press(Key::Ok);
+    assert_eq!(
+        walk.rig.take_reqs(),
+        vec![LoopReq::JfAddServer],
+        "the add row asks the loop for the password form"
+    );
+    // The loop's own arm, verbatim: arm add mode, PUSH the form over the surface.
+    crate::jellyfin::signin::set_add_mode(true);
+    nav_push(walk.d, AppArg::Login);
+    walk.settle();
+    assert_eq!(walk.d.top_screen().map(|s| s.name()), Some("login"), "the form is up over Settings");
+
+    walk.press(Key::Back);
+    assert_eq!(walk.d.top_screen().map(|s| s.name()), Some("home"), "BACK left the form");
+    assert!(settings_up(walk.d), "and the surface it was pushed over is back");
+    assert_eq!(overlay_word(walk.d), Some("servers"), "on the page that asked");
+    assert!(!crate::jellyfin::signin::add_mode(), "add-server mode is disarmed");
+}
+
+/// **RED FIRST (owner, on his set): the Quick Connect form after its poll died.**
+///
+/// Same shape as the add-server path, one leg further: BACK cancelled the poll and answered the
+/// press without leaving, and a cancelled poll lands as `Failed(TimedOut)` - a phase in which BACK
+/// cancelled again and OK did nothing at all. The screen was a dead end. Driven here through the
+/// real key ladder, with the phase an attempt produces.
+#[test]
+fn back_leaves_the_quick_connect_form_after_its_poll_died() {
+    let _g = crate::testlock::serial();
+    let _modes = AddServerModes::new();
+    let mut d = Dispatcher::<AppHost>::new();
+    let mut rig = Bridge::for_test(|| 0);
+    frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
+    open_settings(&mut d);
+    let mut walk = SettingsWalk { d: &mut d, rig: &mut rig, t: 1 };
+    walk.settle();
+    walk.press(Key::Right); // the root's grid: Select server | Quick connect
+    walk.press(Key::Ok);
+    assert_eq!(
+        walk.rig.take_reqs(),
+        vec![LoopReq::JfQuickConnect],
+        "the Quick Connect row asks the loop for the code form"
+    );
+    crate::jellyfin::quick_connect::set_add_mode(true);
+    nav_push(walk.d, AppArg::Login);
+    walk.settle();
+    assert_eq!(walk.d.top_screen().map(|s| s.name()), Some("login"));
+
+    // What the worker's cancelled poll leaves behind.
+    crate::jellyfin::quick_connect::set_phase_for_test(
+        crate::jellyfin::quick_connect::Phase::Failed(crate::jellyfin::quick_connect::Fail::TimedOut),
+    );
+    walk.press(Key::Back);
+    assert_eq!(walk.d.top_screen().map(|s| s.name()), Some("home"), "BACK left the form");
+    assert!(settings_up(walk.d), "the surface is back");
+    assert_eq!(overlay_word(walk.d), Some("settings"), "at its own root");
+    assert_eq!(
+        crate::jellyfin::quick_connect::phase(),
+        crate::jellyfin::quick_connect::Phase::Editing,
+        "the flow is not left pinned in the phase that trapped it"
+    );
+}
+
 /// **Phase 10: the profile menu is a SURFACE over the page whose chip was pressed.**
 ///
 /// `Route::Account { over: BarHost }` existed to answer three questions the container answers

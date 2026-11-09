@@ -80,6 +80,7 @@ pub(crate) mod profile;
 pub(crate) mod search;
 pub(crate) mod quick_connect;
 pub(crate) mod signin;
+pub(crate) mod switch;
 
 pub(crate) use client::{AuthError, AuthOk, JfClient};
 pub(crate) use convert::{boxset_from_dto, movie_from_dto};

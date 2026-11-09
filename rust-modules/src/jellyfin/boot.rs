@@ -91,13 +91,60 @@ enum ConfigFile {
 /// fn is cheap: the first read misses and nothing else runs), a config that will not parse, an
 /// unreachable server, and wrong credentials, each logged on its own terms.
 ///
-/// Runs BEFORE the main loop on the boot thread: a blocking round-trip here delays the first
-/// frame by one LAN request, which is the honest price of knowing whether Home can fill.
+/// **The round trip is BOUNDED and runs on a worker.** It used to run inline on the boot thread,
+/// before the event loop exists: one LAN request was "the honest price of knowing whether Home can
+/// fill", but nothing bounded it. `net::API` bounds libcurl's connect (8 s) and whole transfer
+/// (25 s) and NOT the name lookup - with `NOSIGNAL` and a synchronous resolver a lookup can outlive
+/// both - so a television whose server name no longer resolves could sit in `getaddrinfo` with no
+/// deadline at all. That is a process with no event loop: the webOS splash (`splashBackground`)
+/// stays up because no frame is ever presented, and the close request SAM sends is never read
+/// either, which is exactly issue #400's "stuck on loading screen, impossible even to force-stop".
+///
+/// So the probe answers Home only if it can answer inside [`BOOT_PROBE_BUDGET`]; otherwise the app
+/// comes up at the sign-in gate, where the address and user are prefilled and every key works. The
+/// client is installed HERE, on the caller's thread, from what the worker hands back - a late
+/// answer is dropped with the channel instead of installing a server the boot already abandoned.
 pub(crate) fn try_boot() -> bool {
     let Some(cfg) = active_server() else {
         return false;
     };
-    authenticate_server(&cfg)
+    match within(BOOT_PROBE_BUDGET, "jf-boot-probe", move || authenticate(&cfg)) {
+        Some(client) => {
+            super::install(client);
+            true
+        }
+        None => {
+            crate::log("jellyfin: boot probe did not answer in time - starting at the sign-in gate");
+            false
+        }
+    }
+}
+
+/// How long the boot gate waits for its one LAN round trip. Long enough for a slow-but-alive
+/// server on a home LAN (a healthy one answers in tens of milliseconds), short enough that a dead
+/// address costs a glance at the splash rather than a screen nobody can leave.
+const BOOT_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Run one blocking round trip on a worker and wait at most `budget` for its answer.
+///
+/// `None` means the work did not answer in time (or the OS refused the thread), and the caller
+/// must proceed as though it had failed. The worker is NOT joined: a probe that is still out when
+/// the budget expires is abandoned, and its answer dies with the channel.
+fn within<T: Send + 'static>(
+    budget: std::time::Duration,
+    what: &str,
+    work: impl FnOnce() -> Option<T> + Send + 'static,
+) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = crate::task::spawn_small(what, move || {
+        if let Some(value) = work() {
+            let _ = tx.send(value);
+        }
+    });
+    if !spawned {
+        return None;
+    }
+    rx.recv_timeout(budget).ok()
 }
 
 /// Sign in against one configured server: adopt the token the file carries (or, for a
@@ -105,9 +152,24 @@ pub(crate) fn try_boot() -> bool {
 /// is the one place the boot gate and the Settings "switch server" action share — a switch is a
 /// boot against a different entry of the same list.
 pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
+    match authenticate(entry) {
+        Some(client) => {
+            super::install(client);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The network half of [`authenticate_server`], with no install: it either signs in and hands the
+/// client back, or explains itself and answers `None`. Split out because the two callers that run
+/// it OFF the main thread (the boot probe above and the server picker's switch) have to decide
+/// what to do with the client on the frame thread, and because a unit test can drive this half
+/// without the global.
+fn authenticate(entry: &ServerEntry) -> Option<JfClient> {
     let Some(origin) = crate::origin::Origin::parse(&entry.url) else {
         crate::log("jellyfin: config ignored — url is not a parseable http(s) origin");
-        return false;
+        return None;
     };
     let device_id = entry.device_id.clone().unwrap_or_else(device_id_persistent);
     let client = JfClient::new(origin, device_id);
@@ -118,21 +180,20 @@ pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
                     "jellyfin: signed in as {} — stored token",
                     user.user_name
                 ));
-                super::install(client);
-                return true;
+                return Some(client);
             }
             Err(AuthError::Unauthorized) => {
                 crate::log("jellyfin: stored token REFUSED (401) — falling back to the password");
             }
             Err(AuthError::Unreachable) => {
                 crate::log("jellyfin: server unreachable at boot — staying at the gate");
-                return false;
+                return None;
             }
         }
     }
     let Some(password) = entry.password.as_deref() else {
         crate::log("jellyfin: no usable token and no password — staying at the gate");
-        return false;
+        return None;
     };
     match client.authenticate_by_name(&entry.user, password) {
         Ok(ok) => {
@@ -140,17 +201,16 @@ pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
                 "jellyfin: signed in as {} — server {}",
                 ok.user_name, ok.server_id
             ));
-            super::install(client);
             remember_token(entry, &ok.token);
-            true
+            Some(client)
         }
         Err(AuthError::Unauthorized) => {
             crate::log("jellyfin: login REFUSED (401) — check user/password in the config");
-            false
+            None
         }
         Err(AuthError::Unreachable) => {
             crate::log("jellyfin: server unreachable at boot — staying at the gate");
-            false
+            None
         }
     }
 }
@@ -500,6 +560,48 @@ fn mint_device_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The bound, not the network.** A boot probe that cannot answer inside its budget must
+    /// answer `None` - the app then comes up at the sign-in gate instead of waiting on a round
+    /// trip with no deadline (the shape of #400: the splash stays because no frame is presented
+    /// and the process never reaches its event loop).
+    #[test]
+    fn a_probe_that_outlives_its_budget_answers_none() {
+        let started = std::time::Instant::now();
+        let answer = within(
+            std::time::Duration::from_millis(60),
+            "test-slow-probe",
+            || {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                Some(7u32)
+            },
+        );
+        assert_eq!(answer, None, "a late answer is dropped, not waited for");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(400),
+            "and the caller was released at the budget, not at the worker's pace"
+        );
+    }
+
+    /// A probe that answers inside the budget is handed over whole.
+    #[test]
+    fn a_probe_that_answers_in_time_is_returned() {
+        assert_eq!(
+            within(std::time::Duration::from_secs(5), "test-fast-probe", || Some(7u32)),
+            Some(7)
+        );
+    }
+
+    /// A probe that fails answers `None` at once rather than waiting out the budget.
+    #[test]
+    fn a_failed_probe_answers_none_without_waiting() {
+        let started = std::time::Instant::now();
+        assert_eq!(
+            within(std::time::Duration::from_secs(5), "test-failed-probe", || None::<u32>),
+            None
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
 
     #[test]
     fn a_config_must_name_a_url_and_a_user() {
