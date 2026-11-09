@@ -31,6 +31,15 @@ enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow, SubtitleSize, S
     /// index a recording already knows.
     SkipMarkers }
 impl Field {
+    /// Whether this field's row belongs to the *Audio & subtitles* group. The ONE predicate the
+    /// section split and the row/action pairing share, so a field cannot land in a group that its
+    /// own action does not name (the drift #322 introduced when it split the list).
+    fn is_subtitle(self) -> bool {
+        matches!(
+            self,
+            Self::SubtitleSize | Self::SubtitlePosition | Self::SubtitleBackground
+        )
+    }
     fn title(self) -> &'static str { match self {
         Self::Quality => crate::i18n::msg::settings_playback_quality(), Self::DirectPlay => crate::i18n::msg::settings_playback_direct_play(),
         Self::LipSync => crate::i18n::msg::settings_playback_lip_sync(),
@@ -246,6 +255,16 @@ impl PreferencesPage {
         let current = self.current_value(field);
         self.options(field).into_iter().find(|(_, v)| *v == current).map_or_else(|| crate::i18n::msg::settings_audio_not_set().into(), |(s, _)| s)
     }
+    /// One field's row, the action its press runs and the value it shows, as ONE triple: the three
+    /// things that must never come apart. See `rebuild` for why they travel together.
+    fn field_row(&self, field: Field) -> (Row, Action, String) {
+        let value = self.value_label(field);
+        let mut row = Row::new(field.title()).value(&value).chevron(true).dim(self.state.busy);
+        if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
+            row = row.detail(crate::i18n::msg::settings_playback_overridden());
+        }
+        (row, Action::Open(field), value)
+    }
     fn rebuild(&mut self, selected: i32) {
         self.state.quality = crate::route::quality();
         self.state.direct_play = crate::route::direct_play_mode();
@@ -258,8 +277,22 @@ impl PreferencesPage {
         // SECTIONS change and the ROW ORDER does not: the recorded replay presses this page by
         // position, so regrouping must not move a single stop. The first group keeps its empty
         // header (the page title already names it); only the subtitle group needs a word.
-        let mut section = Section::new("");
-        let mut subtitles = Section::new(crate::i18n::msg::settings_audio_subtitles());
+        //
+        // **ONE triple per row — the row it draws, the action its press runs, and the value it
+        // shows — built in the order the TABLE draws them.** A row's element is its FLATTENED
+        // index across the sections (`Table::n_rows`, `row_stops`, `place`) and `activate` reads
+        // `self.actions[row]`, so the vector the press reads has to be in paint order. It was two
+        // parallel vectors instead: the subtitle rows moved to a second section while their
+        // actions stayed in the first list's tail, so from the first SWITCH row down every press
+        // ran somebody else's field (OK on *Show recently added* opened the subtitle-size picker,
+        // and OK on *Subtitle size* flipped the switch). The tuple is the fix: a row cannot be
+        // pushed without the action and the value that belong to it.
+        //
+        // **The paint order is NOT `fields`' order**: the subtitle group is a SECOND section, so
+        // its rows are drawn after the two switches even though the field list puts them before.
+        // The triples are therefore built playback → switches → subtitles, which is exactly the
+        // flattening the table performs below.
+        let mut rows: Vec<(Row, Action, String)> = Vec::new();
         let fields: Vec<Field> = match self.state.kind {
             // The window configures a card that "Do not offer" never draws, so the row goes with it.
             Kind::Playback => {
@@ -277,24 +310,8 @@ impl PreferencesPage {
                 f
             }
         };
-        let mut list_values = Vec::new(); let mut list_actions = Vec::new();
-        for &field in &fields {
-            let value = self.value_label(field);
-            let mut row = Row::new(field.title()).value(&value).chevron(true).dim(self.state.busy);
-            if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
-                row = row.detail(crate::i18n::msg::settings_playback_overridden());
-            }
-            section = if matches!(
-                field,
-                Field::SubtitleSize | Field::SubtitlePosition | Field::SubtitleBackground
-            ) {
-                subtitles = subtitles.row(row);
-                section
-            } else {
-                section.row(row)
-            };
-            list_values.push(value);
-            list_actions.push(Action::Open(field));
+        for &field in fields.iter().filter(|f| !f.is_subtitle()) {
+            rows.push(self.field_row(field));
         }
         // #297: the Library's opt-in Recently Added shelf. A SWITCH, not a picker: it flips in
         // place, wears no chevron (so RIGHT does not enter it), and its row lives here rather
@@ -304,42 +321,56 @@ impl PreferencesPage {
             .pending_recent
             .as_ref()
             .map_or_else(crate::route::show_recently_added, |(on, _)| *on);
-        section = section.row(
+        rows.push((
             Row::new(crate::i18n::msg::settings_library_recently_added())
                 .detail(crate::i18n::msg::settings_library_recently_added_detail())
                 .toggle(recent)
                 .dim(self.state.busy),
-        );
-        list_values.push(
+            Action::ToggleRecentlyAdded,
             if recent {
                 crate::i18n::msg::widgets_toggle_on()
             } else {
                 crate::i18n::msg::widgets_toggle_off()
             }
             .into(),
-        );
-        list_actions.push(Action::ToggleRecentlyAdded);
+        ));
         // **The idle screen, off by default.** Appended AFTER the Recently Added switch so no
         // recorded stop moves: the controlled replay presses this page by position.
         let idle = self
             .pending_idle
             .as_ref()
             .map_or_else(crate::route::idle_screen, |(on, _)| *on);
-        section = section.row(
+        rows.push((
             Row::new(crate::i18n::msg::settings_playback_idle_screen())
                 .detail(crate::i18n::msg::settings_playback_idle_screen_detail())
                 .toggle(idle)
                 .dim(self.state.busy),
-        );
-        list_values.push(
+            Action::ToggleIdleScreen,
             if idle {
                 crate::i18n::msg::widgets_toggle_on()
             } else {
                 crate::i18n::msg::widgets_toggle_off()
             }
             .into(),
-        );
-        list_actions.push(Action::ToggleIdleScreen);
+        ));
+        for &field in fields.iter().filter(|f| f.is_subtitle()) {
+            rows.push(self.field_row(field));
+        }
+        // …then split into the two sections IN THAT SAME ORDER: a subtitle field's row goes to the
+        // subtitle group, everything else to the page's first group, and the flattened result is
+        // the order the triples were built in.
+        let mut section = Section::new("");
+        let mut subtitles = Section::new(crate::i18n::msg::settings_audio_subtitles());
+        let mut list_values = Vec::new(); let mut list_actions = Vec::new();
+        for (row, action, value) in rows {
+            if matches!(action, Action::Open(field) if field.is_subtitle()) {
+                subtitles = subtitles.row(row);
+            } else {
+                section = section.row(row);
+            }
+            list_values.push(value);
+            list_actions.push(action);
+        }
         let list_sel = if self.state.picker.is_some() { self.parent_row } else { selected };
         for table in [&mut self.table, &mut self.picker_table] {
             table.compact = false; table.header_ink = theme::TEXT_READING; table.list_focused = true;
@@ -791,6 +822,89 @@ mod tests {
         assert!(crate::route::show_recently_added(), "the file says on and the process copy follows");
         let row = page.table.sections.iter().flat_map(|s| s.rows.iter()).find(|r| r.label == crate::i18n::msg::settings_library_recently_added()).expect("the switch is in the table");
         assert_eq!(row.toggle, Some(true));
+        crate::route::restore_show_recently_added(false);
+    }
+
+    /// **Every row presses the field it names, and shows that field's own value.** A row's element
+    /// is its flattened index across the sections, so the vector `activate` reads must be in paint
+    /// order. It was two parallel vectors built in different orders, and from the first switch row
+    /// down every press ran somebody else's field: OK on *Show recently added* opened the
+    /// subtitle-size picker, and OK on *Subtitle size* flipped the switch. The assertion is per row
+    /// rather than per field, so a new row cannot be added without its action, and a section split
+    /// cannot move one without the other.
+    #[test]
+    fn every_row_presses_the_field_it_names() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("prefs-row-action-pairing");
+        let page = PreferencesPage::new(EntryId(0), Kind::Playback);
+        let rows: Vec<&Row> = page.table.sections.iter().flat_map(|s| s.rows.iter()).collect();
+        assert_eq!(rows.len(), page.actions.len(), "one action per drawn row");
+        for (i, row) in rows.iter().enumerate() {
+            match &page.actions[i] {
+                Action::Open(field) => {
+                    assert_eq!(row.label, field.title(), "row {i} presses another field");
+                    let shown = page.value_label(*field);
+                    assert_eq!(
+                        row.value.as_deref(),
+                        Some(shown.as_str()),
+                        "row {i} shows a value that is not the field's own"
+                    );
+                    assert!(row.ticon == Some(crate::ui::icons::Icon::Chevron));
+                }
+                Action::ToggleRecentlyAdded => assert_eq!(
+                    row.label,
+                    crate::i18n::msg::settings_library_recently_added(),
+                    "row {i} is not the switch its action toggles"
+                ),
+                Action::ToggleIdleScreen => assert_eq!(
+                    row.label,
+                    crate::i18n::msg::settings_playback_idle_screen(),
+                    "row {i} is not the switch its action toggles"
+                ),
+                Action::Pick(_) => panic!("row {i}: the field list holds no picker option"),
+            }
+        }
+    }
+
+    /// The two presses the owner would have felt: OK (or RIGHT) on *Subtitle size* must open the
+    /// subtitle-size picker and touch no switch, and OK on *Show recently added* must arm that
+    /// switch's own write instead of opening a picker.
+    #[test]
+    fn the_subtitle_rows_open_their_own_pickers_and_the_switches_flip_themselves() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("prefs-row-action-press");
+        crate::route::restore_show_recently_added(false);
+        let mut page = PreferencesPage::new(EntryId(0), Kind::Playback);
+        let row_of = |page: &PreferencesPage, label: &str| {
+            page.table
+                .sections
+                .iter()
+                .flat_map(|s| s.rows.iter())
+                .position(|r| r.label == label)
+                .unwrap_or_else(|| panic!("no row labelled {label}")) as i32
+        };
+        let size = row_of(&page, crate::i18n::msg::settings_playback_subtitle_size());
+        with_fx(|fx| page.activate(size as usize, fx));
+        assert_eq!(page.state.picker, Some(Field::SubtitleSize),
+            "OK on the subtitle-size row opens the subtitle-size picker");
+        assert!(page.pending_recent.is_none() && page.pending_idle.is_none(),
+            "…and moves no switch");
+        with_fx(|fx| page.close_picker(fx));
+
+        let recent = row_of(&page, crate::i18n::msg::settings_library_recently_added());
+        with_fx(|fx| page.activate(recent as usize, fx));
+        assert!(page.pending_recent.is_some(), "OK on the switch arms the switch's write");
+        assert_eq!(page.state.picker, None, "…and opens no picker");
+        // Let the storage worker land its write before the next test takes the session, as the
+        // switch's own test does.
+        let tick = Tick { ms: 16, dt_us: 16_000 };
+        for _ in 0..1000 {
+            if page.pending_recent.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            with_fx(|fx| { page.step(&ScreenEvent::Tick(tick), &context(recent as u32), fx); });
+        }
         crate::route::restore_show_recently_added(false);
     }
 

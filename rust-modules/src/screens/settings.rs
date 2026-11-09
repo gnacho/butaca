@@ -35,8 +35,9 @@ use crate::ui::containers::transition::Immediate;
 use crate::ui::containers::{Life, Minter};
 use crate::ui::frame::Budget;
 use crate::ui::machine::{
-    Canon, Cx, Delivery, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InstanceId, Key,
-    LogicalState, Machine, MachineId, NavOp, PresentHandle, Stamped, Tick,
+    Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputEvent,
+    InputKind, InstanceId, Key, LogicalState, Machine, MachineId, NavOp, PresentHandle, Source,
+    Stamped, Tick,
 };
 use crate::ui::present::Provenance;
 use crate::ui::route_screen::{RouteLayout, RoutePush};
@@ -105,6 +106,29 @@ impl Push {
     fn child(&self, p: Painter) -> Painter {
         self.route.child(p)
     }
+}
+
+/// The BACK the header's Back control stands for.
+///
+/// One press, one question: a page answers the disc with the same `Key::Back` arm it answers the
+/// remote with, so a page that owns an inner level of its own (the playback page's picker) closes
+/// that level before the surface walks its stack. It is the synthetic event the dispatcher builds
+/// for an `EdgeRule::Nav(NavOpKind::Back)` edge, down to the flags: `Edge::Down` (never the edge
+/// that produced the click) and `at_edge: true`, and `sym`/`wcode` 0 because no hardware key
+/// produced this event and inventing a code would let a screen match on one that never came off
+/// the remote.
+fn back_press<H: DirectoryLike>(cx: &Cx<'_, H>) -> ScreenEvent<InnerHost> {
+    ScreenEvent::Input(InputEvent {
+        at: cx.tick,
+        source: Source::Sdl,
+        kind: InputKind::Key {
+            key: Key::Back,
+            sym: 0,
+            wcode: 0,
+            edge: Edge::Down,
+            at_edge: true,
+        },
+    })
 }
 
 pub(crate) struct RouteSurface {
@@ -661,10 +685,26 @@ impl<H: DirectoryLike> Machine<H> for RouteSurface {
             // The header's two pointer targets, answered here rather than by the page: every page of
             // this family shares this entry, and both actions are about the surface's own stack (go
             // back one page, or leave it entirely for Home), which only the surface can request.
-            ScreenEvent::Activate(e)
-                if *e == crate::screens::registry::HEADER_CRUMB && self.inner.depth() > 1 =>
-            {
-                self.request(NavOp::Pop, cx, fx);
+            //
+            // **The Back control IS the BACK key, and it is answered as one.** The disc is drawn by
+            // the page's own header and published as that page's stop, but what it MEANS is "one
+            // level back", which is the page's own BACK contract: *Video & playback* closes its open
+            // picker before the page itself leaves, exactly as it does for the key. So the press is
+            // re-delivered as the same synthetic BACK the dispatcher builds for an
+            // `EdgeRule::Nav(NavOpKind::Back)` edge (`Edge::Down`, `at_edge: true`, `sym`/`wcode` 0
+            // because no hardware key produced it), the page gets first refusal, and only a refusal
+            // walks the surface's own stack — where `request` already turns an emptying Pop into
+            // this surface's dismissal.
+            //
+            // **This arm used to gate on `depth() > 1` and hand the press to the page otherwise, and
+            // at the surface's ROOT that made the disc a drawn, registered control that answered
+            // nothing**: every page's `Activate` arm answers `Handled::Yes` for an element it does
+            // not know (its row lookup misses and it returns anyway), so the press died inside the
+            // root page and never reached the container that would have dismissed the surface.
+            ScreenEvent::Activate(e) if *e == crate::screens::registry::HEADER_CRUMB => {
+                if self.step_top(back_press(cx), cx, fx) == Handled::No {
+                    self.request(NavOp::Pop, cx, fx);
+                }
                 Handled::Yes
             }
             ScreenEvent::Activate(e) if *e == crate::screens::registry::HEADER_HOME => {
