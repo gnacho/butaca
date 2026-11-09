@@ -193,9 +193,14 @@
    "from": "0x5c5293fe8e840ca3",
    "reason": "detail",
    "to": "0xa714c4fb87bc3b45"
+  },
+  {
+   "from": "0xa714c4fb87bc3b45",
+   "reason": "detail",
+   "to": "0xdff65802bb1d88e4"
   }
  ],
- "state_fp": 12039464288461273925,
+ "state_fp": 16138183083481204964,
  "triggers": [
   "butaca-app-init",
   "butaca-rec",
