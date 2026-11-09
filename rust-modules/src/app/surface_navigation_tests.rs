@@ -1002,7 +1002,7 @@ fn search_route_steps_the_shared_strip_so_its_published_rects_do_not_go_stale() 
 ///
 /// The chain below is `run::update`'s own: one `frame` (which captures chrome, dispatches and
 /// publishes the transition) followed by `update_home_chrome` on every page whose chrome is
-/// `TabBar` — the arm `#392` added. Nothing else steps the strip, so this is the whole of what
+/// `TabBar`, the arm `#392` added. Nothing else steps the strip, so this is the whole of what
 /// the capsule sees.
 #[test]
 fn the_selection_capsule_never_swings_back_on_the_frame_a_tab_press_commits() {
@@ -1064,7 +1064,7 @@ fn the_selection_capsule_never_swings_back_on_the_frame_a_tab_press_commits() {
 /// The mechanism is a seat, not a spring. `SelectTab`'s cover-and-mint enters the new page with
 /// `FirstInGroupAnimated(GroupId(0))`; a page whose rows are still in flight declares NO group on
 /// purpose, so `resolve_group` fell back to the first non-empty group, which is the CHROME the
-/// dispatcher prepends — and the strip's `Seat::Nearest`, asked from the group's own head, answers
+/// dispatcher prepends. The strip's `Seat::Nearest`, asked from the group's own head, answers
 /// the LEFT-MOST pill. The fallback it should have read (`strip_fallback`) was one frame stale:
 /// `capture_chrome` fills it before the dispatcher runs, so on the commit frame it still named the
 /// page being left. `Rig::strip_fallback` is the live re-ask, and `PageWithStrip::seat` answers it

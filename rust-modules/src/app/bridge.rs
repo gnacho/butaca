@@ -747,7 +747,7 @@ impl Bridge {
     }
 
     /// **The pill the shared strip reads as SELECTED this frame, asked of the tree as it stands
-    /// NOW** — the destination's while a route change is in flight, the live route's own answer
+    /// NOW**: the destination's while a route change is in flight, the live route's own answer
     /// otherwise.
     ///
     /// It is NOT [`Self::chrome_selection`], and the difference is one frame wide, which is
@@ -756,7 +756,7 @@ impl Bridge {
     /// viewer is leaving: the op is no longer `pending_dest` (so `view_tab` has already gone back
     /// to -1) and the captured answer still names the OLD page's pill. The strip was handed that
     /// old pill for one frame in the middle of its travel and the capsule swung back before it
-    /// resumed — the owner's "pressing Favoritos makes the hover go out and come back" (reported
+    /// resumed. That is the owner's "pressing Favoritos makes the hover go out and come back" (reported
     /// 2026-11-09, reproduced in
     /// `surface_navigation_tests::the_selection_capsule_never_swings_back_on_the_frame_a_tab_press_commits`).
     ///
@@ -1286,7 +1286,7 @@ impl Rig<AppHost> for Bridge {
             blur_amount: crate::ui::nav::blur_amount(),
         }
     }
-    /// The bar's marked pill for `arg`, answered from the LIVE directory — see
+    /// The bar's marked pill for `arg`, answered from the LIVE directory. See
     /// [`crate::ui::dispatch::Rig::strip_fallback`] for why the dispatcher has to ask at the commit
     /// rather than read the frame's capture.
     fn strip_fallback(&self, arg: &AppArg) -> Option<u32> {

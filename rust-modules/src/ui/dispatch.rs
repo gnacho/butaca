@@ -231,9 +231,9 @@ where
                 // `Placed::index` is `None` exactly when the origin is a synthetic group head
                 // (`focus::head_of`, what `seat_in` hands a `Seat::Nearest` group when a page is
                 // ENTERED onto it) rather than an element the viewer was standing on. Nearest-to-
-                // that-x is the row's LEFT-MOST pill, so a page whose rows have not landed yet —
+                // that-x is the row's LEFT-MOST pill, so a page whose rows have not landed yet
                 // the Favorites collection on its way in, whose only group at that instant is the
-                // chrome this wrapper prepends — seated the bar on INICIO whatever pill had just
+                // (the chrome this wrapper prepends) seated the bar on INICIO whatever pill had
                 // been pressed, and the focus capsule travelled out to the pressed pill and back.
                 // `strip_fallback` is the pill the bar marks as selected for the page that is up
                 // (`app::bridge::capture_chrome`, refreshed live at the commit that reveals it by
@@ -363,7 +363,7 @@ pub trait Rig<H: Host> {
     fn navigation_presentation(&self) -> super::screen::NavPresentation {
         super::screen::NavPresentation { page_alpha: self.page_alpha(), ..Default::default() }
     }
-    /// **The strip member the shared bar marks as SELECTED for the page `arg`** — asked LIVE, at
+    /// **The strip member the shared bar marks as SELECTED for the page `arg`**, asked LIVE at
     /// the commit that reveals that page, and not taken from `app::bridge::capture_chrome`'s
     /// snapshot.
     ///
@@ -371,7 +371,7 @@ pub trait Rig<H: Host> {
     /// a navigation COMMITS it still describes the page being left. That is the frame on which the
     /// commit's own `Enter` seats focus, and the seat reads the strip's fallback (see
     /// `PageWithStrip::seat`): the app answered "Inicio" for a page the viewer had just reached by
-    /// pressing Favoritos, and the focus capsule travelled back to Inicio — the owner's "the hover
+    /// pressing Favoritos, and the focus capsule travelled back to Inicio. That is the owner's "the
     /// does a round trip" (reported 2026-11-09, measured on the television). One question, one
     /// frame, and only the application can answer it, so the rig is asked at the moment it matters.
     ///

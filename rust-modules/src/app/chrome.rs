@@ -136,7 +136,7 @@ impl ChromeSnapshot {
         TabLabels { generation: self.tabs_generation.unwrap_or(0), labels: &self.labels }
     }
 
-    /// The strip member key at pill index `i` — the container's own vocabulary
+    /// The strip member key at pill index `i`, in the container's own vocabulary
     /// (`dispatch::STRIP_BASE + stable_id`), never a display position. `None` for an index the
     /// current vocabulary does not have.
     pub(crate) fn elem_at(&self, i: usize) -> Option<u32> {

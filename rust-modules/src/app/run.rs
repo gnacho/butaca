@@ -1235,13 +1235,13 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         {
             let (cx, cy) = ptr_xy(&app.ev);
             // **A CLICK IS AN INPUT, AND IT WAS THE ONLY ONE THE EVENT LOG DID NOT HAVE.** Every
-            // key is logged unconditionally a few lines above — a hardware one and a
-            // remote-FIFO token alike, because `remote_synth_key` pushes a real SDL event — while
+            // key is logged unconditionally a few lines above: a hardware one and a
+            // remote-FIFO token alike, because `remote_synth_key` pushes a real SDL event, while
             // a click reached only the RECORDER, which is not armed in ordinary use. So "it threw
             // me to Home with no key press" could not be answered from the log on a page whose
             // shared Back disc is a one-click door to it: `Activate(HEADER_CRUMB)` on the item
             // page runs `ContentReq::Back`, which pops the page. Reported from the couch on
-            // 2026-11-09 and unreproducible afterwards — the run it happened in had already
+            // 2026-11-09 and unreproducible afterwards. The run it happened in had already
             // rotated out of `/media/developer/com.butaca.debug-logs/`, so the question "was a
             // click sent?" is exactly the one this line exists to answer next time. Same forensic
             // shape as the key line above, and the same reason: a report with no line in it cannot
