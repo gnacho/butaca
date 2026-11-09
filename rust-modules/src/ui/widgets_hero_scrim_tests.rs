@@ -256,7 +256,6 @@ fn the_wedge_leaves_with_the_hero() {
 #[test]
 fn the_hero_text_reads_over_bright_artwork() {
     use crate::ui::consts::{MARGIN_X, SCR_W};
-    use crate::ui::machine::Measure;
     let hc = crate::ui::detail_layout::hero_chain(
         // a two-line blurb — the shape `hero_chain`'s own doc is tuned on. Measuring is the one
         // thing the host cannot do, so the height is quoted, not computed.
@@ -269,7 +268,7 @@ fn the_hero_text_reads_over_bright_artwork() {
     let people_r = SCR_W - MARGIN_X; // 1830 — the right-aligned people column's own edge
 
     // (label, x, y, ink, right wedge?, floor over BRIGHT art, floor over BLOWN WHITE)
-    let rows: [(&str, f32, f32, [f32; 4], bool, f32, f32); 9] = [
+    let rows: [(&str, f32, f32, [f32; 4], bool, f32, f32); 8] = [
         (
             "home title (right end)",
             home_col_r,
@@ -335,19 +334,6 @@ fn the_hero_text_reads_over_bright_artwork() {
             3.0,
             2.5,
         ),
-        // The deferred ink decision, now taken — `detail::FACTS_INK`, and with it the ordinary
-        // floor. What came due was the hero rhythm: the atmospheric ramp is linear in `y`, so
-        // every rung this row moves up sits in less of it, and at tertiary the row had no
-        // headroom left to spend (2.63 against a lowered 2.6).
-        (
-            "detail facts",
-            1270.0,
-            hc.facts_y,
-            crate::ui::detail_layout::FACTS_INK,
-            true,
-            3.0,
-            2.5,
-        ),
         // The people column at its WORST case: the top line of the tallest block it can produce
         // (a wrapped credit over a wrapped cast list), `PEOPLE_MAX_LINES` above the buttons —
         // 74px higher than the old top-anchored block, where the right wedge is feathering in
@@ -359,8 +345,8 @@ fn the_hero_text_reads_over_bright_artwork() {
             "detail people (top line)",
             people_r,
             crate::ui::detail_layout::people_top(
-                hc.facts_y,
-                crate::ui::fixture::FixtureMeasure.cap_h(theme::size::CAPTION),
+                hc.syn_y,
+                crate::ui::hero_syn_h(crate::ui::HERO_SYN_MAXLINES),
             ),
             crate::ui::detail_layout::PEOPLE_INK,
             true,

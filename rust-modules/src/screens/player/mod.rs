@@ -596,7 +596,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 self.step_tap_commit(tick.ms, fx);
                 // **Nothing opens on top of a playback the viewer did not ask for** (#355). The
                 // language choice lives in the pre-playback window
-                // (`screens::preplay_panel`) now: #314's offer, a track menu over an already
+                // instead: #314's offer was a track menu over an already
                 // paused film, is exactly the behaviour that supersedes it.
                 self.publish();
                 Handled::Yes

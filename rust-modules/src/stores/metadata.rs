@@ -149,6 +149,7 @@ use crate::ui::machine::{Cx, Effects, Handled, Host, Machine};
 use super::StoreEv;
 
 #[derive(Clone)]
+#[allow(dead_code)] // Identify/Images/Intros lost their only surface with the pre-playback window.
 pub(crate) enum MetadataCmd {
     /// Supersede any in-flight load and fetch `(sid, rk)` off-thread; lands through `pump_detail`.
     RequestDetail { sid: ServerId, rk: String },

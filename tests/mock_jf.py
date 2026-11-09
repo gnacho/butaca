@@ -277,6 +277,21 @@ class Library:
                 {"Type": "Audio", "Codec": audio, "Index": 1, "Language": "eng",
                  "DisplayTitle": "Eng - %s - Stereo" % audio, "Channels": 6,
                  "ChannelLayout": "5.1", "BitRate": 384_000, "IsDefault": True},
+                # A second audio track and two subtitle tracks on every other item, so the
+                # detail hero's language discs and the picker have something to choose between
+                # (the owner's pass). Deterministic on the item id, never random: a capture has
+                # to show the same languages twice.
+                *([{"Type": "Audio", "Codec": "aac", "Index": 2, "Language": "spa",
+                    "DisplayTitle": "Spa - AAC - Stereo", "Channels": 2,
+                    "ChannelLayout": "stereo", "BitRate": 192_000, "IsDefault": False}]
+                  if int(item_id, 16) % 2 == 0 else []),
+                {"Type": "Subtitle", "Codec": "subrip", "Index": 3, "Language": "eng",
+                 "DisplayTitle": "Eng - SUBRIP", "IsDefault": True, "IsForced": False,
+                 "IsExternal": False},
+                *([{"Type": "Subtitle", "Codec": "subrip", "Index": 4, "Language": "spa",
+                    "DisplayTitle": "Spa - SUBRIP", "IsDefault": False, "IsForced": False,
+                    "IsExternal": False}]
+                  if int(item_id, 16) % 2 == 0 else []),
             ],
         }
 
@@ -703,6 +718,11 @@ class CatalogLibrary(Library):
             "MediaType": "Video",
             "IsFolder": False,
             "UserData": self._user_data(),
+            # The two numbers a film's hero states: an age rating and the audience score. Derived
+            # from the id, so a capture shows the same ones twice and no catalog entry has to be
+            # hand-edited to have a star.
+            "OfficialRating": OFFICIAL_RATINGS[int(item_id, 16) % len(OFFICIAL_RATINGS)],
+            "CommunityRating": round(5.0 + (int(item_id, 16) % 45) / 10.0, 1),
         }
         if "originallyAvailableAt" in rec:
             item["PremiereDate"] = iso_date(rec["originallyAvailableAt"])
@@ -1219,6 +1239,16 @@ class Handler(BaseHTTPRequestHandler):
             })
         if len(segs) >= 4 and segs[0] == "Items" and segs[2] == "Images" and method == "GET":
             return self.item_image(lib, segs[1], segs[3], query)
+        if len(segs) == 3 and segs[0] == "Items" and segs[2] in ("LocalTrailers",
+                                                                  "SpecialFeatures") \
+                and method == "GET":
+            # Honest emptiness: the demo library carries no extras, and the client folds an empty
+            # list to "none" exactly as it folds a 404 (#387 reads both routes on every detail).
+            return self._send_json(200, {"Items": [], "TotalRecordCount": 0})
+        if path == "/Plugins/MdbListRatings/CachedByItemId" and method == "GET":
+            # The MDBList plugin is not installed on a demo server: a 404 is its answer, and the
+            # client already treats it as "no scores from that source".
+            return self._send_json(404, {})
         if len(segs) == 2 and segs[0] == "MediaSegments" and method == "GET":
             # Honest emptiness: the mock models no intro plugin; the client folds this to "no
             # markers" exactly as it folds a 404.

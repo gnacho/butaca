@@ -165,6 +165,7 @@ impl<'a> HeroLogo<'a> {
             align: HAlign::Left,
         }
     }
+
     /// Horizontal placement inside the band — the logo art and the text fallback share it, so the
     /// two cannot land on different edges.
     pub fn align(mut self, h: HAlign) -> Self {

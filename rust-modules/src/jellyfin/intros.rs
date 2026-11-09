@@ -9,7 +9,7 @@
 //! **The intro is a real item, and this app plays it as one.** The official client splices intros
 //! into the film's own playback queue; this app resolves ONE item and has no queue to splice into
 //! (`route::request_play` starts exactly what it is given), so the honest shape is the one
-//! `screens::preplay_panel` takes: the intro is played as its own item, and when it ends or the
+//! the pre-playback window took: the intro is played as its own item, and when it ends or the
 //! viewer backs out the ordinary player exit returns to the page it was started from. Nothing
 //! claims the film follows it.
 //!
