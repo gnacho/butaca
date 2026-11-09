@@ -1580,6 +1580,10 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
                 from_i,
             ))
             .unwrap_or(cast::CAST_ELEM_RANGE_START)
+        } else if group == SYNOPSIS_GROUP {
+            // One element, so there is nothing to pick: the landing IS the mark. Without this
+            // arm the group fell through to Play and UP from the action row was a no-op.
+            hero::ELEM_SYNOPSIS_MORE
         } else {
             hero::ELEM_PLAY
         };
@@ -2746,6 +2750,13 @@ impl DetailScreen {
             let (controls, n) = hero::hero_ctls(set);
             elems.extend(controls[..n].iter().map(|c| (c.elem(), Activate::Press)));
         }
+        // **The `MÁS` mark is pressable text, so the pointer must be able to press it.** It was a
+        // keyboard-only stop: the D-pad could not reach it (see `SYNOPSIS_GROUP`) and a click
+        // resolved nothing, which left the accordion with no way in at all. Registered on the
+        // same condition that draws it, so a short blurb offers neither.
+        if self.synopsis_more_rect(f.cx.measure, meta).is_some() {
+            elems.push((hero::ELEM_SYNOPSIS_MORE, Activate::Press));
+        }
         if let Some(d) = self.detail(meta) {
             elems.extend(
                 (0..d.seasons.len().min(64))
@@ -2897,9 +2908,15 @@ fn hero_blurb<'a>(
 }
 
 /// The synopsis accordion's own focus group: ONE element, the `MORE` mark under the prose. Its
-/// own group rather than a slot on the action row, because it is not a control in that row — it
+/// own group rather than a slot on the action row, because it is not a control in that row: it
 /// sits above it, in the copy column, and only exists while the blurb is cut.
-pub(crate) const SYNOPSIS_GROUP: GroupId = GroupId(6);
+///
+/// **7, not 6.** It was 6, which is `extras::EXTRAS_GROUP`'s id: two groups answering to one id
+/// made the engine's `find(|g| g.id == cur)` ambiguous, and `seat()` below had no branch for it at
+/// all, so UP from the action row reseated on Play and the mark could not be reached by the D-pad
+/// at any point (measured on the panel with `butaca-focus`, 2026-11-09). 5 belonged to the retired
+/// About footer's group and is not reused.
+pub(crate) const SYNOPSIS_GROUP: GroupId = GroupId(7);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Located {

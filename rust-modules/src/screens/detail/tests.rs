@@ -3159,6 +3159,59 @@ fn a_long_synopsis_offers_more_and_a_short_one_offers_nothing() {
     clear();
 }
 
+/// **The mark is a group of its own, and UP from the action row lands on it.** It shared
+/// `extras::EXTRAS_GROUP`'s id and `seat()` had no arm for it, so the engine reseated on Play and
+/// the accordion could not be reached with the D-pad at all; a click resolved nothing either,
+/// because `record_stops` never registered the mark. Measured on the panel with `butaca-focus`,
+/// 2026-11-09.
+#[test]
+fn the_synopsis_mark_has_its_own_group_and_up_lands_on_it() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "long".into(),
+        kind: "movie".into(),
+        summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
+                  sentence, so the mark has something to open. "
+            .repeat(12),
+        ..Default::default()
+    });
+    let screen = bare(&_guard, sid, "long");
+    let measure = crate::ui::fixture::FixtureMeasure;
+    let mut groups = Vec::new();
+    Focusable::<TestHost>::groups(&screen, &cx(&measure, None), &mut groups);
+    let mine: Vec<_> = groups.iter().filter(|g| g.id == SYNOPSIS_GROUP).collect();
+    assert_eq!(mine.len(), 1, "the mark's group is registered exactly once");
+    assert_ne!(
+        SYNOPSIS_GROUP,
+        extras::EXTRAS_GROUP,
+        "two groups answering to one id make the engine's lookup ambiguous"
+    );
+    for other in [
+        season::SEASON_GROUP,
+        episodes::EPISODES_GROUP,
+        related::RELATED_GROUP,
+        cast::CAST_GROUP,
+        extras::EXTRAS_GROUP,
+        hero::HERO_GROUP,
+    ] {
+        assert_ne!(SYNOPSIS_GROUP, other, "the mark's group id collides with {other:?}");
+    }
+    let from = crate::ui::screen::Placed {
+        rect: crate::ui::Rect::new(88.0, 986.0, 240.0, 60.0),
+        rest_rect: crate::ui::Rect::new(88.0, 986.0, 240.0, 60.0),
+        clip: crate::ui::Rect::FULL,
+        index: Some(0),
+    };
+    let key = Focusable::<TestHost>::seat(&screen, SYNOPSIS_GROUP, from, &cx(&measure, None));
+    assert_eq!(
+        key.elem,
+        hero::ELEM_SYNOPSIS_MORE,
+        "UP from the action row must land on the mark, not reseat on Play"
+    );
+    clear();
+}
+
 /// Pressing the mark opens the accordion in place: the synopsis' measured height grows, the
 /// action row moves down with it, and the mark itself is gone (one-way, so there is no second
 /// affordance to word).
