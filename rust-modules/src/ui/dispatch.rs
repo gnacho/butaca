@@ -230,11 +230,11 @@ where
                 //
                 // `Placed::index` is `None` exactly when the origin is a synthetic group head
                 // (`focus::head_of`, what `seat_in` hands a `Seat::Nearest` group when a page is
-                // ENTERED onto it) rather than an element the viewer was standing on. Nearest-to-
-                // that-x is the row's LEFT-MOST pill, so a page whose rows have not landed yet
-                // the Favorites collection on its way in, whose only group at that instant is the
-                // (the chrome this wrapper prepends) seated the bar on INICIO whatever pill had
-                // been pressed, and the focus capsule travelled out to the pressed pill and back.
+                // ENTERED onto it) rather than an element the viewer was standing on. Nearest to
+                // that x is the row's LEFT-MOST pill, so a page whose rows have not landed yet
+                // (the Favorites collection on its way in, whose only group at that instant is the
+                // chrome this wrapper prepends) seated the bar on INICIO whatever pill had been
+                // pressed, and the focus capsule travelled out to the pressed pill and back.
                 // `strip_fallback` is the pill the bar marks as selected for the page that is up
                 // (`app::bridge::capture_chrome`, refreshed live at the commit that reveals it by
                 // `Rig::strip_fallback`), which is the answer the viewer's own press put there.
@@ -372,8 +372,8 @@ pub trait Rig<H: Host> {
     /// commit's own `Enter` seats focus, and the seat reads the strip's fallback (see
     /// `PageWithStrip::seat`): the app answered "Inicio" for a page the viewer had just reached by
     /// pressing Favoritos, and the focus capsule travelled back to Inicio. That is the owner's "the
-    /// does a round trip" (reported 2026-11-09, measured on the television). One question, one
-    /// frame, and only the application can answer it, so the rig is asked at the moment it matters.
+    /// hover does a round trip" (reported 2026-11-09, measured on the television). One question,
+    /// one frame, and only the application can answer it, so the rig is asked when it matters.
     ///
     /// `None` (the default, and every fixture) leaves the captured answer in place.
     fn strip_fallback(&self, _arg: &H::Arg) -> Option<H::Elem> { None }
