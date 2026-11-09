@@ -746,9 +746,37 @@ impl Bridge {
         (browse_changed, hubs_changed, search_changed)
     }
 
+    /// **The pill the shared strip reads as SELECTED this frame, asked of the tree as it stands
+    /// NOW**: the destination's while a route change is in flight, the live route's own answer
+    /// otherwise.
+    ///
+    /// It is NOT [`Self::chrome_selection`], and the difference is one frame wide, which is
+    /// exactly where a travelling mark shows it. `capture_chrome` runs BEFORE the dispatcher's
+    /// frame, so on the frame a navigation COMMITS its snapshot still describes the page the
+    /// viewer is leaving: the op is no longer `pending_dest` (so `view_tab` has already gone back
+    /// to -1) and the captured answer still names the OLD page's pill. The strip was handed that
+    /// old pill for one frame in the middle of its travel and the capsule swung back before it
+    /// resumed. That is the owner's "pressing Favoritos makes the hover go out and come back" (reported
+    /// 2026-11-09, reproduced in
+    /// `surface_navigation_tests::the_selection_capsule_never_swings_back_on_the_frame_a_tab_press_commits`).
+    ///
+    /// At rest the two answers are the same value by construction: `chrome_selection` is
+    /// `pill_of_arg`'s snapshot for the very route `top_arg` names, and every arm it takes
+    /// (`Home`, `Library`, `Search`, the favourites collection) is one `pill_of_arg` answers.
+    fn selection_now(&self, d: &Dispatcher<AppHost>) -> i32 {
+        self.navigation_presentation()
+            .view_tab
+            .map(|t| t as i32)
+            .unwrap_or_else(|| {
+                d.top_arg()
+                    .and_then(|arg| pill_of_arg(arg, self.directory.view()))
+                    .unwrap_or(0) as i32
+            })
+    }
+
     pub(crate) fn update_home_chrome(&mut self, d: &mut Dispatcher<AppHost>,
         glass: &mut crate::ui::frame::glass::GlassPlan, dt: f32) {
-        let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
+        let selected = self.selection_now(d);
         let focus = Self::home_focus(d);
         let labels = self.chrome.labels();
         let chrome_focus = self.chrome.focus(focus);
@@ -1257,6 +1285,12 @@ impl Rig<AppHost> for Bridge {
             view_tab: u32::try_from(crate::ui::nav::view_tab(-1)).ok(),
             blur_amount: crate::ui::nav::blur_amount(),
         }
+    }
+    /// The bar's marked pill for `arg`, answered from the LIVE directory. See
+    /// [`crate::ui::dispatch::Rig::strip_fallback`] for why the dispatcher has to ask at the commit
+    /// rather than read the frame's capture.
+    fn strip_fallback(&self, arg: &AppArg) -> Option<u32> {
+        pill_of_arg(arg, self.directory.view()).and_then(|i| self.chrome.elem_at(i))
     }
     fn surface_scope(&mut self) -> Option<crate::ui::popover::host::Live> {
         Some(crate::ui::popover::host::live())

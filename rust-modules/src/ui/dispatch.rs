@@ -226,6 +226,26 @@ where
         }
         match &self.strip {
             Some((spec, members)) if spec.id == g => {
+                // **A seat with no element origin answers the pill the bar is MARKING as selected.**
+                //
+                // `Placed::index` is `None` exactly when the origin is a synthetic group head
+                // (`focus::head_of`, what `seat_in` hands a `Seat::Nearest` group when a page is
+                // ENTERED onto it) rather than an element the viewer was standing on. Nearest to
+                // that x is the row's LEFT-MOST pill, so a page whose rows have not landed yet
+                // (the Favorites collection on its way in, whose only group at that instant is the
+                // chrome this wrapper prepends) seated the bar on INICIO whatever pill had been
+                // pressed, and the focus capsule travelled out to the pressed pill and back.
+                // `strip_fallback` is the pill the bar marks as selected for the page that is up
+                // (`app::bridge::capture_chrome`, refreshed live at the commit that reveals it by
+                // `Rig::strip_fallback`), which is the answer the viewer's own press put there.
+                if from.index.is_none() {
+                    if let Some(member) = self
+                        .strip_fallback
+                        .and_then(|key| members.iter().find(|m| m.elem == key))
+                    {
+                        return FocusKey { entry: self.entry, elem: member.elem };
+                    }
+                }
                 let cx_ = from.rect.cx();
                 let mut best = (f32::MAX, 0usize);
                 for (i, member) in members.iter().enumerate() {
@@ -343,6 +363,20 @@ pub trait Rig<H: Host> {
     fn navigation_presentation(&self) -> super::screen::NavPresentation {
         super::screen::NavPresentation { page_alpha: self.page_alpha(), ..Default::default() }
     }
+    /// **The strip member the shared bar marks as SELECTED for the page `arg`**, asked LIVE at
+    /// the commit that reveals that page, and not taken from `app::bridge::capture_chrome`'s
+    /// snapshot.
+    ///
+    /// The snapshot is taken at the TOP of the frame, before the dispatcher runs, so on the frame
+    /// a navigation COMMITS it still describes the page being left. That is the frame on which the
+    /// commit's own `Enter` seats focus, and the seat reads the strip's fallback (see
+    /// `PageWithStrip::seat`): the app answered "Inicio" for a page the viewer had just reached by
+    /// pressing Favoritos, and the focus capsule travelled back to Inicio. That is the owner's "the
+    /// hover does a round trip" (reported 2026-11-09, measured on the television). One question,
+    /// one frame, and only the application can answer it, so the rig is asked when it matters.
+    ///
+    /// `None` (the default, and every fixture) leaves the captured answer in place.
+    fn strip_fallback(&self, _arg: &H::Arg) -> Option<H::Elem> { None }
     /// Shared chrome draws after its page and before surfaces, using a captured vocabulary.
     fn draw_chrome(&mut self, _arg: &H::Arg, _parts: &CxParts<H::Elem>,
         _nav: super::screen::NavPresentation, _glass: Option<&mut super::frame::glass::GlassPlan>) {}
@@ -2322,6 +2356,20 @@ where
             self.stage_mount(rig, parts, eid);
         }
         life.extend(self.nav.commit());
+        // **The chrome the commit just revealed is answered LIVE, before the `Enter` it queued is
+        // executed below.** `capture_chrome` filled `strip_fallback` from the page that was on top
+        // when the frame STARTED, which on this frame is the page being left; the seat the commit
+        // is about to make reads it (see `PageWithStrip::seat`), so a press on Favoritos would seat
+        // the bar's cursor back on Inicio. One call, one frame, and the app is the only thing that
+        // can answer it (`Rig::strip_fallback`).
+        if let Some(elem) = self
+            .nav
+            .top_page()
+            .map(|e| &e.arg)
+            .and_then(|arg| rig.strip_fallback(arg))
+        {
+            self.nav.tabs.strip_fallback = Some(elem);
+        }
         for step in life {
             match step {
                 Life::Mount(eid) => self.mount(rig, parts, eid, &mut post, report),
