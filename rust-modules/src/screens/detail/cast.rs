@@ -14,9 +14,6 @@ use crate::ui::{theme, Painter, Rect};
 pub(crate) const CAST_ELEM_RANGE_START: u32 = 1152;
 pub(crate) const CAST_ELEM_RANGE_END: u32 = 1664;
 pub(crate) const CAST_GROUP: GroupId = GroupId(4);
-/// Heading cap top to card top — the SHARED shelf pitch, stated as the sum rather than as the 60
-/// it has always been, so the three detail shelves move together (see [`super::related::LABEL_H`]).
-pub(crate) const LABEL_H: f32 = crate::ui::consts::TITLE_DY + crate::ui::consts::CARD_DY;
 const SLOT: f32 = 230.0;
 const NAME_GAP: f32 = theme::space::MD + theme::space::XS;
 const ROLE_LEADING: f32 = theme::size::CAPTION as f32 + theme::space::XS;
@@ -74,7 +71,7 @@ pub(crate) fn rect(row: &CardRow, index: usize, top: f32, at_drawn: bool) -> Rec
         crate::ui::consts::MARGIN_X,
         SLOT,
         row.scroll_x(),
-        top + LABEL_H,
+        top,
         (RowStyle::CAST.w, RowStyle::CAST.h),
     );
     if at_drawn {
@@ -89,8 +86,12 @@ pub(crate) fn rect(row: &CardRow, index: usize, top: f32, at_drawn: bool) -> Rec
 /// occupied on every frame. Related and Extras draw only the focused tile's label, which is what
 /// lets them give it back ([`super::related::block_h`]). Measured on the panel first: collapsed,
 /// the cast names printed straight through the Extras heading.
+///
+/// **No heading band.** The owner asked for the `Reparto y equipo` word to go: the headshots and
+/// the names under them say what the shelf is, and the caption was the one thing in this band
+/// that was not the people themselves. Without it the block is exactly the strip and its labels.
 pub(crate) fn block_h() -> f32 {
-    LABEL_H + RowStyle::CAST.h + UNDER_H.max(card_row::UNDER_LABEL_H + FOCUS_POP)
+    RowStyle::CAST.h + UNDER_H.max(card_row::UNDER_LABEL_H + FOCUS_POP)
 }
 
 pub(crate) fn draw(
@@ -101,16 +102,7 @@ pub(crate) fn draw(
     focused: Option<usize>,
     measure: &dyn crate::ui::machine::Measure,
 ) {
-    p.text(
-        crate::i18n::msg::browse_detail_cast_c().as_ptr(),
-        crate::ui::consts::MARGIN_X,
-        top - row.lift(),
-        theme::size::HEADLINE,
-        theme::TEXT_HEADING,
-        0,
-        1,
-    );
-    let row_y = top + LABEL_H;
+    let row_y = top;
     card_row::strip(
         p,
         row,
@@ -300,7 +292,7 @@ mod tests {
     /// always-drawn names printed through the next section's heading.
     #[test]
     fn the_cast_block_covers_its_always_drawn_labels_on_every_frame() {
-        let under = block_h() - LABEL_H - RowStyle::CAST.h;
+        let under = block_h() - RowStyle::CAST.h;
         assert!(under >= card_row::UNDER_LABEL_H + pop_drop(RowStyle::CAST.focus_scale));
         assert!(under > card_row::LABEL_BAND_COLLAPSED);
     }

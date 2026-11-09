@@ -123,7 +123,7 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         tabs: TabStrip::new(),
         season_pop: CtlPop::new(),
         ctl_pop: CtlPop::new(),
-        disc_unfurl: [Spring::at(0.0); 6],
+        disc_unfurl: [Spring::at(0.0); 7],
         season_metrics: season::Metrics::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
@@ -817,6 +817,7 @@ fn hero_focus_survives_a_control_appearing_in_the_middle_of_the_row() {
         favorite: None,
         audio: false,
         subs: false,
+        artwork: false,
     };
     let after = hero::HeroSet {
         alt: true,
@@ -983,11 +984,12 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
         favorite: None,
         audio: false,
         subs: false,
+        artwork: false,
     };
     let index = hero::watch_index(set).unwrap();
     assert_eq!(hero::ctl_at(set, index - 1), Some(hero::HeroCtl::Restart));
     for unfurl in [0.2, 0.6, 1.0] {
-        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl, 0.0, 0.0, 0.0], [201.0, 0.0, 267.0, 0.0, 0.0, 0.0]);
+        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl, 0.0, 0.0, 0.0, 0.0], [201.0, 0.0, 267.0, 0.0, 0.0, 0.0, 0.0]);
         let widths = hero::HeroWidths {
             pill: 230.0,
             alt: 0.0,
@@ -1056,16 +1058,19 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
                     );
                     let (controls, n) = hero::hero_ctls(set);
                     // The heart rides the Jellyfin flavor's rows, beside the pair this counts.
+                    // The heart rides the Jellyfin flavor's rows, and the artwork disc rides every
+                    // landed item, beside the pair this counts.
                     assert_eq!(n, 2 + usize::from(restart) + usize::from(alt)
-                        + usize::from(set.favorite.is_some()));
+                        + usize::from(set.favorite.is_some())
+                        + usize::from(set.artwork));
                     sizes.insert(n);
                     for unfurl in [
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.3, 0.0, 0.7, 0.0, 0.0, 0.0],
-                        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.3, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
                     ] {
                         screen.disc_unfurl = unfurl.map(Spring::at);
                         for scroll in [0.0, 48.0] {
@@ -1111,9 +1116,10 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
             }
         }
     }
-    // The Jellyfin flavor's heart shifts every row one wider than the shape this test was
-    // written against.
-        assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![3, 4, 5]);
+    // The Jellyfin flavor's heart and the artwork disc shift every row wider than the shape this
+    // test was written against: three controls with nothing optional, four with one, five with
+    // both.
+        assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![4, 5, 6]);
         assert_eq!(cases, 192);
     clear();
     crate::registry::reset_for_test();
@@ -2428,9 +2434,8 @@ fn section_tops_do_not_remeasure_per_credit() {
         let placed = Focusable::<TestHost>::place(&screen, &elem, &context, At::Drawn)
             .expect("cast credit must place");
         assert_eq!(
-            placed.rect.y,
-            first_top + cast::LABEL_H,
-            "credit {i} must share the cached cast strip"
+            placed.rect.y, first_top,
+            "credit {i} must share the cached cast strip, which starts at the block's own top now              that the `Reparto y equipo` heading is gone"
         );
     }
     assert_eq!(
@@ -3130,8 +3135,9 @@ fn a_long_synopsis_offers_more_and_a_short_one_offers_nothing() {
         rk: "long".into(),
         kind: "movie".into(),
         summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
-                  sentence, so the mark has something to open. "
-            .repeat(12),
+                  sentence, so the mark has something to open, and long enough that opening it \
+                  is taller than the closed cap plus the mark's own row. "
+            .repeat(40),
         ..Default::default()
     });
     let screen = bare(&_guard, sid, "long");
@@ -3153,6 +3159,59 @@ fn a_long_synopsis_offers_more_and_a_short_one_offers_nothing() {
     clear();
 }
 
+/// **The mark is a group of its own, and UP from the action row lands on it.** It shared
+/// `extras::EXTRAS_GROUP`'s id and `seat()` had no arm for it, so the engine reseated on Play and
+/// the accordion could not be reached with the D-pad at all; a click resolved nothing either,
+/// because `record_stops` never registered the mark. Measured on the panel with `butaca-focus`,
+/// 2026-11-09.
+#[test]
+fn the_synopsis_mark_has_its_own_group_and_up_lands_on_it() {
+    let sid = ServerId::UNSET;
+    let _guard = install(Detail {
+        sid,
+        rk: "long".into(),
+        kind: "movie".into(),
+        summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
+                  sentence, so the mark has something to open. "
+            .repeat(12),
+        ..Default::default()
+    });
+    let screen = bare(&_guard, sid, "long");
+    let measure = crate::ui::fixture::FixtureMeasure;
+    let mut groups = Vec::new();
+    Focusable::<TestHost>::groups(&screen, &cx(&measure, None), &mut groups);
+    let mine: Vec<_> = groups.iter().filter(|g| g.id == SYNOPSIS_GROUP).collect();
+    assert_eq!(mine.len(), 1, "the mark's group is registered exactly once");
+    assert_ne!(
+        SYNOPSIS_GROUP,
+        extras::EXTRAS_GROUP,
+        "two groups answering to one id make the engine's lookup ambiguous"
+    );
+    for other in [
+        season::SEASON_GROUP,
+        episodes::EPISODES_GROUP,
+        related::RELATED_GROUP,
+        cast::CAST_GROUP,
+        extras::EXTRAS_GROUP,
+        hero::HERO_GROUP,
+    ] {
+        assert_ne!(SYNOPSIS_GROUP, other, "the mark's group id collides with {other:?}");
+    }
+    let from = crate::ui::screen::Placed {
+        rect: crate::ui::Rect::new(88.0, 986.0, 240.0, 60.0),
+        rest_rect: crate::ui::Rect::new(88.0, 986.0, 240.0, 60.0),
+        clip: crate::ui::Rect::FULL,
+        index: Some(0),
+    };
+    let key = Focusable::<TestHost>::seat(&screen, SYNOPSIS_GROUP, from, &cx(&measure, None));
+    assert_eq!(
+        key.elem,
+        hero::ELEM_SYNOPSIS_MORE,
+        "UP from the action row must land on the mark, not reseat on Play"
+    );
+    clear();
+}
+
 /// Pressing the mark opens the accordion in place: the synopsis' measured height grows, the
 /// action row moves down with it, and the mark itself is gone (one-way, so there is no second
 /// affordance to word).
@@ -3164,8 +3223,9 @@ fn pressing_more_opens_the_synopsis_in_place() {
         rk: "long".into(),
         kind: "movie".into(),
         summary: "A synopsis long enough to run past the hero's five-line cap, sentence after \
-                  sentence, so the mark has something to open. "
-            .repeat(12),
+                  sentence, so the mark has something to open, and long enough that opening it \
+                  is taller than the closed cap plus the mark's own row. "
+            .repeat(40),
         ..Default::default()
     });
     let mut screen = bare(&_guard, sid, "long");

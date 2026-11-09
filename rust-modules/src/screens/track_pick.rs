@@ -22,12 +22,12 @@
 use std::borrow::Cow;
 
 use crate::metadata::Detail;
-use crate::screens::registry::{AppFx, AppLike, ContentReq};
+use crate::screens::registry::AppLike;
 use crate::ui::frame::Budget;
 use crate::ui::icons::Icon;
 use crate::ui::machine::{
-    Canon, Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
-    LogicalState, Machine, NavOp,
+    Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
+    LogicalState, Machine, MachineId, NavOp,
 };
 use crate::ui::screen::{
     At, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, Focusable, GroupKind, GroupSpec, Hover,
@@ -51,12 +51,16 @@ pub(crate) const SHAPE: [&str; 2] = [
 
 /// What the container is asked to present.
 ///
-/// `audio` names which list; `chosen` is the stream id the page would play today (`0` for Off on
-/// the subtitle list, and `-1`/`0` for "the ladder's own answer" on the audio one), so the
-/// checkmark is drawn from the same number the play would use. `anchor` is the disc's rest
-/// rectangle, bit-preserving so a canonical argument needs no float equality.
+/// `host` is the PAGE the disc belongs to, and it rides on the argument rather than being looked
+/// up, for `AltSourcesArg`'s reason: the surface outlives any one frame's idea of what is on top,
+/// and the commit has to reach that page. `audio` names which list; `chosen` is the stream id the
+/// page would play today (`0` for Off on the subtitle list, and `-1`/`0` for "the ladder's own
+/// answer" on the audio one), so the checkmark is drawn from the same number the play would use.
+/// `anchor` is the disc's rest rectangle, bit-preserving so a canonical argument needs no float
+/// equality.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct TrackPickArg {
+    pub(crate) host: crate::ui::machine::InstanceId,
     pub(crate) audio: bool,
     pub(crate) chosen: i64,
     pub(crate) anchor: [u32; 4],
@@ -64,6 +68,7 @@ pub(crate) struct TrackPickArg {
 
 impl LogicalState for TrackPickArg {
     fn write(&self, c: &mut Canon) {
+        c.u32(self.host.0);
         c.u32(u32::from(self.audio));
         c.u64(self.chosen as u64);
         for value in self.anchor {
@@ -72,6 +77,17 @@ impl LogicalState for TrackPickArg {
     }
     fn probe(&self, out: &mut String) {
         out.push_str("track_pick_arg");
+    }
+}
+
+/// **What a committed row tells the page**: the stream id, on the half the list was about.
+/// `None` on the other half is the point — a picker for audio never clears a subtitle the viewer
+/// set from the other disc. Split out of [`TrackPickScreen::commit`] so the pair's shape is graded
+/// without a host.
+pub(crate) fn commit_message(audio: bool, sid: i64) -> crate::screens::registry::AppMsg {
+    crate::screens::registry::AppMsg::DetailTracks {
+        audio_sid: audio.then_some(sid),
+        sub_sid: (!audio).then_some(sid),
     }
 }
 
@@ -216,16 +232,22 @@ impl TrackPickScreen {
     }
 
     /// Commit row `elem` and close. The page keeps the number until its Play press.
+    ///
+    /// **The message goes to the PAGE, named on the argument.** Reporting it as a
+    /// `ContentReq::Tracks` sent it to this surface's own instance, which dismisses itself in the
+    /// same frame: the choice landed on a screen that was already leaving, and Play started with
+    /// the ladder's own track (measured on the panel, 2026-11-09: picking `spa · SUBRIP` and
+    /// pressing Play logged `ff: sub tracks=[...] selected=-1`). `AltSourcesScreen::commit` is the
+    /// same shape.
     fn commit<H: AppLike>(&mut self, elem: u32, fx: &mut Effects<'_, H>) {
         let Some(choice) = self.choices.get(elem as usize).copied() else {
             return;
         };
         self.dismiss(fx);
-        fx.push(Fx::App(AppFx::Content(if self.arg.audio {
-            ContentReq::Tracks { audio_sid: Some(choice.sid), sub_sid: None }
-        } else {
-            ContentReq::Tracks { audio_sid: None, sub_sid: Some(choice.sid) }
-        })));
+        fx.push(Fx::Deliver(
+            MachineId::Instance(self.arg.host),
+            Delivery::Screen(ScreenEvent::App(commit_message(self.arg.audio, choice.sid))),
+        ));
     }
 }
 
@@ -419,6 +441,23 @@ mod tests {
             Choice { sid: 0, off: true },
             Choice { sid: 3, off: false },
         ]);
+    }
+
+    /// The message names ONE half, so a pick from one disc cannot clear the other's choice.
+    #[test]
+    fn a_commit_names_only_the_half_the_list_was_about() {
+        match commit_message(false, 3) {
+            crate::screens::registry::AppMsg::DetailTracks { audio_sid, sub_sid } => {
+                assert_eq!((audio_sid, sub_sid), (None, Some(3)));
+            }
+            _ => panic!("a picker commit must be a DetailTracks message"),
+        }
+        match commit_message(true, 2) {
+            crate::screens::registry::AppMsg::DetailTracks { audio_sid, sub_sid } => {
+                assert_eq!((audio_sid, sub_sid), (Some(2), None));
+            }
+            _ => panic!("a picker commit must be a DetailTracks message"),
+        }
     }
 
     /// A row states the language and the codec — the two facts the About footer's Languages

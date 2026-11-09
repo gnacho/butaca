@@ -885,10 +885,6 @@ pub(crate) enum ContentReq {
     /// all.
     PreviewSeek(i64),
     ItemMenu,
-    /// **The hero's track picker committed a row** — the stream ids the page keeps for its next
-    /// Play. The menu only REPORTS: the page owns the choice, so this is a message to it rather
-    /// than a write the surface performs.
-    Tracks { audio_sid: Option<i64>, sub_sid: Option<i64> },
     /// **Present one of the Detail page's own panels** on the container tree (spec §6.2's
     /// "page-owned panels"). The page names WHICH and supplies whatever the panel needs to place
     /// itself; the loop knows the style and the page's identity, so neither is on this request.
@@ -928,6 +924,12 @@ pub(crate) enum ContentPanel {
     /// today, and `anchor` is the disc's drawn rectangle, bit-preserving like every other anchored
     /// menu's.
     TrackPick { audio: bool, chosen: i64, anchor: [u32; 4] },
+    /// **Edit images** (`screens::images`): the pictures the metadata providers already hold for
+    /// the item the page is standing on, anchored to the control that opened it. It came back with
+    /// the artwork disc (the owner asked for "Cambiar imagen" and the pre-playback window that used
+    /// to carry it is gone); the picker is the same surface #369 built, and the SERVER is what
+    /// fetches the chosen picture.
+    Images { anchor: [u32; 4] },
 }
 
 impl ContentPanel {
@@ -973,7 +975,16 @@ impl ContentPanel {
             Self::CollectionAbout => (Style::Alert, AppArg::CollectionAbout),
             Self::TrackPick { audio, chosen, anchor } => (
                 Style::Compact,
-                AppArg::TrackPick(crate::screens::track_pick::TrackPickArg { audio, chosen, anchor }),
+                AppArg::TrackPick(crate::screens::track_pick::TrackPickArg {
+                    host,
+                    audio,
+                    chosen,
+                    anchor,
+                }),
+            ),
+            Self::Images { anchor } => (
+                Style::Compact,
+                AppArg::Images(crate::screens::images::ImagesArg { anchor }),
             ),
         })
     }
@@ -1516,6 +1527,10 @@ pub(crate) enum AppArg {
     /// list, the stream id the page would play today (for the checkmark) and the disc's drawn rect;
     /// WHICH tracks it offers is read off `metadata::current()`, the item the page stands on.
     TrackPick(crate::screens::track_pick::TrackPickArg),
+    /// **Edit images** (`screens::images`): the pictures the metadata providers already hold for
+    /// the item the page stands on. It carries only where it hangs; the subject is
+    /// `metadata::current()`, exactly as the Track-information sheet's and the hero's picker's are.
+    Images(crate::screens::images::ImagesArg),
     /// Account sign-in (QR), shown when there is no usable session.
     Login,
     /// The "who's watching" profile picker.
@@ -1552,7 +1567,8 @@ pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,S
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
-     TrackPick{audio:u8,chosen:i64,anchor:[u32;4]},\
+     TrackPick{host:u32,audio:u8,chosen:i64,anchor:[u32;4]},\
+     Images{anchor:[u32;4]},\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
      host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
 
@@ -1573,6 +1589,10 @@ impl LogicalState for AppArg {
             // pre-playback window and its menu and are NOT reused: a canon tag is a surface's
             // identity in a recorded state, so a retired one is never handed to its replacement.
             Self::TrackPick(arg) => { c.u32(17); arg.write(c); }
+            // 16 again, deliberately: this is the SAME surface coming back (same argument, same
+            // screen), not a replacement for a retired one, so its canon tag is unchanged and a
+            // recording taken before the owner's pass still names the grid it named then.
+            Self::Images(arg) => { c.u32(16); arg.write(c); }
             // 8 and 9 rather than the 6/7 the profile and card menus carried on their own
             // branch: this canon tag is the surface's identity in a recorded state, so two
             // surfaces merged from two lanes may not share one. 4/5 are the library and player
@@ -1622,7 +1642,8 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::AboutPanel
             | AppArg::PersonBio
             | AppArg::CollectionAbout
-            | AppArg::TrackPick(_) => Chrome::None,
+            | AppArg::TrackPick(_)
+            | AppArg::Images(_) => Chrome::None,
         }
     }
     fn id(&self) -> ScreenId {
@@ -1642,6 +1663,8 @@ impl crate::ui::screen::ScreenArg for AppArg {
             // 29: the hero's track picker, allocated forward. 25 and 26 belonged to the retired
             // pre-playback window and its menu and are not reused.
             AppArg::TrackPick(_) => 29,
+            // 30: the Edit-images grid, allocated forward for the same reason.
+            AppArg::Images(_) => 30,
             // 19 and 20, not the 5 and 6 `Route::Account`/`Route::ItemMenu` vacated when this
             // phase deleted them, and not the 17/18 these two carried on their own branch: ids
             // are allocated forward here so a retired identity is never handed to the screen
@@ -1784,6 +1807,9 @@ where
             ),
             AppArg::TrackPick(arg) => Box::new(
                 crate::screens::track_pick::TrackPickScreen::new(entry, *arg, H::metadata(cx)),
+            ),
+            AppArg::Images(arg) => Box::new(
+                crate::screens::images::ImagesScreen::new(entry, *arg),
             ),
             AppArg::Content(ContentArg::Detail { sid, rk }) => {
                 let mut page = crate::screens::detail::DetailScreen::new(entry, *sid, rk.clone(), H::hubs(cx));
@@ -1937,6 +1963,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         AppArg::PersonBio,
         AppArg::CollectionAbout,
         AppArg::TrackPick(crate::screens::track_pick::TrackPickArg {
+            host: crate::ui::machine::InstanceId(1),
             audio: true,
             chosen: 0,
             anchor: [0; 4],
@@ -1957,6 +1984,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::PersonBio
             | AppArg::CollectionAbout
             | AppArg::TrackPick(_)
+            | AppArg::Images(_)
             | AppArg::PlayerOverlay(_)
             | AppArg::Settings(_) => {}
             // The eight PAGE variants. Named rather than swept into a `_`, so the exhaustiveness
@@ -2023,6 +2051,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::person_bio::SHAPE,
     crate::screens::track_pick::SHAPE[0],
     crate::screens::track_pick::SHAPE[1],
+    crate::screens::images::SHAPE,
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::screens::preferences::SHAPE,
 ];
@@ -2152,7 +2181,17 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // The fork's sync drops the consent and incident-report screens from the inventory: the pin
 // above was 0x668c_44dc_797c_5b0f with them. The Jellyfin-only conversion then retires the
 // Settings AudioSubtitles page from the shape (0xab1b_123e_0a85_9621 before it).
-const SCREEN_SHAPES_PIN: u64 = 0xc20f_2e11_2b09_3a51;
+//
+// **Edit images returns** (0xc20f_2e11_2b09_3a51 before it, the owner's pass): `ARG_SHAPE` gains
+// `Images{anchor}` and `screens::images::SHAPE` rejoins the inventory, because the artwork disc on
+// the detail hero opens the provider-picture grid the pre-playback window used to carry. A schema
+// transition rather than a rebaseline: the grid's cursor and its phase are state that moves while
+// it is up, so a recording taken before it could not tell two of its frames apart.
+//
+// **`TrackPick` learns its host** (0xad7a_d673_797c_86bb before it): the picker's argument now
+// carries the page it reports to, because a commit addressed to its own instance died with the
+// surface. Additive for every recording here (none opens the picker), and the replay proves it.
+const SCREEN_SHAPES_PIN: u64 = 0x16df_9f5e_e595_f1be;
 
 #[cfg(test)]
 mod arg_tests {
