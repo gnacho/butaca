@@ -2036,10 +2036,11 @@ fn loop_requests(app: &mut App) {
 }
 
 /// **A switch is a request, not a round trip.** The sign-in itself is one blocking LAN call
-/// (`jellyfin::boot::authenticate_server`), and running it here parked the frame thread for its
-/// whole duration - no heartbeat, no spinner, no BACK - on the screen a person reaches when a
-/// server needs changing. `jellyfin::switch` runs it on a worker and [`land_server_switch`] takes
-/// the answer on the frame thread, which is the only thread that may reset the stores.
+/// (`jellyfin::boot::sign_in`), and running it here parked the frame thread for its whole
+/// duration - no heartbeat, no spinner, no BACK - on the screen a person reaches when a server
+/// needs changing. `jellyfin::switch` runs it on a worker and [`land_server_switch`] takes the
+/// answer on the frame thread, which is the only thread that may install the client and reset the
+/// stores.
 fn jellyfin_switch_server(i: usize) {
     let Some(list) = crate::jellyfin::boot::load_servers() else {
         return;
@@ -2050,18 +2051,20 @@ fn jellyfin_switch_server(i: usize) {
     crate::jellyfin::switch::start(i, entry);
 }
 
-/// The frame thread's half of [`jellyfin_switch_server`]: a switch that answered becomes the
-/// active server and resets every store keyed to the previous one. A switch that did not answer,
-/// or that never comes back at all, changes nothing - the picker stays up and BACK still works.
+/// The frame thread's half of [`jellyfin_switch_server`]: a switch that answered installs its
+/// client, becomes the active server and resets every store keyed to the previous one. A switch
+/// that did not answer, or that never comes back at all, changes nothing - the picker stays up and
+/// BACK still works.
 fn land_server_switch(app: &mut App) {
-    let Some((index, signed_in)) = crate::jellyfin::switch::take() else {
+    let Some((index, client)) = crate::jellyfin::switch::take() else {
         return;
     };
-    if !signed_in {
+    let Some(client) = client else {
         crate::log("jellyfin: server switch refused - the server did not answer");
         crate::ui::idle::invalidate();
         return;
-    }
+    };
+    crate::jellyfin::install(client);
     if let Some(list) = crate::jellyfin::boot::load_servers() {
         if index < list.servers.len() {
             crate::jellyfin::boot::save_servers(&list.servers, index);

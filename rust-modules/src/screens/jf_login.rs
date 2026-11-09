@@ -1057,6 +1057,7 @@ mod tests {
     impl ResetModes {
         fn new() -> Self {
             signin::set_add_mode(false);
+            signin::set_phase_for_test(Phase::Editing);
             qc::set_add_mode(false);
             qc::set_phase_for_test(qc::Phase::Editing);
             Self
@@ -1066,6 +1067,7 @@ mod tests {
     impl Drop for ResetModes {
         fn drop(&mut self) {
             signin::set_add_mode(false);
+            signin::set_phase_for_test(Phase::Editing);
             qc::set_add_mode(false);
             qc::set_phase_for_test(qc::Phase::Editing);
         }
@@ -1199,7 +1201,8 @@ mod tests {
     }
 
     #[test]
-    fn destinationless_login_has_no_back_control_or_pop() {        let _serial = crate::testlock::serial();
+    fn destinationless_login_has_no_back_control_or_pop() {
+        let _serial = crate::testlock::serial();
         let _modes = ResetModes::new();
         let measure = crate::ui::fixture::FixtureMeasure;
         for quick in [false, true] {
@@ -1265,6 +1268,30 @@ mod tests {
         let (_, out) = login_step(&mut screen, physical_back(), &context);
         assert_eq!(pop_count(&out), 1, "an in-flight fetch never traps the page");
         assert_eq!(qc::phase(), qc::Phase::Editing);
+    }
+
+    /// The password add-server form has the same contract: BACK is a way out while its fetch is
+    /// out, and it is still a way out when that fetch never comes back. The key handler answers
+    /// BACK before the `Working` gate that makes the form inert to OK, so the press is not spent.
+    #[test]
+    fn back_leaves_the_add_server_form_while_its_fetch_is_out() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        set_flow(false, true);
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        let context = login_cx(&measure);
+        signin::set_phase_for_test(Phase::Working);
+
+        // The visible control says the same thing the remote does, in that same phase.
+        let mut frame = DrawFrame::new(&context, crate::ui::Painter::recording());
+        let ops = draw_login(&mut screen, &mut frame);
+        assert!(back_is_drawn(&ops), "the way out stays visible while the fetch is out");
+
+        let (handled, out) = login_step(&mut screen, physical_back(), &context);
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(pop_count(&out), 1, "an in-flight fetch never traps the form");
+        assert!(!signin::add_mode(), "and the add-server mode is disarmed");
     }
 
     /// The failure line says "vuelve a empezar", so the row and the field must answer OK again

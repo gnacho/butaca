@@ -199,7 +199,8 @@ pub(crate) fn take_ready() -> bool {
 
 /// Back to a clean form. Bumps the epoch so an attempt still in flight cannot come back as a
 /// success, and clears the code and the cancel flag.
-pub(crate) fn reset() {    EPOCH.fetch_add(1, Ordering::SeqCst);
+pub(crate) fn reset() {
+    EPOCH.fetch_add(1, Ordering::SeqCst);
     CANCEL.store(false, Ordering::SeqCst);
     if let Ok(mut slot) = MAIL.lock() {
         *slot = None;

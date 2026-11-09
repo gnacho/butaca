@@ -108,13 +108,13 @@ pub(crate) fn try_boot() -> bool {
     let Some(cfg) = active_server() else {
         return false;
     };
-    match within(BOOT_PROBE_BUDGET, "jf-boot-probe", move || authenticate(&cfg)) {
+    match within(BOOT_PROBE_BUDGET, "jf-boot-probe", move || sign_in(&cfg)) {
         Some(client) => {
             super::install(client);
             true
         }
         None => {
-            crate::log("jellyfin: boot probe did not answer in time - starting at the sign-in gate");
+            crate::log("jellyfin: boot probe did not sign in - starting at the sign-in gate");
             false
         }
     }
@@ -127,9 +127,10 @@ const BOOT_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(3)
 
 /// Run one blocking round trip on a worker and wait at most `budget` for its answer.
 ///
-/// `None` means the work did not answer in time (or the OS refused the thread), and the caller
-/// must proceed as though it had failed. The worker is NOT joined: a probe that is still out when
-/// the budget expires is abandoned, and its answer dies with the channel.
+/// `None` means the work did not produce an answer: it failed, the OS refused the thread, or the
+/// budget expired first. The caller proceeds as though it had failed. The worker is NOT joined: a
+/// probe that is still out when the budget expires is abandoned, and its answer dies with the
+/// channel.
 fn within<T: Send + 'static>(
     budget: std::time::Duration,
     what: &str,
@@ -148,25 +149,10 @@ fn within<T: Send + 'static>(
 }
 
 /// Sign in against one configured server: adopt the token the file carries (or, for a
-/// password-era file, mint one with the password first), and install the client on success. This
-/// is the one place the boot gate and the Settings "switch server" action share — a switch is a
-/// boot against a different entry of the same list.
-pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
-    match authenticate(entry) {
-        Some(client) => {
-            super::install(client);
-            true
-        }
-        None => false,
-    }
-}
-
-/// The network half of [`authenticate_server`], with no install: it either signs in and hands the
-/// client back, or explains itself and answers `None`. Split out because the two callers that run
-/// it OFF the main thread (the boot probe above and the server picker's switch) have to decide
-/// what to do with the client on the frame thread, and because a unit test can drive this half
-/// without the global.
-fn authenticate(entry: &ServerEntry) -> Option<JfClient> {
+/// password-era file, mint one with the password first) and hand the installed-ready client back.
+/// It touches no global: every caller decides on its own thread what to do with the answer, which
+/// is what lets the boot probe and the Settings "switch server" action run it on a worker.
+pub(crate) fn sign_in(entry: &ServerEntry) -> Option<JfClient> {
     let Some(origin) = crate::origin::Origin::parse(&entry.url) else {
         crate::log("jellyfin: config ignored — url is not a parseable http(s) origin");
         return None;

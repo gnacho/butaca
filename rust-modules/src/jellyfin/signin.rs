@@ -69,6 +69,16 @@ fn set_phase(p: Phase) {
     crate::ui::idle::invalidate();
 }
 
+/// Put the flow in the phase an attempt produces, without an attempt. `Phase::Working` is not
+/// reachable in a host test without a server on the wire (`start` would spawn a worker that dials
+/// one), and the screen's BACK arm is graded against it. Test-only, and deliberately narrow -
+/// there is no production caller.
+#[cfg(test)]
+pub(crate) fn set_phase_for_test(p: Phase) {
+    crate::testlock::assert_held("the jellyfin sign-in store (phase)");
+    set_phase(p);
+}
+
 /// Arm or disarm add-server mode, the flag [`start`]'s worker reads once when it captures it.
 pub(crate) fn set_add_mode(on: bool) {
     ADD_SERVER.store(on, Ordering::SeqCst);
