@@ -863,16 +863,28 @@ fn request_tls_evidence(
     // enters curl with a half-configured request.
     let verb_c = CString::new(verb).map_err(|_| RequestError::Transport)?;
     let url_c = CString::new(url).map_err(|_| RequestError::Transport)?;
-    let resolve_c = resolve
-        .map(CString::new)
-        .transpose()
-        .map_err(|_| RequestError::Transport)?;
     // The offline reproduction: with `/tmp/butaca-nowan` armed, a name reaches the wire only
     // with a pin. This is the ONE place every easy request passes (`request_result` enters here
     // directly), which is why the gate is here and not on `request_tls`.
     if resolve.is_none() && refuse_name(crate::origin::url_host(url), t.connect_s) {
         return Err(RequestError::Transport.into());
     }
+    // A request that carries no pin and names a HOST asks the system resolver for one. It runs
+    // after the `nowan` gate on purpose: that trigger stands for a resolver that answers nothing,
+    // and this is a resolver, so the reproduction keeps refusing names rather than quietly
+    // becoming a test of `getaddrinfo`. See `resolve::system_entry` for why a request should not
+    // depend on the resolver libcurl itself was built with.
+    let system_entry: Option<String> = if resolve.is_none() {
+        crate::origin::url_port(url)
+            .and_then(|port| resolve::system_entry(crate::origin::url_host(url), port))
+    } else {
+        None
+    };
+    let resolve = resolve.or(system_entry.as_deref());
+    let resolve_c = resolve
+        .map(CString::new)
+        .transpose()
+        .map_err(|_| RequestError::Transport)?;
     let ua =
         CString::new(crate::server::identity::user_agent()).map_err(|_| RequestError::Transport)?;
     let tls_c = match tls {
@@ -1364,6 +1376,55 @@ pub(crate) mod resolve {
         lookup(host, port).map(|p| entry_of(&p))
     }
 
+    /// **A name-to-address path that does not go through libcurl's own resolver.**
+    ///
+    /// `crate::net`'s TLS requests had exactly two ways to answer a name: a pin this process had
+    /// recorded (nothing records one since #166) or libcurl's own resolver. The second one is
+    /// c-ares built into the set's 7.53.1 libcurl, configured from `/etc/resolv.conf`, and it is
+    /// the one part of a request this app does not otherwise own: it reads a resolver file, and on
+    /// a jailed install that file names a loopback address the jail may or may not reach. The
+    /// plaintext transport has never depended on it - `crate::stream` resolves with `getaddrinfo`,
+    /// through the set's own NSS stack.
+    ///
+    /// So: ask the SYSTEM resolver (through [`crate::stream::resolve_one`], the same
+    /// `getaddrinfo` the plaintext transport dials with) and hand libcurl the answer as one
+    /// `CURLOPT_RESOLVE` entry. The hostname stays in the URL, so SNI and certificate identity are
+    /// untouched: this is a shortcut past DNS, not past TLS.
+    ///
+    /// **What this did NOT turn out to be, measured on the development television (2026-11-09).**
+    /// The *Edit images* picker's black tiles had this shape to explain them, and the port was the
+    /// defect (`origin::split_external`): the set's log carried `net: curl rc=7` (an address was
+    /// obtained and the CONNECT failed) beside `rc=28`, so c-ares was answering after all. This
+    /// function stays because it removes the resolver from the set's firmware and its jail from the
+    /// list of things a fetch depends on, and because a request that resolves here cannot be the
+    /// next black tile: it is pinned from the same resolver everything else on the set uses.
+    ///
+    /// A numeric literal gets `None`: it needs no resolver and a pin for it would be a second
+    /// spelling of the address, including the bracket syntax a v6 entry needs. A name the system
+    /// resolver cannot answer also gets `None`, which leaves the request on libcurl's own resolver
+    /// exactly as it was before this function existed - the worse path, but not a new refusal.
+    ///
+    /// **Nothing is cached here.** [`PINS`] is append-only because a pin is a fact this process
+    /// recorded and cannot become wrong, while a DNS answer can (a CDN's address is not a
+    /// property of the name). A resolution is therefore one `getaddrinfo` per request, which is
+    /// what the plaintext transport pays per open too.
+    pub(crate) fn system_entry(host: &str, port: i32) -> Option<String> {
+        if host.is_empty() || host.parse::<std::net::IpAddr>().is_ok() {
+            return None;
+        }
+        let addr = crate::stream::resolve_one(host, port)?;
+        let pin = ResolvePin::new(host, port, addr);
+        static REPORTED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        if !REPORTED.swap(true, Ordering::Relaxed) {
+            crate::log(&format!(
+                "net: name pinned from the system resolver (family={})",
+                pin.family()
+            ));
+        }
+        Some(entry_of(&pin))
+    }
+
     /// Grade a `curl_easy_setopt(CURLOPT_RESOLVE)` result. `Ok` means the request may go on:
     /// either the pin took, or this libcurl has no such option (`CURLE_UNKNOWN_OPTION`, 48) and
     /// the name resolves through DNS as it did before the pin existed — logged once per process
@@ -1742,6 +1803,62 @@ mod request_tests {
         if ran.is_none() {
             eprintln!("skipped: ::1 not bindable here");
         }
+    }
+
+    /// **The name-to-address path a set with a dead c-ares still has.** `system_entry` is the
+    /// function a TLS request with no pin goes through: it must answer a name the SYSTEM resolver
+    /// knows, in the `CURLOPT_RESOLVE` syntax this libcurl parses, and it must answer nothing for
+    /// a literal (which needs no resolver) and nothing for a name no zone answers for (which
+    /// leaves the request on libcurl's own resolver, exactly as before).
+    #[test]
+    fn the_system_resolver_pins_a_name_and_never_a_literal() {
+        let entry = resolve::system_entry("localhost", 8080).expect("localhost resolves here");
+        assert!(
+            entry.starts_with("localhost:8080:"),
+            "entry {entry:?} is host:port:address"
+        );
+        let tail = entry.strip_prefix("localhost:8080:").unwrap();
+        let addr = tail.trim_start_matches('[').trim_end_matches(']');
+        assert!(
+            addr.parse::<std::net::IpAddr>().is_ok(),
+            "the entry ends in an address, got {entry:?}"
+        );
+        assert_eq!(
+            resolve::system_entry("127.0.0.1", 8080),
+            None,
+            "a literal needs no resolver"
+        );
+        assert_eq!(
+            resolve::system_entry("no-such-host.invalid", 8080),
+            None,
+            "an unanswerable name stays on libcurl's own path"
+        );
+    }
+
+    /// **End to end over the wiring**: a request that carries NO pin to a name reaches a loopback
+    /// listener, because the transport asked the system resolver and pinned the answer. It also
+    /// pins the family choice - the listener is v4, and a resolver that preferred an unroutable
+    /// AAAA here would fail the request rather than fall back (a pin has no second address).
+    #[test]
+    fn a_request_without_a_pin_reaches_a_name_the_system_resolver_knows() {
+        let _g = crate::testlock::serial();
+        if !(global_init() && available()) {
+            return;
+        }
+        with_ok_server("127.0.0.1:0", |port, accepts| {
+            let url = format!("http://localhost:{port}/");
+            let t = Timeouts {
+                connect_s: 3,
+                total_s: 5,
+                ..API
+            };
+            let r = request_result(&url, &[], "GET", None, t, false, None, None)
+                .expect("the system resolver pinned localhost");
+            assert_eq!(r.status, 200);
+            assert_eq!(r.body, b"ok");
+            assert_eq!(accepts.load(Ordering::Acquire), 1);
+        })
+        .expect("loopback v4 binds");
     }
 
     #[test]

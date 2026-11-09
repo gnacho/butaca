@@ -342,6 +342,25 @@ pub fn split(url: &str) -> (Origin, &str) {
     )
 }
 
+/// [`split`] for **somebody else's URL** - a metadata provider's picture, not a server this
+/// client signed in against. One difference, and it is the whole function: a URL that names no
+/// port means the SCHEME's own (443/80), never [`DEFAULT_PORT`].
+///
+/// [`DEFAULT_PORT`] is 32400 because that is what this client's legacy server URLs meant when they
+/// spelled no port, and it is nobody else's web port. Reading an external URL through [`split`]
+/// dialled the provider's CDN on 32400: measured on the development television (2026-11-09), the
+/// *Edit images* picker logged `net: curl rc=28` and `rc=7` on every tile, and the set's own shell
+/// then answered the same URL on 443 in 0.24 s (404) while `:32400` never connected at all (18.7 s,
+/// curl exit 7). The port was the defect; the resolver work in `net::resolve::system_entry` is the
+/// second half of the same path and does not change this reading.
+pub fn split_external(url: &str) -> (Origin, &str) {
+    let p = Parts::of(url);
+    let port = p
+        .port
+        .unwrap_or(if p.scheme.is_tls() { 443 } else { 80 });
+    (Origin::new(p.scheme, p.host, port), p.path)
+}
+
 // ---- StreamUrl — the streaming return type ----
 
 /// A built playback target for the raw demux/cue sockets. NOT a fetched response — the player
@@ -414,6 +433,22 @@ impl StreamUrl {
 /// copy probe carried is gone with its ranking.
 pub fn url_host(url: &str) -> &str {
     Parts::of(url).host
+}
+
+/// The PORT a URL names, or the SCHEME's own when it names none - the twin [`url_host`] needs,
+/// because a `CURLOPT_RESOLVE` entry is keyed on both and on nothing else.
+///
+/// `None` only for a written-but-undialable port, the case [`dial_port`] refuses: a request that
+/// would have to guess is not a request this function should give an address to.
+///
+/// It is deliberately NOT [`DEFAULT_PORT`]: see [`split_external`], where the same reading is
+/// applied to somebody else's URL.
+pub fn url_port(url: &str) -> Option<i32> {
+    let p = Parts::of(url);
+    if p.port_bad {
+        return None;
+    }
+    p.port.or(Some(if p.scheme.is_tls() { 443 } else { 80 }))
 }
 
 /// The raw reading of a URL, before any policy is applied to it. Two callers with two different
@@ -489,10 +524,13 @@ impl<'a> Parts<'a> {
 /// stays in the URL and in SNI. libcurl is merely told the answer DNS would have given
 /// (`CURLOPT_RESOLVE`), so no lookup happens at all.
 ///
-/// **No product path builds one any more.** The pinned server-hostname path went with the
-/// wire layer (#166), so the only constructor left is [`ResolvePin::for_test`], which the
-/// transport tests use to prove that a name reached the wire through the pin and not
-/// through DNS. Everything below the constructor is the entry syntax libcurl parses.
+/// **No stored record builds one any more.** The pinned server-hostname path went with the wire
+/// layer (#166). What builds one now is [`ResolvePin::new`], from the answer the SYSTEM resolver
+/// gives for a name at the moment a TLS request needs it: the pin is the shape `CURLOPT_RESOLVE`
+/// takes, and handing libcurl the address is what keeps a set whose c-ares cannot reach its
+/// loopback resolver able to fetch from a public name at all. [`ResolvePin::for_test`] is the
+/// transport tests' constructor, which proves a name reached the wire through the pin and not
+/// through DNS. Everything below the constructors is the entry syntax libcurl parses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvePin {
     host: String,
@@ -510,6 +548,17 @@ impl ResolvePin {
     /// name reached the wire through the pin and not through DNS.
     #[cfg(test)]
     pub(crate) fn for_test(host: &str, port: i32, addr: std::net::IpAddr) -> ResolvePin {
+        ResolvePin {
+            host: host.to_owned(),
+            port,
+            addr,
+        }
+    }
+
+    /// A pin from an answer somebody else's resolver gave: the host and port a URL named, and the
+    /// address the SYSTEM resolver (`getaddrinfo`) returned for them. See
+    /// [`crate::net::resolve::system_entry`], its one constructor.
+    pub(crate) fn new(host: &str, port: i32, addr: std::net::IpAddr) -> ResolvePin {
         ResolvePin {
             host: host.to_owned(),
             port,
@@ -801,6 +850,33 @@ mod tests {
             url_host("https://203-0-113-9.h4sh2.example.com:31234"),
             "203-0-113-9.h4sh2.example.com"
         );
+    }
+
+    /// **A provider's URL that names no port means 443/80, never the Jellyfin legacy default.**
+    /// The measured defect: the *Edit images* picker read `https://image.tmdb.org/t/p/...` through
+    /// [`split`], got [`DEFAULT_PORT`] (32400) and timed out on every tile while the set's own
+    /// shell answered the same URL in a quarter of a second on 443.
+    #[test]
+    fn an_external_url_takes_the_schemes_port_and_a_jellyfin_origin_keeps_32400() {
+        let (https, path) = split_external("https://img.example/t/p/w300/a.jpg");
+        assert_eq!((https.port(), path), (443, "/t/p/w300/a.jpg"));
+        assert_eq!(split_external("http://img.example/a.jpg").0.port(), 80);
+        assert_eq!(
+            split_external("https://img.example:8443/a.jpg").0.port(),
+            8443,
+            "a written port is kept"
+        );
+        assert_eq!(
+            split("https://jellyfin.example/a.jpg").0.port(),
+            DEFAULT_PORT,
+            "the server default is untouched: this is the external reader's rule only"
+        );
+        // and the pin's key is the same reading: a name resolved for a URL with no port is pinned
+        // at 443, because that is the authority the request will carry.
+        assert_eq!(url_port("https://img.example/a.jpg"), Some(443));
+        assert_eq!(url_port("http://img.example/a.jpg"), Some(80));
+        assert_eq!(url_port("https://img.example:8443/a.jpg"), Some(8443));
+        assert_eq!(url_port("https://img.example:/a.jpg"), None, "an empty port is not 443");
     }
 
     /// The scheme's wire spelling is what `base()` is built from and what a dev trigger writes,
