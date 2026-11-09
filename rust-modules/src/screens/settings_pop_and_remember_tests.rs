@@ -278,6 +278,77 @@ fn clicking_the_crumb_walks_back_to_the_settings_root() {
     );
 }
 
+/// **The Back disc at the surface's own ROOT leaves Settings.** It is drawn by the root's header
+/// and published as a stop, and it used to answer nothing there: the surface handed the press to
+/// the root page, whose `Activate` arm answers `Handled::Yes` for any element it does not know (its
+/// row lookup misses and it returns anyway), so the press died inside the page and never reached
+/// the container that dismisses a surface. The owner reported exactly this: the disc is there, the
+/// arrows reach it, and OK does nothing.
+#[test]
+fn the_back_disc_at_the_surface_root_dismisses_it() {
+    let _g = crate::testlock::serial();
+    let _sess = scratch_session("surface-crumb-root");
+    let mut s = RouteSurface::new(
+        EntryId(7),
+        InstanceId(0),
+        Family::Settings,
+        SettingsPage::Root,
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
+    );
+    step(&mut s, ScreenEvent::Mount, None);
+    assert_eq!(s.inner.depth(), 1);
+    let out = step(
+        &mut s,
+        ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB),
+        None,
+    );
+    assert!(
+        out.iter()
+            .any(|st| matches!(&st.fx, Fx::Nav(NavOp::Dismiss(e)) if *e == EntryId(7))),
+        "the disc at the root is the surface's dismissal, the same answer BACK gets there"
+    );
+}
+
+/// …and on a page that owns an inner level, the disc is that page's BACK: *Video & playback* has
+/// its own picker submenu, and the disc on the picker's header must close the picker before the
+/// surface pops the page. Before the fix the surface popped the page straight out from under an
+/// open picker.
+#[test]
+fn the_back_disc_closes_the_playback_pages_picker_before_leaving_it() {
+    let _g = crate::testlock::serial();
+    let _sess = scratch_session("surface-crumb-picker");
+    let mut s = RouteSurface::new(
+        EntryId(7),
+        InstanceId(0),
+        Family::Settings,
+        SettingsPage::Root,
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
+    );
+    step(&mut s, ScreenEvent::Mount, None);
+    forwarded(&mut s, Fx::Nav(NavOp::Push(SettingsPage::Playback)));
+    assert_eq!(s.inner.depth(), 2, "the playback page is up");
+    let first = FocusKey { entry: EntryId(7), elem: 0 };
+    step(&mut s, ScreenEvent::FocusMoved { from: None, to: first, by: By::Dir }, Some(first));
+    step(&mut s, ScreenEvent::Activate(first.elem), Some(first));
+    let mut probe = String::new();
+    <RouteSurface as Screen<InnerHost>>::state(&s).probe(&mut probe);
+    assert!(probe.contains("picker=Some(Quality)"), "a picker is open: {probe}");
+
+    let out = step(
+        &mut s,
+        ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB),
+        Some(first),
+    );
+    let mut probe = String::new();
+    <RouteSurface as Screen<InnerHost>>::state(&s).probe(&mut probe);
+    assert_eq!(s.inner.depth(), 2, "the page stays: the disc closed its picker, it did not leave");
+    assert!(probe.contains("picker=None"), "the picker is closed: {probe}");
+    assert!(
+        !out.iter().any(|st| matches!(&st.fx, Fx::Nav(NavOp::Dismiss(_)))),
+        "nothing above the surface was asked to leave"
+    );
+}
+
 /// Home sits in the header for the pointer only, and it names no route: a page cannot retire the
 /// stack, so the click becomes an application request (BACK at the root is the keyboard's road).
 #[test]
