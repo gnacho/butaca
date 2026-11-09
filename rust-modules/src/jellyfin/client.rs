@@ -915,7 +915,19 @@ impl JfClient {
     pub(crate) fn get_bytes(&self, built_path: &str) -> Option<Vec<u8>> {
         if let Some((origin, path)) = absolute_http_url(built_path) {
             let reply = http::request(&origin, path, http::Method::Get, &[], None)?;
-            return reply.ok().then_some(reply.body);
+            let ok = reply.ok();
+            // **One line per provider fetch, and it is the only evidence there is.** The tiles of
+            // *Edit images* have no other read-out: a failed fetch reaches the log as `net: curl
+            // rc=…` from the transport, a successful one was silent, and a picker full of black
+            // squares therefore had nothing in the file to say whether the picture arrived or the
+            // decode dropped it. No host and no URL - a provider's host is a fact, the query this
+            // client's own URLs carry is not, and this arm is the one place both could meet.
+            crate::log(&format!(
+                "images: provider fetch status={} bytes={}",
+                reply.status,
+                reply.body.len()
+            ));
+            return ok.then_some(reply.body);
         }
         let reply = http::request(&self.origin, built_path, http::Method::Get, &[], None)?;
         reply.ok().then_some(reply.body)
@@ -1484,7 +1496,9 @@ pub(crate) fn absolute_http_url(url: &str) -> Option<(crate::origin::Origin, &st
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return None;
     }
-    let (origin, path) = crate::origin::split(url);
+    // `split_external`, not `split`: a provider's URL that names no port means the scheme's own
+    // (443/80), never this client's legacy 32400 for a Jellyfin server. See `origin::split_external`.
+    let (origin, path) = crate::origin::split_external(url);
     (!path.is_empty()).then_some((origin, path))
 }
 
@@ -1957,6 +1971,14 @@ mod tests {
         assert!(absolute_http_url("//img.example/a.jpg").is_none());
         assert!(absolute_http_url("file:///etc/passwd").is_none());
         assert!(absolute_http_url("https://img.example").is_none(), "no path, nothing to dial");
+        // The port a provider's URL means when it names none: the scheme's, not this client's
+        // 32400. The picker timed out on every tile with the other answer.
+        assert_eq!(absolute_http_url("https://img.example/a.jpg").unwrap().0.port(), 443);
+        assert_eq!(absolute_http_url("http://img.example/a.jpg").unwrap().0.port(), 80);
+        assert_eq!(
+            absolute_http_url("https://img.example:8443/a.jpg").unwrap().0.port(),
+            8443
+        );
     }
 
     /// The Library grid's query puts every menu on the query string: sort + direction always

@@ -971,13 +971,28 @@ impl RouteLayout {
         Rect::new(self.narrative.x, self.narrative.y, self.narrative.w, CRUMB_BAND)
     }
 
-    /// The Home word's box in the action band: the right-hand end of [`Self::action`], as wide as
-    /// the word needs and never narrower than a control, so the pointer reaches it as easily as the
-    /// band's own buttons.
+    /// The Home word's box: the TOP-RIGHT corner of the safe frame, the mirror of the shared Back
+    /// control the Settings family draws at the top-left (`widgets::CHIP_FRAME`).
+    ///
+    /// **It used to be the right-hand end of [`Self::action`]**, the bottom row of the narrative
+    /// column, and that is a different place on every layout: on the two-column routes it sat at
+    /// the bottom of the left column, in an action band those pages leave empty, and the owner read
+    /// it on the television as a word floating in the footer, "bottom centre", with no control near
+    /// it. The two chrome controls of these pages are BACK and HOME; one of them was at the top-left
+    /// and the other at the bottom of a column. A shortcut that leaves the surface entirely belongs
+    /// beside the one that steps back inside it, on the same band, against the opposite margin.
+    ///
+    /// The box is a control's size (the disc's [`crate::ui::widgets::CHIP_D`] height and never
+    /// narrower than it), so the pointer reaches it as easily as it reaches the disc, and it is
+    /// inset by [`crate::ui::widgets::TAB_TRACK_PAD`] on the right exactly as the disc is on the
+    /// left - the capsule family's own margin, not a second one invented here.
     pub(crate) fn home_rect(self, label: &str, measure: &dyn Measure) -> Rect {
         let word_w = measure.width_str(label, theme::size::CAPTION, false) + theme::space::SM * 2.0;
-        let w = word_w.max(self.action.h).min(self.action.w);
-        Rect::new(self.action.x + self.action.w - w, self.action.y, w, self.action.h)
+        let h = crate::ui::widgets::CHIP_D;
+        let w = word_w.max(h).min(crate::ui::consts::SAFE.w);
+        let right = crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X
+            - crate::ui::widgets::TAB_TRACK_PAD;
+        Rect::new(right - w, crate::ui::widgets::TOP_BAR_Y, w, h)
     }
 
     /// The crumb as it is DRAWN. `focused` is the D-pad's: the crumb is a focus stop on every
@@ -1366,6 +1381,49 @@ mod tests {
             assert_eq!(rect.x, l.narrative.x, "{word}: it starts on the narrative's own edge");
             assert_eq!(rect.h, CRUMB_BAND, "{word}: the whole band is the target");
             assert!(inside_safe(rect), "{word}: the crumb is required content");
+        }
+    }
+
+    /// **The Home word is chrome, not a footer.** It used to be drawn at the right end of
+    /// [`RouteLayout::action`] - the bottom row of the narrative column - which on a two-column
+    /// Settings page put it alone in an empty action band at the bottom of the left half, and the
+    /// owner read that on the television as "Inicio" misplaced in the footer. It now mirrors the
+    /// shared Back control: same band, opposite margin, top of the frame.
+    #[test]
+    fn the_home_word_mirrors_the_back_control_on_the_top_band() {
+        struct Fixed;
+        impl Measure for Fixed {
+            fn width(&self, text: &std::ffi::CStr, _size: i32, _bold: bool) -> f32 {
+                text.to_string_lossy().chars().count() as f32 * 12.0
+            }
+            fn cap_h(&self, size: i32) -> f32 { size as f32 * 0.7 }
+            fn line_h(&self, size: i32) -> f32 { size as f32 * 1.2 }
+        }
+        let measure = Fixed;
+        let word = "Inicio";
+        for l in [RouteLayout::screen(), RouteLayout::centered(1200.0)] {
+            let rect = l.home_rect(word, &measure);
+            assert!(inside_safe(rect), "the word is required chrome: {rect:?}");
+            let back = crate::ui::widgets::CHIP_FRAME;
+            assert_eq!(
+                rect.y, back.y,
+                "same band as the Back control, not the action row"
+            );
+            assert_eq!(rect.h, back.h, "the target is a control's height");
+            assert!(
+                rect.y + rect.h < l.action.y || l.action.y + l.action.h < rect.y,
+                "…and it no longer shares a row with the action band"
+            );
+            assert_eq!(
+                rect.x + rect.w,
+                crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X
+                    - crate::ui::widgets::TAB_TRACK_PAD,
+                "right margin mirrors the disc's left one"
+            );
+            assert!(
+                rect.x > l.narrative.x,
+                "top-right, not on the title's own edge"
+            );
         }
     }
 

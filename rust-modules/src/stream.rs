@@ -1020,6 +1020,77 @@ unsafe fn resolve(host: &str, port: c_int) -> Option<AddrList> {
     Some(AddrList { head: res })
 }
 
+/// The ONE address to hand a name's single-slot `CURLOPT_RESOLVE` entry: the system resolver's
+/// first IPv4 answer when it has one, else its first address of any family.
+///
+/// The TLS control plane needs exactly one address: a libcurl 7.53.1 `CURLOPT_RESOLVE` entry takes
+/// a single one (the comma-separated list arrived in 7.59), so the chain [`connect_any_result`]
+/// walks by hand has to be cut to its head. The order is `getaddrinfo`'s own - RFC 6724
+/// destination selection, the same answer a browser on the set would dial first.
+///
+/// **IPv4 first when both families are offered, and that is the pin's lack of a fallback talking.**
+/// RFC 6724 prefers IPv6 on a host that has a global address, which on a television means a set
+/// whose router advertises a prefix: the AAAA is first, it may be unroutable, and a pin has no
+/// second address to try. A name that answers AAAA only is still taken - the alternative is
+/// refusing a v6-only host outright - but a name with both is dialled the way every other fetch
+/// this app has ever made on the dev set went (measured: the set's own shell reached the metadata
+/// CDN at 79.127.134.130, an A record).
+///
+/// `None` for every resolver failure, exactly like [`resolve`], whose `nowan` gate this inherits:
+/// with `/tmp/butaca-nowan` armed a name resolves to nothing here too, which is what keeps that
+/// reproduction meaning "a dead resolver" instead of "a resolver this app now owns".
+pub(crate) fn resolve_one(host: &str, port: c_int) -> Option<std::net::IpAddr> {
+    let list = unsafe { resolve(host, port) }?;
+    let mut v6 = None;
+    let mut ai: *const libc::addrinfo = list.head;
+    while !ai.is_null() {
+        // SAFETY: `ai` walks the chain `getaddrinfo` allocated, which `list` frees only on drop.
+        unsafe {
+            match addr_of(ai) {
+                Some(std::net::IpAddr::V4(v4)) => return Some(std::net::IpAddr::V4(v4)),
+                Some(other) => {
+                    v6.get_or_insert(other);
+                }
+                None => {}
+            }
+            ai = (*ai).ai_next;
+        }
+    }
+    v6
+}
+
+/// The address inside one `addrinfo`, for the two families this app speaks.
+///
+/// `s_addr` is read through `to_ne_bytes` rather than arithmetically: the kernel stores the four
+/// octets in memory order on every platform, and `Ipv4Addr::from([u8; 4])` wants exactly that
+/// order, so no endianness reasoning is needed on either side. A family neither branch names is
+/// skipped by the caller, which keeps walking.
+///
+/// # Safety
+/// `ai` must be a live `addrinfo` from a `getaddrinfo` result, and its `ai_addr` either null or a
+/// `sockaddr_in`/`sockaddr_in6` matching `sa_family` - which is what `getaddrinfo` promises.
+unsafe fn addr_of(ai: *const libc::addrinfo) -> Option<std::net::IpAddr> {
+    let sa = (*ai).ai_addr;
+    if sa.is_null() {
+        return None;
+    }
+    match (*sa).sa_family as c_int {
+        libc::AF_INET => {
+            let v4 = &*(sa as *const libc::sockaddr_in);
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
+                v4.sin_addr.s_addr.to_ne_bytes(),
+            )))
+        }
+        libc::AF_INET6 => {
+            let v6 = &*(sa as *const libc::sockaddr_in6);
+            Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
+                v6.sin6_addr.s6_addr,
+            )))
+        }
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConnectFailure {
     TimedOut,
