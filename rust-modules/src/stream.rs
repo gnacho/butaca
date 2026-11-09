@@ -1033,8 +1033,7 @@ unsafe fn resolve(host: &str, port: c_int) -> Option<AddrList> {
 /// whose router advertises a prefix: the AAAA is first, it may be unroutable, and a pin has no
 /// second address to try. A name that answers AAAA only is still taken - the alternative is
 /// refusing a v6-only host outright - but a name with both is dialled the way every other fetch
-/// this app has ever made on the dev set went (measured: the set's own shell reached the metadata
-/// CDN at 79.127.134.130, an A record).
+/// this app has ever made on the dev set went.
 ///
 /// `None` for every resolver failure, exactly like [`resolve`], whose `nowan` gate this inherits:
 /// with `/tmp/butaca-nowan` armed a name resolves to nothing here too, which is what keeps that

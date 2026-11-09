@@ -872,8 +872,8 @@ fn request_tls_evidence(
     // A request that carries no pin and names a HOST asks the system resolver for one. It runs
     // after the `nowan` gate on purpose: that trigger stands for a resolver that answers nothing,
     // and this is a resolver, so the reproduction keeps refusing names rather than quietly
-    // becoming a test of `getaddrinfo`. See `resolve::system_entry` for why libcurl cannot be
-    // trusted with the lookup on a set whose c-ares cannot see the loopback resolver.
+    // becoming a test of `getaddrinfo`. See `resolve::system_entry` for why a request should not
+    // depend on the resolver libcurl itself was built with.
     let system_entry: Option<String> = if resolve.is_none() {
         crate::origin::url_port(url)
             .and_then(|port| resolve::system_entry(crate::origin::url_host(url), port))
@@ -1376,20 +1376,28 @@ pub(crate) mod resolve {
         lookup(host, port).map(|p| entry_of(&p))
     }
 
-    /// **The name-to-address path a set with a broken libcurl resolver still has.**
+    /// **A name-to-address path that does not go through libcurl's own resolver.**
     ///
-    /// `crate::net`'s TLS requests used to have exactly two ways to answer a name: a pin this
-    /// process had recorded (nothing records one since #166) or libcurl's own resolver. On the
-    /// development television that second path is c-ares built into a 7.53.1 libcurl, and inside
-    /// the app's jail it cannot reach the loopback resolver `/etc/resolv.conf` names - while
-    /// `getaddrinfo` from the same process can, because it goes through the set's own NSS stack.
-    /// The first hostname this app ever fetched was a metadata provider's CDN, and every tile in
-    /// *Edit images* drew black: `net: curl rc=28`, twenty-five seconds at a time.
+    /// `crate::net`'s TLS requests had exactly two ways to answer a name: a pin this process had
+    /// recorded (nothing records one since #166) or libcurl's own resolver. The second one is
+    /// c-ares built into the set's 7.53.1 libcurl, configured from `/etc/resolv.conf`, and it is
+    /// the one part of a request this app does not otherwise own: it reads a resolver file, and on
+    /// a jailed install that file names a loopback address the jail may or may not reach. The
+    /// plaintext transport has never depended on it - `crate::stream` resolves with `getaddrinfo`,
+    /// through the set's own NSS stack.
     ///
     /// So: ask the SYSTEM resolver (through [`crate::stream::resolve_one`], the same
     /// `getaddrinfo` the plaintext transport dials with) and hand libcurl the answer as one
     /// `CURLOPT_RESOLVE` entry. The hostname stays in the URL, so SNI and certificate identity are
-    /// untouched - this is a shortcut past DNS, not past TLS.
+    /// untouched: this is a shortcut past DNS, not past TLS.
+    ///
+    /// **What this did NOT turn out to be, measured on the development television (2026-11-09).**
+    /// The *Edit images* picker's black tiles had this shape to explain them, and the port was the
+    /// defect (`origin::split_external`): the set's log carried `net: curl rc=7` (an address was
+    /// obtained and the CONNECT failed) beside `rc=28`, so c-ares was answering after all. This
+    /// function stays because it removes the resolver from the set's firmware and its jail from the
+    /// list of things a fetch depends on, and because a request that resolves here cannot be the
+    /// next black tile: it is pinned from the same resolver everything else on the set uses.
     ///
     /// A numeric literal gets `None`: it needs no resolver and a pin for it would be a second
     /// spelling of the address, including the bracket syntax a v6 entry needs. A name the system

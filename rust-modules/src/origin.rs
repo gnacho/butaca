@@ -348,9 +348,11 @@ pub fn split(url: &str) -> (Origin, &str) {
 ///
 /// [`DEFAULT_PORT`] is 32400 because that is what this client's legacy server URLs meant when they
 /// spelled no port, and it is nobody else's web port. Reading an external URL through [`split`]
-/// dialled the provider's CDN on 32400: measured on the development television, the *Edit images*
-/// picker timed out (`net: curl rc=28`) on every tile while the same URL answered 404 in 0.25 s
-/// from the set's own shell, because the shell was talking to 443 and the app was not.
+/// dialled the provider's CDN on 32400: measured on the development television (2026-11-09), the
+/// *Edit images* picker logged `net: curl rc=28` and `rc=7` on every tile, and the set's own shell
+/// then answered the same URL on 443 in 0.24 s (404) while `:32400` never connected at all (18.7 s,
+/// curl exit 7). The port was the defect; the resolver work in `net::resolve::system_entry` is the
+/// second half of the same path and does not change this reading.
 pub fn split_external(url: &str) -> (Origin, &str) {
     let p = Parts::of(url);
     let port = p
