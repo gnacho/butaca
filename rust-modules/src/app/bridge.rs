@@ -1286,6 +1286,12 @@ impl Rig<AppHost> for Bridge {
             blur_amount: crate::ui::nav::blur_amount(),
         }
     }
+    /// The bar's marked pill for `arg`, answered from the LIVE directory — see
+    /// [`crate::ui::dispatch::Rig::strip_fallback`] for why the dispatcher has to ask at the commit
+    /// rather than read the frame's capture.
+    fn strip_fallback(&self, arg: &AppArg) -> Option<u32> {
+        pill_of_arg(arg, self.directory.view()).and_then(|i| self.chrome.elem_at(i))
+    }
     fn surface_scope(&mut self) -> Option<crate::ui::popover::host::Live> {
         Some(crate::ui::popover::host::live())
     }

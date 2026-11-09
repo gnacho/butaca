@@ -1052,6 +1052,69 @@ fn the_selection_capsule_never_swings_back_on_the_frame_a_tab_press_commits() {
     );
 }
 
+/// **A tab press leaves the cursor on the pill it pressed, while the page it named is still
+/// landing.**
+///
+/// The same owner report as the test above, from its other side: "the hover does a round trip".
+/// The selection capsule was one half; this is the other and the one the eye follows, because the
+/// FOCUS capsule is the bright one. Measured on the television (2026-11-09, `sha=586441e`): after
+/// clicking Favoritos the amber capsule sat still on Favoritos for four seconds, then travelled
+/// LEFT to Inicio over ~490 ms, on the frame the collection's 81 rows landed.
+///
+/// The mechanism is a seat, not a spring. `SelectTab`'s cover-and-mint enters the new page with
+/// `FirstInGroupAnimated(GroupId(0))`; a page whose rows are still in flight declares NO group on
+/// purpose, so `resolve_group` fell back to the first non-empty group, which is the CHROME the
+/// dispatcher prepends — and the strip's `Seat::Nearest`, asked from the group's own head, answers
+/// the LEFT-MOST pill. The fallback it should have read (`strip_fallback`) was one frame stale:
+/// `capture_chrome` fills it before the dispatcher runs, so on the commit frame it still named the
+/// page being left. `Rig::strip_fallback` is the live re-ask, and `PageWithStrip::seat` answers it
+/// for a synthetic origin.
+#[test]
+fn a_tab_press_leaves_the_cursor_on_the_pill_it_pressed_while_the_page_lands() {
+    let _g = crate::testlock::serial();
+    let mut d = Dispatcher::<AppHost>::with_transition(
+        Box::new(crate::ui::containers::transition::PageDip::new()));
+    let mut rig = Bridge::for_test(|| 0);
+    rig.stores.browse.borrow_mut().seed_two_source_table_for_test();
+    rig.refresh_browse_directory();
+    rig.seed_hubs_for_test(6, crate::catalog::HubState::Ready);
+    let mut glass = crate::ui::frame::glass::GlassPlan::new();
+    let step_chrome = |d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+                       glass: &mut crate::ui::frame::glass::GlassPlan| {
+        if d.top_arg().is_some_and(|arg| arg.chrome() == Chrome::TabBar) {
+            rig.update_home_chrome(d, glass, 1.0 / 60.0);
+        }
+    };
+
+    super::show_page(&mut d, AppArg::Home);
+    for i in 0..40u32 {
+        super::frame(&mut d, &mut rig, tick(i), vec![]);
+        step_chrome(&mut d, &mut rig, &mut glass);
+    }
+    rig.home_command(HomeCmd::FocusStrip(HomeTab::Favorites));
+    for i in 40..80u32 {
+        super::frame(&mut d, &mut rig, tick(i), vec![]);
+        step_chrome(&mut d, &mut rig, &mut glass);
+    }
+    let pressed = d.focus().expect("premise: the remote is on a strip pill");
+    assert_eq!(rig.strip.focus_pill(), 3, "premise: that pill is Favoritos");
+
+    super::nav_tab(&mut d, &mut rig, HomeTab::Favorites, None, None);
+
+    // The page's own store never lands in this rig, so every frame below is the "mounted, rows
+    // still in flight" state the television sat in for four seconds.
+    for i in 80..150u32 {
+        super::frame(&mut d, &mut rig, tick(i), vec![]);
+        step_chrome(&mut d, &mut rig, &mut glass);
+        assert_eq!(
+            d.focus().map(|key| key.elem),
+            Some(pressed.elem),
+            "frame {i}: the seat moved the cursor off the pill the viewer pressed",
+        );
+        assert_eq!(rig.strip.focus_pill(), 3, "frame {i}: the focus capsule left Favoritos");
+    }
+}
+
 /// **A second open of the detail page already on its way is not a new navigation** — the detail
 /// half of `enter_player`'s pending-push rule. The dip-out prepares the pushed page, which spends
 /// the `DetailSeed` at its mount, and a repeated `Push` of the same page is inert
