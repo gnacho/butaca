@@ -211,6 +211,15 @@ pub(crate) fn reset() {
     set_phase(Phase::Editing);
 }
 
+/// Put the flow in the phase an attempt produces, without an attempt. The screen's BACK and OK
+/// arms are graded against `Working` and `Failed`, and neither is reachable in a host test
+/// without a server on the wire: `start` would spawn a worker that dials one. Test-only, and
+/// deliberately narrow - there is no production caller.
+#[cfg(test)]
+pub(crate) fn set_phase_for_test(p: Phase) {
+    set_phase(p);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

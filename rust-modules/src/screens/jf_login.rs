@@ -232,6 +232,14 @@ impl JfLoginScreen {
     }
 
     /// The one Back behavior shared by the physical key and the visible pointer control.
+    ///
+    /// **BACK leaves, at every depth and in every phase.** That is the whole contract of this
+    /// function, and the Quick Connect leg broke it: while an attempt was out (or after one had
+    /// failed) BACK only asked the worker to stop and answered `Handled::Yes`, so the press was
+    /// spent and the screen stayed. A cancelled poll then landed as `Phase::Failed(TimedOut)`,
+    /// which is not `Editing` either, so every later BACK cancelled an attempt that was already
+    /// over and the form - inert to OK in that same phase - became a screen with no way out
+    /// (reported by the owner as "no tira hacia atrás, no puedo salir de esa config").
     fn back(&mut self, fx: &mut Effects<'_, impl AppLike>) -> Handled {
         // BACK with no edit in flight: the boot gate's form keeps swallowing it (nothing lives
         // behind a first-ever boot's sign-in), but the Settings "quick connect" copy was PUSHED
@@ -239,23 +247,26 @@ impl JfLoginScreen {
         // invalidate is load-bearing: structural ops apply at the frame's NAV COMMIT, and an idle
         // loop renders no frame - without it the parked pop sat uncommitted forever.
         if in_quick_connect() {
-            // Quick Connect: BACK during the poll cancels it (the form keeps the remote and shows
-            // why it stopped); BACK while editing disarms the mode and pops back to Settings,
-            // exactly as add-server does.
+            // Stop whatever the worker is doing and put the store back in the one phase that
+            // means "no attempt in flight". `reset` bumps the epoch, so an answer still on the
+            // wire is discarded instead of landing on a screen that has left; `cancel` after it
+            // is what makes the worker give up at its next poll rather than at the end of its
+            // budget. `cancel` alone left the phase at `Working`/`Failed`, which is what pinned
+            // the form.
             if qc::phase() != qc::Phase::Editing {
+                qc::reset();
                 qc::cancel();
-            } else {
-                qc::set_add_mode(false);
-                self.qc_fail = None;
-                self.dirty = true;
-                // Back to the password form, or back to Settings when this copy was pushed over
-                // the page that asked. The route's root is this screen on a first boot, so popping
-                // there would pop nothing and BACK has to mean "give me the other form" instead.
-                if self.code_pushed || signin::add_mode() {
-                    fx.push(Fx::Nav(NavOp::Pop));
-                }
-                fx.invalidate(crate::ui::present::Provenance::Input);
             }
+            qc::set_add_mode(false);
+            self.qc_fail = None;
+            self.dirty = true;
+            // Back to the password form, or back to Settings when this copy was pushed over
+            // the page that asked. The route's root is this screen on a first boot, so popping
+            // there would pop nothing and BACK has to mean "give me the other form" instead.
+            if self.code_pushed || signin::add_mode() {
+                fx.push(Fx::Nav(NavOp::Pop));
+            }
+            fx.invalidate(crate::ui::present::Provenance::Input);
             Handled::Yes
         } else if signin::add_mode() {
             signin::set_add_mode(false);
@@ -305,8 +316,14 @@ impl JfLoginScreen {
     }
 
     /// OK on the Quick Connect form: row 0 edits the server field, row 1 starts the flow.
+    ///
+    /// Inert only while an attempt is genuinely OUT. `Phase::Failed` is documented as "the form
+    /// owns the remote AND shows the reason", and the reason line this form draws says "vuelve a
+    /// empezar" - which was a lie while the row refused the press: the only way to start over was
+    /// dead, and so was the server field. A refusal now belongs to `Working`/`Ready` alone, the
+    /// same rule the password form above applies to `Phase::Working`.
     fn activate_qc(&mut self, elem: u32, fx: &mut Effects<'_, impl AppLike>) {
-        if qc::phase() != qc::Phase::Editing {
+        if matches!(qc::phase(), qc::Phase::Working | qc::Phase::Ready) {
             return; // an attempt is out; the form is inert until it answers
         }
         if elem == ROW_START_QC {
@@ -834,6 +851,10 @@ mod tests {
         use crate::ui::hit::{HitMap, pointer_gaps};
         use crate::ui::machine::{EntryId, FocusKey};
 
+        // `JfLoginScreen::new` reads the process-global add-server modes, so a test that leaves
+        // Quick Connect armed would build the two-row code form here instead of the password form.
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
         let screen = JfLoginScreen::new(EntryId(9));
         let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
         let rows = pointer_rows(&screen.table, frame);
@@ -1036,7 +1057,9 @@ mod tests {
     impl ResetModes {
         fn new() -> Self {
             signin::set_add_mode(false);
+            signin::set_phase_for_test(Phase::Editing);
             qc::set_add_mode(false);
+            qc::set_phase_for_test(qc::Phase::Editing);
             Self
         }
     }
@@ -1044,7 +1067,9 @@ mod tests {
     impl Drop for ResetModes {
         fn drop(&mut self) {
             signin::set_add_mode(false);
+            signin::set_phase_for_test(Phase::Editing);
             qc::set_add_mode(false);
+            qc::set_phase_for_test(qc::Phase::Editing);
         }
     }
 
@@ -1202,5 +1227,97 @@ mod tests {
             assert_eq!(pop_count(&remote_out), 0, "quick={quick}: boot Back stays inside the flow");
             qc::set_add_mode(false);
         }
+    }
+
+    /// **RED FIRST (owner, on his set): "no tira hacia atrás, no puedo salir de esa config".**
+    ///
+    /// The Quick Connect leg answered BACK with `qc::cancel()` and `Handled::Yes` whenever the
+    /// phase was not `Editing`. A cancelled poll lands as `Failed(TimedOut)` - also not `Editing` -
+    /// so from that moment every BACK press cancelled an attempt that was already over, the press
+    /// was spent, and the screen stayed. With OK inert in the same phase the form had no exit at
+    /// all. BACK now stops the attempt, resets the flow to `Editing` (so the form is alive again)
+    /// and pops, on the same press.
+    #[test]
+    fn back_leaves_the_quick_connect_form_after_its_poll_died() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        set_flow(true, true);
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        let context = login_cx(&measure);
+        qc::set_phase_for_test(qc::Phase::Failed(qc::Fail::TimedOut));
+
+        let (handled, out) = login_step(&mut screen, physical_back(), &context);
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(pop_count(&out), 1, "BACK leaves the form it was pushed over");
+        assert_eq!(qc::phase(), qc::Phase::Editing, "and the flow is no longer pinned");
+        assert!(!qc::add_mode(), "add-server mode is disarmed");
+    }
+
+    /// The same press while the poll is genuinely out: stop it, reset the flow, and leave.
+    #[test]
+    fn back_leaves_the_quick_connect_form_while_the_poll_is_out() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        set_flow(true, true);
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        let context = login_cx(&measure);
+        qc::set_phase_for_test(qc::Phase::Working);
+
+        let (_, out) = login_step(&mut screen, physical_back(), &context);
+        assert_eq!(pop_count(&out), 1, "an in-flight fetch never traps the page");
+        assert_eq!(qc::phase(), qc::Phase::Editing);
+    }
+
+    /// The password add-server form has the same contract: BACK is a way out while its fetch is
+    /// out, and it is still a way out when that fetch never comes back. The key handler answers
+    /// BACK before the `Working` gate that makes the form inert to OK, so the press is not spent.
+    #[test]
+    fn back_leaves_the_add_server_form_while_its_fetch_is_out() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        set_flow(false, true);
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        let context = login_cx(&measure);
+        signin::set_phase_for_test(Phase::Working);
+
+        // The visible control says the same thing the remote does, in that same phase.
+        let mut frame = DrawFrame::new(&context, crate::ui::Painter::recording());
+        let ops = draw_login(&mut screen, &mut frame);
+        assert!(back_is_drawn(&ops), "the way out stays visible while the fetch is out");
+
+        let (handled, out) = login_step(&mut screen, physical_back(), &context);
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(pop_count(&out), 1, "an in-flight fetch never traps the form");
+        assert!(!signin::add_mode(), "and the add-server mode is disarmed");
+    }
+
+    /// The failure line says "vuelve a empezar", so the row and the field must answer OK again
+    /// once an attempt has failed: `Failed` is documented as the phase where the form owns the
+    /// remote. Before this, only `Working` did, and the reason line pointed at a dead control.
+    #[test]
+    fn the_failed_quick_connect_form_answers_ok_again() {
+        let _serial = crate::testlock::serial();
+        let _modes = ResetModes::new();
+        let measure = crate::ui::fixture::FixtureMeasure;
+        set_flow(true, true);
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        let context = login_cx(&measure);
+        qc::set_phase_for_test(qc::Phase::Failed(qc::Fail::Unreachable));
+
+        let (handled, _) = login_step(&mut screen, ScreenEvent::Activate(F_SERVER as u32), &context);
+        assert_eq!(handled, Handled::Yes);
+        assert_eq!(
+            screen.editing,
+            Some(F_SERVER),
+            "the server field opens for editing after a failed attempt"
+        );
+
+        screen.editing = None;
+        qc::set_phase_for_test(qc::Phase::Working);
+        let (_, _) = login_step(&mut screen, ScreenEvent::Activate(F_SERVER as u32), &context);
+        assert_eq!(screen.editing, None, "…and stays inert while an attempt is really out");
     }
 }

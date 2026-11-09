@@ -254,6 +254,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         content_requests(app, fr);
         crate::dev::scenarios::advance_content_boot(app, fr);
         loop_requests(app);
+        land_server_switch(app);
         app.instr.mark(crate::diag::heartbeat::Phase::NavCommit); // navcommit
         update(app, fr);
         app.rec.content_results();
@@ -2024,7 +2025,7 @@ fn loop_requests(app: &mut App) {
                 super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
             crate::screens::registry::LoopReq::JfSwitchServer(i) => {
-                jellyfin_switch_server(app, i);
+                jellyfin_switch_server(i);
                 super::bridge::dismiss_surfaces(&mut app.pages);
             }
             crate::screens::registry::LoopReq::JfDisconnectServer => {
@@ -2034,22 +2035,51 @@ fn loop_requests(app: &mut App) {
     }
 }
 
-fn jellyfin_switch_server(app: &mut App, i: usize) {
+/// **A switch is a request, not a round trip.** The sign-in itself is one blocking LAN call
+/// (`jellyfin::boot::sign_in`), and running it here parked the frame thread for its whole
+/// duration - no heartbeat, no spinner, no BACK - on the screen a person reaches when a server
+/// needs changing. `jellyfin::switch` runs it on a worker and [`land_server_switch`] takes the
+/// answer on the frame thread, which is the only thread that may install the client and reset the
+/// stores.
+fn jellyfin_switch_server(i: usize) {
     let Some(list) = crate::jellyfin::boot::load_servers() else {
         return;
     };
     let Some(entry) = list.servers.get(i).cloned() else {
         return;
     };
-    if crate::jellyfin::boot::authenticate_server(&entry) {
-        crate::jellyfin::boot::save_servers(&list.servers, i);
-        super::boot::activate_server_owned(&mut app.bridge);
+    crate::jellyfin::switch::start(i, entry);
+}
+
+/// The frame thread's half of [`jellyfin_switch_server`]: a switch that answered installs its
+/// client, becomes the active server and resets every store keyed to the previous one. A switch
+/// that did not answer, or that never comes back at all, changes nothing - the picker stays up and
+/// BACK still works.
+fn land_server_switch(app: &mut App) {
+    let Some((index, client)) = crate::jellyfin::switch::take() else {
+        return;
+    };
+    let Some(client) = client else {
+        crate::log("jellyfin: server switch refused - the server did not answer");
+        crate::ui::idle::invalidate();
+        return;
+    };
+    crate::jellyfin::install(client);
+    if let Some(list) = crate::jellyfin::boot::load_servers() {
+        if index < list.servers.len() {
+            crate::jellyfin::boot::save_servers(&list.servers, index);
+        }
     }
+    super::boot::activate_server_owned(&mut app.bridge);
+    crate::ui::idle::invalidate();
 }
 
 /// *Desconectar*: retire the active server's credentials. With servers remaining the first
 /// survivor is signed in and made active (the same switch path); with none the config is erased
 /// and the app lands on the sign-in gate.
+///
+/// Everything local happens here and now (the list, the uninstalled client, the route); the
+/// survivor's sign-in is the worker's, exactly as a picker row's switch is.
 fn jellyfin_disconnect_server(app: &mut App) {
     let remaining = crate::jellyfin::boot::remove_active();
     crate::jellyfin::uninstall();
@@ -2062,9 +2092,7 @@ fn jellyfin_disconnect_server(app: &mut App) {
         crate::jellyfin::boot::save_servers(&remaining.servers, remaining.active);
         let active = remaining.active;
         if let Some(entry) = remaining.servers.get(active).cloned() {
-            if crate::jellyfin::boot::authenticate_server(&entry) {
-                super::boot::activate_server_owned(&mut app.bridge);
-            }
+            crate::jellyfin::switch::start(active, entry);
         }
         super::bridge::dismiss_surfaces(&mut app.pages);
     }
