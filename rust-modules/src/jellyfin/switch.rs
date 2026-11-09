@@ -70,14 +70,16 @@ fn start_with(
     let spawned = crate::task::spawn_small("jf-switch-server", move || {
         let client =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(sign_in)).unwrap_or(None);
-        // An abandoned generation must not overwrite the switch that replaced it.
+        // An abandoned generation must not overwrite the switch that replaced it, and must not
+        // wake a settled screen either.
         if generation == GENERATION.load(Ordering::SeqCst) {
+            // A settled screen stops presenting, so the landing needs a frame to happen in. Done
+            // BEFORE publishing: a reader that sees the answer knows the wake already happened.
+            crate::ui::idle::invalidate();
             if let Ok(mut slot) = MAIL.lock() {
                 *slot = Some(Outcome { generation, index, client });
             }
         }
-        // A settled screen stops presenting, so the landing needs a frame to happen in.
-        crate::ui::idle::invalidate();
     });
     if !spawned {
         OUT.store(false, Ordering::SeqCst);
