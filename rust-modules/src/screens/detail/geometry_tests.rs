@@ -111,7 +111,7 @@ fn bare(sid: ServerId, rk: &str) -> DetailScreen {
         tabs: TabStrip::new(),
         season_pop: CtlPop::new(),
         ctl_pop: CtlPop::new(),
-        disc_unfurl: [Spring::at(0.0); 6],
+        disc_unfurl: [Spring::at(0.0); 7],
         season_metrics: season::Metrics::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {

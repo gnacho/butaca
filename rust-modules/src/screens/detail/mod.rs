@@ -192,7 +192,7 @@ pub(crate) struct DetailScreen {
     tabs: TabStrip,
     season_pop: CtlPop<1>,
     ctl_pop: CtlPop<8>,
-    disc_unfurl: [Spring; 6],
+    disc_unfurl: [Spring; 7],
     season_metrics: season::Metrics,
     /// The page's own keyed ground. Deliberately a bare [`AmbientWash`] and not the shared
     /// `PageGround`, which is the browsing screens' policy: that type draws itself whenever it is
@@ -370,6 +370,26 @@ impl Drop for LayoutPin<'_> {
     }
 }
 
+/// Lines of blurb the DETAIL hero shows before its `MORE` mark: five, the owner's own number.
+///
+/// The shared [`crate::ui::HERO_SYN_MAXLINES`] stays at three because the Home billboard draws the
+/// same role over a peeking shelf and has no accordion to open: past three lines it would walk its
+/// pinned row into that shelf. The detail page has the room (its hero top moved up to pay for
+/// exactly these two lines) and the mark that gives them back.
+const DETAIL_SYN_MAXLINES: usize = 5;
+
+/// The CLOSED synopsis view: one builder for the chain's measure, the paint and the mark's own
+/// rect, so the three cannot disagree about where the block ends.
+fn closed_synopsis<'a>(
+    summary: &'a str,
+    lead: &'a str,
+    measure: &'a dyn crate::ui::machine::Measure,
+) -> crate::ui::text_view::TextView<'a> {
+    crate::ui::hero_synopsis(summary, lead)
+        .with_measure(measure)
+        .max_lines(DETAIL_SYN_MAXLINES)
+}
+
 impl DetailScreen {
     pub(crate) fn new(entry: EntryId, sid: ServerId, rk: String, hubs: crate::catalog::HubsView<'_>) -> Self {
         let selected = hubs.find(sid, &rk).cloned();
@@ -416,7 +436,7 @@ impl DetailScreen {
             tabs: TabStrip::new(),
             season_pop: CtlPop::new(),
             ctl_pop: CtlPop::new(),
-            disc_unfurl: [Spring::at(0.0); 6],
+            disc_unfurl: [Spring::at(0.0); 7],
             season_metrics: season::Metrics::new(),
             ground,
             selected,
@@ -699,9 +719,19 @@ impl DetailScreen {
         measure: &dyn crate::ui::machine::Measure,
     ) -> crate::ui::detail_layout::HeroChain {
         let (lead, synopsis) = hero_blurb(d, self.selected());
-        let synopsis_h = self
-            .synopsis_view(&synopsis, &lead, measure)
-            .measure_h(crate::ui::detail_layout::HERO_TEXT_W);
+        // The height is the view the page is DRAWING: the closed one, or the whole blurb once the
+        // accordion is open. Only the truncation question is asked of the closed view, because
+        // that is the view the mark belongs to.
+        let view = self.synopsis_view(&synopsis, &lead, measure);
+        let mut synopsis_h = view.measure_h(crate::ui::detail_layout::HERO_TEXT_W);
+        // **The `MORE` mark owns a row of its own.** It hangs one `SM` under the block, and the
+        // people band starts one `SM` under whatever this chain is told the synopsis ends at: the
+        // mark used to land INSIDE that gap and printed straight through the first line of cast
+        // names (measured on the panel, 2026-11-09). Reserving its cap band here is what gives it
+        // room without moving the mark itself.
+        if !self.synopsis_open && view.truncates(crate::ui::detail_layout::HERO_TEXT_W) {
+            synopsis_h += theme::space::SM + measure.cap_h(theme::size::CAPTION);
+        }
         crate::ui::detail_layout::hero_chain(
             synopsis_h,
             // The audience score moved into the identity line beside the age rating, so the
@@ -726,7 +756,7 @@ impl DetailScreen {
         lead: &'a str,
         measure: &'a dyn crate::ui::machine::Measure,
     ) -> crate::ui::text_view::TextView<'a> {
-        let view = crate::ui::hero_synopsis(summary, lead).with_measure(measure);
+        let view = closed_synopsis(summary, lead, measure);
         if self.synopsis_open {
             view.max_lines(0)
         } else {
@@ -748,7 +778,7 @@ impl DetailScreen {
         if summary.is_empty() {
             return None;
         }
-        let view = crate::ui::hero_synopsis(&summary, &lead).with_measure(measure);
+        let view = closed_synopsis(&summary, &lead, measure);
         if self.synopsis_open || !view.truncates(crate::ui::detail_layout::HERO_TEXT_W) {
             return None;
         }
@@ -2310,16 +2340,36 @@ impl DetailScreen {
         let logo_alpha = p.alpha(
             self.preview_chrome * preview_logo_scroll_alpha(self.scroll.pos, hero_extent, t),
         );
+        // **The poster column, from whatever the page actually has.** It used to be gated on the
+        // home catalog row, so a page opened from the Library grid, a Related tile or the person
+        // page (never in the hubs) drew NO poster and the "one top edge" the owner asked for had
+        // nothing to align to. The loaded item carries the same picture: its `thumb` is the
+        // Primary, which for a film and a show is the poster (an episode's Primary is its 16:9
+        // still, so an episode keeps the catalog row's series poster and draws none without it).
+        let poster_rect = Rect::new(
+            crate::ui::consts::MARGIN_X,
+            crate::ui::detail_layout::POSTER_Y,
+            crate::ui::detail_layout::POSTER_W,
+            crate::ui::detail_layout::POSTER_H,
+        );
         if let Some(m) = self.selected() {
             crate::ui::card_row::draw_tile(
                 logo_alpha,
                 crate::ui::widgets::Art::Poster(Some(m)),
-                Rect::new(
-                    crate::ui::consts::MARGIN_X,
-                    crate::ui::detail_layout::POSTER_Y,
-                    crate::ui::detail_layout::POSTER_W,
-                    crate::ui::detail_layout::POSTER_H,
-                ),
+                poster_rect,
+                1.0,
+                &crate::ui::card_row::RowStyle::HOME,
+                None,
+            );
+        } else if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
+            crate::ui::card_row::draw_tile(
+                logo_alpha,
+                crate::ui::widgets::Art::Thumb {
+                    sid: d.sid,
+                    key: &d.thumb,
+                    res: crate::ui::widgets::POSTER_RES,
+                },
+                poster_rect,
                 1.0,
                 &crate::ui::card_row::RowStyle::HOME,
                 None,
@@ -2399,9 +2449,12 @@ impl DetailScreen {
             .unwrap_or_default();
         // **One line says what the item is and how long it runs.** The year (never the full
         // release date) and the runtime moved up here from the facts row the owner's pass removed,
-        // so the identity line reads `Película · 2012 · 1 h 52 min · 12` instead of a record under
-        // a heading. An episode keeps its show and address, which is the only way to tell two of
-        // them apart.
+        // so the identity line reads `2012 · 1 h 52 min · 12` instead of a record under a heading.
+        // **The kind word is gone too** (the owner's pass: "igualar vista de películas en Inicio y
+        // en Películas"): the Home billboard of the same film states `year · runtime · age`, and a
+        // page that opened with `Película` said one thing more than the shelf that sent the viewer
+        // there. An episode keeps its show and address, which is the only way to tell two of them
+        // apart.
         let year = hero::hero_year(d);
         let extent = hero::hero_extent(d).unwrap_or_default();
         let mut parts: Vec<&str> = Vec::new();
@@ -2412,8 +2465,6 @@ impl DetailScreen {
             if !ordinal.is_empty() {
                 parts.push(&ordinal);
             }
-        } else {
-            parts.push(if d.is_show { crate::i18n::msg::browse_kind_tv_show() } else { crate::i18n::msg::browse_kind_movie() });
         }
         if !year.is_empty() {
             parts.push(&year);
@@ -2619,6 +2670,9 @@ impl DetailScreen {
                         // language one) and the caption box for the subtitles.
                         hero::HeroCtl::Audio => crate::ui::icons::Icon::Note,
                         hero::HeroCtl::Subtitles => crate::ui::icons::Icon::Cc,
+                        // The artwork disc: the picture frame the item menu's own *Edit images*
+                        // row wears, so the two entries read as one action.
+                        hero::HeroCtl::Artwork => crate::ui::icons::Icon::Image,
                         _ => unreachable!(),
                     };
                     let mut button = CircleButton::new(c"".as_ptr())
@@ -3529,6 +3583,12 @@ impl DetailScreen {
             favorite,
             audio,
             subs,
+            // **The artwork disc rides on the loaded item.** The remote-image routes are addressed
+            // by item id, so any item the page can describe can be offered the pictures the
+            // providers already hold for it; the picker itself says so when the server refuses the
+            // write. It is absent while the item has not landed, because there is nothing yet to
+            // name.
+            artwork: self.detail(meta).is_some_and(|d| !d.rk.is_empty()),
         }
     }
 
@@ -3708,6 +3768,28 @@ impl DetailScreen {
                     ContentReq::Panel(ContentPanel::TrackPick {
                         audio,
                         chosen,
+                        anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
+                    }),
+                );
+            }
+            // **The artwork disc**: the provider pictures this item may wear instead of the one it
+            // has. It opens the Edit-images grid anchored under itself, the same surface #369 built
+            // for the pre-playback window's menu; the SERVER fetches the chosen picture.
+            hero::HeroCtl::Artwork => {
+                let set = self.hero_set(meta);
+                let Some(i) = hero::index_of(set, ctl) else { return };
+                let widths = hero::hero_widths(
+                    cx.measure,
+                    set,
+                    set.restart,
+                    self.disc_unfurl.map(|s| s.pos),
+                    self.named_show(meta),
+                );
+                let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
+                rect.y -= self.scroll.pos;
+                self.content(
+                    fx,
+                    ContentReq::Panel(ContentPanel::Images {
                         anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
                     }),
                 );

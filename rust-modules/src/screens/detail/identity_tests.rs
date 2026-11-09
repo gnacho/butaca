@@ -78,7 +78,7 @@ fn body(entry: EntryId, rk: &str) -> DetailScreen {
         episode_scale: [Spring::at(1.0); EP_SCALE_MAX], related: CardRow::new(),
         extras: CardRow::new(),
         cast: CardRow::new(), tabs: TabStrip::new(), season_pop: CtlPop::new(),
-        ctl_pop: CtlPop::new(), disc_unfurl: [Spring::at(0.0); 6],
+        ctl_pop: CtlPop::new(), disc_unfurl: [Spring::at(0.0); 7],
         season_metrics: season::Metrics::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP), selected: None, spin_ms: 0.0,
         spin_phase: crate::ui::motion::Phase::default(),

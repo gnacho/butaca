@@ -353,21 +353,28 @@ and signing out all live behind the gear, so there is no second entry point to k
 
 ![Detail page](screenshots/ux-detail.jpg)
 
-Opened by OK on a card (or the hero's ⓘ). Full-bleed backdrop, title treatment, a fact row
-(kind · genres · certificate, with **4K** and **CC** badges where they apply), the critic/audience
-ratings, the summary, and a technical line: release date · runtime · **and the playback verdict for
-this item on this television** — *"Direct Play"* or *"Converts on server"*.
+Opened by OK on a card (or the hero's ⓘ). Full-bleed backdrop with the item's poster at the left
+margin, and the title treatment aligned to the poster's head. Under it one identity line says what
+the item is and how long it runs: **year · runtime · age rating · the audience score**, with no
+`SCORE` caption. Then the summary, capped at five lines, with a **MÁS** mark under it that opens the
+whole blurb in place. The mark exists only while the text is actually cut.
 
 The action row:
 
 | control | what OK does |
 |---|---|
-| **Play** / **Resume** | start, or resume from the stored position |
+| **Play** / **Resume** | start, or resume from the stored position. There is no window in between: the picture starts |
 | **↺** | play from the start (shown when there is a resume point) |
 | the watched disc | toggle watched — it **wears the face of the write it would perform**, so it is a **✓** on an unwatched item and a **−** on a watched one |
+| the heart | mark or unmark the item as a favourite |
+| the audio disc | pick the language the play starts in |
+| the subtitle disc | pick the track the play starts with, or Off |
+| the artwork disc | pick another poster from the pictures the metadata providers already hold |
 
-Below, **Cast & Crew** — OK on a headshot opens that person's page, from which their other titles
-lead back into more detail pages. The BACK trail unwinds the whole chain.
+Below, the cast and crew headshots, with no heading: the faces and the names under them say what
+the shelf is, and OK on a headshot opens that person's page, from which their other titles lead
+back into more detail pages. Then the Related shelf, and Extras when the item has any. The BACK trail
+unwinds the whole chain.
 
 For a series, the page carries its seasons and episodes rather than a single action row.
 
