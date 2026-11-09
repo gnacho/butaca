@@ -60,7 +60,7 @@ fn start_with(
     sign_in: impl FnOnce() -> Option<JfClient> + Send + 'static,
 ) -> bool {
     if OUT.swap(true, Ordering::SeqCst) {
-        crate::log("jellyfin: a server switch is already out — this press is ignored");
+        crate::log("jellyfin: a server switch is already out - this press is ignored");
         return false;
     }
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -100,7 +100,7 @@ fn take_at(now: Instant, budget: Duration) -> Option<(usize, Option<JfClient>)> 
     let mut slot = MAIL.lock().ok()?;
     if let Some(out) = slot.take() {
         if out.generation != GENERATION.load(Ordering::SeqCst) {
-            crate::log("jellyfin: an abandoned server switch answered — discarded");
+            crate::log("jellyfin: an abandoned server switch answered - discarded");
             return None;
         }
         OUT.store(false, Ordering::SeqCst);
@@ -126,7 +126,7 @@ fn take_at(now: Instant, budget: Duration) -> Option<(usize, Option<JfClient>)> 
     if let Ok(mut started) = STARTED.lock() {
         *started = None;
     }
-    crate::log("jellyfin: server switch abandoned after its budget — the picker is live again");
+    crate::log("jellyfin: server switch abandoned after its budget - the picker is live again");
     None
 }
 
