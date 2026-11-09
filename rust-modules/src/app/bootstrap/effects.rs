@@ -179,7 +179,6 @@ fn content_request(request: &crate::screens::registry::ContentReq) -> Result<Val
         ContentReq::PreviewTransport(play) => json!({"preview_transport":play}),
         ContentReq::PreviewSeek(position) => json!({"preview_seek":position}),
         ContentReq::ItemMenu => json!("itemmenu"),
-        ContentReq::Tracks { audio_sid, sub_sid } => json!({"tracks_choice":audio_sid,"sub":sub_sid}),
         ContentReq::Panel(panel) => json!({"panel":match panel {
             ContentPanel::AltSources { anchor } => json!({"alt_sources":anchor}),
             ContentPanel::Tracks { page } => json!({"tracks":page}),

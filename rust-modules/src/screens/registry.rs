@@ -885,10 +885,6 @@ pub(crate) enum ContentReq {
     /// all.
     PreviewSeek(i64),
     ItemMenu,
-    /// **The hero's track picker committed a row** — the stream ids the page keeps for its next
-    /// Play. The menu only REPORTS: the page owns the choice, so this is a message to it rather
-    /// than a write the surface performs.
-    Tracks { audio_sid: Option<i64>, sub_sid: Option<i64> },
     /// **Present one of the Detail page's own panels** on the container tree (spec §6.2's
     /// "page-owned panels"). The page names WHICH and supplies whatever the panel needs to place
     /// itself; the loop knows the style and the page's identity, so neither is on this request.
@@ -979,7 +975,12 @@ impl ContentPanel {
             Self::CollectionAbout => (Style::Alert, AppArg::CollectionAbout),
             Self::TrackPick { audio, chosen, anchor } => (
                 Style::Compact,
-                AppArg::TrackPick(crate::screens::track_pick::TrackPickArg { audio, chosen, anchor }),
+                AppArg::TrackPick(crate::screens::track_pick::TrackPickArg {
+                    host,
+                    audio,
+                    chosen,
+                    anchor,
+                }),
             ),
             Self::Images { anchor } => (
                 Style::Compact,
@@ -1566,7 +1567,7 @@ pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,S
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
-     TrackPick{audio:u8,chosen:i64,anchor:[u32;4]},\
+     TrackPick{host:u32,audio:u8,chosen:i64,anchor:[u32;4]},\
      Images{anchor:[u32;4]},\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
      host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
@@ -1962,6 +1963,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         AppArg::PersonBio,
         AppArg::CollectionAbout,
         AppArg::TrackPick(crate::screens::track_pick::TrackPickArg {
+            host: crate::ui::machine::InstanceId(1),
             audio: true,
             chosen: 0,
             anchor: [0; 4],
@@ -2185,7 +2187,11 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // the detail hero opens the provider-picture grid the pre-playback window used to carry. A schema
 // transition rather than a rebaseline: the grid's cursor and its phase are state that moves while
 // it is up, so a recording taken before it could not tell two of its frames apart.
-const SCREEN_SHAPES_PIN: u64 = 0xad7a_d673_797c_86bb;
+//
+// **`TrackPick` learns its host** (0xad7a_d673_797c_86bb before it): the picker's argument now
+// carries the page it reports to, because a commit addressed to its own instance died with the
+// surface. Additive for every recording here (none opens the picker), and the replay proves it.
+const SCREEN_SHAPES_PIN: u64 = 0x16df_9f5e_e595_f1be;
 
 #[cfg(test)]
 mod arg_tests {

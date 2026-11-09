@@ -611,34 +611,6 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                     target_ns,
                 );
             }
-            ContentReq::Tracks { audio_sid, sub_sid } => {
-                // The picker named stream ids; the PAGE keeps them (it owns what its Play press
-                // hands to `StartTracks`). **The reporter is the picker's own instance**, and it
-                // dismisses itself in the same frame, so delivering back to `instance` posted the
-                // choice to a surface that was already leaving: the mark never reached the page
-                // and Play started with the ladder's own track (measured on the panel, 2026-11-09).
-                // The host is the entry UNDER the surface, which is the page that opened it.
-                let host = app
-                    .pages
-                    .nav
-                    .tabs
-                    .stack
-                    .entries
-                    .iter()
-                    .position(|e| e.id == entry)
-                    .and_then(|i| i.checked_sub(1))
-                    .and_then(|i| app.pages.nav.tabs.stack.entries[i].inst.as_ref().map(|inst| inst.id))
-                    .unwrap_or(instance);
-                app.pages.emit(
-                    MachineId::Nav,
-                    Fx::Deliver(
-                        MachineId::Instance(host),
-                        Delivery::Screen(ScreenEvent::App(
-                            crate::screens::registry::AppMsg::DetailTracks { audio_sid, sub_sid },
-                        )),
-                    ),
-                );
-            }
             ContentReq::Panel(panel) => {
                 halt_preview(app);
                 // **The SUBJECT is the page's item, and a page need not have one.** A panel that
