@@ -5604,6 +5604,21 @@ impl Default for StripRender {
     }
 }
 
+impl StripRender {
+    /// The pill the SELECTION capsule is bound to this frame, or -1. Test-only: the whole point of
+    /// a travelling mark is that its target is not something the app can be asked about, so the
+    /// regression tests read it here rather than reconstructing it from published geometry.
+    #[cfg(test)]
+    pub(crate) fn selection_pill(&self) -> i32 {
+        self.top_strip.sel.at
+    }
+    /// …and the FOCUS capsule's.
+    #[cfg(test)]
+    pub(crate) fn focus_pill(&self) -> i32 {
+        self.top_strip.foc.at
+    }
+}
+
 /// **What the shared top bar is made of, THIS frame** — published by [`StripRender::draw`] and
 /// consumed by [`profile_chip_with`], the band's other surface.
 ///
