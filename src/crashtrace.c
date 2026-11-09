@@ -300,9 +300,33 @@ void butaca_crash_write_image_marker(int fd) {
     ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
     if (n <= 0) return;
     path[n] = 0;
-    const char pre[] = "bin: ";
+    /* A LAUNCH MARKER, and it says so. It used to be a bare `bin: <path>` line, one per launch,
+     * which made the append-only file look like a stream of records with their header missing:
+     * triage read "bin:" lines with no `*** SIGNAL` above them and could not tell an idle marker
+     * from a crash whose first line had been lost (#328 follow-up). The epoch and the pid make
+     * every line attributable to one run, and the prefix says what it is. */
+    const char pre[] = "run: ";
     // warn_unused_result does not honour the (void) cast; a named sink does.
+    char when[64];
+    int k = 0;
+    const char *w = " t=";
+    while (*w) when[k++] = *w++;
+    unsigned long long t = (unsigned long long)time(NULL);
+    char digits[24];
+    int d = 0;
+    if (t == 0) digits[d++] = '0';
+    while (t) { digits[d++] = (char)('0' + (t % 10)); t /= 10; }
+    while (d) when[k++] = digits[--d];
+    w = " pid=";
+    while (*w) when[k++] = *w++;
+    unsigned long long pid = (unsigned long long)getpid();
+    d = 0;
+    if (pid == 0) digits[d++] = '0';
+    while (pid) { digits[d++] = (char)('0' + (pid % 10)); pid /= 10; }
+    while (d) when[k++] = digits[--d];
+    when[k++] = ' ';
     ssize_t ignored = write(fd, pre, sizeof(pre) - 1);
+    ignored += write(fd, when, (size_t)k);
     ignored += write(fd, path, (size_t)n);
     ignored += write(fd, "\n", 1);
     (void)ignored;
