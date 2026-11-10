@@ -1518,12 +1518,11 @@ where
             let n = nav.tabs.stack.entries.len();
             let top_entry = nav.tabs.stack.top().map(|entry| entry.id);
             let from = if draws_below { n.saturating_sub(2) } else { n.saturating_sub(1) };
-            // **The page-scroll publication is cleared before the walk**, so that a page which does
-            // not draw this pass (a held transition image) leaves the bar's brand at its head
-            // instead of riding an answer from the frame before. A page that does draw publishes
-            // its own (`ui::nav::publish_page_scroll`), and the top page draws last, so its value
-            // is the one `draw_chrome` reads below.
-            super::nav::reset_page_scroll();
+            // **The bar's brand rides what the page on top says about its own scroll.** Declared
+            // here, outside the loop, because the page publishes it INTO its own `DrawFrame` and
+            // the chrome is drawn after that page, in the same iteration. A page that does not
+            // draw this pass (a held transition image) leaves the default, which is the head.
+            let mut chrome_navigation = navigation;
             for (index, e) in nav.tabs.stack.entries[from..].iter_mut().enumerate() {
                 let page_z = Z::page(index);
                 if page_z >= ceiling { break; }
@@ -1557,6 +1556,9 @@ where
                         if !full_alpha { f.page_alpha *= nav.tabs.stack.transition.page_alpha(); }
                         backdrop::draw_span("page", || inst.screen.draw(&mut f));
                         report.drawn.push(inst.id);
+                        // What the page said about its own scroll, carried to the bar it shares
+                        // with its neighbours. Read before `into_stops` consumes the frame.
+                        chrome_navigation.page_scroll = f.page_scroll();
                         let drawn_stops = f.into_stops();
                         if capture { *page_stops = drawn_stops.clone(); }
                         stops.extend(drawn_stops);
@@ -1587,7 +1589,7 @@ where
                         chrome_parts.focus = input.engine.read(chrome_parts.owner);
                         drop(page_cx);
                         let _chrome_layer = backdrop::layer(Z::CHROME, true);
-                        backdrop::draw_span("chrome", || rig.draw_chrome(&e.arg, &chrome_parts, navigation, glass.as_deref_mut()));
+                        backdrop::draw_span("chrome", || rig.draw_chrome(&e.arg, &chrome_parts, chrome_navigation, glass.as_deref_mut()));
                     }
                 }
             }

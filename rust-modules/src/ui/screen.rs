@@ -824,11 +824,23 @@ pub struct NavPresentation {
     pub chrome_alpha: f32,
     pub view_tab: Option<u32>,
     pub blur_amount: f32,
+    /// **How far the page on top has left its own head**, 0 at the top and 1 once it has scrolled
+    /// past the shared bar's brand (owner, 2026-11-10: "el logo de Butaca que desaparezca en cuanto
+    /// hacemos scroll").
+    ///
+    /// The PAGE answers it, because the page is the only thing that knows: Home's head is its
+    /// billboard and the dive that leaves it, the Library's and Search's are their documents'
+    /// scroll offsets. A page states it during its own draw
+    /// ([`DrawFrame::scrolled_to`]), the dispatcher carries the answer into the frame it then asks
+    /// the application to draw the bar with, and the bar maps it to the brand's alpha
+    /// ([`crate::ui::widgets::brand_alpha`]). It travels here rather than through a second static
+    /// for the reason this whole type exists: a screen never reads a live nav singleton.
+    pub page_scroll: f32,
 }
 
 impl Default for NavPresentation {
     fn default() -> Self {
-        Self { page_alpha: 1.0, chrome_alpha: 1.0, view_tab: None, blur_amount: 0.0 }
+        Self { page_alpha: 1.0, chrome_alpha: 1.0, view_tab: None, blur_amount: 0.0, page_scroll: 0.0 }
     }
 }
 
@@ -854,6 +866,11 @@ pub struct DrawFrame<'a, 'views, H: Host> {
     /// construction — the one write is `with_navigation`.
     pub nav_page_alpha: f32,
     pub press: PressRead,
+    /// **How far this page has left its own head**, 0..1, as the page itself reports it during its
+    /// own draw with [`DrawFrame::scrolled_to`]. The dispatcher carries it out of this frame into
+    /// the [`NavPresentation`] the application draws the shared bar with, which is where the bar's
+    /// brand reads it. A page that never calls the setter stays at 0 and keeps its brand.
+    page_scroll: f32,
     /// **The page under this surface, as the container latched it** — the `ModalStack`'s one
     /// underlay field (`containers::modal::ModalUnderlay`), which a popover panel's ground is drawn
     /// from (`widgets::panel_ground`). `None` on a page's own frame and on any frame whose
@@ -878,9 +895,27 @@ impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
             blur_amount: nav.blur_amount,
             nav_page_alpha: nav.page_alpha,
             press: cx.press,
+            page_scroll: 0.0,
             underlay: None,
             stops: Vec::new(),
         }
+    }
+
+    /// **State how far this page has left its own head** (0 at the top, 1 once the shared bar's
+    /// brand has nothing left to sit on). A page calls this once, at the top of its own draw, with
+    /// the same numbers it places its content from - Home's dive and shelf scroll, the Library's
+    /// and Search's document offsets - and the dispatcher carries the answer to the bar.
+    ///
+    /// A method rather than a public field on purpose: the value is a claim about the PAGE, and the
+    /// one thing that must not happen is a container or a wrapper frame writing it on the page's
+    /// behalf with a number the page did not choose.
+    pub fn scrolled_to(&mut self, amount: f32) {
+        self.page_scroll = if amount.is_nan() { 0.0 } else { amount.clamp(0.0, 1.0) };
+    }
+
+    /// …and the read, for the dispatcher that carries it out of the frame.
+    pub fn page_scroll(&self) -> f32 {
+        self.page_scroll
     }
 
     /// Carry this frame's presentation into a nested frame, including any container alpha.
@@ -897,6 +932,7 @@ impl<'a, 'views, H: Host> DrawFrame<'a, 'views, H> {
             chrome_alpha: self.chrome_alpha,
             view_tab: self.view_tab,
             blur_amount: self.blur_amount,
+            page_scroll: self.page_scroll,
         }
     }
 
@@ -1100,6 +1136,7 @@ mod draw_frame_tests {
             chrome_alpha: 1.0,
             view_tab: None,
             blur_amount: 0.0,
+            page_scroll: 0.0,
         };
         let mut f = DrawFrame::with_navigation(&cx, Painter::root(), navigation);
         assert_eq!(f.nav_page_alpha, 0.42);
@@ -1219,4 +1256,59 @@ pub fn pop_sequence<H: Host>(top: EntryId, under: Option<EntryId>) -> Vec<(Entry
         v.push((u, ScreenEvent::Enter(Enter::Restored)));
     }
     v
+}
+
+#[cfg(test)]
+mod page_scroll_tests {
+    use super::*;
+    use crate::ui::fixture::FixtureHost;
+    use crate::ui::machine::{Cx, EntryId, FocusRead, InputOwner, PressRead, Tick};
+
+    fn cx<'a>(
+        measure: &'a dyn crate::ui::machine::Measure,
+        store: &'a crate::ui::fixture::FixtureView,
+    ) -> Cx<'a, FixtureHost> {
+        Cx {
+            views: crate::ui::fixture::FixtureViews { store },
+            tick: Tick::default(),
+            measure,
+            press: PressRead::default(),
+            focus: FocusRead::default(),
+            owner: InputOwner::Entry(EntryId(0)),
+        }
+    }
+
+    /// **The bar's brand rides the page's own answer, and the answer is a claim about the PAGE.**
+    /// A page that never states one is at its head; a page that states nonsense cannot hide the
+    /// brand for good (a NaN from a spring handed a bad dt) nor light it past solid (a negative
+    /// offset from an overshooting scroll).
+    #[test]
+    fn a_page_states_its_own_scroll_and_the_frame_clamps_it() {
+        let m = crate::ui::fixture::FixtureMeasure;
+        let store = crate::ui::fixture::FixtureView::default();
+        let context = cx(&m, &store);
+        let mut f = DrawFrame::new(&context, Painter::root());
+        assert_eq!(f.page_scroll(), 0.0, "a page that says nothing is at its head");
+        f.scrolled_to(0.4);
+        assert_eq!(f.page_scroll(), 0.4);
+        f.scrolled_to(7.5);
+        assert_eq!(f.page_scroll(), 1.0, "it cannot scroll past gone");
+        f.scrolled_to(-2.0);
+        assert_eq!(f.page_scroll(), 0.0, "nor above its head");
+        f.scrolled_to(f32::NAN);
+        assert_eq!(f.page_scroll(), 0.0, "a NaN amount reads as the head, never as a hidden brand");
+    }
+
+    /// A frame built from a presentation starts at the head whatever the presentation carried: the
+    /// value travels OUT of a page's frame (the dispatcher copies it into the next presentation),
+    /// never into one, so a nested frame cannot inherit a parent's scroll as its own.
+    #[test]
+    fn a_fresh_frame_starts_at_its_own_head() {
+        let m = crate::ui::fixture::FixtureMeasure;
+        let store = crate::ui::fixture::FixtureView::default();
+        let context = cx(&m, &store);
+        let nav = NavPresentation { page_scroll: 0.9, ..Default::default() };
+        let f = DrawFrame::with_navigation(&context, Painter::root(), nav);
+        assert_eq!(f.page_scroll(), 0.0);
+    }
 }

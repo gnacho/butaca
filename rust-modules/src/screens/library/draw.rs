@@ -108,7 +108,7 @@ impl LibraryScreen {
         });
         // **How far this page has left its head, for the shared bar's brand** - the document's own
         // scroll, the same spring the grid, the shelves and the rail are placed from.
-        crate::ui::nav::publish_page_scroll(crate::ui::widgets::brand_scroll(self.scroll.pos));
+        f.scrolled_to(crate::ui::widgets::brand_scroll(self.scroll.pos));
         crate::ui::profile::phase("lb.ground", || {
             self.ground.draw(f.painter.alpha(f.page_alpha), Rect::FULL);
         });

@@ -1149,7 +1149,7 @@ impl HomeScreen {
         // transition, which one wheel tick starts) and the shelf scroll (`scroll_y`, px) once the
         // grid is live. The brand rides the larger of the two, so the dive alone already takes it
         // away and coming back up the shelves brings it back as the page reaches its head.
-        crate::ui::nav::publish_page_scroll(
+        f.scrolled_to(
             crate::ui::widgets::brand_scroll(self.grid.scroll_y.pos)
                 .max(self.snap.pos.clamp(0.0, 1.0)),
         );

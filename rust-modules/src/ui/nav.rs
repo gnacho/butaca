@@ -62,10 +62,6 @@ thread_local! {
     /// Dev only: swap the dip for a blurred dissolve. Latched at boot from the trigger. Kept as
     /// its own cell because it is armed once per process and read by an unrelated caller.
     static BLUR_DISSOLVE: Cell<bool> = const { Cell::new(false) };
-    /// **How far the page on top has left its own head**, 0 at the top and 1 once it is scrolled
-    /// far enough that the shared bar's brand has nothing left to sit on. See
-    /// [`publish_page_scroll`].
-    static PAGE_SCROLL: Cell<f32> = const { Cell::new(0.0) };
 }
 
 /// **Publish this frame's transition**, from the container that owns it. One writer
@@ -125,38 +121,6 @@ pub(crate) fn view_tab(own: c_int) -> c_int {
     if t >= 0 { t } else { own }
 }
 
-/// **How far the page on top has left its head**, normalized 0..1 - the shared bar's brand rides
-/// it (owner, 2026-11-10: "el logo de Butaca que desaparezca en cuanto hacemos scroll").
-///
-/// Published by the page itself, during its own `draw`, because the page is the only thing that
-/// knows: Home's head is its billboard and the dive that leaves it, the Library's and Search's are
-/// their documents' scroll offsets. The dispatcher clears it before it walks the page stack and
-/// the bar is drawn after the page it belongs to, so the value read here is THIS frame's and the
-/// top page's, not a leftover from the page below or from the frame before.
-///
-/// A continuous amount rather than a boolean on purpose: a threshold would blink while a spring
-/// settles across it, and a scroll that is still moving is exactly when a logo appearing and
-/// disappearing reads as a fault. The bar maps it to alpha through
-/// [`crate::ui::widgets::CHROME_BRAND_FADE`].
-pub(crate) fn publish_page_scroll(amount: f32) {
-    // A NaN amount is a spring that has been handed a bad dt; it must read as the page's HEAD
-    // rather than as "scrolled to the end", because the second hides the bar's brand for good.
-    let amount = if amount.is_nan() { 0.0 } else { amount.clamp(0.0, 1.0) };
-    PAGE_SCROLL.with(|s| s.set(amount));
-}
-
-/// …and the read. 0 (the head) for a page that publishes nothing, which is every screen that does
-/// not scroll: the brand simply stays.
-pub(crate) fn page_scroll() -> f32 {
-    PAGE_SCROLL.with(Cell::get)
-}
-
-/// Clear the publication before a frame's page walk. Called by the dispatcher, which is the only
-/// thing that knows which page is on top.
-pub(crate) fn reset_page_scroll() {
-    PAGE_SCROLL.with(|s| s.set(0.0));
-}
-
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
@@ -184,7 +148,8 @@ mod tests {
     /// own selection, and the blur prototype reads the page ramp the other way up while flattening
     /// the dip it replaces.
     #[test]
-    fn the_pending_pill_overrides_and_the_blur_prototype_reads_the_ramp_inverted() {        let _g = crate::testlock::serial();
+    fn the_pending_pill_overrides_and_the_blur_prototype_reads_the_ramp_inverted() {
+        let _g = crate::testlock::serial();
         publish(0.25, 1.0, Some(2));
         assert_eq!(view_tab(0), 2, "the capsule travels to the queued destination");
         assert_eq!(page_alpha(), 0.25);
@@ -195,28 +160,5 @@ mod tests {
         assert_eq!(blur_amount(), 0.75);
         set_blur_dissolve(false);
         publish(1.0, 1.0, None);
-    }
-
-    /// **The page-scroll publication is a clamp and a reset, and nothing else.** The bar's brand
-    /// rides it (owner, 2026-11-10: the wordmark leaves with the page), so the two ways it can be
-    /// wrong are a value outside 0..1 arriving from a page's own arithmetic, and a value surviving
-    /// into a frame whose page did not publish - the stale answer that would keep the brand hidden
-    /// (or visible) after the page that decided it had gone.
-    #[test]
-    fn the_page_scroll_publication_clamps_and_clears() {
-        let _g = crate::testlock::serial();
-        reset_page_scroll();
-        assert_eq!(page_scroll(), 0.0, "a page that publishes nothing is at its head");
-        publish_page_scroll(0.4);
-        assert_eq!(page_scroll(), 0.4);
-        publish_page_scroll(7.5);
-        assert_eq!(page_scroll(), 1.0, "a page cannot scroll past gone");
-        publish_page_scroll(-2.0);
-        assert_eq!(page_scroll(), 0.0, "nor above its head");
-        publish_page_scroll(f32::NAN);
-        assert_eq!(page_scroll(), 0.0, "a NaN amount reads as the head, never as a hidden brand");
-        publish_page_scroll(1.0);
-        reset_page_scroll();
-        assert_eq!(page_scroll(), 0.0, "the frame's walk starts from the head");
     }
 }
