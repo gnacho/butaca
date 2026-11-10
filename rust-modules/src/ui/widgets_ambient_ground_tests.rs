@@ -286,18 +286,18 @@ fn a_page_changing_subject_jumps_rather_than_washing_the_old_one_across_it() {
     }
 }
 
-/// An artwork-less browsing page carries a soft blue envelope instead of the flat app surface.
+/// An artwork-less browsing page carries a soft violet-blue envelope instead of the flat app surface.
 #[test]
-fn the_artworkless_page_ground_is_a_warm_gradient() {
+fn the_artworkless_page_ground_is_a_cool_gradient() {
     let mut ground = PageGround::new();
     for _ in 0..120 {
         ground.key(None, PageGround::CARD_W, 1.0 / 60.0);
     }
-    assert!(!ground.is_flat(), "the warm fallback is drawn");
+    assert!(!ground.is_flat(), "the cool fallback is drawn");
     let corners = ground.corners();
     assert!(corners.iter().any(|a| *a != corners[0]), "a gradient, not a flat fill");
     for (i, corner) in corners.iter().enumerate() {
-        assert!(corner[0] > corner[2], "corner {i} must lean warm, got {corner:?}");
+        assert!(corner[2] > corner[0], "corner {i} must lean cool, got {corner:?}");
         assert!(contrast(theme::TEXT_TERTIARY, [corner[0], corner[1], corner[2], 1.0]) >= 3.0,
             "corner {i} drops tertiary ink below the floor");
         assert!(contrast(theme::TEXT_PRIMARY, [corner[0], corner[1], corner[2], 1.0]) >= 7.0,
@@ -305,15 +305,15 @@ fn the_artworkless_page_ground_is_a_warm_gradient() {
     }
 }
 
-/// Artwork still keys the ground, but the wash leans toward the same blue atmosphere.
+/// Artwork still keys the ground, but the wash leans toward the same violet-blue atmosphere.
 #[test]
-fn an_artwork_keyed_page_ground_leans_warm_and_stays_legible() {
+fn an_artwork_keyed_page_ground_leans_cool_and_stays_legible() {
     let mut ground = PageGround::new();
     for _ in 0..120 {
         ground.key(Some([[0.4, 0.4, 0.4]; 4]), PageGround::CARD_W, 1.0 / 60.0);
     }
     for (i, corner) in ground.corners().iter().enumerate() {
-        assert!(corner[0] - corner[2] > 0.01, "corner {i} did not take the warm lean: {corner:?}");
+        assert!(corner[2] - corner[0] > 0.01, "corner {i} did not take the cool lean: {corner:?}");
         assert!(contrast(theme::TEXT_TERTIARY, [corner[0], corner[1], corner[2], 1.0]) >= 3.0,
             "corner {i} drops tertiary ink below the floor");
         assert!(contrast(theme::TEXT_PRIMARY, [corner[0], corner[1], corner[2], 1.0]) >= 7.0,

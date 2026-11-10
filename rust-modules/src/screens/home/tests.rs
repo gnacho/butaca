@@ -546,11 +546,11 @@ fn blurred(blur: [[f32; 3]; 4]) -> CatalogMovie {
 }
 
 #[test]
-fn an_artless_home_falls_back_to_a_warm_wash() {
+fn an_artless_home_falls_back_to_a_cool_wash() {
     let corners = wash_corners(None, [theme::SURFACE_APP; 4], 1.0);
     assert!(corners.iter().any(|a| *a != corners[0]), "the fallback is a gradient");
     for (i, corner) in corners.iter().enumerate() {
-        assert!(corner[0] > corner[2], "corner {i} must lean warm, got {corner:?}");
+        assert!(corner[2] > corner[0], "corner {i} must lean cool, got {corner:?}");
     }
 }
 

@@ -1838,9 +1838,9 @@ mod tests {
     }
 
     #[test]
-    fn the_pre_home_fallback_leans_warm() {
+    fn the_pre_home_fallback_leans_cool() {
         for (i, corner) in theme::ROUTE_GROUND_FALLBACK.iter().enumerate() {
-            assert!(corner[0] > corner[2], "corner {i} must lean warm, got {corner:?}");
+            assert!(corner[2] > corner[0], "corner {i} must lean cool, got {corner:?}");
         }
     }
 

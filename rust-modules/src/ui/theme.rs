@@ -35,14 +35,18 @@ const fn rgb8(r: u8, g: u8, b: u8) -> [f32; 4] {
 }
 
 // Warm — the mockup's ember palette: page ground, inks, gold accents and the ambient wash.
+// The DARK stops (900/950/1000) are the page grounds, and the owner's 2026-11-10 pass swapped their
+// brown for the Jellyfin logo palette: a near-black violet instead of the ember-brown, so the page
+// reads as Jellyfin rather than as a warm generic. The light stops stay warm (the text inks) — the
+// request was the BACKGROUND, not the reading colour.
 const WARM_0: [f32; 4] = rgb8(0xff, 0xfd, 0xf8);
 const WARM_100: [f32; 4] = rgb8(0xff, 0xce, 0xa3);
 const WARM_300: [f32; 4] = rgb8(0xe8, 0xcd, 0xb0);
 const WARM_500: [f32; 4] = rgb8(0xd8, 0xc6, 0xb4);
 const WARM_700: [f32; 4] = rgb8(0xd0, 0xc3, 0xb4);
-const WARM_900: [f32; 4] = rgb8(0x24, 0x16, 0x11);
-const WARM_950: [f32; 4] = rgb8(0x1d, 0x12, 0x0c);
-const WARM_1000: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
+const WARM_900: [f32; 4] = rgb8(0x1c, 0x18, 0x29);
+const WARM_950: [f32; 4] = rgb8(0x16, 0x12, 0x21);
+const WARM_1000: [f32; 4] = rgb8(0x0e, 0x0b, 0x16);
 const WARM_ACCENT: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
 const WARM_GOLD: [f32; 4] = rgb8(0xe8, 0xa0, 0x4c);
 
@@ -81,12 +85,13 @@ const CAPTION_40: [f32; 4] = rgb8(0x66, 0x66, 0x66);
 const CAPTION_28: [f32; 4] = rgb8(0x47, 0x47, 0x47);
 
 // Warm atmosphere — four dark, low-frequency stops for the artwork-less page ground. The range
-// moves from ember at the top left to wine at the bottom right, over the app's near-black base.
-// These are page grounds, never control fills or state colours.
-const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x8c, 0x32, 0x1c);
-const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x7a, 0x2c, 0x3f);
-const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x2a, 0x1a, 0x12);
-const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x5a, 0x24, 0x18);
+// used to run ember to wine; the owner's 2026-11-10 pass moved it to the Jellyfin logo palette, a
+// violet-to-blue sweep over the same near-black base. These are page grounds, never control fills
+// or state colours.
+const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x6a, 0x3f, 0xa0);
+const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x3f, 0x4a, 0x9a);
+const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x22, 0x1a, 0x38);
+const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x2a, 0x5a, 0x8a);
 
 // Semantic — amber / red / green: state and verdict, never decoration.
 const AMBER_300: [f32; 4] = rgb8(0xfa, 0xb8, 0x2e);
