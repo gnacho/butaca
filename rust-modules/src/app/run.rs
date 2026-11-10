@@ -1353,25 +1353,18 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         app.last_input = clock::now();
         if app.last_input.wrapping_sub(app.ptr.last_wheel) > 250 {
             app.ptr.last_wheel = app.last_input;
-            // **The host reads a DIFFERENT offset, and this one is not the LG-fork
-            // shift `decode_key` documents — it is the desktop `libSDL2` again being
-            // sdl2-compat forwarding into SDL3.** `SDL_MouseWheelEvent` on real SDL2
-            // (what the television runs) carries a plain `Sint32 y` at +20, which is
-            // what production code always read. Measured 2026-09-02 by dumping the
-            // polled bytes of an injected -40 tick on this host: `+20` came back 0, and
-            // -40.0 arrived instead as the FLOAT `preciseY` field at `+32` — SDL2's own
-            // struct gained that field in 2.0.18 for fractional trackpad scroll, and
-            // sdl2-compat's round trip apparently only forwards it, leaving the legacy
-            // integer field zeroed for both a genuine trackpad tick and anything
-            // `SDL_PushEvent`d in this shape (item 13's `wheel:<dy>` FIFO token hit
-            // this the first time anything synthesized a wheel event at all — nothing
-            // needed one before). `cfg!`, not `#[cfg]`, so both arms keep compiling.
-            let dy = if cfg!(feature = "hostsim") {
-                rd_f32(&app.ev, 32).round() as i32
-            } else {
-                rd_i32(&app.ev, 20)
-            };
+            // **Which field carries the delta is the SDL's business, not this arm's** - `wheel_dy`
+            // reads all of them, so a firmware that fills `y` for one direction and `preciseY`
+            // for the other (or a host that fills only the float) is no longer a wheel that
+            // answers one way. The old `cfg!(feature = "hostsim")` split is gone with it: the
+            // host and the device now read the same fields.
+            let dy = super::events::wheel_dy(&app.ev);
             app.rec.input(super::recorder::enc_pointer("wheel", 0, dy));
+            // **Every wheel tick that is DELIVERED says so**, in the same forensic shape as the key
+            // and click lines. The owner's "scroll up only works downward" (2026-11-10) is a report
+            // whose whole question is "did the tick arrive, and with which sign" - and until this
+            // line there was no answer in the log for either half.
+            log(&format!("[{}] wheel dy={dy}", app.last_input));
             // the wheel scrolls VERTICALLY only, and only on routes with a vertical
             // flow (it used to drive home's focus behind every other screen)
             //

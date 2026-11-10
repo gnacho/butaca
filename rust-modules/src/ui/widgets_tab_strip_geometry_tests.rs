@@ -47,15 +47,20 @@ fn tab_geometry_is_shared_by_paint_members_and_clipping() {
     assert_eq!(geometry.track.w, geometry.clip.w + 2.0 * TAB_TRACK_PAD);
 }
 
+/// **A pill's width follows its FACE**: a word is measured and padded, a mark is the square the
+/// control family draws its icons in. The owner's 2026-11-10 pass made Inicio and Favoritos marks
+/// too, so this is no longer "the last pill is the Search icon".
 #[test]
-fn captured_tab_labels_measure_words_and_keep_the_search_mark_square() {
+fn captured_tab_labels_measure_words_and_give_every_mark_a_square_pill() {
     use super::*;
-    let labels = vec!["Home".into(), "Фильмы".into(), String::new()];
-    let (words, widths) = tab_metrics_from(&labels, |s| s.to_bytes().len() as f32 * 7.0);
+    let labels = vec![String::new(), "Фильмы".into(), "Movies".into(), String::new()];
+    let icons = [Some(crate::ui::icons::Icon::Home), None, None, Some(crate::ui::icons::Icon::Search)];
+    let (words, widths) = tab_metrics_from(&labels, &icons, |s| s.to_bytes().len() as f32 * 7.0);
     assert_eq!(words.len(), labels.len());
-    assert_eq!(widths[0], 4.0 * 7.0 + 2.0 * TAB_PILL_PAD);
+    assert_eq!(widths[0], TAB_ICON_PILL_W, "the house is a mark");
     assert_eq!(widths[1], "Фильмы".len() as f32 * 7.0 + 2.0 * TAB_PILL_PAD);
-    assert_eq!(widths[2], TAB_ICON_PILL_W);
+    assert_eq!(widths[2], 6.0 * 7.0 + 2.0 * TAB_PILL_PAD);
+    assert_eq!(widths[3], TAB_ICON_PILL_W, "the magnifier is a mark");
     assert_eq!(words[1].to_bytes(), "Фильмы".as_bytes());
 }
 
@@ -63,13 +68,17 @@ fn captured_tab_labels_measure_words_and_keep_the_search_mark_square() {
 fn tab_metrics_cache_rejects_different_captured_labels_even_at_the_same_generation() {
     use super::*;
     let labels = vec!["Home".into(), "Movies".into(), String::new()];
-    let (words, widths) = tab_metrics_from(&labels, |_| 42.0);
-    let cache = (7, words, widths);
-    assert!(tab_cache_matches(&cache, TabLabels { generation: 7, labels: &labels }));
-    assert!(!tab_cache_matches(&cache, TabLabels { generation: 8, labels: &labels }));
+    let icons = [None, None, Some(crate::ui::icons::Icon::Search)];
+    let (words, widths) = tab_metrics_from(&labels, &icons, |_| 42.0);
+    let cache = (7, words, widths, icons.to_vec());
+    assert!(tab_cache_matches(&cache, TabLabels { generation: 7, labels: &labels, icons: &icons }));
+    assert!(!tab_cache_matches(&cache, TabLabels { generation: 8, labels: &labels, icons: &icons }));
     let changed = vec!["Home".into(), "TV Shows".into(), String::new()];
-    assert!(!tab_cache_matches(&cache, TabLabels { generation: 7, labels: &changed }));
-    assert!(!tab_cache_matches(&cache, TabLabels { generation: 7, labels: &labels[..2] }));
+    assert!(!tab_cache_matches(&cache, TabLabels { generation: 7, labels: &changed, icons: &icons }));
+    assert!(!tab_cache_matches(&cache, TabLabels { generation: 7, labels: &labels[..2], icons: &icons }));
+    // …and the same words with a different FACE are a different vocabulary too.
+    let other = [Some(crate::ui::icons::Icon::Home), None, None];
+    assert!(!tab_cache_matches(&cache, TabLabels { generation: 7, labels: &labels, icons: &other }));
 }
 
 #[test]
@@ -264,4 +273,26 @@ fn a_stale_pill_index_clamps_instead_of_panicking() {
         "an empty strip has no width and no gaps"
     );
     assert_eq!(tab_scroll_target(&[], 0, 12.0), 0.0);
+}
+
+/// **The bar's brand leaves with the page and comes back at its head** - one linear ramp, written
+/// once, so Home's dive, the Library's document and Search's results cannot fade it at three
+/// different rates. Linear on purpose: a threshold would blink while a scroll spring settles
+/// across it, and the owner's complaint about a logo that "disappears when we scroll" is exactly
+/// the case where an appearing/disappearing control reads as a fault.
+#[test]
+fn the_bar_brand_rides_one_linear_ramp_from_head_to_gone() {
+    assert_eq!(super::brand_scroll(0.0), 0.0);
+    assert_eq!(super::brand_alpha(super::brand_scroll(0.0)), 1.0, "at the head it is there");
+    assert_eq!(super::brand_alpha(super::brand_scroll(super::BRAND_SCROLL_FADE)), 0.0,
+        "one fade's worth of travel and it is gone");
+    assert_eq!(super::brand_alpha(super::brand_scroll(super::BRAND_SCROLL_FADE * 3.0)), 0.0,
+        "and it stays gone, however far the page goes");
+    let half = super::brand_alpha(super::brand_scroll(super::BRAND_SCROLL_FADE * 0.5));
+    assert!((half - 0.5).abs() < 1e-6, "half the travel is half the brand");
+    // a negative scroll (an overshooting spring) is the head, never a brand brighter than solid
+    assert_eq!(super::brand_alpha(super::brand_scroll(-20.0)), 1.0);
+    // …and a bad frame hides nothing
+    assert_eq!(super::brand_alpha(f32::NAN), 1.0);
+    assert_eq!(super::brand_scroll(f32::NAN), 0.0);
 }

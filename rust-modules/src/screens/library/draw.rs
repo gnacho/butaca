@@ -106,6 +106,9 @@ impl LibraryScreen {
         crate::ui::profile::phase("lb.clear", || {
             crate::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
         });
+        // **How far this page has left its head, for the shared bar's brand** - the document's own
+        // scroll, the same spring the grid, the shelves and the rail are placed from.
+        f.scrolled_to(crate::ui::widgets::brand_scroll(self.scroll.pos));
         crate::ui::profile::phase("lb.ground", || {
             self.ground.draw(f.painter.alpha(f.page_alpha), Rect::FULL);
         });

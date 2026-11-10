@@ -1,0 +1,9 @@
+{
+  "expected": "0x8d20a9b5f99b5087",
+  "first_frame": 7,
+  "from_state_fp": 16138183083481204964,
+  "got": "0x84717611f487ed4c",
+  "preceding_event_kinds": [],
+  "reason": "poster",
+  "to_state_fp": 16138183083481204964
+}

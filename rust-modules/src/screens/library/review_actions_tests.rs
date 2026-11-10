@@ -457,7 +457,8 @@ fn rail_keyboard_ok_and_back_return_the_exact_engine_remembered_item() {
         let fixture = Fixture::new();
         let mut page = fixture.screen();
         let mut engine = FocusEngine::new();
-        let grid = page.key(page.pair.detail.elems[17]);
+        // the last COLUMN of a row: RIGHT is what leaves the grid for the rail
+        let grid = page.key(page.pair.detail.elems[4 * layout::COLS - 1]);
         engine.set(
             OWNER,
             grid,

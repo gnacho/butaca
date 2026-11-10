@@ -1090,7 +1090,7 @@ fn search_route_steps_the_shared_strip_so_its_published_rects_do_not_go_stale() 
     // scroll spring far from where Search's own (short) labels want it.
     let wide: Vec<String> = (0..8).map(|i| format!("Wide Destination Label Number {i}")).collect();
     rig.strip.reveal(
-        crate::ui::widgets::TabLabels { generation: 1, labels: &wide },
+        crate::ui::widgets::TabLabels { generation: 1, labels: &wide, icons: &[] },
         wide.len() - 1,
     );
 

@@ -180,6 +180,10 @@ pub enum Icon {
     Search,
     /// The Settings gear, one stroked path with its centre circle as a subpath.
     Settings,
+    /// **The house - the top strip's Inicio destination** (owner's 2026-11-10 pass: "el menú
+    /// principal: cambiar Inicio y Favoritos por iconos"). It is a MARK, so it is drawn in the
+    /// strip's square icon pill at [`TAB_ICON_D`], and it takes the strip's own mixed ink.
+    Home,
     /// The empty face of the audience score's star, the SCALE a filled star is read against, and
     /// the reason a row of them says "out of five". One five-point polygon, see `star.svg`.
     Star,
@@ -349,6 +353,7 @@ fn src(id: Icon) -> &'static str {
         Icon::More => include_str!("../../../assets/icons/more.svg"),
         Icon::Search => include_str!("../../../assets/icons/search.svg"),
         Icon::Settings => include_str!("../../../assets/icons/settings.svg"),
+        Icon::Home => include_str!("../../../assets/icons/home.svg"),
         Icon::Star => include_str!("../../../assets/icons/star.svg"),
         Icon::StarFill => include_str!("../../../assets/icons/star-fill.svg"),
         Icon::Tomato => include_str!("../../../assets/icons/tomato.svg"),

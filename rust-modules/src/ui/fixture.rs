@@ -768,7 +768,7 @@ impl Screen<FixtureHost> for FixtureModal {
         self.last_draw_alpha = f.page_alpha;
         self.last_navigation = super::screen::NavPresentation {
             page_alpha: f.page_alpha, chrome_alpha: f.chrome_alpha,
-            view_tab: f.view_tab, blur_amount: f.blur_amount,
+            view_tab: f.view_tab, blur_amount: f.blur_amount, page_scroll: f.page_scroll(),
         };
         let p = f.painter;
         let r = Rect::new(600.0, 200.0, 720.0, 600.0);
@@ -1004,7 +1004,7 @@ impl Rig<FixtureHost> for FixtureRig {
         self.navigation_reads.set(self.navigation_reads.get() + 1);
         super::screen::NavPresentation {
             page_alpha: self.page_alpha, chrome_alpha: self.chrome_alpha,
-            view_tab: self.view_tab, blur_amount: self.blur_amount,
+            view_tab: self.view_tab, blur_amount: self.blur_amount, page_scroll: 0.0,
         }
     }
     fn draw_chrome(&mut self, _arg: &FixtureArg, _parts: &CxParts<u32>,
@@ -1019,7 +1019,11 @@ impl Rig<FixtureHost> for FixtureRig {
                 name: &self.scrim_name,
                 name_w: 0.0,
             },
-            labels: super::widgets::TabLabels { generation: 1, labels: &self.scrim_labels },
+            labels: super::widgets::TabLabels {
+                generation: 1,
+                labels: &self.scrim_labels,
+                icons: &[],
+            },
             chip_expand: self.scrim_expand,
         })
     }

@@ -463,9 +463,11 @@ mod tests {
         assert_eq!(eviction_plan(6, 3).map(|plan| (plan[1].target, plan[2].target)), Ok((Target::Library(3), Target::Library(5))));
         assert_eq!(eviction_plan(1, 3).map(|_| ()), Err(Unfit { what: "library-rows", have: 1, need: 6 }));
         // Dive: the retained offset must reach the bar the grader holds it to.
-        assert!(shelf_offset(8, 9) < DIVE_MIN_OFFSET_PX);
-        assert_eq!(dive_plan(9), Err(Unfit { what: "home-shelf0-cards", have: 9, need: 10 }));
-        assert_eq!(dive_plan(0), Err(Unfit { what: "home-shelf0-cards", have: 0, need: 10 }));
+        // The bar is a DISTANCE, so the card count that reaches it follows the card width: at the
+        // shared 300px poster, eight cards still hold the head on screen and nine do not.
+        assert!(shelf_offset(7, 8) < DIVE_MIN_OFFSET_PX);
+        assert_eq!(dive_plan(8), Err(Unfit { what: "home-shelf0-cards", have: 8, need: 9 }));
+        assert_eq!(dive_plan(0), Err(Unfit { what: "home-shelf0-cards", have: 0, need: 9 }));
         // A catalog of the wrong shape can never be planned against.
         assert!(plan_for(Mode::Dive, Content::Grid { rows: 26, per_screen: 3 }).is_err());
     }

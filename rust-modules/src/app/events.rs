@@ -190,6 +190,45 @@ pub(crate) fn rd_i32(ev: &[u8], off: usize) -> i32 {
     i32::from_ne_bytes([ev[off], ev[off + 1], ev[off + 2], ev[off + 3]])
 }
 
+/// **A wheel tick's vertical delta, read from EVERY field that can carry it.**
+///
+/// `SDL_MouseWheelEvent` grew: `Sint32 y` at +20 has been there since 2.0.0, and `float preciseY`
+/// at +32 arrived in 2.0.18 for fractional trackpad scrolling. The two SDLs this app links do not
+/// agree on which of them a tick fills. Stock SDL2 on the host writes `preciseY` and leaves the
+/// integer zeroed (measured 2026-09-02, and the reason the host had an arm of its own), while a
+/// fork that only knows the older struct writes `y`. Reading one field means every tick from the
+/// other SDL is silently dropped, and a platform that fills the integer for one direction only
+/// drops exactly that direction - which is the owner's report on the television ("scroll up with
+/// the Magic Remote only works downward", 2026-11-10). The simulator had the same defect in the
+/// other half: `wheel:` drove nothing at all, because its synthesized tick filled +20 and the
+/// host arm read +32.
+///
+/// So the delta is the first NON-ZERO of `y`, `preciseY`, and then the horizontal pair, because a
+/// fork that maps the remote's wheel onto the x axis would otherwise be a dead wheel. Zero stays
+/// zero: that is a fractional tick that rounded to nothing, and the caller must ignore it rather
+/// than invent a step. The float arms are bounded by a notched mouse's own ±120 so stale bytes
+/// past an older, shorter struct cannot be read as a tick.
+pub(crate) fn wheel_dy(ev: &[u8]) -> i32 {
+    const MAX_TICK: f32 = 120.0;
+    let y = rd_i32(ev, 20);
+    if y != 0 {
+        return y;
+    }
+    let precise = rd_f32(ev, 32);
+    if precise.is_finite() && precise.abs() >= 0.5 && precise.abs() <= MAX_TICK {
+        return precise.round() as i32;
+    }
+    let x = rd_i32(ev, 16);
+    if x != 0 {
+        return x;
+    }
+    let precise_x = rd_f32(ev, 28);
+    if precise_x.is_finite() && precise_x.abs() >= 0.5 && precise_x.abs() <= MAX_TICK {
+        return precise_x.round() as i32;
+    }
+    0
+}
+
 pub(crate) fn rd_f32(ev: &[u8], off: usize) -> f32 {
     f32::from_ne_bytes([ev[off], ev[off + 1], ev[off + 2], ev[off + 3]])
 }
@@ -380,7 +419,11 @@ pub(crate) fn remote_synth_key_repeat(sym: c_uint, wcode: c_uint) {
 pub(crate) fn remote_synth_wheel(dy: i32) {
     let mut ev = [0u8; 128];
     ev[0..4].copy_from_slice(&SDL_MOUSEWHEEL.to_ne_bytes());
+    // Both halves of the delta, as a real SDL2 >= 2.0.18 writes them: the integer `y` and the
+    // float `preciseY`. Filling one only is how a synthesized tick reaches an app that reads the
+    // other as "no step at all" (`wheel_dy` documents the two SDLs).
     ev[20..24].copy_from_slice(&dy.to_ne_bytes());
+    ev[32..36].copy_from_slice(&(dy as f32).to_ne_bytes());
     unsafe { SDL_PushEvent(ev.as_ptr() as *const c_void) };
 }
 
@@ -435,10 +478,43 @@ mod input_event_tests {
         }
     }
 
+    /// **A wheel tick answers in BOTH directions, whichever field the SDL filled.** The defect
+    /// this pins is the owner's: with only `y` read, a host or firmware that fills `preciseY`
+    /// (stock SDL2) or fills `y` for one direction only drops the other direction outright, which
+    /// reads as a wheel that scrolls down and refuses to scroll back up.
+    #[test]
+    fn a_wheel_tick_reads_both_offsets_and_keeps_both_signs() {
+        let wheel = |y: i32, precise: f32, x: i32, precise_x: f32| {
+            let mut ev = [0u8; 128];
+            ev[0..4].copy_from_slice(&SDL_MOUSEWHEEL.to_ne_bytes());
+            ev[16..20].copy_from_slice(&x.to_ne_bytes());
+            ev[20..24].copy_from_slice(&y.to_ne_bytes());
+            ev[28..32].copy_from_slice(&precise_x.to_ne_bytes());
+            ev[32..36].copy_from_slice(&precise.to_ne_bytes());
+            wheel_dy(&ev)
+        };
+        // the older struct's integer field, both signs
+        assert_eq!(wheel(-40, 0.0, 0, 0.0), -40);
+        assert_eq!(wheel(40, 0.0, 0, 0.0), 40);
+        // …and the 2.0.18 float field, which is the only one a compat host fills
+        assert_eq!(wheel(0, -40.0, 0, 0.0), -40);
+        assert_eq!(wheel(0, 40.0, 0, 0.0), 40);
+        // a fractional trackpad tick still steps, and a sub-half one does not
+        assert_eq!(wheel(0, -1.4, 0, 0.0), -1);
+        assert_eq!(wheel(0, 0.2, 0, 0.0), 0);
+        // …and a fork that put the vertical delta on the horizontal axis is not a dead wheel
+        assert_eq!(wheel(0, 0.0, -3, 0.0), -3);
+        assert_eq!(wheel(0, 0.0, 0, 3.0), 3);
+        // the integer wins when both are present, so a notched tick is never halved
+        assert_eq!(wheel(3, 3.0, 0, 0.0), 3);
+        // stale bytes past an older, shorter struct are not a tick
+        assert_eq!(wheel(0, f32::NAN, 0, 0.0), 0);
+        assert_eq!(wheel(0, 1.0e9, 0, 0.0), 0);
+    }
+
     #[cfg(feature = "devtriggers")]
     #[test]
-    fn hang_probes_are_direct_recorder_tokens() {
-        for token in ["hang:1", "hang-raw:1", "hang:5001"] {
+    fn hang_probes_are_direct_recorder_tokens() {        for token in ["hang:1", "hang-raw:1", "hang:5001"] {
             assert!(token_is_direct(token));
         }
         for token in ["down", "hang:", "hang:-1", "hang-raw:bad"] {

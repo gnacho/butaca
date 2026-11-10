@@ -1237,14 +1237,20 @@ impl Rig<AppHost> for Bridge {
         let Some(glass) = glass else { return };
         self.prepare_chrome_logo();
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
-        if self.logo_tex != 0 && self.logo_px.0 > 0 && self.logo_px.1 > 0 {
+        // **The brand leaves with the page** (owner, 2026-11-10). It is drawn outside every page's
+        // own frame, so it cannot ride the page's alpha: the page states how far it has left its
+        // head in its own `DrawFrame` (`DrawFrame::scrolled_to`), the dispatcher carries that into
+        // this presentation, and this is the one reader. The strip, the clock and the gear stay -
+        // the bar is still the bar; only the wordmark goes.
+        let brand = crate::ui::widgets::brand_alpha(nav.page_scroll);
+        if self.logo_tex != 0 && self.logo_px.0 > 0 && self.logo_px.1 > 0 && brand > 0.004 {
             let h = 46.0;
             let w = h * self.logo_px.0 as f32 / self.logo_px.1 as f32;
             let logo = crate::ui::Rect::new(crate::ui::consts::MARGIN_X,
                 crate::ui::widgets::TOP_BAR_Y
                     + (crate::ui::widgets::TAB_PILL_H - h) * 0.5,
                 w, h);
-            p.tex(self.logo_tex, logo, 0.0, crate::ui::theme::TEXT_PRIMARY);
+            p.alpha(brand).tex(self.logo_tex, logo, 0.0, crate::ui::theme::TEXT_PRIMARY);
         }
         if let Some(instance) = self.chrome.instance().map(|label| label.as_ptr()) {
             let badge = crate::ui::widgets::CircleButton::new(instance)
@@ -1284,6 +1290,8 @@ impl Rig<AppHost> for Bridge {
             chrome_alpha: crate::ui::nav::chrome_alpha(),
             view_tab: u32::try_from(crate::ui::nav::view_tab(-1)).ok(),
             blur_amount: crate::ui::nav::blur_amount(),
+            // the bar's brand rides the page's own answer, not a second static
+            page_scroll: 0.0,
         }
     }
     /// The bar's marked pill for `arg`, answered from the LIVE directory. See

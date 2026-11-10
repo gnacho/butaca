@@ -768,13 +768,20 @@ fn the_ground_is_skipped_only_when_opaque_art_covers_it() {
     );
 }
 
+/// **The billboard's head is the tallest logo's own clearance, and no logo can reach the tab
+/// track.** The block is TOP-anchored since the owner's 2026-11-10 pass, so this is the term that
+/// DECIDES where the title sits rather than a check on a stack computed upward from the bottom.
 #[test]
 fn the_home_hero_logo_never_reaches_the_top_bar() {
-    const META_H: f32 = 28.0 * 1.32;
-    let synopsis = crate::ui::hero_syn_h(crate::ui::HERO_SYN_MAXLINES);
     let band = hero_logo::band_h(LogoRung::Hero);
-    let top = hero_stack_top(band, META_H, theme::space::SM + synopsis);
-    assert!(top - (theme::logo::HERO_H_MAX - band) > crate::ui::widgets::TOP_BAR_BOTTOM);
+    let ink_top = crate::ui::landing_hero::TEXT_TOP - (theme::logo::HERO_H_MAX - band);
+    assert!(
+        ink_top >= crate::ui::widgets::TOP_BAR_BOTTOM - 0.01,
+        "a square emblem's ink starts at {ink_top}, the chrome ends at {}",
+        crate::ui::widgets::TOP_BAR_BOTTOM
+    );
+    // …and the block's head is still below the chrome, so no TEXT can reach it either.
+    assert!(crate::ui::landing_hero::TEXT_TOP > crate::ui::widgets::TOP_BAR_BOTTOM);
 }
 
 #[test]
@@ -2106,10 +2113,12 @@ fn a_shelf_heading_on_screen_is_drawn_while_its_cards_are_still_below_the_edge()
     assert!(!drawn(&s), "a shelf entirely below the screen draws nothing");
 }
 
-/// The mockup's wide row, as a property of the row and not of the painter: Continue Watching is
-/// the one hub that trades posters for 16:9 stills, and its stride is shorter because its art is.
+/// **Continue Watching is a poster row like every other shelf** (the owner's 2026-11-10 pass:
+/// "alinear para que TODAS se vean igual"). It was the app's one landscape row, and the Library's
+/// own deck shelf had already disagreed with it for months. What stays the deck's own is its
+/// BEHAVIOUR, not its tile: it plays on OK and its label leads with the amber triangle.
 #[test]
-fn continue_watching_is_the_one_landscape_row() {
+fn continue_watching_is_a_poster_row_like_every_other_shelf() {
     let _guard = crate::testlock::serial();
     let mut state = crate::catalog::CatalogState::default();
     let adapter = std::sync::Arc::new(crate::catalog::CatalogAdapter::default());
@@ -2121,24 +2130,17 @@ fn continue_watching_is_the_one_landscape_row() {
         .iter()
         .position(|r| r.identity == HomeHubIdentity::ContinueWatching)
         .expect("the demo library seeds Continue Watching");
-    assert!(s.row_landscape(cw));
-    assert_eq!(s.row_card(cw), (RowStyle::EPISODE.w, RowStyle::EPISODE.h));
-    assert_eq!(
-        s.row_pitch(cw),
-        card_row::ROW_PITCH_FIXED,
-        "the wide row keeps the poster stride; only its art is shorter"
-    );
-    assert!(s.row_card_dy(cw) > CARD_DY, "the shorter art sits on the band's foot");
+    assert_eq!(s.row_card(cw), (CARD_W, CARD_H), "the deck wears the shared poster");
+    assert_eq!(s.row_card_dy(cw), CARD_DY, "no shorter art to sit on the band's foot");
     let poster = s
         .rows
         .iter()
         .position(|r| r.identity != HomeHubIdentity::ContinueWatching)
         .unwrap_or(usize::MAX);
-    assert!(!s.row_landscape(poster));
     assert_eq!(s.row_card(poster), (CARD_W, CARD_H));
     assert_eq!(
-        s.row_pitch(cw + 1),
-        card_row::ROW_PITCH_FIXED,
-        "the rows below a landscape row do not re-flow"
+        s.row_pitch(cw),
+        s.row_pitch(poster),
+        "one stride for the whole stack: this is the alignment the owner asked for"
     );
 }

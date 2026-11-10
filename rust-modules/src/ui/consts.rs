@@ -9,9 +9,27 @@
 #![allow(dead_code)]
 use std::os::raw::{c_int, c_uint};
 
-pub const CARD_W: f32 = 250.0;
-pub const CARD_H: f32 = 375.0;
-pub const GAP: f32 = 30.0;
+/// **THE poster card's width** - one number, and every surface that draws a poster reads it:
+/// Home's shelves, the Library's All grid, the Library's shelves, the Collection page, Search and
+/// the detail page's Related row. Its height is the 2:3 aspect at [`CARD_H`], its slot pitch is
+/// `CARD_W + GAP`, and [`crate::ui::poster_grid`] is the one place the column count and the band
+/// those columns have to fit in are written down.
+///
+/// **300 since 2026-11-10** (the owner's pass: "carátulas 20% más grandes"). It was 250, and the
+/// enlargement is why the grid went from six columns to five: at 300 a sixth column does not fit
+/// inside the safe area beside the Library's alphabet rail, and a card that had to be squeezed to
+/// keep the count would not be an enlargement at all.
+pub const CARD_W: f32 = 300.0;
+/// The poster's height: 2:3, the shape every poster on the server is authored at.
+pub const CARD_H: f32 = 450.0;
+/// **The air between two poster columns, and it is a GRID constant rather than a shelf constant.**
+///
+/// It used to be `30` for Home and a `GRID_GAP` derived from the Library's own rail reserve, so
+/// the same six cards sat on two different lattices five pixels apart: Home's last column ended at
+/// 1746 and the Library's at 1772. The owner reported that as the four surfaces not looking alike
+/// ("alinear para que TODAS se vean igual"). One gap, one band, one lattice - see
+/// [`crate::ui::poster_grid::BAND_W`].
+pub const GAP: f32 = 44.0;
 /// **The safe area's LEFT/RIGHT keep-out — 5% of [`SCR_W`], and the reason it is 96 rather than 90.**
 ///
 /// A television overscans: the panel shows less than the frame it is handed, by a margin the set
@@ -111,12 +129,15 @@ pub fn inside_safe(r: crate::ui::Rect) -> bool {
 }
 
 // hero <-> grid continuum
-/// Shelf top in hero view. Re-derived once the peek row stopped magnifying its focused cell: the
-/// peek used to be judged off that popped tile, whose 1.09 scale about its centre lifted its top
-/// edge `CARD_H * 0.09 / 2 ≈ 17px` above every other card in the row. Un-popping the row dropped
-/// the whole shelf by that much, so the peek is 17px shallower here to keep the composition the
-/// hero view was tuned to (828 → 811; card top = `PEEK_Y + CARD_DY` = 837, as the popped one was).
-pub const PEEK_Y: f32 = 811.0;
+/// **Shelf top in hero view - the first row's `row_y`, whose cards start `CARD_DY` below it.**
+///
+/// It follows the hero's own action row now that the billboard's text block is TOP-anchored
+/// (2026-11-10): the row's head is [`crate::ui::landing_hero::TEXT_TOP`] and its bottom is the
+/// action row plus the page dots, so the first shelf can sit a full `space::XL` under the dots
+/// instead of the 811 that was tuned around a bottom-anchored block. A 450px poster starting at
+/// `PEEK_Y + CARD_DY` shows about three quarters of itself above the panel's foot, which is what
+/// makes the peek read as "there is a shelf here" rather than as a sliver.
+pub const PEEK_Y: f32 = 730.0;
 // shelf top in grid view — leaves the first hub title (row_y − TITLE_DY, lifted up to ~10 more when its
 // leftmost card magnifies) a clear space::MD under the profile chip (bottom edge 126).
 // 176 until 2026-08-23: it moved with the top bar, which dropped 18px so its track clears MARGIN_Y

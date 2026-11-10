@@ -302,7 +302,7 @@ impl Art<'_> {
 const STILL_RES: (c_int, c_int) = (420, 236);
 /// The box a portrait poster card asks the transcoder for. The collection fan baker requests its
 /// members at this box too, so a member already fetched for a card is a disk hit, not a refetch.
-pub(crate) const POSTER_RES: (c_int, c_int) = (250, 375);
+pub(crate) const POSTER_RES: (c_int, c_int) = (300, 450);
 
 /// **Which artwork a landscape tile draws, in order of preference.** The episode's own still, the
 /// show's backdrop, then the show's poster.
@@ -836,8 +836,8 @@ pub(crate) fn row_watch_state<T: crate::ui::tile::Tile + ?Sized>(m: &T) -> Poste
 /// The app's **two watch-state verbs**, written down once.
 ///
 /// Two surfaces offer this pair of writes — the press-and-hold card menu's state group
-/// ([`crate::screens::item_menu`]) and the detail hero's discs, which unfurl the verb on focus
-/// ([`crate::ui::detail`]'s `watch_label`) — and they are the same two actions on the same item.
+/// ([`crate::screens::item_menu`]) and the detail hero's discs, whose focused verb the hero names
+/// at the row's right end - and they are the same two actions on the same item.
 /// A menu row reading *Mark as Watched* beside a control reading *Watched* would read as two
 /// different writes, so both take the words from here. They sit beside [`row_watch_state`] because
 /// that function is the other half of the same vocabulary: it decides WHICH of these a surface may
@@ -851,7 +851,7 @@ pub(crate) fn mark_unwatched_verb() -> &'static str { crate::i18n::msg::widgets_
 /// …and the third verb the same two surfaces share: **play this from 00:00, ignoring the resume
 /// point.** The detail hero's disc and the card menu's row are one action, so they carry one WORD —
 /// this one. Before 2026-08-21 they did not even do that: the row said this and the disc said
-/// nothing at all, which is what the unfurl fixed.
+/// nothing at all, which is what the row's own verb caption fixed.
 ///
 /// **They deliberately carry two GLYPHS, and that is not the same mistake.** The row draws
 /// [`crate::ui::icons::Icon::PlayStart`], the hero disc draws `Icon::Restart` — because the disc is
@@ -1947,16 +1947,21 @@ const HERO_SCRIM_W: f32 = 0.80 * crate::ui::consts::SCR_W; // 1536
 const HERO_SCRIM_TOP: f32 = 0.15 * crate::ui::consts::SCR_H; // 162
 /// Where the wedge reaches full strength — and the seam between its two quads, named once so the
 /// pair is watertight by construction. It sits above every hero TEXT anchor, which is what lets
-/// [`hero_scrim_a`] be a function of x alone: both heroes baseline their title on the bottom of a
-/// `hero_logo::band_h` band (home's stack bottoms out at y≈528, detail's on `TITLE_BOTTOM` 566), so
-/// the highest cap top on either screen is ~479, and every line below it is lower still.
+/// [`hero_scrim_a`] be a function of x alone.
+///
+/// **It moved up from 0.39 (421.2) to 0.31 (334.8) with the home billboard's 2026-11-10 pass**, and
+/// the two numbers are one decision: the owner asked for the title and the synopsis at the TOP, so
+/// the text block's head is now 278 and its title's cap top 346 - above the old knee, where the
+/// wedge is still feathering in and the ink would have been graded by a field the paint does not
+/// deliver. The knee is the line that keeps the closed form honest, so it moved with the text.
 ///
 /// What DOES cross this line is a clearLogo, which is art: the band is a layout floor and a squarer
-/// mark spills upward out of it as paint, to y=298 on detail and y=260 on home. Up there the wedge
-/// is still feathering in (~0.27 of its peak at y=260) rather than absent, which is the reason nit
-/// 2's taller logos were sequenced AFTER this component; the clearance that binds them is the top
-/// chrome's ([`TOP_BAR_BOTTOM`]), asserted in `home.rs`, not this knee.
-const HERO_SCRIM_KNEE: f32 = 0.39 * crate::ui::consts::SCR_H; // 421.2
+/// mark spills upward out of it as paint, to y=130 on home (the top chrome's own bottom edge, which
+/// is exactly what [`crate::ui::landing_hero::TEXT_TOP`] is derived from). Up there the wedge is
+/// still feathering in rather than absent, which is the reason nit 2's taller logos were sequenced
+/// AFTER this component; the clearance that binds them is the top chrome's
+/// ([`TOP_BAR_BOTTOM`]), asserted in `home.rs`, not this knee.
+pub(crate) const HERO_SCRIM_KNEE: f32 = 0.31 * crate::ui::consts::SCR_H; // 334.8
 
 /// The mirrored RIGHT wedge — for a hero with a right-aligned column, which today means detail's
 /// "Starring" block at x 1270..1830, the one piece of hero copy the left wedge by definition cannot
@@ -1998,7 +2003,13 @@ const HERO_SCRIM_BAND_A: f32 = 0.34;
 /// other everywhere. Retuning the atmospheric floor is a different decision from sharing its
 /// origin, and only the panel can judge it; the curves stay as `ui::landing_hero::base_scrim_a` /
 /// `detail::base_scrim_a`, which is also what the legibility table below grades.
-pub(crate) const HERO_BASE_SCRIM_Y0: f32 = 0.34 * crate::ui::consts::SCR_H; // 367.2
+///
+/// **It starts at 0.30 (324) since 2026-11-10**, up from 0.34 (367.2): the home billboard's text
+/// block moved to the top of the panel, so the blurb's first line now sits at 472 instead of 584 and
+/// the bottom-up curve had less of itself left to give it. Graded over blown-white artwork that row
+/// came back 2.47:1 against a 2.5 floor; the earlier start is worth 0.04 of alpha there and leaves
+/// the foot where it was.
+pub(crate) const HERO_BASE_SCRIM_Y0: f32 = 0.30 * crate::ui::consts::SCR_H; // 324
 
 /// The hero wedge's alpha at `x`, at or below [`HERO_SCRIM_KNEE`] — which is where every hero text
 /// anchor sits, by construction (see that const). Pure, because the legibility contract is graded
@@ -2619,39 +2630,19 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
 // ---- CircleButton: circular disc + centered glyph, same keyed/unkeyed ControlStyle family as
 // Button / TransportButton. The hero + detail +/i/> circles. ----
 
-/// The **UNFURL**: a focused disc grows rightward into a capsule carrying the verb its press
-/// performs — icon-only at rest, LABELLED on focus.
+/// **A DISC IS A DISC - it does not grow a label on focus.**
 ///
-/// It exists because a disc is the one control that cannot say what it does. At ten feet a bare
-/// tick teaches nobody, and a television has no hover to hint with, so focus is the only moment the
-/// user can be told. Resting geometry is unchanged: at `e == 0` every number below cancels and the
-/// control is the same 60px disc it has always been, which is what lets the whole family opt in
-/// without a second widget beside it.
+/// It used to: a focused disc grew rightward into a capsule carrying the verb its press performs,
+/// on the argument that a bare tick teaches nobody and a television has no hover to hint with. The
+/// owner's 2026-11-10 pass ended it ("los iconos de reproducir, audio, etc. que no se expandan con
+/// texto"): the row's controls MOVED every time focus walked across them, so the thing the viewer
+/// was aiming at ran away from the pointer, and the row's total width was a function of which disc
+/// happened to be lit.
 ///
-/// The open capsule is `LEAD + icon + GAP + label + TAIL` — deliberately asymmetric, the icon side
-/// tighter, because a round glyph reads as further from a capsule's end than a stem does. The
-/// glyph's own inset slides from the disc's centring to [`DISC_LABEL_LEAD`] across the unfurl, so
-/// both ENDS are exactly the shapes the design draws rather than only the open one.
-///
-/// Sibling of the profile chip's own unfurl (`chip_cap`), and the same two rules apply: the width
-/// is the ONE expression both the painter and the hit-test read ([`CircleButton::cap_w`]), and the
-/// label rides the TAIL of the widening so its glyphs land in a capsule that has already made room
-/// for them instead of smearing across the grow.
-///
-/// The two differ on ONE policy and deliberately: what happens when the word does not fit. The chip
-/// ELIDES to a fixed `CHIP_NAME_MAX` budget, because a profile name is user data of any length and
-/// a shortened name is still a name. A verb is not — half of "Mark as Unwatched" teaches less than
-/// the tick it was meant to explain — so a control with a hard bound to respect asks
-/// [`CircleButton::label_budget`] and shows the whole word or none of it
-/// (`detail::watch_cap_at`). Both are right for their content; neither is the default.
-const DISC_LABEL_LEAD: f32 = 26.0;
-const DISC_LABEL_GAP: f32 = 14.0;
-const DISC_LABEL_TAIL: f32 = 34.0;
-/// The unfurl's stiffness — deliberately [`K_CHIP`], the profile chip's own. The two are the same
-/// interaction (a focused control opening far enough to name itself) and a bar that settles at one
-/// rate over a hero row that settles at another reads as two systems rather than one.
-pub(crate) const K_DISC_UNFURL: f32 = K_CHIP;
-
+/// **The label is not lost, it is moved**: the detail hero draws the focused disc's verb at the
+/// row's right end (`screens::detail`'s `draw_buttons`), where it names the control without being
+/// part of it. That is the rule this widget now states - an icon control's BOX is the design
+/// system's, never its label's - and it is why there is no builder here for one.
 pub struct CircleButton {
     pub frame: Rect,
     pub glyph: *const c_char,
@@ -2664,9 +2655,6 @@ pub struct CircleButton {
     pub palette: ControlPalette,
     /// The FOCUS POP, as a factor on the frame — see [`CircleButton::scale`].
     pub scale: f32,
-    /// The unfurled label and how far open it is (0..1) — see [`DISC_LABEL_LEAD`]. `None` is a
-    /// plain disc, which is what every caller that has not opted in still gets.
-    pub label: Option<(*const c_char, f32)>,
 }
 impl CircleButton {
     pub fn new(glyph: *const c_char) -> Self {
@@ -2679,23 +2667,17 @@ impl CircleButton {
             ground: ControlGround::Keyed,
             palette: ControlPalette::default(),
             scale: 1.0,
-            label: None,
         }
     }
-    /// Move the disc, keeping its own diameter. Enough for a plain disc, and NOT enough for an
-    /// unfurled one — see [`frame`](Self::frame).
+    /// Move the disc, keeping its own diameter.
     pub fn at(mut self, x: f32, y: f32) -> Self {
         self.frame.x = x;
         self.frame.y = y;
         self
     }
-    /// Place AND size the control from a frame the caller already owns.
-    ///
-    /// The unfurl's width is [`cap_w`](Self::cap_w), which a row that accumulates its controls has
-    /// already had to compute — so it hands the whole rect over rather than an origin, and the
-    /// shape drawn is by construction the shape that row reserved and the pointer grades against.
-    /// [`at`](Self::at) would silently keep the bare 60, which draws a labelled capsule clipped to
-    /// a disc.
+    /// Place AND size the control from a frame the caller already owns - the row's own accumulated
+    /// advance, so the shape drawn is by construction the shape that row reserved and the pointer
+    /// grades against.
     pub fn frame(mut self, r: Rect) -> Self {
         self.frame = r;
         self
@@ -2737,81 +2719,6 @@ impl CircleButton {
         self.palette = palette;
         self
     }
-    /// Give this disc the [UNFURL](DISC_LABEL_LEAD): `text` is the verb the press performs and `e`
-    /// (0..1) is how far open the capsule is — normally a focus spring, so the control reads as one
-    /// object opening rather than a label appearing beside it. `e == 0` draws the plain disc.
-    ///
-    /// The caller must size [`frame`](Self::frame)`.w` with [`cap_w`](Self::cap_w) at the same `e`:
-    /// the drawn shape and the graded shape are one expression (`chip_cap`'s rule), which is what
-    /// keeps a pointer clicking the capsule it can see. A frame that is NOT a capsule cancels the
-    /// unfurl outright, glyph included — see [`cap_label_w`](Self::cap_label_w) — so a row that
-    /// refused this control its room can keep passing `e` without drawing anything wrong.
-    ///
-    /// Three preconditions, none of which the builder can enforce:
-    /// * **It needs [`icon`](Self::icon).** The label is drawn beside the vector glyph; the
-    ///   text-glyph form has no run to sit next to, and silently ignores this.
-    /// * **The label is drawn at [`theme::size::BODY`]**, the one control-label rung — measure with
-    ///   the same size when sizing the frame, or the capsule and its word disagree.
-    /// * **It clips, and the clip has no stack** (`gfx::clip_clear` is a bare `glDisable`). Drawing
-    ///   an unfurled control INSIDE another scissor releases that outer clip for the rest of the
-    ///   frame. Every caller today is unclipped; a scrolling list that adopts this is not.
-    pub fn label(mut self, text: *const c_char, e: f32) -> Self {
-        self.label = Some((text, e));
-        self
-    }
-
-    /// The capsule width of a disc of diameter `d`, unfurled `e` (0..1) around a label measured
-    /// `label_w` wide. The LAYOUT companion to `draw`, and the only place the open geometry is
-    /// written down — a row accumulating this control's advance and the painter placing its glyphs
-    /// read the very same number, at every phase of the animation.
-    ///
-    /// `label_w <= 0` is "no label", which collapses to the bare disc whatever `e` says.
-    pub fn cap_w(d: f32, e: f32, label_w: f32) -> f32 {
-        if label_w <= 0.0 {
-            return d;
-        }
-        d + (Self::cap_open_w(d, label_w) - d) * e.clamp(0.0, 1.0)
-    }
-
-    /// The fully-open capsule — [`cap_w`](Self::cap_w) at `e == 1`, and the only place the open
-    /// geometry is spelled out.
-    fn cap_open_w(d: f32, label_w: f32) -> f32 {
-        DISC_LABEL_LEAD + (d * DISC_ICON_RATIO).round() + DISC_LABEL_GAP + label_w + DISC_LABEL_TAIL
-    }
-
-    /// The widest label a disc of diameter `d` may unfurl when its row can spare only `room`
-    /// beyond the bare disc — i.e. `cap_w(d, 1.0, label_budget(d, room)) - d == room`.
-    ///
-    /// The INVERSE of [`cap_w`](Self::cap_w), for a caller that has a fixed bound to respect and a
-    /// label to decide about (`detail::watch_cap_at`). Having it here rather than re-derived at
-    /// the call site is the same rule the width itself follows: the open geometry is written down
-    /// once, so a budget and the shape it is a budget FOR cannot drift apart. Can come back
-    /// negative, which means the disc cannot afford a label of any width at all.
-    pub(crate) fn label_budget(d: f32, room: f32) -> f32 {
-        room - (Self::cap_open_w(d, 0.0) - d)
-    }
-
-    /// The label width a capsule of DRAWN width `w` was sized for — the exact inverse of
-    /// [`cap_w`](Self::cap_w) at the same `e`, so the widget can recover what its caller measured
-    /// without being handed it a second time (two numbers that must agree are two numbers that can
-    /// disagree; this way the frame is the single statement of the geometry, as `chip_cap`'s rule
-    /// demands).
-    ///
-    /// `None` means **this frame is not a capsule**, and it is the widget's whole guard rather than
-    /// a convenience: `w <= d` is a caller that asked for a label and was given a bare disc — a row
-    /// that REFUSED the unfurl for want of room ([`label_budget`](Self::label_budget)), or a
-    /// measurement that came back 0 because the font never opened — while its focus spring keeps
-    /// climbing to 1. Answering with the arithmetic there returns a NEGATIVE label width, which
-    /// then reads as "acres of tail air" to the fade ramp and lights the word up at full alpha; and
-    /// the icon, slid by that same `e`, lands 26px into a 60px circle. Both are the disc drawn
-    /// wrong, from a state the caller declared by handing over the frame.
-    fn cap_label_w(d: f32, e: f32, w: f32) -> Option<f32> {
-        if e <= 0.01 || w <= d {
-            return None;
-        }
-        let lw = (w - d) / e - (Self::cap_open_w(d, 0.0) - d);
-        (lw > 0.0).then_some(lw)
-    }
 }
 impl View for CircleButton {
     fn draw(&self, _e: &Env, p: Painter) {
@@ -2839,62 +2746,16 @@ impl View for CircleButton {
             self.focused,
             self.ground,
         );
-        // Resolve the unfurl from the FRAME, before anything is placed by it: `cap_label_w` answers
-        // `None` for a frame that is not a capsule, and that verdict governs the GLYPH as well as
-        // the word. Sliding the icon off the caller's raw `e` was a real defect — a control whose
-        // row refused it the room still had a focus spring climbing to 1, and the check kicked 12px
-        // right inside a disc that never grew.
-        // …from the frame the CALLER sized (`cap_w`), not the popped one: the pop is a factor
-        // applied after the row's layout, so asking the base frame is how the widget recovers the
-        // label width its caller actually measured.
-        let unfurl = self.label.and_then(|(text, e)| {
-            Some((
-                text,
-                e.clamp(0.0, 1.0),
-                Self::cap_label_w(base.h, e, base.w)?,
-            ))
-        });
-        let e = unfurl.map(|(_, e, _)| e).unwrap_or(0.0);
         if let Some(icon) = self.icon {
-            // vector glyph at the shared DISC_ICON_RATIO box, so every round control carries its
-            // icon at one ratio — centred on the DISC, sliding to the open capsule's lead inset as
-            // the unfurl opens (see `DISC_LABEL_LEAD`).
+            // vector glyph at the shared DISC_ICON_RATIO box, centred on the DISC: one ratio for
+            // every round control in the app, and no state in which it moves.
             let isz = (d * DISC_ICON_RATIO).round();
-            let closed_inset = (d - isz) * 0.5;
-            // the capsule's own air rides the pop with it, so a popped capsule is the same shape
-            // scaled and not a wider one wearing the original padding
-            let (lead, gap, tail) = (
-                DISC_LABEL_LEAD * self.scale,
-                DISC_LABEL_GAP * self.scale,
-                DISC_LABEL_TAIL * self.scale,
-            );
-            let ix = r.x + closed_inset + (lead - closed_inset) * e;
             crate::ui::icons::draw(
                 p,
                 icon,
-                Rect::new(ix, r.y + (r.h - isz) * 0.5, isz, isz),
+                Rect::new(r.x + (d - isz) * 0.5, r.y + (r.h - isz) * 0.5, isz, isz),
                 ink,
             );
-            if let Some((text, _, label_w)) = unfurl {
-                // The label rides the TAIL of the widening, and the ramp is the GEOMETRY rather
-                // than a chosen fraction of it: it fades in exactly as fast as the capsule's tail
-                // air ([`DISC_LABEL_TAIL`]) opens up behind the last glyph. So the word is at zero
-                // the instant it would still be overhanging, and at full only once the capsule has
-                // the whole run plus its own end air — which is what stops a half-cut glyph being
-                // legible for a few frames of every focus move. A magic 0.55 could not do that: the
-                // crossover moves with the LABEL's width, and this row's two differ by 34px.
-                let tx = ix + isz + gap;
-                let a = (((r.x + r.w) - (tx + label_w * self.scale)) / tail).clamp(0.0, 1.0);
-                if a > 0.004 {
-                    let ty = crate::text::text_vcenter_y(theme::size::BODY, 1, r.y + d * 0.5);
-                    // …and the clip stays, as the backstop the ramp makes invisible: a caller whose
-                    // frame does not come from `cap_w` would otherwise paint a label out over the
-                    // page (the design's own `overflow:hidden`).
-                    p.clip(r);
-                    p.alpha(a).text(text, tx, ty, theme::size::BODY, ink, 0, 1);
-                    p.clip_clear();
-                }
-            }
         } else {
             // text glyph centred on the disc by its cap band (layout ≠ paint), not a hand-tuned y
             crate::ui::label::Label::new(self.glyph, crate::ui::theme::size::HEADLINE, ink)
@@ -5487,6 +5348,35 @@ pub(crate) const TAB_TRACK_PAD: f32 = 8.0;
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
 /// host test instead of leaving it to a device capture.
 pub(crate) const TOP_BAR_BOTTOM: f32 = TOP_BAR_Y + TAB_PILL_H + TAB_TRACK_PAD; // 130
+
+/// **How far a page scrolls before the shared bar's brand has left it** - the owner's "el logo de
+/// Butaca que desaparezca en cuanto hacemos scroll" (2026-11-10).
+///
+/// One notch of a wheel and a little air: the brand is gone within the first ~50px of travel, so
+/// it reads as "it left with the page" rather than as a slow dissolve, and it is back the moment
+/// the page is at its head again. The scroll amount itself is published by the page
+/// ([`crate::ui::nav::publish_page_scroll`]), continuous rather than a threshold, so a spring
+/// settling across it cannot blink.
+pub(crate) const BRAND_SCROLL_FADE: f32 = 48.0;
+
+/// A page's scroll offset in px, as the 0..1 amount the shared bar's brand rides
+/// ([`BRAND_SCROLL_FADE`]). The one place the conversion is written down, so Home's dive, the
+/// Library's document and Search's results cannot fade the brand at three different rates.
+pub(crate) fn brand_scroll(px: f32) -> f32 {
+    if px.is_nan() {
+        return 0.0;
+    }
+    (px / BRAND_SCROLL_FADE).clamp(0.0, 1.0)
+}
+
+/// …and the brand's own alpha: full at the head, gone once the page has left it. Linear in the
+/// published amount, which is what makes the return at the top the exact inverse of the exit.
+pub(crate) fn brand_alpha(scroll: f32) -> f32 {
+    if scroll.is_nan() {
+        return 1.0;
+    }
+    1.0 - scroll.clamp(0.0, 1.0)
+}
 /// Inter-pill air ≈ the season tabs' rhythm (their `TAB_ADVANCE` 52 minus the 2×18 pad the pills
 /// here already carry — pill edge to pill edge reads the same). Doubles as the scroll-into-view
 /// context margin, exactly as the season tabs use their advance.
@@ -6302,23 +6192,46 @@ latched_flag!(
 // label byte. A PERMANENT entry in `ci/allow/statics.txt`, not an ownership path: every caller
 // supplies Bridge-owned `TabLabels`, and a key mismatch deterministically replaces the memo. Like
 // `text_view.rs`'s `WRAP_CACHE`, it is never read as logical state.
-static mut TAB_CACHE: Option<(u32, Vec<std::ffi::CString>, Vec<f32>)> = None;
+static mut TAB_CACHE: Option<(u32, Vec<std::ffi::CString>, Vec<f32>, Vec<Option<crate::ui::icons::Icon>>)> = None;
 
-/// The shared strip's captured labels, including Home first and an empty Search icon label last.
-/// Supplied by the application. No Browse type is part of the renderer's vocabulary.
+/// The shared strip's captured vocabulary: one entry per pill, in strip order. Supplied by the
+/// application. No Browse type is part of the renderer's vocabulary.
+///
+/// **A destination may be a WORD or a MARK, and `icons` is which** (owner's 2026-11-10 pass: "el
+/// menú principal: cambiar Inicio y Favoritos por iconos"). `labels[i]` is the pill's word when
+/// `icons[i]` is `None`; when it is `Some(icon)` the pill draws that mark in a square pill and the
+/// label is empty - one slot, two kinds of face, and the widths follow the face (`TAB_ICON_PILL_W`
+/// for a mark, the measured word plus its padding for a label).
+///
+/// The Search pill used to be the ONLY mark and it was spelled as an EMPTY LABEL with the icon
+/// chosen by position (`i + 1 == n`). That convention could hold exactly one mark, at exactly one
+/// place, so the two destinations the owner asked to convert had nowhere to go. The icon is data
+/// now: same length as `labels`, so the draw, the hit test and the widths walk one array.
 #[derive(Clone, Copy)]
 pub(crate) struct TabLabels<'a> {
     pub(crate) generation: u32,
     pub(crate) labels: &'a [String],
+    pub(crate) icons: &'a [Option<crate::ui::icons::Icon>],
+}
+
+impl TabLabels<'_> {
+    /// Is pill `i` a MARK rather than a word? An `icons` slice shorter than `labels` (every
+    /// fixture) simply answers "no" past its end.
+    fn mark(&self, i: usize) -> Option<crate::ui::icons::Icon> {
+        self.icons.get(i).copied().flatten()
+    }
 }
 
 /// Build glyph runs and widths from an explicitly supplied vocabulary. The application's
 /// `ChromeSnapshot` owns those labels; both normal chrome and its scrim lift borrow the same
 /// snapshot, so this renderer never reconstructs vocabulary from app globals.
-fn tab_metrics_from(labels: &[String], measure: impl Fn(&std::ffi::CStr) -> f32) -> (Vec<CString>, Vec<f32>) {
+fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
+    measure: impl Fn(&std::ffi::CStr) -> f32) -> (Vec<CString>, Vec<f32>) {
     let words: Vec<CString> = labels.iter().map(|label| CString::new(label.as_str()).unwrap_or_default()).collect();
     let widths = words.iter().enumerate().map(|(i, word)| {
-        if i + 1 == words.len() { TAB_ICON_PILL_W }
+        // a MARK is a square at the control family's height, because a mark is not measured like
+        // a word - the same rule the Search pill has always carried, now keyed on the face.
+        if icons.get(i).copied().flatten().is_some() { TAB_ICON_PILL_W }
         else { measure(word) + 2.0 * TAB_PILL_PAD }
     }).collect();
     (words, widths)
@@ -6326,8 +6239,9 @@ fn tab_metrics_from(labels: &[String], measure: impl Fn(&std::ffi::CStr) -> f32)
 
 /// Measure a published vocabulary once when it changes. The same metric rule feeds paint and
 /// input geometry; the capability keeps host fixtures independent of a loaded SDL font.
-pub(crate) fn tab_widths(labels: &[String], measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
-    tab_metrics_from(labels, |word| measure.width(word, theme::size::BODY, true)).1
+pub(crate) fn tab_widths(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
+    measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
+    tab_metrics_from(labels, icons, |word| measure.width(word, theme::size::BODY, true)).1
 }
 
 /// Publish control geometry from the strip's actual scroll and its current destination. Keys
@@ -6359,9 +6273,13 @@ fn tab_members_at(widths: &[f32], keys: &[u32], scroll: f32, target: f32,
     }
 }
 
-fn tab_cache_matches(cache: &(u32, Vec<CString>, Vec<f32>), data: TabLabels<'_>) -> bool {
+fn tab_cache_matches(cache: &(u32, Vec<CString>, Vec<f32>, Vec<Option<crate::ui::icons::Icon>>),
+    data: TabLabels<'_>) -> bool {
     cache.0 == data.generation && cache.1.len() == data.labels.len()
         && cache.1.iter().zip(data.labels).all(|(a, b)| a.to_bytes() == b.as_bytes())
+        && cache.3.len() == data.labels.len()
+        && cache.3.iter().zip(data.icons.iter().chain(std::iter::repeat(&None)))
+            .all(|(a, b)| *a == *b)
 }
 
 /// Run `f` with the tab row's labels + pill widths, rebuilding them when the full vocabulary key
@@ -6385,14 +6303,15 @@ fn with_tab_metrics_for<R>(data: TabLabels<'_>, f: impl FnOnce(&[CString], &[f32
         // identical glyph widths on both paths.
         use crate::ui::machine::Measure as _;
         let measure = LegacyMeasure;
-        let (labels, widths) = tab_metrics_from(data.labels,
+        let (labels, widths) = tab_metrics_from(data.labels, data.icons,
             |l| measure.width(l, theme::size::BODY, true));
         // The Search pill, last. It carries an EMPTY label so nothing here has to special-case a
         // missing entry — `labels.len()` stays the pill count, which is what the draw and the hit
         // test both walk — and a fixed square width, because a mark is not measured like a word.
-        *cache = Some((data.generation, labels, widths));
+        let icons = (0..data.labels.len()).map(|i| data.mark(i)).collect();
+        *cache = Some((data.generation, labels, widths, icons));
     }
-    let (_, labels, widths) = cache.as_ref().unwrap();
+    let (_, labels, widths, _) = cache.as_ref().unwrap();
     f(labels, widths)
 }
 
@@ -6761,18 +6680,14 @@ impl StripRender {
                 // booleans, or a mid-travel label could darken toward ACCENT_INK with nothing bright
                 // under it (`cap_cover` is the one rule both sides read).
                 let (fm, sm) = self.top_strip.mixes((px, widths[i]));
-                if i + 1 == n {
-                    // The Search pill is a MARK, and it takes its ink from exactly the same
-                    // `mixed_ink` the labels do — so it darkens toward ACCENT_INK under the focus
-                    // capsule in step with its neighbours instead of being a separate colour story.
+                if let Some(icon) = data.mark(i) {
+                    // A MARK takes its ink from exactly the same `mixed_ink` the labels do - so it
+                    // darkens toward ACCENT_INK under the focus capsule in step with its neighbours
+                    // instead of being a separate colour story. The glyph is centred in the square
+                    // pill the widths were laid out for, at the strip's own icon ratio.
                     let d = TAB_ICON_D;
                     let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + (r.h - d) * 0.5, d, d);
-                    crate::ui::icons::draw(
-                        p,
-                        crate::ui::icons::Icon::Search,
-                        ir,
-                        TabPill::mixed_ink(fm, sm),
-                    );
+                    crate::ui::icons::draw(p, icon, ir, TabPill::mixed_ink(fm, sm));
                 } else {
                     TabPill::new(labels[i].as_ptr(), theme::size::BODY, r)
                         .mix(fm, sm)

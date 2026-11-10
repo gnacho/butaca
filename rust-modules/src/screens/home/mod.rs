@@ -23,8 +23,7 @@ use crate::ui::icons::Icon;
 use crate::ui::label::{Label, VAlign};
 
 use crate::ui::landing_hero::{
-    base_scrim_ramp, stack_top as hero_stack_top, COL_W as HERO_COL_W,
-    TEXT_BOTTOM as HERO_TEXT_BOTTOM,
+    base_scrim_ramp, stack_bottom as hero_stack_bottom, COL_W as HERO_COL_W, TEXT_TOP as HERO_TEXT_TOP,
 };
 use crate::ui::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputEvent,
@@ -89,7 +88,10 @@ const HERO_PREFETCH: usize = 1;
 const HERO_ART_CULL: f32 = 0.996;
 const HERO_WASH_W: [f32; 4] = [0.55, 0.55, 0.40, 0.40];
 
-const HERO_ROW_Y: f32 = HERO_TEXT_BOTTOM + theme::space::MD;
+/// **The air between the hero's text block and its action row** - the ladder's step from
+/// information to action (`theme::space::LG`, the same rung the detail hero uses), not the `MD` the
+/// block keeps between its own rows.
+const HERO_BLOCK_TO_ROW: f32 = theme::space::LG;
 const HERO_CTRL_D: f32 = StatusOverlay::CTRL_H;
 const HERO_CTRL_GAP: f32 = crate::ui::widgets::CTRL_GAP;
 const HERO_PAGER_D: f32 = HERO_CTRL_D * crate::ui::widgets::DISC_ICON_RATIO;
@@ -671,16 +673,17 @@ impl HomeScreen {
         self.hub(view, row)?.items.get(col)
     }
 
-    /// **Continue Watching is the mockup's one LANDSCAPE row**: 16:9 stills with the resume bar
-    /// and the watched mark, not posters. Every other hub keeps the shared poster row, so the
-    /// page still reads as one shelf stack.
-    fn row_landscape(&self, row: usize) -> bool {
-        self.rows
-            .get(row)
-            .is_some_and(|r| r.identity == HomeHubIdentity::ContinueWatching)
-    }
-    fn row_style(&self, row: usize) -> &'static RowStyle {
-        if self.row_landscape(row) { &RowStyle::EPISODE } else { &RowStyle::HOME }
+    /// **Every hub is the shared poster row, Continue Watching included.**
+    ///
+    /// It was the app's one LANDSCAPE row (16:9 stills with the resume bar), on the argument that
+    /// an episode is not a poster. The owner's 2026-11-10 pass overrules that: the four surfaces
+    /// that show a card - Home's shelves, the Library's movies, its series and Continue Watching -
+    /// must look the same, and the Library's own Continue Watching shelf has always been posters.
+    /// The deck keeps everything that was ever about the DECK rather than the tile: it plays on OK
+    /// (`is_continue`), so its focused label leads with the amber ▶ (`TileLabel::played`), and its
+    /// tiles carry the resume bar like any in-progress poster.
+    fn row_style(&self, _row: usize) -> &'static RowStyle {
+        &RowStyle::HOME
     }
     fn row_card(&self, row: usize) -> (f32, f32) {
         let sty = self.row_style(row);
@@ -1141,6 +1144,15 @@ impl HomeScreen {
 
     fn draw_page<H: HomeLike>(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         crate::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
+        // **How far this page has left its head, for the shared bar's brand.** Home's head is the
+        // billboard, and two motions leave it: the DIVE (`snap`, 0..1 across the billboard→grid
+        // transition, which one wheel tick starts) and the shelf scroll (`scroll_y`, px) once the
+        // grid is live. The brand rides the larger of the two, so the dive alone already takes it
+        // away and coming back up the shelves brings it back as the page reaches its head.
+        f.scrolled_to(
+            crate::ui::widgets::brand_scroll(self.grid.scroll_y.pos)
+                .max(self.snap.pos.clamp(0.0, 1.0)),
+        );
         let view = H::hubs(f.cx);
         let visible_focus = self.visible_focus(f.focus.current);
         let env = self.env(0.0);
@@ -1204,7 +1216,7 @@ impl HomeScreen {
         if view.hero_count() > 1 {
             PageDots::new(view.hero_count())
                 .active(self.carousel_index(view))
-                .centered_at(SCR_W * 0.5, HERO_ROW_Y + HERO_CTRL_D + theme::space::SM)
+                .centered_at(SCR_W * 0.5, hero_row_y(hero.item) + HERO_CTRL_D + theme::space::SM)
                 .draw(env, p);
         }
     }
@@ -1223,22 +1235,23 @@ impl HomeScreen {
     ) {
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
         let label = if resumes { crate::i18n::msg::browse_home_continue_c() } else { crate::i18n::msg::browse_detail_play_c() };
+        let row_y = hero_row_y(hero);
         let pill = Rect::new(
             MARGIN_X,
-            HERO_ROW_Y,
+            row_y,
             hero_pill_w(measure, label),
             HERO_CTRL_D,
         );
         let info = Rect::new(
             pill.x + pill.w + HERO_CTRL_GAP,
-            HERO_ROW_Y,
+            row_y,
             HERO_CTRL_D,
             HERO_CTRL_D,
         );
         let mark_d = HERO_PAGER_D.round();
         let mark = Rect::new(
             info.x + info.w + HERO_PAGER_PAD,
-            HERO_ROW_Y + (HERO_CTRL_D - mark_d) * 0.5,
+            row_y + (HERO_CTRL_D - mark_d) * 0.5,
             mark_d,
             mark_d,
         );
@@ -1316,11 +1329,7 @@ impl HomeScreen {
                     continue;
                 }
                 let (rect, scale) = self.drawn_card_geometry(row, col, 1.0);
-                let art = if self.row_landscape(row) {
-                    Art::Still(Some(item))
-                } else {
-                    Art::Poster(Some(item))
-                };
+                let art = Art::Poster(Some(item));
                 card_row::draw_tile(p, art, rect, scale, self.row_style(row), item.resume_frac());
             }
         }
@@ -1357,7 +1366,7 @@ impl HomeScreen {
         // The grid draws at `scroll_x * snap` ([`Grid::eff_scroll`]), so the lag it still owes does too.
         let lag = self.grid.shelves[row].settle_lag(count, col, &RowStyle::HOME) * self.snap.pos;
         let label = label.revealed(self.grid.shelves[row].band_reveal()).settling(lag);
-        let art = if cw { Art::Still(Some(item)) } else { Art::Poster(Some(item)) };
+        let art = Art::Poster(Some(item));
         card_row::draw_focused(
             p,
             art,
@@ -1627,9 +1636,12 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
         }
         let view = H::hubs(cx);
         let hero_len = hero_group_len(view);
+        let row_y = self
+            .selected_hero(view)
+            .map_or(HERO_TEXT_TOP, |hero| hero_row_y(hero.item));
         let hero_end = self
             .hero_button_rect(view, hero_len.saturating_sub(1), cx.measure)
-            .unwrap_or(Rect::new(MARGIN_X, HERO_ROW_Y, 0.0, HERO_CTRL_D));
+            .unwrap_or(Rect::new(MARGIN_X, row_y, 0.0, HERO_CTRL_D));
         out.push(GroupSpec {
             id: HERO_GROUP,
             kind: GroupKind::Row { wrap: false },
@@ -1646,7 +1658,7 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
             ],
             extent: Rect::new(
                 MARGIN_X,
-                HERO_ROW_Y,
+                row_y,
                 hero_end.x + hero_end.w - MARGIN_X,
                 HERO_CTRL_D,
             ),
@@ -1911,9 +1923,10 @@ impl HomeScreen {
         let hero = self.selected_hero(view)?.item;
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
         let label = if resumes { crate::i18n::msg::browse_home_continue_c() } else { crate::i18n::msg::browse_detail_play_c() };
+        let row_y = hero_row_y(hero);
         let pill = Rect::new(
             MARGIN_X,
-            HERO_ROW_Y,
+            row_y,
             hero_pill_w(measure, label),
             HERO_CTRL_D,
         );
@@ -1921,7 +1934,7 @@ impl HomeScreen {
             0 => Some(pill),
             1 => Some(Rect::new(
                 pill.x + pill.w + HERO_CTRL_GAP,
-                HERO_ROW_Y,
+                row_y,
                 HERO_CTRL_D,
                 HERO_CTRL_D,
             )),
@@ -2476,6 +2489,58 @@ fn meta_drawn_w(view: &TextView<'_>, text: &str, width: f32, measure: &dyn Measu
     }
     measure.width_str(text, theme::size::BODY, false).min(width)
 }
+/// **The three measured heights the hero's text block is built from** - the title band's floor,
+/// the identity line and the blurb. One expression, because the block is now TOP-anchored: its rows
+/// stack DOWNWARD from [`HERO_TEXT_TOP`], so the action row's y is the block's measured bottom and
+/// cannot be a constant. `hero_content` (the draw) and [`hero_row_y`] (placement, hit-testing and
+/// the dots) both read this, so a title that wraps differently on another item moves all three
+/// together.
+fn hero_text_metrics(hero: &CatalogMovie) -> (f32, f32, f32) {
+    let title_h = hero_logo::band_h(LogoRung::Hero);
+    let meta = hero_meta_text(hero);
+    let meta_h = TextView::new(&meta, theme::size::BODY, theme::TEXT_SECONDARY)
+        .max_lines(1)
+        .measure_h(HERO_COL_W);
+    let synopsis_h = (!hero.summary.is_empty())
+        .then(|| theme::space::SM + crate::ui::hero_synopsis(&hero.summary, "").measure_h(HERO_COL_W))
+        .unwrap_or(0.0);
+    (title_h, meta_h, synopsis_h)
+}
+
+/// The identity line: the detail page's own facts, in the same order, for the same item.
+fn hero_meta_text(hero: &CatalogMovie) -> String {
+    if hero.kind == 3 {
+        let mut text = crate::ui::fmt::episode_address(i64::from(hero.season_index), i64::from(hero.ep_index)).to_string();
+        if !text.is_empty() && !hero.title.is_empty() {
+            text.push_str(" \u{b7} ");
+        }
+        text.push_str(&hero.title);
+        return text;
+    }
+    let runtime = (hero.dur_ns >= 60_000_000_000).then(|| crate::ui::fmt::dur_long(hero.dur_ns / 1_000_000));
+    let mut parts: Vec<String> = Vec::new();
+    if hero.year > 0 {
+        parts.push(hero.year.to_string());
+    }
+    if let Some(runtime) = runtime {
+        parts.push(runtime);
+    }
+    parts.push(if hero.rating.is_empty() {
+        crate::i18n::msg::browse_detail_unrated().to_string()
+    } else {
+        hero.rating.clone()
+    });
+    parts.join(" \u{b7} ")
+}
+
+/// The y of the hero's action row: the text block's measured bottom plus the ladder's step from
+/// information to action. The ONE expression the pill, the info disc, the pager mark, the page
+/// dots, the focus group and the pointer's stops all read - a wrapped blurb moves them together.
+fn hero_row_y(hero: &CatalogMovie) -> f32 {
+    let (title_h, meta_h, synopsis_h) = hero_text_metrics(hero);
+    hero_stack_bottom(title_h, meta_h, synopsis_h) + HERO_BLOCK_TO_ROW
+}
+
 fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure: &dyn Measure) {
     if !on_axis(
         MARGIN_X + dx,
@@ -2500,39 +2565,11 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
     // "igualar la vista de películas en Inicio y en Películas"). The year, the runtime and the age
     // rating are the detail page's identity line, so the billboard of the same film says the same
     // thing instead of a gold word above the title.
-    let runtime = (hero.dur_ns >= 60_000_000_000).then(|| {
-        crate::ui::fmt::dur_long(hero.dur_ns / 1_000_000)
-    });
-    let mut parts: Vec<String> = Vec::new();
-    let meta = if episode {
-        let mut text = crate::ui::fmt::episode_address(i64::from(hero.season_index), i64::from(hero.ep_index)).to_string();
-        if !text.is_empty() && !hero.title.is_empty() {
-            text.push_str(" \u{b7} ");
-        }
-        text.push_str(&hero.title);
-        text
-    } else {
-        if hero.year > 0 {
-            parts.push(hero.year.to_string());
-        }
-        if let Some(runtime) = runtime {
-            parts.push(runtime);
-        }
-        parts.push(if hero.rating.is_empty() {
-            crate::i18n::msg::browse_detail_unrated().to_string()
-        } else {
-            hero.rating.clone()
-        });
-        parts.join(" \u{b7} ")
-    };
+    let meta = hero_meta_text(hero);
     let meta_view = TextView::new(&meta, theme::size::BODY, theme::TEXT_SECONDARY).max_lines(1);
     let meta_h = meta_view.measure_h(HERO_COL_W);
     let synopsis = (!hero.summary.is_empty()).then(|| crate::ui::hero_synopsis(&hero.summary, ""));
-    let synopsis_h = synopsis
-        .as_ref()
-        .map(|v| theme::space::SM + v.measure_h(HERO_COL_W))
-        .unwrap_or(0.0);
-    let mut y = hero_stack_top(title_h, meta_h, synopsis_h);
+    let mut y = HERO_TEXT_TOP;
     HeroLogo::new(hero.sid, hero_logo_rk(hero), title, LogoRung::Hero)
         .draw(p, Rect::new(MARGIN_X, y, HERO_COL_W, title_h), measure);
     y += title_h + theme::space::MD;

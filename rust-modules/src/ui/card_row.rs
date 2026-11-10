@@ -63,10 +63,14 @@ impl RowStyle {
     /// The home shelf's portrait-poster row: 1.09 focus pop (matches `Home Screen.dc.html`), the big
     /// glow ring, animated scroll. The `ui::press` click dips a focused card from here back toward
     /// `scale(1.0)`, so the pop needs to be large enough for that press-in to read.
+    ///
+    /// **The gap is the shared [`crate::ui::consts::GAP`] and not a shelf-local number.** It used to
+    /// be 30 here and 35.2 in the Library's All grid, so the same six cards sat on two lattices; the
+    /// owner's "align so they all look the same" is one number, here.
     pub(crate) const HOME: RowStyle = RowStyle {
         w: CARD_W,
         h: CARD_H,
-        gap: GAP,
+        gap: crate::ui::consts::GAP,
         margin_x: MARGIN_X,
         radius: theme::CARD_RING_RAD,
         focus_scale: 1.09,

@@ -110,7 +110,7 @@ fn all_grid_caption_band_restores_with_the_saved_viewport() {
     let _guard = crate::testlock::serial();
     let fixture = Fixture::new();
     let mut page = fixture.screen();
-    let key = page.key(page.pair.detail.elem_at(35).unwrap());
+    let key = page.key(page.pair.detail.elem_at(5 * super::layout::COLS).unwrap());
     page.relayout(Some(key));
     page.scroll_target = page.target_layout.row_reveal(5);
     page.scroll.jump(page.scroll_target);
@@ -135,7 +135,7 @@ fn saved_last_all_row_opens_before_the_bookmark_scroll_is_clamped() {
     let mut fixture = Fixture::new();
     let saved_scroll = fixture.screen().layout.with_grid_focus(Some(5)).max_scroll();
     fixture.listing = fixture.listing.clone().with_cursor(crate::stores::browse::Cursor {
-        at: crate::stores::browse::CursorAt::SlotIndex(35), scroll: saved_scroll,
+        at: crate::stores::browse::CursorAt::SlotIndex(5 * super::layout::COLS), scroll: saved_scroll,
     });
     let mut page = fixture.screen();
     let mut output = Vec::new();
@@ -155,7 +155,7 @@ fn all_grid_moves_open_only_the_destination_band_and_use_settled_reveal() {
     let mut page = fixture.screen();
     page.initial = false;
     let mut engine = FocusEngine::new();
-    let first = page.key(page.pair.detail.elem_at(12).unwrap());
+    let first = page.key(page.pair.detail.elem_at(2 * super::layout::COLS).unwrap());
     page.relayout(Some(first));
     engine.set(OWNER, first, Some(page.pair.groups_config().detail), By::Restore);
     direction(&mut page, &mut engine, &fixture, Dir::Down);
@@ -306,7 +306,7 @@ fn derived_grid_indexes_survive_reorder_truncation_clear_and_restore() {
     let stable = page.pair.detail.elem_at(5).unwrap();
     let removed = page.pair.detail.elem_at(30).unwrap();
 
-    let mut reordered = (0..36).map(|i| original.view().item(i).unwrap().clone()).collect::<Vec<_>>();
+    let mut reordered = (0..40).map(|i| original.view().item(i).unwrap().clone()).collect::<Vec<_>>();
     reordered.swap(5, 17);
     fixture.listing = fixture.listing.clone().with_page(0, reordered);
     page.sync(&fixture.cx(None));
@@ -342,17 +342,19 @@ fn down_from_a_missing_final_row_column_clamps_to_the_last_item() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
     let sid = crate::registry::ServerId::from_raw(0);
+    // One card short of a full second row: the last column of the first row has nothing under it.
+    let last = super::layout::COLS + 2;
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
-        (0..8).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
+        (0..=last).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
         Vec::new());
     let mut page = fixture.screen();
     let mut engine = FocusEngine::new();
-    let key = page.key(page.pair.detail.elems[5]);
+    let key = page.key(page.pair.detail.elems[super::layout::COLS - 1]);
     engine.set(OWNER, key, Some(page.pair.groups_config().detail), By::Restore);
     direction(&mut page, &mut engine, &fixture, Dir::Down);
-    assert_eq!(engine.current(OWNER), Some(page.key(page.pair.detail.elems[7])));
+    assert_eq!(engine.current(OWNER), Some(page.key(page.pair.detail.elems[last])));
     direction(&mut page, &mut engine, &fixture, Dir::Down);
-    assert_eq!(engine.current(OWNER), Some(page.key(page.pair.detail.elems[7])), "the last row remains an edge");
+    assert_eq!(engine.current(OWNER), Some(page.key(page.pair.detail.elems[last])), "the last row remains an edge");
 }
 
 #[test]
@@ -387,11 +389,19 @@ fn rail_eligibility_and_last_producer_hold_over_a_long_shelf() {
     let mut draw = DrawFrame::new(&cx, crate::ui::Painter::root());
     page.record_stops(&mut draw);
     let stops = draw.into_stops();
-    assert!(stops.iter().any(|stop| region_of_elem(stop.key.elem) == Some(KeyRegion::Shelf)
-        && stop.rect.intersect(stop.clip).contains(placed.rect.cx(), placed.rect.cy())), "the producer-order assertion needs actual overlap");
+    // A shelf card that reaches INTO the rail's band - the overlap is what makes producer order
+    // gradable at all, and the last column of a row reaches four pixels past the rail's left edge.
+    let overlap = stops
+        .iter()
+        .filter(|stop| region_of_elem(stop.key.elem) == Some(KeyRegion::Shelf))
+        .find_map(|stop| {
+            let r = stop.rect.intersect(stop.clip).intersect(placed.rect);
+            (r.w > 1.0 && r.h > 1.0).then(|| (r.cx(), r.cy()))
+        })
+        .expect("a shelf card must reach into the rail's band, or producer order cannot be graded");
     let mut hit = crate::ui::hit::HitMap::new();
     hit.fill(stops); hit.swap();
-    assert_eq!(hit.top_at(placed.rect.cx(), placed.rect.cy()).map(|stop| stop.key), Some(rail),
+    assert_eq!(hit.top_at(overlap.0, overlap.1).map(|stop| stop.key), Some(rail),
         "the eligible rail must paint and register after the document's wide shelf");
 }
 
@@ -851,9 +861,12 @@ impl Fixture {
 
     pub(super) fn new() -> Self {
         let sid = crate::registry::ServerId::from_raw(0);
-        let listing = crate::browse::view::ListingSnapshot::fixture(sid, (0..36).map(|i|
+        // 40 items in two letters of 20: a whole number of rows in the shared grid at any
+        // column count, so a test that says "the last card of a row" or "the last card of a
+        // letter" keeps meaning it when the card geometry changes.
+        let listing = crate::browse::view::ListingSnapshot::fixture(sid, (0..40).map(|i|
             Some(crate::catalog::CatalogMovie { sid, rk: format!("{}", i + 1), title: format!("s{i:04x}"), ..Default::default() })).collect(),
-            vec![("A".into(), 18), ("Z".into(), 18)]);
+            vec![("A".into(), 20), ("Z".into(), 20)]);
         let directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, vec![
             crate::browse::view::SectionView { sid: Some(sid), key: 1, kind: SecKind::Movie,
                 row: crate::browse::SrcRow { section: 0, title: "Cinema".into(), pinned: true, current: true, ..Default::default() } }]);
@@ -962,7 +975,8 @@ fn projected_entry_preserves_the_last_item_within_a_letter_then_live_move_jumps(
     let fixture = Fixture::new();
     let mut page = fixture.screen();
     let mut engine = FocusEngine::new();
-    let exact = page.key(page.pair.detail.elem_at(17).unwrap());
+    // the last COLUMN of its row, which is where RIGHT leaves the grid for the rail
+    let exact = page.key(page.pair.detail.elem_at(4 * super::layout::COLS - 1).unwrap());
     engine.set(OWNER, exact, Some(page.pair.groups_config().detail), By::Restore);
     assert_eq!(direction(&mut page, &mut engine, &fixture, Dir::Right), 0);
     assert_eq!(engine.current_group(OWNER), Some(page.pair.groups_config().master));
@@ -973,7 +987,9 @@ fn projected_entry_preserves_the_last_item_within_a_letter_then_live_move_jumps(
     direction(&mut page, &mut engine, &fixture, Dir::Right);
     assert_eq!(direction(&mut page, &mut engine, &fixture, Dir::Down), 1);
     direction(&mut page, &mut engine, &fixture, Dir::Left);
-    assert_eq!(page.grid_position(engine.current(OWNER)), Some((3, 0)));
+    // DOWN from the rail lands on the row BELOW the remembered card's, which is the rail's own
+    // long-standing rule (`master`'s seat), then LEFT walks to the row's head.
+    assert_eq!(page.grid_position(engine.current(OWNER)), Some((4, 0)));
 }
 
 #[test]
@@ -986,7 +1002,8 @@ fn toolbar_rail_entry_uses_engine_grid_memory_and_returns_to_toolbar() {
     engine.set(OWNER, exact, Some(page.pair.groups_config().detail), By::Restore);
     engine.set(OWNER, page.key(FILTER), Some(page.toolbar_group()), By::Dir);
     assert_eq!(direction(&mut page, &mut engine, &fixture, Dir::Right), 0);
-    assert_eq!(page.pair.master.start_for_elem(engine.current(OWNER).unwrap().elem), Some(18));
+    // the second letter starts at card 20 in the fixture (two letters of twenty)
+    assert_eq!(page.pair.master.start_for_elem(engine.current(OWNER).unwrap().elem), Some(20));
     direction(&mut page, &mut engine, &fixture, Dir::Left);
     assert_eq!(engine.current(OWNER), Some(page.key(FILTER)));
     assert_eq!(engine.remembered_for(ENTRY).iter().find(|(g, _)| *g == page.pair.groups_config().detail).unwrap().1, exact.elem);
@@ -997,15 +1014,15 @@ fn removed_grid_key_keeps_its_typed_master_detail_reconciliation_path() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
-    let original = page.key(page.pair.detail.elem_at(17).unwrap());
+    let original = page.key(page.pair.detail.elem_at(4 * super::layout::COLS - 1).unwrap());
     let sid = crate::registry::ServerId::from_raw(0);
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
-        (0..35).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{}", i + 100), ..Default::default() })).collect(),
-        vec![("A".into(), 18), ("Z".into(), 17)]);
+        (0..40).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{}", i + 100), ..Default::default() })).collect(),
+        vec![("A".into(), 20), ("Z".into(), 20)]);
     page.sync(&fixture.cx(Some(original)));
     assert_eq!(<LibraryScreen as Focusable<HostFixture>>::group_of(&page, &original.elem, &fixture.cx(Some(original))), None);
     let recovered = <LibraryScreen as Focusable<HostFixture>>::reconcile(&page, original, &fixture.cx(Some(original)));
-    assert_eq!(page.grid_position(Some(recovered)), Some((2, 5)));
+    assert_eq!(page.grid_position(Some(recovered)), Some((3, 4)));
 }
 
 #[test]
@@ -1014,7 +1031,7 @@ fn direct_rail_activation_jumps_even_when_the_letter_was_already_selected() {
     let fixture = Fixture::new();
     let mut page = fixture.screen();
     let mut engine = FocusEngine::new();
-    let exact = page.key(page.pair.detail.elem_at(17).unwrap());
+    let exact = page.key(page.pair.detail.elem_at(4 * super::layout::COLS - 1).unwrap());
     engine.set(OWNER, exact, Some(page.pair.groups_config().detail), By::Restore);
     direction(&mut page, &mut engine, &fixture, Dir::Right);
     let letter = engine.current(OWNER).unwrap().elem;

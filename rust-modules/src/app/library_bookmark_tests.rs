@@ -210,7 +210,9 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         );
     }
     assert!(saves.0.iter().any(|(target, cursor)| target.sid == item.sid
-        && matches!(&cursor.at, crate::stores::browse::CursorAt::ItemKey { sid, rk, slot: 52 } if *sid == item.sid && rk == &item.rk)),
+        && matches!(&cursor.at, crate::stores::browse::CursorAt::ItemKey { sid, rk, slot }
+            if *sid == item.sid && rk == &item.rk
+                && *slot == 8 * crate::screens::library::layout::COLS + 4)),
         "section switching must emit the outgoing A snapshot through the StoreCmd drain");
     assert_eq!(
         rig.directory.view().current(),
@@ -243,7 +245,9 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         d.prune(&report.unmounted);
     }
     assert!(saves.0.iter().any(|(target, cursor)| target.sid == b_item.sid
-        && matches!(&cursor.at, crate::stores::browse::CursorAt::ItemKey { sid, rk, slot: 19 } if *sid == b_item.sid && rk == &b_item.rk)),
+        && matches!(&cursor.at, crate::stores::browse::CursorAt::ItemKey { sid, rk, slot }
+            if *sid == b_item.sid && rk == &b_item.rk
+                && *slot == 3 * crate::screens::library::layout::COLS + 1)),
         "outgoing WillLeave must emit B's snapshot before its engine memory is retired");
     // One server now: the old cross-server rating-key-namespace assert has no subject (the
     // multi-source namespace contract lives on in catalog_multi_source_merge_tests). What must

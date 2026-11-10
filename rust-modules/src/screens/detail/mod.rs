@@ -192,7 +192,10 @@ pub(crate) struct DetailScreen {
     tabs: TabStrip,
     season_pop: CtlPop<1>,
     ctl_pop: CtlPop<8>,
-    disc_unfurl: [Spring; 7],
+    /// The focused disc's verb caption - a spring on the word's alpha, not on any control's
+    /// geometry: the discs are fixed (`ui::widgets::CircleButton`), and this is where the label
+    /// went when the owner ended the unfurl.
+    disc_verb_a: Spring,
     season_metrics: season::Metrics,
     /// The page's own keyed ground. Deliberately a bare [`AmbientWash`] and not the shared
     /// `PageGround`, which is the browsing screens' policy: that type draws itself whenever it is
@@ -436,7 +439,7 @@ impl DetailScreen {
             tabs: TabStrip::new(),
             season_pop: CtlPop::new(),
             ctl_pop: CtlPop::new(),
-            disc_unfurl: [Spring::at(0.0); 7],
+            disc_verb_a: Spring::at(0.0),
             season_metrics: season::Metrics::new(),
             ground,
             selected,
@@ -1123,13 +1126,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
         let meta = H::metadata(cx);
         let measure = cx.measure;
         let set = self.hero_set(meta);
-        let widths = hero::hero_widths(
-            cx.measure,
-            set,
-            set.restart,
-            self.disc_unfurl.map(|s| s.pos),
-            self.named_show(meta),
-        );
+        let widths = hero::hero_widths(cx.measure, set.restart);
         let (_, hero_n) = hero::visible_ctls(set, self.full_trailer());
         let hero_y = self.hero_chain(measure, meta).btn_y;
         let hero_last = hero::hero_btn_rect_at(set, hero_n.saturating_sub(1), hero_y, widths);
@@ -1339,13 +1336,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
             Located::Hero(ctl) => {
                 let set = self.hero_set(meta);
                 let i = hero::index_of(set, ctl)?;
-                let widths = hero::hero_widths(
-                    cx.measure,
-                    set,
-                    set.restart,
-                    self.disc_unfurl.map(|s| s.pos),
-                    self.named_show(meta),
-                );
+                let widths = hero::hero_widths(cx.measure, set.restart);
                 let base =
                     hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y - vertical, widths);
                 (
@@ -2590,13 +2581,7 @@ impl DetailScreen {
     fn draw_buttons<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, y: f32, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let set = self.hero_set(meta);
-        let widths = hero::hero_widths(
-            cx.measure,
-            set,
-            set.restart,
-            self.disc_unfurl.map(|s| s.pos),
-            self.named_show(meta),
-        );
+        let widths = hero::hero_widths(cx.measure, set.restart);
         let current = cx.focus.current.map(|k| k.elem);
         // Deliberately `hero_ctls`, not `hero::visible_ctls`: the row's FOCUSABLE extent narrows
         // to Play the instant `full_trailer()` flips (that gate lives in `valid`/`focusable` and
@@ -2679,18 +2664,32 @@ impl DetailScreen {
                         hero::HeroCtl::Artwork => crate::ui::icons::Icon::Image,
                         _ => unreachable!(),
                     };
-                    let mut button = CircleButton::new(c"".as_ptr())
+                    CircleButton::new(c"".as_ptr())
                         .icon(icon)
                         .frame(rect)
                         .focused(focused)
                         .palette(palette)
                         .ground(ground)
-                        .scale(scale);
-                    let favorited = self.detail(meta).map(|d| d.is_favorite).unwrap_or(false);
-                    if let Some((slot, label)) = hero::disc_verb(ctl, self.named_show(meta), favorited) {
-                        button = button.label(label.as_ptr(), self.disc_unfurl[slot].pos);
-                    }
-                    button.draw(&Env::inert(), p);
+                        .scale(scale)
+                        .draw(&Env::inert(), p);
+                }
+            }
+        }
+        // **The focused disc's verb, at the row's RIGHT END** - where the label went when the
+        // unfurl ended (owner, 2026-11-10: "los iconos ... que no se expandan con texto"). It is a
+        // fixed slot at the row's own vertical centre, so naming a control never moves one: the
+        // word appears where there was air, and the row's geometry is the same in every focus
+        // state. A pill already carries its own word, so it contributes none.
+        let a = self.disc_verb_a.pos.clamp(0.0, 1.0);
+        if a > 0.004 {
+            if let Some(Located::Hero(ctl)) = cx.focus.current.and_then(|k| self.locate(k.elem, meta)) {
+                let favorited = self.detail(meta).map(|d| d.is_favorite).unwrap_or(false);
+                if let Some((_, verb)) = hero::disc_verb(ctl, self.named_show(meta), favorited) {
+                    let ink = theme::TEXT_SECONDARY;
+                    crate::ui::label::Label::new(verb.as_ptr(), theme::size::CAPTION, ink)
+                        .h(crate::ui::label::HAlign::Right)
+                        .v(crate::ui::label::VAlign::CapTop)
+                        .draw(p.alpha(a), disc_verb_rect(y - self.scroll.pos));
                 }
             }
         }
@@ -2848,6 +2847,23 @@ fn play_resume_ns(from_start: bool, resume_ms: i64, duration_ms: i64) -> i64 {
     }
 }
 
+/// **The box the focused disc's verb is right-aligned in.** The whole air between the content's
+/// two margins, at the action row's own height - NOT the control row's width.
+///
+/// That distinction is the whole reason this is a function: the row is only as wide as its discs,
+/// so a caption right-aligned to `last.x + last.w` lands ON them. Measured in the simulator before
+/// this existed: "Reproducir desde el inicio" was painted across the heart and the two mode discs.
+/// The row's right end is where the CONTROLS stop; the air the caption is meant to occupy is the
+/// page's, which is what the safe margin names.
+///
+/// The vertical offset centres one CAPTION cap band on the row, so the word sits on the discs'
+/// optical line rather than on their box's.
+fn disc_verb_rect(y: f32) -> Rect {
+    let x = crate::ui::consts::MARGIN_X;
+    let cap = crate::text::text_cap_band(theme::size::CAPTION, 0).0;
+    Rect::new(x, y + (hero::CD - cap) * 0.5, crate::ui::consts::SCR_W - 2.0 * x, hero::CD)
+}
+
 /// Is it safe to sample the panel behind the hero buttons for the ambient control palette this
 /// frame (spec §14 phase 8)? Only once BOTH the route-level nav dip (`nav_page_alpha`,
 /// `DrawFrame::nav_page_alpha` — replaces the old live `ui::nav::page_alpha()` read) and the
@@ -2864,6 +2880,27 @@ fn ease(value: &mut f32, target: f32, dt: f32) -> bool {
     let moved = (next - *value).abs() > 0.001;
     *value = next;
     moved
+}
+
+#[cfg(test)]
+mod disc_verb_rect_tests {
+    use super::disc_verb_rect;
+    use crate::ui::consts::{MARGIN_X, SCR_W};
+
+    /// The caption's right edge is the CONTENT margin, not the control row's end - the defect this
+    /// pins was measured on the simulator (the verb painted over the discs).
+    #[test]
+    fn the_verb_caption_is_right_aligned_to_the_page_and_not_to_the_row() {
+        let r = disc_verb_rect(800.0);
+        assert_eq!(r.x, MARGIN_X);
+        assert_eq!(r.x + r.w, SCR_W - MARGIN_X, "the page's right margin");
+        assert!(r.w > 3.0 * MARGIN_X, "the air it is meant to occupy, not a row's width");
+        // …and the box is the row's height, centred on it, so the word sits on the discs' line
+        assert_eq!(r.h, super::hero::CD);
+        let a = disc_verb_rect(800.0);
+        let b = disc_verb_rect(900.0);
+        assert_eq!(b.y - a.y, 100.0, "it travels with the row, one for one");
+    }
 }
 
 #[cfg(test)]
@@ -3151,20 +3188,15 @@ impl DetailScreen {
         self.ctl_pop.step(hero_index, dt);
         self.season_pop
             .step(matches!(focused, Some(Located::Season(_))).then_some(0), dt);
-        let disc = match focused {
+        let named = match focused {
             Some(Located::Hero(c)) => {
                 let favorited = self.detail(meta).map(|d| d.is_favorite).unwrap_or(false);
-                hero::disc_verb(c, self.named_show(meta), favorited).map(|(i, _)| i)
+                hero::disc_verb(c, self.named_show(meta), favorited).is_some()
             }
-            _ => None,
+            _ => false,
         };
-        for (i, spring) in self.disc_unfurl.iter_mut().enumerate() {
-            spring.step(
-                f32::from(disc == Some(i)),
-                crate::ui::widgets::K_DISC_UNFURL,
-                dt,
-            );
-        }
+        self.disc_verb_a
+            .step(f32::from(named), hero::K_DISC_VERB, dt);
 
         let episode_focus = match focused {
             Some(Located::Episode(i, episodes::Row::Still)) => Some(i),
@@ -3272,7 +3304,7 @@ impl DetailScreen {
         let moving = self.scroll.vel.abs() > 0.01
             || self.episode_scroll.vel.abs() > 0.01
             || self.tab_scroll.vel.abs() > 0.01
-            || self.disc_unfurl.iter().any(|s| s.vel.abs() > 0.01);
+            || self.disc_verb_a.vel.abs() > 0.01;
         if !meta.detail_loading()
             && !meta.season_loading()
             && focused.is_some_and(|located| self.return_pending && !self.return_waiting(meta) || self.restore_target_matches(located, meta))
@@ -3741,13 +3773,7 @@ impl DetailScreen {
             hero::HeroCtl::Alt => {
                 let set = self.hero_set(meta);
                 if let Some(i) = hero::index_of(set, ctl) {
-                    let widths = hero::hero_widths(
-                        cx.measure,
-                        set,
-                        set.restart,
-                        self.disc_unfurl.map(|s| s.pos),
-                        self.named_show(meta),
-                    );
+                    let widths = hero::hero_widths(cx.measure, set.restart);
                     let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                     rect.y -= self.scroll.pos;
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
@@ -3766,13 +3792,7 @@ impl DetailScreen {
                 let audio = ctl == hero::HeroCtl::Audio;
                 let set = self.hero_set(meta);
                 let Some(i) = hero::index_of(set, ctl) else { return };
-                let widths = hero::hero_widths(
-                    cx.measure,
-                    set,
-                    set.restart,
-                    self.disc_unfurl.map(|s| s.pos),
-                    self.named_show(meta),
-                );
+                let widths = hero::hero_widths(cx.measure, set.restart);
                 let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                 rect.y -= self.scroll.pos;
                 let chosen = if audio {
@@ -3795,13 +3815,7 @@ impl DetailScreen {
             hero::HeroCtl::Artwork => {
                 let set = self.hero_set(meta);
                 let Some(i) = hero::index_of(set, ctl) else { return };
-                let widths = hero::hero_widths(
-                    cx.measure,
-                    set,
-                    set.restart,
-                    self.disc_unfurl.map(|s| s.pos),
-                    self.named_show(meta),
-                );
+                let widths = hero::hero_widths(cx.measure, set.restart);
                 let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                 rect.y -= self.scroll.pos;
                 self.content(

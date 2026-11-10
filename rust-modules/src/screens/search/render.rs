@@ -119,6 +119,9 @@ fn count_keys(shelves: &[crate::search::Shelf]) -> [Option<(Kind, usize)>; 5] {
 
 pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>) {
     crate::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
+    // **How far this page has left its head, for the shared bar's brand** - the results document's
+    // own scroll, which is what a wheel moves here (a wheel scrolls Search without moving focus).
+    f.scrolled_to(crate::ui::widgets::brand_scroll(screen.scroll.pos));
     let p = f.painter.alpha(f.page_alpha);
     screen.ground.draw(p, Rect::FULL);
     field(screen, f, p);

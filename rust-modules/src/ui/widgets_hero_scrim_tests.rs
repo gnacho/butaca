@@ -301,7 +301,7 @@ fn the_hero_text_reads_over_bright_artwork() {
         (
             "home synopsis",
             home_col_r,
-            crate::ui::landing_hero::TEXT_BOTTOM - home_syn_h(),
+            crate::ui::widgets::test_support::home_synopsis_top(),
             theme::TEXT_READING,
             false,
             3.0,
