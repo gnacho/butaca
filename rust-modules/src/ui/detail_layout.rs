@@ -7,13 +7,17 @@ use super::{consts::SCR_W, Rect};
 /// is the whole point: at 943 it stopped 481px short of the margin and the hero read as a column
 /// with a hole beside it. The poster keeps the left margin, so nothing is lost there, and the
 /// people column is no longer a second column beside this one (see `PEOPLE_W`).
-pub(crate) const HERO_TEXT_W: f32 = 1340.0;
+pub(crate) const HERO_TEXT_W: f32 = 1244.0;
 /// The hero's poster column: 364 wide at 2:3 — 30% up from the mockup's 280 (the owner's
 /// 2026-11-10 pass: "la carátula, al menos 30% más grande"). A second column is the whole point —
 /// the wide backdrop stays, and the poster is what makes the page read as an item rather than a
 /// still.
-pub(crate) const POSTER_W: f32 = 364.0;
-pub(crate) const POSTER_H: f32 = 546.0;
+/// The hero's poster column: 460 wide at 2:3 — the page's DOMINANT element (the owner's
+/// 2026-11-10 pass: "lo que manda es la carátula, tiene que cobrar protagonismo"). The copy column
+/// starts right of it and the action row lives IN that column, so the taller poster no longer
+/// collides with the controls below.
+pub(crate) const POSTER_W: f32 = 460.0;
+pub(crate) const POSTER_H: f32 = 690.0;
 pub(crate) const POSTER_GAP: f32 = 24.0;
 /// **The hero's one top edge.** The poster's head and the title band's head are the same line
 /// (the owner's pass: "alinear el logo con la carátula"), and the poster rose 20% of its own
@@ -41,7 +45,7 @@ pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + theme::logo::HERO_H_MAX;
 /// copy. A 560-wide column at the right edge was what capped the copy at 943: the two shared a
 /// horizontal strip, so widening the text meant running under the names. Stacked, each gets the
 /// full measure and the page has no dead corner.
-pub(crate) const PEOPLE_W: f32 = 1340.0;
+pub(crate) const PEOPLE_W: f32 = 1244.0;
 pub(crate) const PEOPLE_LEAD: f32 = 32.0;
 pub(crate) const PEOPLE_MAX_LINES: usize = 4;
 pub(crate) const PEOPLE_INK: [f32; 4] = theme::TEXT_SECONDARY;

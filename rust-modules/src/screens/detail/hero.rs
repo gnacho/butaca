@@ -448,10 +448,13 @@ pub(crate) struct HeroWidths {
 }
 
 /// The accumulation itself, PURE: the drawn frame of control `i` in `set`, given both pills'
-/// measured widths. Ported verbatim from `ui/detail.rs::hero_btn_rect_at`.
+/// measured widths. Ported verbatim from `ui/detail.rs::hero_btn_rect_at`, but STARTING at
+/// [`crate::ui::detail_layout::HERO_TEXT_X`] rather than the left margin: the owner's 2026-11-10
+/// pass makes the poster the dominant left column, so the controls live in the copy column beside
+/// it and no longer sit under the taller poster.
 pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -> Rect {
     let (v, n) = hero_ctls(set);
-    let mut x = crate::ui::consts::MARGIN_X;
+    let mut x = crate::ui::detail_layout::HERO_TEXT_X;
     let mut w = cw.pill;
     for (k, c) in v[..n].iter().enumerate() {
         w = match c {

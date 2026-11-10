@@ -2868,9 +2868,9 @@ fn play_resume_ns(from_start: bool, resume_ms: i64, duration_ms: i64) -> i64 {
 /// The vertical offset centres one CAPTION cap band on the row, so the word sits on the discs'
 /// optical line rather than on their box's.
 fn disc_verb_rect(y: f32) -> Rect {
-    let x = crate::ui::consts::MARGIN_X;
+    let x = crate::ui::detail_layout::HERO_TEXT_X;
     let cap = crate::text::text_cap_band(theme::size::CAPTION, 0).0;
-    Rect::new(x, y + (hero::CD - cap) * 0.5, crate::ui::consts::SCR_W - 2.0 * x, hero::CD)
+    Rect::new(x, y + (hero::CD - cap) * 0.5, crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - x, hero::CD)
 }
 
 /// Is it safe to sample the panel behind the hero buttons for the ambient control palette this
@@ -2901,7 +2901,7 @@ mod disc_verb_rect_tests {
     #[test]
     fn the_verb_caption_is_right_aligned_to_the_page_and_not_to_the_row() {
         let r = disc_verb_rect(800.0);
-        assert_eq!(r.x, MARGIN_X);
+        assert_eq!(r.x, crate::ui::detail_layout::HERO_TEXT_X);
         assert_eq!(r.x + r.w, SCR_W - MARGIN_X, "the page's right margin");
         assert!(r.w > 3.0 * MARGIN_X, "the air it is meant to occupy, not a row's width");
         // …and the box is the row's height, centred on it, so the word sits on the discs' line
