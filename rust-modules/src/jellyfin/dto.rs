@@ -168,6 +168,9 @@ pub(crate) struct BaseItemDto {
     /// Cast AND crew in one array, told apart by `PersonDto::kind` ("Actor"/"Director"/"Writer").
     #[serde(rename = "People", default)]
     pub(crate) people: Vec<PersonDto>,
+    /// Production companies / studios, in server order. The detail hero's "Studios" line.
+    #[serde(rename = "Studios", default)]
+    pub(crate) studios: Vec<StudioDto>,
     #[serde(rename = "Chapters", default)]
     pub(crate) chapters: Vec<ChapterDto>,
     /// Where it was made, the retired `Country[]` row on the About panel.
@@ -299,6 +302,13 @@ pub(crate) struct ChapterDto {    #[serde(rename = "Name")]
     /// 100-ns ticks — the module doc's units rule applies (`/ 10_000` for the seek target).
     #[serde(rename = "StartPositionTicks")]
     pub(crate) start_position_ticks: i64,
+}
+
+/// One studio / production company on an item (`BaseItemDto::studios`). Only the name is drawn.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct StudioDto {
+    #[serde(rename = "Name")]
+    pub(crate) name: String,
 }
 
 /// `GET /Items/{itemId}/RemoteImages`: the pictures the metadata providers have for one image

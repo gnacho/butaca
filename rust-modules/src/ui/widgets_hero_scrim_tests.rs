@@ -263,8 +263,7 @@ fn the_hero_text_reads_over_bright_artwork() {
     );
     let band = crate::ui::hero_logo::band_h(crate::ui::hero_logo::LogoRung::Hero);
     let home_col_r = MARGIN_X + crate::ui::landing_hero::COL_W; // 750 — the column's right end
-    let det_col_r = MARGIN_X + crate::ui::detail_layout::HERO_TEXT_W; // 990 — the synopsis' wrap edge,
-                                                               // and since nit 2 the title band's column too: a very wide wordmark runs the same 990.
+    let det_col_r = crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W; // the copy column's RIGHT edge, wherever the poster leaves it: a very wide wordmark runs to this same edge.
     let people_r = SCR_W - MARGIN_X; // 1830 — the right-aligned people column's own edge
 
     // (label, x, y, ink, right wedge?, floor over BRIGHT art, floor over BLOWN WHITE)

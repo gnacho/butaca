@@ -303,6 +303,49 @@ pub(crate) fn friendly_codec(codec: &str) -> String {
     }
 }
 
+/// The NATURAL name of a language, from whatever the server put in `Stream.language` — a bare ISO
+/// code ("en", "eng", "es-419") or an already-human name ("English"). Codes fold to the language's
+/// own name ("English", "Español", …: the convention every language picker uses, so a Spanish UI
+/// shows "Español" the same way the English one does). Anything that is not a known code is
+/// returned unchanged, so a server that already sends a name is never mangled.
+pub(crate) fn language_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    // Strip a region subtag ("es-419", "en-GB") down to the primary language before matching.
+    let primary = trimmed.split(['-', '_']).next().unwrap_or(trimmed).to_lowercase();
+    let name = match primary.as_str() {
+        "en" | "eng" => "English",
+        "es" | "spa" => "Español",
+        "fr" | "fra" | "fre" => "Français",
+        "de" | "deu" | "ger" => "Deutsch",
+        "it" | "ita" => "Italiano",
+        "pt" | "por" => "Português",
+        "ru" | "rus" => "Русский",
+        "ja" | "jpn" => "日本語",
+        "ko" | "kor" => "한국어",
+        "zh" | "zho" | "chi" => "中文",
+        "ar" | "ara" => "العربية",
+        "nl" | "nld" | "dut" => "Nederlands",
+        "pl" | "pol" => "Polski",
+        "sv" | "swe" => "Svenska",
+        "no" | "nor" | "nb" | "nob" => "Norsk",
+        "da" | "dan" => "Dansk",
+        "fi" | "fin" => "Suomi",
+        "tr" | "tur" => "Türkçe",
+        "el" | "ell" | "gre" => "Ελληνικά",
+        "he" | "heb" => "עברית",
+        "hi" | "hin" => "हिन्दी",
+        "cs" | "ces" | "cze" => "Čeština",
+        "hu" | "hun" => "Magyar",
+        "ro" | "ron" | "rum" => "Română",
+        "uk" | "ukr" => "Українська",
+        "ca" | "cat" => "Català",
+        "eu" | "eus" | "baq" => "Euskara",
+        "gl" | "glg" => "Galego",
+        _ => return raw.trim().to_string(),
+    };
+    name.to_string()
+}
+
 /// One credit on the Cast & Crew shelf. Server ships crew (`Director[]`/`Writer[]`) in the SAME shape
 /// as the actors (`Role[]`) minus the `role` attribute, so a crew credit is this same struct with
 /// its JOB in `role` — see [`crew_credits`].
@@ -1368,6 +1411,12 @@ pub(crate) struct Detail {
     pub(crate) has_blur: bool,
     pub(crate) genres: Vec<String>,
     pub(crate) countries: Vec<String>,
+    /// Production companies / studios, in server order — the detail hero's "Studios" line. Empty
+    /// for every item whose server sent none; the skip keeps an item with no studios round-tripping
+    /// byte-identically (the replay gate's canonical check), and `default` keeps old cache records
+    /// valid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) studios: Vec<String>,
     pub(crate) cast: Vec<Cast>,
     /// Director[] tags, in server order — the hero's "Directed by …" line.
     pub(crate) directors: Vec<String>,

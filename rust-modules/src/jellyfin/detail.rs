@@ -336,6 +336,7 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
         has_blur: blur.is_some(),
         genres: it.genres.clone(),
         countries: it.production_locations.clone(),
+        studios: it.studios.iter().map(|s| s.name.clone()).filter(|n| !n.is_empty()).collect(),
         cast: cast_from_people(&it.people),
         directors: crew_names(&it.people, "Director"),
         crew: crew_credits(&it.people),
