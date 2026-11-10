@@ -74,13 +74,10 @@ pub(crate) const CD: f32 = crate::ui::widgets::StatusOverlay::CTRL_H;
 const PEOPLE_MAX_LINES: usize = 2;
 const PEOPLE_CAST: usize = 3;
 const PEOPLE_LABEL_INK: [f32; 4] = theme::TEXT_TERTIARY;
-/// The facts row now runs to the safe edge: the people band is BELOW it, not beside it, so the row
-/// no longer has a column to stop short of (issue #323). It survives as the BAR the row's own
-/// tests hold the widest control set to, which is why it is test-only since the discs stopped
-/// unfurling: nothing in the draw reads a right edge any more.
-#[cfg(test)]
-const FACTS_R: f32 =
-    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - theme::space::SM;
+/// The facts row runs to the safe edge: the people band is BELOW it, not beside it, so the row no
+/// longer has a column to stop short of (issue #323). The owner's 2026-11-10 pass justifies the
+/// whole action row to the RIGHT safe edge, so the two tests that hold the widest control set now
+/// measure against `SCR_W - MARGIN_X` directly.
 
 /// Duplicated from `widgets::Button`'s own PRIVATE `BTN_ICON_RATIO`/`BTN_ICON_GAP` (1.15, 12.0):
 /// those two constants are `widgets.rs`-internal, and this module may not reach past that file's
@@ -456,20 +453,25 @@ pub(crate) struct HeroWidths {
 /// it and no longer sit under the taller poster.
 pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -> Rect {
     let (v, n) = hero_ctls(set);
-    let mut x = crate::ui::detail_layout::HERO_TEXT_X;
+    let width_of = |c: HeroCtl| match c {
+        HeroCtl::Play => cw.pill,
+        HeroCtl::Alt => cw.alt,
+        HeroCtl::Restart => cw.disc[0],
+        HeroCtl::Trailer => cw.disc[1],
+        HeroCtl::MarkWatched | HeroCtl::MarkUnwatched => cw.disc[2],
+        HeroCtl::Favorite => cw.disc[3],
+        HeroCtl::Audio => cw.disc[4],
+        HeroCtl::Subtitles => cw.disc[5],
+        HeroCtl::Artwork => cw.disc[6],
+    };
+    // Justified to the RIGHT margin (the owner's 2026-11-10 pass: "justificados a derecha"): the
+    // row's own total width decides its left edge, so the last control ends on the safe edge.
+    let total: f32 = v[..n].iter().map(|&c| width_of(c)).sum::<f32>()
+        + CGAP * (n.saturating_sub(1)) as f32;
+    let mut x = crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - total;
     let mut w = cw.pill;
-    for (k, c) in v[..n].iter().enumerate() {
-        w = match c {
-            HeroCtl::Play => cw.pill,
-            HeroCtl::Alt => cw.alt,
-            HeroCtl::Restart => cw.disc[0],
-            HeroCtl::Trailer => cw.disc[1],
-            HeroCtl::MarkWatched | HeroCtl::MarkUnwatched => cw.disc[2],
-            HeroCtl::Favorite => cw.disc[3],
-            HeroCtl::Audio => cw.disc[4],
-            HeroCtl::Subtitles => cw.disc[5],
-            HeroCtl::Artwork => cw.disc[6],
-        };
+    for (k, &c) in v[..n].iter().enumerate() {
+        w = width_of(c);
         if k >= i {
             break;
         }
@@ -1191,7 +1193,7 @@ mod tests {
                                     let widths = hero_widths(&measure, restart);
                                     let last = hero_btn_rect_at(set, n - 1, 0.0, widths);
                                     assert!(
-                                        last.x + last.w <= FACTS_R + 0.01,
+                                        last.x + last.w <= crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X + 0.01,
                                         "{set:?} ends at {}",
                                         last.x + last.w
                                     );
@@ -1250,7 +1252,7 @@ mod tests {
                 disc: [CD; 7],
             },
         );
-        assert!(last.x + last.w < FACTS_R);
+        assert!(last.x + last.w <= crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X + 0.01);
     }
 
     #[test]
