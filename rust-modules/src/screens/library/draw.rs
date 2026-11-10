@@ -252,6 +252,10 @@ impl LibraryScreen {
                     .settling(model.motion.settle_lag(model.elems.len(), col, style)), f.measure);
         } else {
             card_row::draw_tile(p, art, rect, scale, style, resume);
+            // Every card of the row carries its own name, in the quieter ink while it is not the
+            // one under the cursor; the band that opened for the focused cell is the row's.
+            card_row::draw_tile_caption(p, rect, scale, style,
+                &shelf_label(shelf, col).revealed(model.motion.band_reveal()), f.measure);
         }
         if shelf.landscape {
             crate::ui::widgets::still_overlay(p, item, rect, style.tile_radius(rect, scale), shelf.is_continue, f.measure);
