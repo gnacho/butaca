@@ -118,14 +118,14 @@ pub(crate) fn choices(d: &Detail, audio: bool) -> Vec<Choice> {
 /// them from.
 pub(crate) fn row_label(stream: &crate::metadata::Stream) -> String {
     let lang = if stream.lang.is_empty() {
-        crate::i18n::msg::browse_detail_unknown()
+        crate::i18n::msg::browse_detail_unknown().to_string()
     } else {
-        stream.lang.as_str()
+        crate::metadata::language_name(&stream.lang)
     };
     let mut text = if stream.codec.is_empty() {
-        lang.to_string()
+        lang
     } else {
-        format!("{lang} \u{b7} {}", stream.codec.to_uppercase())
+        format!("{lang} \u{b7} {}", crate::metadata::friendly_codec(&stream.codec))
     };
     for (on, tag) in [
         (stream.forced, crate::i18n::msg::widgets_tracks_forced()),
@@ -464,7 +464,10 @@ mod tests {
     /// column printed, which is where the owner moved them from.
     #[test]
     fn a_row_states_the_language_and_its_codec() {
-        assert_eq!(row_label(&stream(1, "eng", "eac3")), "eng \u{b7} EAC3");
+        // The language is the human name (a Spanish UI still reads "English" here, the language's
+        // own name), and the codec is `friendly_codec`'s — the owner's 2026-11-10 "lenguaje más
+        // entendible": "eng · EAC3" reads "English · Dolby Digital Plus".
+        assert_eq!(row_label(&stream(1, "eng", "eac3")), "English \u{b7} Dolby Digital Plus");
         let mut flagged = stream(2, "spa", "srt");
         flagged.sdh = true;
         assert!(row_label(&flagged).contains("SDH"));
