@@ -605,7 +605,10 @@ fn tile_paint_bounds(rect: Rect, scale: f32, labelled: bool) -> Rect {
     let pad = theme::CARD_SHADOW_BLUR + theme::CARD_SHADOW_DY + 1.0;
     let mut bounds = rect.inset(-pad);
     if labelled {
-        let label_bottom = rect.y + rect.h * 0.5 + rect.h / scale * 0.5 + UNDER_LABEL_H;
+        // The block hangs from [`label_top`], so the bound is the label's own bottom corner -
+        // `UNDER_DROP` included. It used to add `UNDER_LABEL_H` straight onto the card's bottom and
+        // sat 30px short of the last caption line.
+        let label_bottom = label_top(rect, scale) + UNDER_LABEL_H;
         bounds.h = bounds.h.max(label_bottom - bounds.y);
     }
     bounds
@@ -627,6 +630,10 @@ pub(crate) fn paint_visible(p: Painter, rect: Rect, scale: f32, labelled: bool) 
 
 /// A non-focused cell body: the art tile + an optional resume bar. `rect` is the caller's
 /// already-scaled rect; `s` scales the corner radius. (The home grid's non-focused cell, verbatim.)
+///
+/// The card's NAME is [`draw_tile_caption`], deliberately a second call rather than a parameter: the
+/// hero's poster and an episode's still are drawn through this same function and are not cards of a
+/// row, so the artwork and the row's caption are two decisions a surface makes separately.
 pub(crate) fn draw_tile(
     p: Painter,
     art: Art,
@@ -648,9 +655,71 @@ pub(crate) fn draw_tile(
     }
 }
 
-/// The metadata block under a FOCUSED tile: a centred title, optionally a second caption line
-/// ("S1 • E8", a year, a character name), optionally led by the Continue-Watching play glyph. Only
-/// the focused tile carries it, so a row builds exactly one of these per frame.
+/// **A non-focused card's label block** — the same block the focused cell wears, at the same anchor
+/// and the same height, in [`LabelInk::Rest`]'s quieter ink.
+///
+/// This used to be the focused card's privilege: a row of five posters had one caption and four bare
+/// cards, every card a different height, and every title riding on where the cursor happened to be
+/// (owner, on a real Library frame: "solo la enfocada tiene título, la fila queda descuadrada").
+/// A card is a poster PLUS its name; the name is the ITEM's, and what focus changes is the ink, never
+/// whether the card is named.
+///
+/// The caller chains the row's band reveal onto `label` ([`TileLabel::revealed`]), so a row whose
+/// band has not opened draws nothing here - the room for the block is the row's, not the cell's.
+/// `s` is the scale `rect` was built from, exactly as [`draw_focused`] takes it: the anchor divides
+/// by it, so a shrinking tile does not slide its caption.
+pub(crate) fn draw_tile_caption(
+    p: Painter,
+    rect: Rect,
+    s: f32,
+    sty: &RowStyle,
+    label: &TileLabel,
+    measure: &dyn crate::ui::machine::Measure,
+) {
+    if label.reveal <= 0.0 {
+        return;
+    }
+    draw_label_block(p.alpha(label.reveal), rect, sty, label, label_top(rect, s), measure, LabelInk::Rest);
+}
+
+/// Where a card's label block hangs: the UNSCALED card bottom, `UNDER_DROP` below it. One expression
+/// for both inks, so the focused card's title and its neighbours' cannot sit on two different
+/// baselines - which is the whole of "the two cards in a row measure the same height".
+#[inline]
+pub(crate) fn label_top(rect: Rect, s: f32) -> f32 {
+    rect.y + rect.h * 0.5 + (rect.h / s) * 0.5 + UNDER_DROP
+}
+
+/// **The window a resting (unfocused) card's block is drawn in**: its own card, centred. Pure so the
+/// test beside it can hold it to the two facts that matter — it starts and ends inside the card (so
+/// five of them sit side by side, and the Library's rail band can never be reached), and it is the
+/// same width for every column of a row, the last one included.
+#[inline]
+pub(crate) fn resting_block(rect: Rect, sty: &RowStyle) -> (f32, f32) {
+    (rect.cx() - sty.w * 0.5, sty.w)
+}
+
+/// Which ink a label block is drawn in. Two values because there are two jobs: naming the card the
+/// remote is on, and identifying every other card in the row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LabelInk {
+    /// The card that holds focus: `TEXT_PRIMARY` (and `TEXT_SECONDARY` for the caption), the wide
+    /// [`under_budget`] block that may bleed into its neighbours, and the marquee for a run that
+    /// still does not fit.
+    Focus,
+    /// Any other card of the same row: the same block at the same height, bounded by its own card,
+    /// in `TEXT_SECONDARY` over `TEXT_TERTIARY` - the existing dimming step, no new colour - and
+    /// never a marquee, because a screenful of gliding titles is noise and costs the present gate
+    /// frames nobody asked for.
+    Rest,
+}
+
+/// The metadata block under a card: a centred title, optionally a second caption line ("S1 • E8", a
+/// year, a character name), optionally led by the Continue-Watching play glyph.
+///
+/// **Every card of a row carries one**; the focused card's is drawn in [`LabelInk::Focus`]'s ink and
+/// the rest of the row's in [`LabelInk::Rest`]'s, from this one type, so a row's blocks cannot
+/// disagree about their height or their anchor.
 ///
 /// It is a type rather than three parameters because the block's height is a fact the SCREEN needs:
 /// every shelf must reserve room for it in its own flow, and `reveal`/`scroll_into_view` only keep
@@ -782,7 +851,7 @@ pub(crate) fn draw_focused(
     // base bottom = cy + (h/s)/2). In the mock the label is normal-flow BELOW the transformed
     // poster — a pop/press never moves it; the pop eats the poster→label gap instead of shoving
     // the label into the next shelf's title.
-    let ty = rect.y + rect.h * 0.5 + (rect.h / s) * 0.5 + UNDER_DROP;
+    let ty = label_top(rect, s);
     // …and the block itself rides the band's reveal. The card, its ring and its resume bar do NOT:
     // they are the tile, which is on screen either way; this alpha is only about whether the room
     // under it has opened yet ([`CardRow::band_reveal`]).
@@ -790,7 +859,7 @@ pub(crate) fn draw_focused(
         return;
     }
     let p = p.alpha(label.reveal);
-    draw_label_block(p, rect, sty, label, ty, measure);
+    draw_label_block(p, rect, sty, label, ty, measure, LabelInk::Focus);
 }
 
 /// THE one-row strip loop: draw a whole horizontal shelf, non-focused tiles first (off-axis
@@ -805,10 +874,12 @@ pub(crate) fn draw_focused(
 /// hand-rolled per-screen copy of this loop keeps getting wrong.
 ///
 /// The caller supplies the per-index content as closures: `art` the tile's [`Art`], `resume` its
-/// amber progress fraction (`None` = not in progress), `label` the FOCUSED tile's [`TileLabel`]
-/// (`TileLabel::default()` for a row that captions every tile through `extra` instead), and `extra`
-/// any per-tile caption drawn for EVERY tile (cast names/roles). `label` is invoked for the focused
-/// index only. `axis_span` widens the cull band where captions should survive slightly off-screen.
+/// amber progress fraction (`None` = not in progress), `label` the tile's [`TileLabel`] — drawn for
+/// EVERY tile, [`LabelInk::Focus`] on the focused cell and [`LabelInk::Rest`] on the rest of the row,
+/// so one row never mixes a named card with bare ones — and `extra` any per-tile decoration drawn in
+/// addition (cast names under their headshots). A caller whose row wants no captions at all passes a
+/// `label` that answers `TileLabel::default()`. `axis_span` widens the cull band where captions
+/// should survive slightly off-screen.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn strip<'a>(
     p: Painter,
@@ -840,6 +911,11 @@ pub(crate) fn strip<'a>(
         let s = row.scale(i);
         let rect = tile_rect(i, sty.margin_x, pitch, 0.0, row_y, size).scaled(s);
         draw_tile(pr, art(i), rect, s, sty, resume(i));
+        // The whole row is named, not just the cell under the cursor: the unfocused tiles wear their
+        // own label in [`LabelInk::Rest`]'s ink, inside the band the focused one opened. A caller
+        // that captions every tile through `extra` instead passes a label that draws nothing (the
+        // cast strip's `TileLabel::default`), so nothing is said twice.
+        draw_tile_caption(pr, rect, s, sty, &label(i).revealed(row.band_reveal()), measure);
         extra(pr, i, x, false);
     }
     if focus_col >= 0 && (focus_col as usize) < n {
@@ -1374,9 +1450,15 @@ pub(crate) fn label_band(p: Painter, rect: Rect, sty: &RowStyle) -> (f32, f32) {
     (at.x, at.w)
 }
 
-/// The focused tile's whole label block — title (with its optional Continue-Watching glyph) and
-/// caption — placed ONCE by [`place_label`] from the wider of its two runs, so both lines share one
-/// alignment: centred on the card together, or starting together at the card's leading edge.
+/// A card's whole label block — title (with its optional Continue-Watching glyph) and caption —
+/// placed ONCE from the wider of its two runs, so both lines share one alignment: centred on the
+/// card together, or starting together at the card's leading edge.
+///
+/// **One implementation, two inks** ([`LabelInk`]). What differs is the block's WINDOW and the ink:
+/// the focused card may reach into the gaps either side ([`under_budget`]) and marquee a run that
+/// still overflows; every other card of the row is bounded by [`RowStyle::w`] and elided into it, so
+/// five of them can stand side by side. The two lines' OFFSETS do not differ at all, which is what
+/// keeps a row's captions on one baseline whether or not the card is focused.
 fn draw_label_block(
     p: Painter,
     rect: Rect,
@@ -1384,8 +1466,17 @@ fn draw_label_block(
     label: &TileLabel,
     mut y: f32,
     measure: &dyn crate::ui::machine::Measure,
+    ink: LabelInk,
 ) {
-    let full = under_budget(sty);
+    let full = match ink {
+        LabelInk::Focus => under_budget(sty),
+        // **The resting block is its card's width, anchored on the card** - not
+        // [`place_label`]'s panel test. A card-wide block starts and ends inside its own card, so
+        // it can never reach the panel edge or the Library's rail band, and it stays centred on the
+        // last column too (where the panel test would have flipped it to the leading edge and
+        // left one caption in the row visibly different from its four neighbours).
+        LabelInk::Rest => sty.w,
+    };
     let csz = theme::size::CAPTION;
     let elide_caption = |s: &str, w: f32| crate::text::elide_by(s, w, false, |t| measure.width_str(t, csz, false));
     // Measured once and threaded through: the title's drawn width feeds both how wide the block
@@ -1399,15 +1490,39 @@ fn draw_label_block(
     let caption_run = caption_str.as_ref().map_or(0.0, |s| {
         measure.width_str(&elide_caption(s, full), csz, false)
     });
-    let at = place_label(p, rect, sty, title_run.max(caption_run), label.settle_lag);
+    let at = match ink {
+        LabelInk::Focus => place_label(p, rect, sty, title_run.max(caption_run), label.settle_lag),
+        LabelInk::Rest => {
+            let (x, w) = resting_block(rect, sty);
+            LabelPlace { x, w, centred: true }
+        }
+    };
     if let Some(t) = &label.title {
-        title_marquee(p, at, t.as_ptr(), y, label.glyph, title_w_val.unwrap_or(0.0));
+        match ink {
+            LabelInk::Focus => title_marquee(p, at, t.as_ptr(), y, label.glyph, title_w_val.unwrap_or(0.0)),
+            // No marquee and no glyph off-focus: the ▶ is the focused card's announcement of what
+            // the press will do (`widgets::still_glyph`), and a row of five gliding titles would
+            // keep the present gate awake for nothing. The dimmed line is a NAME, not an affordance.
+            LabelInk::Rest => {
+                let run = t.to_string_lossy();
+                let owned = crate::text::elide_by(&run, at.w, false,
+                    |s| measure.width_str(s, theme::size::LABEL, true));
+                if let Ok(tc) = std::ffi::CString::new(owned) {
+                    let w = measure.width(&tc, theme::size::LABEL, true);
+                    p.text(tc.as_ptr(), at.run_x(w), y, theme::size::LABEL, theme::TEXT_SECONDARY, 0, 1);
+                }
+            }
+        }
         y += UNDER_LINE_H + UNDER_LINE_GAP;
     }
     if let Some(s) = &caption_str {
         if let Ok(tc) = std::ffi::CString::new(elide_caption(s, at.w)) {
             let w = measure.width(&tc, csz, false);
-            p.text(tc.as_ptr(), at.run_x(w), y, csz, theme::TEXT_SECONDARY, 0, 0);
+            let ink = match ink {
+                LabelInk::Focus => theme::TEXT_SECONDARY,
+                LabelInk::Rest => theme::TEXT_TERTIARY,
+            };
+            p.text(tc.as_ptr(), at.run_x(w), y, csz, ink, 0, 0);
         }
     }
 }
@@ -1933,6 +2048,59 @@ mod tests {
         let without = TileLabel::title("Title");
         assert_eq!(with_caption.own_height(), TileLabel::height(true));
         assert_eq!(without.own_height(), TileLabel::height(false));
+    }
+
+    // ---- every card of a row is named ----------------------------------------------------------
+
+    /// **The caption slot is the CARD's, not the focus's.** Owner, on a real Library frame: the
+    /// focused poster carried "Sherlock Holmes / 1954" and the two beside it carried nothing, so the
+    /// row was ragged and the three cards were three different heights. Every card of a row now
+    /// reserves the same slot and draws the same block; focus only changes the ink
+    /// ([`LabelInk`]) and the window the runs may use.
+    ///
+    /// Watched red against the shipped behaviour: a resting card had NO slot at all, so the only
+    /// answer this could have got before is `label_slot` of the focused one versus nothing.
+    #[test]
+    fn every_card_in_a_row_reserves_the_same_caption_slot_focused_or_not() {
+        let one_row = |focused_col: usize, rest_col: usize| {
+            let sty = RowStyle::HOME;
+            let pop = sty.focus_scale;
+            let rest = Rect::new(MARGIN_X + rest_col as f32 * (sty.w + sty.gap), 400.0, sty.w, sty.h);
+            let focused = Rect::new(MARGIN_X + focused_col as f32 * (sty.w + sty.gap), 400.0, sty.w, sty.h)
+                .scaled(pop);
+            let rest_label = TileLabel::titled("Caminandes", "2016");
+            let focus_label = TileLabel::titled("Sherlock Holmes", "1954");
+            // The slot a card reserves: where its block hangs and how tall it is.
+            let slot = |rect: Rect, s: f32, label: &TileLabel| (label_top(rect, s), label.own_height());
+            let rest_slot = slot(rest, 1.0, &rest_label);
+            let focus_slot = slot(focused, pop, &focus_label);
+            assert_eq!(rest_slot, focus_slot, "the two cards of a row must measure the same block");
+            assert_eq!(rest_slot.1, UNDER_LABEL_H, "and it is the full caption block");
+            // …and the slot exists for a card that carries only a title, at its own height.
+            assert_eq!(slot(rest, 1.0, &TileLabel::title("Spring")).1, TileLabel::height(false));
+            // The resting window is the card's own, so five of them sit side by side and the last
+            // column's caption is the same width as its neighbours' (no leading-edge fallback).
+            let (x, w) = resting_block(rest, &sty);
+            assert_eq!((x, w), (rest.x, sty.w), "a resting block is its card, centred on it");
+            assert!(x >= rest.x && x + w <= rest.x + rest.w);
+        };
+        for (focused, rest) in [(0, 1), (1, 0), (3, 4), (4, 3)] {
+            one_row(focused, rest);
+        }
+    }
+
+    /// A pop moves the card, never its caption line: the block hangs from the UNSCALED card bottom,
+    /// so walking the cursor along a row does not step the titles up and down.
+    #[test]
+    fn a_focused_pop_does_not_move_the_caption_off_its_row_s_baseline() {
+        let sty = RowStyle::HOME;
+        let rect = Rect::new(MARGIN_X, 400.0, sty.w, sty.h);
+        let at_rest = label_top(rect, 1.0);
+        let popped = rect.scaled(sty.focus_scale);
+        assert!((label_top(popped, sty.focus_scale) - at_rest).abs() < 0.001);
+        // a press dips the tile without dragging the block with it
+        let pressed = rect.scaled(0.94);
+        assert!((label_top(pressed, 0.94) - at_rest).abs() < 0.001);
     }
 
     // ---- The collapsing label band -------------------------------------------------------------

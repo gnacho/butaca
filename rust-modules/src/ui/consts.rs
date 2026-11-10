@@ -29,7 +29,16 @@ pub const CARD_H: f32 = 450.0;
 /// 1746 and the Library's at 1772. The owner reported that as the four surfaces not looking alike
 /// ("alinear para que TODAS se vean igual"). One gap, one band, one lattice - see
 /// [`crate::ui::poster_grid::BAND_W`].
-pub const GAP: f32 = 44.0;
+///
+/// **44 until 2026-11-10, and 36 is the arithmetic, not a taste change.** The Library's alphabet rail
+/// used to take its 44px track straight out of the band's reserve, which left the fifth column with
+/// FOUR pixels of air on its right instead of the 44 every other column had: the rail read as part
+/// of that column (owner, "el rail se mete en el espacio de la quinta columna"). Five 300px cards
+/// plus a gap either side plus that track do not fit the 1728px safe width at 44, so the gap gives
+/// up the 8px it has to: `COLS * CARD_W + (COLS - 1) * GAP == BAND_W` still closes exactly, the cards
+/// keep their 300, and the rail gets a full `space::LG` of air of its own. See
+/// [`crate::ui::poster_grid::RAIL_BAND`] for the band that spends it.
+pub const GAP: f32 = 36.0;
 /// **The safe area's LEFT/RIGHT keep-out — 5% of [`SCR_W`], and the reason it is 96 rather than 90.**
 ///
 /// A television overscans: the panel shows less than the frame it is handed, by a margin the set

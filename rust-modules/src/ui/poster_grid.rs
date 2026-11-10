@@ -21,7 +21,20 @@ use crate::ui::{Rect, Spring};
 /// puts nothing there. The alternative - Home using the full safe width and the Library giving up
 /// 52px - is what made the same card land on two lattices, and with 20% bigger posters the two
 /// would have differed by a whole column.
-pub(crate) const RAIL_BAND: f32 = 44.0 + crate::ui::theme::space::XS;
+///
+/// **It is `air + track`, and the air is the point** (2026-11-10). The band used to be
+/// `RAIL_TRACK_W + XS`, i.e. four pixels more than the track, so the rail's strip began four pixels
+/// from the last column's edge and every column but the fifth had 44px of air on its right: the
+/// rail read as sitting IN the fifth column, and on a five-card row it was the only asymmetry on the
+/// screen. It now buys a full [`crate::ui::theme::space::LG`] of air before the track, which the
+/// columns pay for out of [`GAP`] rather than out of their own width - see `consts::GAP`'s doc for
+/// that arithmetic, and [`the_poster_columns_close_the_band_exactly`] for the test that holds all
+/// six numbers to it.
+pub(crate) const RAIL_AIR: f32 = crate::ui::theme::space::LG;
+/// The rail's own strip: the track a letter sits in. [`RAIL_BAND`] is this plus the air before it.
+pub(crate) const RAIL_TRACK_W: f32 = 44.0;
+pub(crate) const RAIL_BAND: f32 = RAIL_AIR + RAIL_TRACK_W;
+
 /// The usable width for poster columns: the safe area less the rail's band.
 pub(crate) const BAND_W: f32 = SCR_W - 2.0 * MARGIN_X - RAIL_BAND;
 /// **How many poster columns the band holds.** Five, and the count is a CONSEQUENCE of
@@ -283,6 +296,35 @@ mod tests {
         let right = MARGIN_X + BAND_W;
         assert!(right <= SCR_W - MARGIN_X + 0.01, "the band ends at the safe edge");
         assert!((right - (SCR_W - MARGIN_X - RAIL_BAND)).abs() < 0.01);
+    }
+
+    /// **The rail is OUTSIDE the band, with the same air the columns have between them.** Owner, on
+    /// a real frame: "el rail se mete en el espacio de la quinta columna". It did — the band was
+    /// `RAIL_TRACK_W + XS`, so the strip began four pixels past the last card while every other
+    /// column had a full gap on its right, and the fifth column was the only card on the screen with
+    /// no air beside it.
+    ///
+    /// The three numbers that make it impossible again: the band closes exactly on the columns, the
+    /// rail's band is one `RAIL_AIR` plus its track, and the track's right edge is the safe frame.
+    #[test]
+    fn the_rail_stands_clear_of_the_poster_band() {
+        let band_edge = MARGIN_X + BAND_W;
+        let track_left = band_edge + RAIL_AIR;
+        let track_right = track_left + RAIL_TRACK_W;
+        assert_eq!(RAIL_BAND, RAIL_AIR + RAIL_TRACK_W);
+        assert!(
+            RAIL_AIR >= GAP * 0.9,
+            "the rail's air ({RAIL_AIR}) has to read as one column gap ({GAP}), not as a sliver"
+        );
+        assert!(
+            track_right <= SCR_W - MARGIN_X + 0.01,
+            "the rail's track must stay inside the safe frame: {track_right}"
+        );
+        // …and the fifth column's card ends at the band's edge, so its air before the rail is
+        // exactly RAIL_AIR: the same separation every other card has to its neighbour.
+        let fifth_right = MARGIN_X + (COLS - 1) as f32 * (CARD_W + GAP) + CARD_W;
+        assert!((fifth_right - band_edge).abs() < 0.01);
+        assert!(track_left - fifth_right >= GAP * 0.9);
     }
 
     #[test]
