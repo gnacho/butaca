@@ -1,7 +1,7 @@
 {
  "anchor": true,
  "blobs": false,
- "build": "0.8.0-dev",
+ "build": "0.9.0-dev",
  "clock": {
   "start": 0
  },
@@ -168,38 +168,6 @@
   "probe": "controlled=home version=1"
  },
  "schema": 3,
- "shape_history": [
-  {
-   "from": "0x4857d0f3323b78ca",
-   "reason": "preplay",
-   "to": "0x75eb261dc92a0f22"
-  },
-  {
-   "from": "0x75eb261dc92a0f22",
-   "reason": "preplay",
-   "to": "0x6d49289ade7e4c7d"
-  },
-  {
-   "from": "0x6d49289ade7e4c7d",
-   "reason": "preplay",
-   "to": "0xeb59dbd7d424353f"
-  },
-  {
-   "from": "0xeb59dbd7d424353f",
-   "reason": "Favorites",
-   "to": "0x5c5293fe8e840ca3"
-  },
-  {
-   "from": "0x5c5293fe8e840ca3",
-   "reason": "detail",
-   "to": "0xa714c4fb87bc3b45"
-  },
-  {
-   "from": "0xa714c4fb87bc3b45",
-   "reason": "detail",
-   "to": "0xdff65802bb1d88e4"
-  }
- ],
  "state_fp": 16138183083481204964,
  "triggers": [
   "butaca-app-init",
