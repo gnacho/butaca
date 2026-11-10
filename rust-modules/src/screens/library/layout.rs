@@ -1,10 +1,9 @@
 //! Pure geometry for the owned Library's single vertical document.
 
-use crate::ui::consts::{CARD_H, CARD_W, MARGIN_X, MARGIN_Y, SCR_H, SCR_W};
+use crate::ui::consts::{CARD_H, MARGIN_X, MARGIN_Y, SCR_H, SCR_W};
 use crate::ui::card_row::RowStyle;
-use crate::ui::theme;
 
-pub(super) const COLS: usize = 6;
+pub(crate) const COLS: usize = crate::ui::poster_grid::COLS;
 const EPISODE_COLS: usize = 4;
 pub(super) const MAX_LIBRARY_PILLS: usize = 8;
 pub(super) const MAX_SHELVES: usize = 12;
@@ -23,10 +22,14 @@ pub(super) const GRID_PITCH: f32 = CARD_H
 pub(super) const RAIL_TRACK_W: f32 = 44.0;
 pub(super) const RAIL_PITCH: f32 = 34.0;
 pub(super) const RAIL_CAP_PAD: f32 = 10.0;
-pub(super) const RAIL_BAND: f32 = RAIL_TRACK_W + theme::space::XS;
-pub(super) const GRID_RIGHT: f32 = SCR_W - MARGIN_X - RAIL_BAND;
-pub(super) const GRID_GAP: f32 =
-    (GRID_RIGHT - MARGIN_X - COLS as f32 * CARD_W) / (COLS as f32 - 1.0);
+/// The alphabet rail's band - the SHARED one ([`crate::ui::poster_grid::RAIL_BAND`]), because the
+/// grid's columns and Home's shelves have to sit on one lattice. Re-exported rather than
+/// re-declared, so the rail's own width cannot drift from the band it is given.
+pub(super) use crate::ui::poster_grid::RAIL_BAND;
+/// The grid's right edge: the shared poster band's end. Home draws nothing in the rail's band but
+/// reserves it too, which is what makes the two screens' columns line up.
+pub(super) const GRID_RIGHT: f32 = MARGIN_X + crate::ui::poster_grid::BAND_W;
+pub(super) const GRID_GAP: f32 = crate::ui::poster_grid::GAP;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Block {
@@ -243,11 +246,16 @@ impl Layout {
 }
 
 /// The original fixed rail band: it never follows the scrolling first grid row.
+///
+/// Its x is the CENTRE of the shared poster band's reserved strip rather than "the margin minus
+/// half a track": the strip is what Home reserves too (see
+/// [`crate::ui::poster_grid::RAIL_BAND`]), so the rail sits in the air it is charged for.
 pub(super) fn rail_geom(n: usize) -> (f32, f32, f32, f32) {
     const TOP: f32 = 232.0 + 8.0;
     let visible = ((SCR_H - MARGIN_Y - TOP - RAIL_CAP_PAD) / RAIL_PITCH).floor().max(1.0);
     let height = visible.min(n as f32) * RAIL_PITCH;
-    (TOP, SCR_W - MARGIN_X - RAIL_TRACK_W * 0.5, height, (n as f32 * RAIL_PITCH - height).max(0.0))
+    let cx = GRID_RIGHT + (RAIL_BAND - RAIL_TRACK_W) * 0.5 + RAIL_TRACK_W * 0.5;
+    (TOP, cx, height, (n as f32 * RAIL_PITCH - height).max(0.0))
 }
 
 pub(super) fn rail_scroll_target(scroll: f32, drive: usize, n: usize) -> f32 {

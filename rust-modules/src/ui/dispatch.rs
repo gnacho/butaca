@@ -1518,6 +1518,12 @@ where
             let n = nav.tabs.stack.entries.len();
             let top_entry = nav.tabs.stack.top().map(|entry| entry.id);
             let from = if draws_below { n.saturating_sub(2) } else { n.saturating_sub(1) };
+            // **The page-scroll publication is cleared before the walk**, so that a page which does
+            // not draw this pass (a held transition image) leaves the bar's brand at its head
+            // instead of riding an answer from the frame before. A page that does draw publishes
+            // its own (`ui::nav::publish_page_scroll`), and the top page draws last, so its value
+            // is the one `draw_chrome` reads below.
+            super::nav::reset_page_scroll();
             for (index, e) in nav.tabs.stack.entries[from..].iter_mut().enumerate() {
                 let page_z = Z::page(index);
                 if page_z >= ceiling { break; }

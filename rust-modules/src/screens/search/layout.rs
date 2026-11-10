@@ -187,17 +187,28 @@ mod tests {
         assert_eq!(top(&ALL, 99, OPEN), top(&ALL, ALL.len(), OPEN));
     }
 
+    /// **The first shelf's HEAD clears the raised keyboard, and the row is what pays for it.**
+    ///
+    /// The contract used to be the whole row, and it was satisfiable while a poster was 375 tall
+    /// (300 + 60 + 375 = 735 under a keyboard top at 756). At the shared 450px poster the row ends
+    /// at 810 and no layout of this page can fit it: the keyboard takes 324 of 1080. So the
+    /// guarantee is the one that is still true and still worth having - the reader sees the shelf's
+    /// heading and the top of its cards above the keyboard, which is what says "there are results",
+    /// and the rest is revealed by the document's own scroll as the reader moves.
     #[test]
-    fn the_first_shelfs_whole_row_clears_the_raised_keyboard() {
+    fn the_first_shelfs_head_clears_the_raised_keyboard() {
         let floor = SCR_H - KEYBOARD_H;
         for kind in ALL {
-            let bottom = top(&[kind], 0, OPEN) + HEAD_TO_ROW + style(kind).h;
+            let head = top(&[kind], 0, OPEN) + HEAD_TO_ROW;
             assert!(
-                bottom <= floor,
-                "{kind:?}: the first row ends at {bottom}, under the keyboard at {floor}"
+                head <= floor,
+                "{kind:?}: the first row starts at {head}, under the keyboard at {floor}"
             );
+            // …and enough of the card shows above the floor to read as a card, not a sliver.
+            assert!(floor - head >= 0.5 * style(kind).h,
+                "{kind:?}: only {}px of the first row shows", floor - head);
         }
-        assert_eq!(top(&[Kind::Movie], 0, OPEN) + HEAD_TO_ROW + CARD_H, 735.0);
+        assert_eq!(top(&[Kind::Movie], 0, OPEN) + HEAD_TO_ROW + CARD_H, 810.0);
         assert_eq!(floor, 756.0);
     }
 

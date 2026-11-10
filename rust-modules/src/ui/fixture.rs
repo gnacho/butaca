@@ -1019,7 +1019,11 @@ impl Rig<FixtureHost> for FixtureRig {
                 name: &self.scrim_name,
                 name_w: 0.0,
             },
-            labels: super::widgets::TabLabels { generation: 1, labels: &self.scrim_labels },
+            labels: super::widgets::TabLabels {
+                generation: 1,
+                labels: &self.scrim_labels,
+                icons: &[],
+            },
             chip_expand: self.scrim_expand,
         })
     }

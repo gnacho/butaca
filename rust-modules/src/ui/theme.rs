@@ -682,7 +682,13 @@ pub const SCRIM_BLACK_INK: [f32; 3] = [BLACK[0], BLACK[1], BLACK[2]];
 /// rather than a colour, like [`CARD_SHADOW_REST_A`]: the ink is [`SCRIM_INK`], only the weight is
 /// the decision. **This is the one knob** if the treatment reads heavy — 0.60 still clears 3:1
 /// everywhere.
-pub const SCRIM_TEXT_A: f32 = 0.72;
+///
+/// **0.78 since 2026-11-10**, and the reason is a LAYOUT change rather than a taste one: the home
+/// billboard's text block is top-anchored now, so the title's right end sits at y=346 instead of
+/// 458 - above the atmospheric ramp's own start (367), where the bottom-up curve used to be doing
+/// part of this job. Graded over blown-white artwork that row came back 2.46:1 against its 2.5
+/// floor; eight per cent more wedge takes it to 2.6 and leaves the other rows where they were.
+pub const SCRIM_TEXT_A: f32 = 0.78;
 
 /// **White overlay at alpha `a`** — the ramp every overlay on this palette rides.
 ///

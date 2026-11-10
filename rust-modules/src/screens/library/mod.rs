@@ -1,7 +1,7 @@
 //! Library instance: document motion and transactions belong here; focus belongs to Input.
 mod identity;
 mod bookmark;
-mod layout;
+pub(crate) mod layout;
 mod parts;
 mod rail;
 #[cfg(test)]

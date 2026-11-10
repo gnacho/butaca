@@ -168,6 +168,12 @@ The path data `M5 13l4 4L19 7` on a 24×24 grid is identical to Heroicons v1
 `optimized/outline/check.svg` (confirmed against upstream). *Modified*: stroke width 2 → 3,
 stroke colour set to white.
 
+**Heroicons** - the `home` icon (`assets/icons/home.svg`)
+Copyright (c) Tailwind Labs, Inc. Licence: **MIT** (`licenses/MIT.txt`).
+The house is Heroicons v1 `optimized/outline/home.svg`, re-expressed as one path so the
+rasterizer's even-odd rule cannot knock the doorway out of the wall. *Modified*: stroke width
+2 → 2.4, stroke colour set to white.
+
 **Lucide** - the `settings` icon (`assets/icons/settings.svg`)
 Copyright (c) 2026 Lucide Icons and Contributors. Licence: **ISC** (`licenses/lucide.txt`).
 The path data comes from Lucide's `settings` icon. *Modified*: stroke colour set to white.

@@ -27,7 +27,7 @@ use crate::metadata::{Detail, Episode, Extra};
 use crate::ui::label::HAlign;
 use crate::ui::machine::{GroupId, Measure};
 use crate::ui::text_view::TextView;
-use crate::ui::widgets::{CircleButton, PosterMark};
+use crate::ui::widgets::PosterMark;
 use crate::ui::{theme, Painter, Rect};
 
 /// The hero's whole `u32` elem namespace. A later Detail package's own range must start here.
@@ -62,6 +62,11 @@ pub(crate) const HERO_GROUP: GroupId = GroupId(0);
 /// The Play/Resume pill's minimum width — a pathologically short label still gets a pill.
 const PW: f32 = 168.0;
 
+/// The focused disc's verb caption fades in at the row's own pace - the profile chip's unfurl
+/// stiffness, which is what this interaction is: a name arriving beside a control that does not
+/// move. Not [`crate::ui::widgets`]'s, because that widget no longer has an unfurl to lend.
+pub(crate) const K_DISC_VERB: f32 = 240.0;
+
 /// The row's inter-control air and its disc diameter — the SHARED control-family numbers
 /// (`ui::widgets::CTRL_GAP`/`StatusOverlay::CTRL_H`), not a second copy of them.
 const CGAP: f32 = crate::ui::widgets::CTRL_GAP;
@@ -70,7 +75,10 @@ const PEOPLE_MAX_LINES: usize = 2;
 const PEOPLE_CAST: usize = 3;
 const PEOPLE_LABEL_INK: [f32; 4] = theme::TEXT_TERTIARY;
 /// The facts row now runs to the safe edge: the people band is BELOW it, not beside it, so the row
-/// no longer has a column to stop short of (issue #323).
+/// no longer has a column to stop short of (issue #323). It survives as the BAR the row's own
+/// tests hold the widest control set to, which is why it is test-only since the discs stopped
+/// unfurling: nothing in the draw reads a right edge any more.
+#[cfg(test)]
 const FACTS_R: f32 =
     crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - theme::space::SM;
 
@@ -465,92 +473,27 @@ pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -
     Rect::new(x, y, w, CD)
 }
 
-/// Every disc's drawn width right now, given the row's set, both pills' widths, each disc's
-/// unfurl `e` (0..1) and each verb's measured width.
+/// **Every disc's width - always its own diameter.**
 ///
-/// The widest verb must fit wholly before the People column as a single extra, and the last
-/// control of the trial layout must still sit at or before [`FACTS_R`] — otherwise every disc
-/// remains a circle. Three discs can unfurl at once (Restart + Trailer + Watch), so a pair-wide
-/// budget is not enough: two extras that each fit can still push Watch across the People column.
-pub(crate) fn disc_caps(
-    measure: &dyn Measure,
-    set: HeroSet,
-    unfurl: [f32; 7],
-    named_show: bool,
-) -> [f32; 7] {
-    let (v, n) = hero_ctls(set);
-    let mut label_w = [0.0f32; 7];
-    for &c in &v[..n] {
-        if let Some((slot, label)) = disc_verb(c, named_show, set.favorite.unwrap_or(false)) {
-            label_w[slot] = measure.width(label, theme::size::BODY, true);
-        }
-    }
-    disc_caps_at(
-        set,
-        hero_pill_w(measure, set.restart),
-        alt_pill_w(measure),
-        unfurl,
-        label_w,
-    )
-}
-
-pub(super) fn disc_caps_at(
-    set: HeroSet,
-    pill: f32,
-    alt: f32,
-    unfurl: [f32; 7],
-    label_w: [f32; 7],
-) -> [f32; 7] {
-    let (_, n) = hero_ctls(set);
-    let closed = HeroWidths {
-        pill,
-        alt,
-        disc: [CD; 7],
-    };
-    let last = hero_btn_rect_at(set, n.saturating_sub(1), 0.0, closed);
-    let budget = CircleButton::label_budget(CD, FACTS_R - (last.x + last.w));
-    if label_w.iter().copied().fold(0.0f32, f32::max) > budget {
-        return [CD; 7];
-    }
-    let open = [
-        CircleButton::cap_w(CD, unfurl[0], label_w[0]),
-        CircleButton::cap_w(CD, unfurl[1], label_w[1]),
-        CircleButton::cap_w(CD, unfurl[2], label_w[2]),
-        CircleButton::cap_w(CD, unfurl[3], label_w[3]),
-        CircleButton::cap_w(CD, unfurl[4], label_w[4]),
-        CircleButton::cap_w(CD, unfurl[5], label_w[5]),
-        CircleButton::cap_w(CD, unfurl[6], label_w[6]),
-    ];
-    let last_open = hero_btn_rect_at(
-        set,
-        n.saturating_sub(1),
-        0.0,
-        HeroWidths {
-            pill,
-            alt,
-            disc: open,
-        },
-    );
-    if last_open.x + last_open.w > FACTS_R + 0.01 {
-        return [CD; 7];
-    }
-    open
+/// This used to be a budget dance: a focused disc grew into a capsule carrying its verb, so the row
+/// had to prove the widest verb still fitted before the People column, and the discs' widths were a
+/// function of which one was lit. The owner's 2026-11-10 pass ended the unfurl ("los iconos de
+/// reproducir, audio, etc. que no se expandan con texto"), so the row is now a fixed sum of
+/// [`CD`]-wide discs and the answer cannot depend on focus at all. The verb is still NAMED - the
+/// row's right end carries the focused disc's own word (see [`disc_verb`]) - it just is not part of
+/// the control.
+pub(crate) fn disc_caps() -> [f32; 7] {
+    [CD; 7]
 }
 
 /// The live widths, combining [`hero_pill_w`]/[`alt_pill_w`]/[`disc_caps`] — the one function
 /// `DetailScreen`'s `Focusable` queries and `draw` both call, so they can never drift (mirrors
 /// `ui/detail.rs::hero_widths`, over `Measure` instead of `crate::text` directly).
-pub(crate) fn hero_widths(
-    measure: &dyn Measure,
-    set: HeroSet,
-    has_restart: bool,
-    unfurl: [f32; 7],
-    named_show: bool,
-) -> HeroWidths {
+pub(crate) fn hero_widths(measure: &dyn Measure, has_restart: bool) -> HeroWidths {
     HeroWidths {
         pill: hero_pill_w(measure, has_restart),
         alt: alt_pill_w(measure),
-        disc: disc_caps(measure, set, unfurl, named_show),
+        disc: disc_caps(),
     }
 }
 
@@ -1224,45 +1167,30 @@ mod tests {
         }
     }
 
+    /// **The widest row the app can build still ends before the People column, at every focus
+    /// state** - because the discs no longer change width at all. The old version swept unfurl
+    /// phases; the contract it protected (nothing crosses the column) is now a property of the
+    /// fixed sum, and this is what holds it.
     #[test]
-    fn an_unfurling_disc_never_crosses_the_people_column() {
-        let mut opened = false;
+    fn the_widest_control_row_never_crosses_the_people_column() {
+        let measure = crate::ui::fixture::FixtureMeasure;
         for restart in [false, true] {
             for alt in [false, true] {
                 for trailer in [false, true] {
-                    for mark in [
-                        PosterMark::None,
-                        PosterMark::InProgress,
-                        PosterMark::Watched,
-                    ] {
-                        let set = set_full(restart, alt, mark, trailer);
-                        let (_, n) = hero_ctls(set);
-                        for labels in [
-                            [10.0, 12.0, 12.0, 0.0, 0.0, 0.0, 0.0],
-                            [201.0, 80.0, 316.0, 0.0, 0.0, 0.0, 0.0],
-                            [400.0, 400.0, 400.0, 0.0, 0.0, 0.0, 0.0],
-                            [900.0, 40.0, 40.0, 0.0, 0.0, 0.0, 0.0],
-                        ] {
-                            for e in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
-                                for unfurl in [
-                                    [e, 0.0, 1.0 - e, 0.0, 0.0, 0.0, 0.0],
-                                    [1.0 - e, 0.0, e, 0.0, 0.0, 0.0, 0.0],
-                                    [e, e, 0.0, 0.0, 0.0, 0.0, 0.0],
-                                    [0.0, e, e, 0.0, 0.0, 0.0, 0.0],
-                                ] {
-                                    let disc = disc_caps_at(set, PW + 62.0, 340.0, unfurl, labels);
-                                    let last = hero_btn_rect_at(
-                                        set,
-                                        n - 1,
-                                        0.0,
-                                        HeroWidths {
-                                            pill: PW + 62.0,
-                                            alt: 340.0,
-                                            disc,
-                                        },
+                    for mark in [PosterMark::None, PosterMark::InProgress, PosterMark::Watched] {
+                        for audio in [false, true] {
+                            for subs in [false, true] {
+                                for artwork in [false, true] {
+                                    let set = HeroSet { restart, trailer, alt, mark, favorite: Some(false), audio, subs, artwork };
+                                    let (_, n) = hero_ctls(set);
+                                    let widths = hero_widths(&measure, restart);
+                                    let last = hero_btn_rect_at(set, n - 1, 0.0, widths);
+                                    assert!(
+                                        last.x + last.w <= FACTS_R + 0.01,
+                                        "{set:?} ends at {}",
+                                        last.x + last.w
                                     );
-                                    assert!(last.x + last.w <= FACTS_R + 0.01);
-                                    opened |= disc.iter().any(|width| *width > CD);
+                                    assert_eq!(widths.disc, [CD; 7], "a disc is its own diameter");
                                 }
                             }
                         }
@@ -1270,109 +1198,29 @@ mod tests {
                 }
             }
         }
-        assert!(opened, "the sweep must exercise a real open capsule");
     }
 
+    /// The verbs are still NAMED - the row's right-end caption is the thing that names them - and
+    /// they are the same words the card menu uses, so the two surfaces cannot describe one write
+    /// two ways.
     #[test]
-    fn the_real_verbs_all_fit_the_widest_row() {
-        let measure = crate::ui::fixture::FixtureMeasure;
-        let wide = HeroSet {
-            restart: true,
-            trailer: true,
-            alt: true,
-            mark: PosterMark::Watched,
-        favorite: None,
-        audio: false,
-        subs: false,
-        artwork: false,
-    };
-        let caps = disc_caps(&measure, wide, [1.0; 7], true);
-        let (_, n) = hero_ctls(wide);
-        let last = hero_btn_rect_at(
-            wide,
-            n - 1,
-            0.0,
-            HeroWidths {
-                pill: hero_pill_w(&measure, true),
-                alt: alt_pill_w(&measure),
-                disc: caps,
-            },
-        );
-        assert!(
-            last.x + last.w <= FACTS_R + 0.01,
-            "the 5-control row collapses rather than crossing People"
-        );
-
-        let roomy = HeroSet {
-            restart: false,
-            trailer: true,
-            alt: false,
-            mark: PosterMark::Watched,
-        favorite: None,
-        audio: false,
-        subs: false,
-        artwork: false,
-    };
-        let caps = disc_caps(&measure, roomy, [1.0; 7], false);
-        assert!(caps[1] > CD, "Trailer unfurls when the row has room");
-        assert!(caps[2] > CD, "Watch unfurls when the row has room");
-    }
-
-    struct HugeMeasure;
-    impl Measure for HugeMeasure {
-        fn width(&self, _text: &CStr, _size: i32, _bold: bool) -> f32 {
-            10_000.0
+    fn every_disc_has_a_verb_and_it_is_the_menus_own() {
+        for (ctl, named_show, favorited, want) in [
+            (HeroCtl::Restart, false, false, "Play from Start"),
+            (HeroCtl::MarkWatched, false, false, "Mark as Watched"),
+            (HeroCtl::MarkUnwatched, true, false, "Mark Show as Unwatched"),
+        ] {
+            assert_eq!(disc_verb(ctl, named_show, favorited).unwrap().1.to_str().unwrap(), want);
         }
-        fn cap_h(&self, size: i32) -> f32 {
-            size as f32
-        }
-        fn line_h(&self, size: i32) -> f32 {
-            size as f32
-        }
+        // the discs that name a MODE rather than a write keep their own words
+        assert!(disc_verb(HeroCtl::Audio, false, false).is_some());
+        assert!(disc_verb(HeroCtl::Subtitles, false, false).is_some());
+        assert!(disc_verb(HeroCtl::Artwork, false, false).is_some());
+        // …and the two pills are words already, so they have no caption to add
+        assert_eq!(disc_verb(HeroCtl::Play, false, false), None);
+        assert_eq!(disc_verb(HeroCtl::Alt, false, false), None);
     }
 
-    #[test]
-    fn a_verb_that_does_not_fit_is_dropped_whole() {
-        let set = HeroSet {
-            restart: true,
-            trailer: true,
-            alt: true,
-            mark: PosterMark::Watched,
-        favorite: None,
-        audio: false,
-        subs: false,
-        artwork: false,
-    };
-        assert_eq!(disc_caps(&HugeMeasure, set, [1.0; 7], true), [CD; 7]);
-    }
-
-    #[test]
-    fn the_unfurled_verbs_are_the_menus_own() {
-        assert_eq!(
-            disc_verb(HeroCtl::Restart, false, false)
-                .unwrap()
-                .1
-                .to_str()
-                .unwrap(),
-            "Play from Start"
-        );
-        assert_eq!(
-            disc_verb(HeroCtl::MarkWatched, false, false)
-                .unwrap()
-                .1
-                .to_str()
-                .unwrap(),
-            "Mark as Watched"
-        );
-        assert_eq!(
-            disc_verb(HeroCtl::MarkUnwatched, true, false)
-                .unwrap()
-                .1
-                .to_str()
-                .unwrap(),
-            "Mark Show as Unwatched"
-        );
-    }
 
     #[test]
     fn the_widest_action_row_clears_the_people_column() {
@@ -1525,15 +1373,18 @@ mod tests {
     }
 
     #[test]
-    fn the_trailer_unfurl_spring_reports_while_opening_and_is_quiet_at_rest() {
+    fn the_verb_caption_spring_reports_while_opening_and_is_quiet_at_rest() {
         let _g = crate::testlock::serial();
         crate::ui::idle::reset_for_test();
+        // The row's verb caption is the ONLY spring the discs still carry: the controls themselves
+        // are fixed (`disc_caps`). It has to report while it opens, and settle to silence, or the
+        // present gate spins a still page at 60 fps.
         let mut springs = [crate::ui::Spring::at(0.0); 3];
         for spring in springs.iter_mut() {
-            spring.step(0.0, crate::ui::widgets::K_DISC_UNFURL, 1.0 / 60.0);
+            spring.step(0.0, K_DISC_VERB, 1.0 / 60.0);
             assert!(
                 spring.pos.abs() < 0.01 && spring.vel.abs() < 0.01,
-                "a trailer=false set must not keep springs moving"
+                "a disc with no verb must not keep springs moving"
             );
         }
 
@@ -1542,24 +1393,24 @@ mod tests {
         crate::ui::idle::note_spring(0.0, 0.0, 0.0);
         assert!(
             !crate::ui::idle::should_present(10_016),
-            "a trailer=false set must not keep the present gate awake"
+            "a row with no verb must not keep the present gate awake"
         );
 
         crate::ui::idle::frame_begin(1.0 / 60.0);
-        springs[1].step(1.0, crate::ui::widgets::K_DISC_UNFURL, 1.0 / 60.0);
+        springs[1].step(1.0, K_DISC_VERB, 1.0 / 60.0);
         assert!(
             crate::ui::idle::should_present(10_032),
-            "opening the trailer disc reports motion"
+            "opening the caption reports motion"
         );
         assert!(springs[1].pos > 0.01 || springs[1].vel.abs() > 0.01);
 
         for _ in 0..240 {
             crate::ui::idle::frame_begin(1.0 / 60.0);
-            springs[1].step(1.0, crate::ui::widgets::K_DISC_UNFURL, 1.0 / 60.0);
+            springs[1].step(1.0, K_DISC_VERB, 1.0 / 60.0);
         }
         assert!(
             (springs[1].pos - 1.0).abs() < 0.01 && springs[1].vel.abs() < 0.01,
-            "the third unfurl spring settles"
+            "the caption's spring settles"
         );
         crate::ui::idle::frame_begin(1.0 / 60.0);
         crate::ui::idle::note_spring(1.0, 1.0, 0.0);
@@ -1569,7 +1420,7 @@ mod tests {
         crate::ui::idle::note_spring(1.0, 1.0, 0.0);
         assert!(
             !crate::ui::idle::should_present(20_016),
-            "the third unfurl spring is quiet at rest"
+            "the caption's spring is quiet at rest"
         );
     }
 }

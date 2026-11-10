@@ -34,7 +34,10 @@ fn keyboard_rail_ok_down_up_returns_without_arming_or_requesting_a_card() {
     frame(&mut d, &mut rig, AppArg::Library, tick(0), vec![]);
     Bridge::library_command(
         &mut d,
-        crate::screens::registry::LibraryCmd::FocusGrid { row: 2, col: 5 },
+        crate::screens::registry::LibraryCmd::FocusGrid {
+            row: 2,
+            col: crate::screens::library::layout::COLS - 1,
+        },
     );
     for i in 1..80 {
         frame(&mut d, &mut rig, AppArg::Library, tick(i), vec![]);
@@ -256,7 +259,9 @@ fn library_sweep_visits_the_whole_document_and_reverses_at_its_ends() {
         if region == "grid" {
             grid_rows.insert(row);
         }
-        if region == "library" && grid_rows.contains(&19) {
+        // the last grid row of the seeded catalog at the shared column count
+        let last_row = (120 / crate::screens::library::layout::COLS - 1) as i32;
+        if region == "library" && grid_rows.contains(&last_row) {
             returned = true;
             break;
         }
@@ -271,7 +276,7 @@ fn library_sweep_visits_the_whole_document_and_reverses_at_its_ends() {
         "{path:?}"
     );
     assert_eq!(shelves, (0..12).collect());
-    assert_eq!(grid_rows, (0..20).collect());
+    assert_eq!(grid_rows, (0..(120 / crate::screens::library::layout::COLS) as i32).collect());
     assert!(
         returned,
         "the real engine sweep reverses and returns to the document head"

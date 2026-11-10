@@ -219,55 +219,25 @@ fn an_index_past_the_row_is_a_resting_control() {
     );
 }
 
-/// The unfurl's three formulas are ONE formula asked three ways, and each way is load-bearing
-/// somewhere the others are not: [`CircleButton::cap_w`] places the capsule, `cap_label_w`
-/// recovers what it was sized for so the label's fade can be geometric rather than guessed, and
-/// [`CircleButton::label_budget`] is what a row with a hard right edge asks before allowing any
-/// of it (`detail::watch_cap_at`). They agree or the control paints a word past its own frame.
+/// **A disc is a disc: its box is the design system's, never its label's.** The unfurl is gone
+/// (owner, 2026-11-10: "los iconos de reproducir, audio, etc. que no se expandan con texto"), and
+/// what has to stay true is the reason it went: a row of discs is a FIXED sum, so walking focus
+/// across it never moves the thing the viewer is aiming at. This pins the widget's side of that -
+/// `CircleButton` has no builder that can widen a frame, and the frame it is handed is the frame
+/// it paints.
 #[test]
-fn the_unfurl_geometry_round_trips() {
+fn a_circle_button_can_only_ever_be_the_frame_it_is_handed() {
     let d = StatusOverlay::CTRL_H;
-    for label_w in [40.0f32, 120.0, 233.0, 267.0, 400.0] {
-        assert_eq!(
-            CircleButton::cap_w(d, 0.0, label_w),
-            d,
-            "shut is the bare disc"
-        );
-        let open = CircleButton::cap_w(d, 1.0, label_w);
-        assert!(
-            open > d + label_w,
-            "an open capsule holds its label and then some"
-        );
-
-        for e in [0.05f32, 0.25, 0.5, 0.9, 1.0] {
-            let w = CircleButton::cap_w(d, e, label_w);
-            assert!(
-                w >= d && w <= open,
-                "the capsule stays between its two ends at e={e}"
-            );
-            let back = CircleButton::cap_label_w(d, e, w).expect("open enough to invert");
-            assert!(
-                (back - label_w).abs() < 0.01,
-                "e={e}: recovered {back}, measured {label_w}"
-            );
-        }
-        // …and the budget is the same equation solved for the label: spending exactly it must
-        // land the open capsule exactly `room` past the bare disc.
-        let room = open - d;
-        let budget = CircleButton::label_budget(d, room);
-        assert!(
-            (budget - label_w).abs() < 0.01,
-            "budget {budget} for a {label_w} label"
-        );
-    }
-    // a shut (or nearly shut) capsule carries no recoverable label — the range where the ramp
-    // has nothing to fade in anyway
-    assert_eq!(CircleButton::cap_label_w(d, 0.0, d), None);
-    // "no label" collapses whatever the unfurl says, so a caller cannot animate a bare disc wide
-    for e in [0.0f32, 0.5, 1.0] {
-        assert_eq!(CircleButton::cap_w(d, e, 0.0), d);
-        assert_eq!(CircleButton::cap_w(d, e, -5.0), d);
-    }
+    let bare = CircleButton::new(std::ptr::null()).at(100.0, 40.0);
+    assert_eq!((bare.frame.w, bare.frame.h), (d, d), "at() keeps its own diameter");
+    let handed = Rect::new(100.0, 40.0, d, d);
+    let same = |r: Rect| (r.x, r.y, r.w, r.h) == (handed.x, handed.y, handed.w, handed.h);
+    let placed = CircleButton::new(std::ptr::null()).frame(handed);
+    assert!(same(placed.frame));
+    // …and there is no label face left to ask for: the verb is drawn by the row, beside the discs,
+    // so a focused control and an unfocused one are the same rectangle.
+    let focused = CircleButton::new(std::ptr::null()).frame(handed).focused(true);
+    assert!(same(focused.frame));
 }
 
 /// The **destructive** face, both states, as the one sentence it is meant to say: *the colour

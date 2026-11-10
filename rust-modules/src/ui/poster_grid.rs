@@ -13,8 +13,25 @@ use crate::ui::card_row::{self, RowStyle, LABEL_BAND_COLLAPSED, UNDER_LABEL_H};
 use crate::ui::consts::{CARD_H, CARD_W, MARGIN_X, MARGIN_Y, SCR_H, SCR_W, UNDER_LABEL_AIR};
 use crate::ui::{Rect, Spring};
 
-pub(crate) const COLS: usize = 6;
-pub(crate) const GAP: f32 = (SCR_W - 2.0 * MARGIN_X - COLS as f32 * CARD_W) / (COLS as f32 - 1.0);
+/// **The band the alphabet rail stands in, on the Library's All grid** - and, since 2026-11-10, on
+/// EVERY poster surface, including the ones that draw no rail.
+///
+/// That is the whole of "alinear para que TODAS se vean igual": a column lattice is only shared if
+/// the space it may occupy is shared, so Home reserves the rail's band on its right even though it
+/// puts nothing there. The alternative - Home using the full safe width and the Library giving up
+/// 52px - is what made the same card land on two lattices, and with 20% bigger posters the two
+/// would have differed by a whole column.
+pub(crate) const RAIL_BAND: f32 = 44.0 + crate::ui::theme::space::XS;
+/// The usable width for poster columns: the safe area less the rail's band.
+pub(crate) const BAND_W: f32 = SCR_W - 2.0 * MARGIN_X - RAIL_BAND;
+/// **How many poster columns the band holds.** Five, and the count is a CONSEQUENCE of
+/// [`CARD_W`] and [`crate::ui::consts::GAP`] rather than a choice made on its own: the invariant
+/// `COLS * CARD_W + (COLS - 1) * GAP == BAND_W` is asserted in the tests below, so raising the card
+/// width fails a test here instead of silently pushing the last column off the panel.
+pub(crate) const COLS: usize = 5;
+/// The column pitch's air - the SHARED card gap, so a poster slot is the same object on every
+/// screen.
+pub(crate) const GAP: f32 = crate::ui::consts::GAP;
 pub(crate) const STYLE: RowStyle = RowStyle { gap: GAP, ..RowStyle::HOME };
 /// A COLLAPSED row's pitch; a row whose band is open adds its share of `card_row::BAND_OPEN`.
 pub(crate) const ROW_PITCH: f32 = CARD_H + LABEL_BAND_COLLAPSED + UNDER_LABEL_AIR;
@@ -171,10 +188,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn six_portraits_keep_existing_card_size_and_share_one_pitch() {
+    fn a_row_of_portraits_keeps_one_card_size_and_one_pitch() {
         let a = cell(0, 400.0, 0.0, &[]);
-        let b = cell(5, 400.0, 0.0, &[]);
-        let next = cell(6, 400.0, 0.0, &[]);
+        let b = cell(COLS - 1, 400.0, 0.0, &[]);
+        let next = cell(COLS, 400.0, 0.0, &[]);
         assert_eq!((a.w, a.h), (CARD_W, CARD_H));
         assert!(b.x + b.w <= SCR_W - MARGIN_X + 0.01);
         assert_eq!(next.x, a.x);
@@ -184,16 +201,23 @@ mod tests {
     /// C2: a row focused below the first scrolls the page so a row's top rests exactly on the
     /// content edge — the row above the focused one, when both fit — and never cuts a row; row 0
     /// shows the head again.
+    /// C2: a row focused below the first scrolls the page so that row's top rests on the content
+    /// edge, never cut; row 0 shows the head again.
+    ///
+    /// **It no longer also rests the row ABOVE on the edge**, and that is the card size rather than
+    /// a regression: a 450px poster with its open caption band is 542px of a 930px viewport, so two
+    /// rows cannot both show whole. The guarantee that survives - and the one the grid is actually
+    /// judged on - is that the focused row is whole and the page lands on a row boundary.
     #[test]
     fn a_snapped_page_rests_a_row_on_the_content_edge() {
         let (top, edge, len) = (520.0, 96.0, 18);
         let at = snap_row(0.0, 1, len, top, edge);
-        assert_eq!(cell(0, top, at, &settled(Some(1))).y, edge, "row 0 rests on the edge");
-        let focused = cell(6, top, at, &settled(Some(1)));
-        assert!(focused.y + CARD_H + UNDER_LABEL_H <= SCR_H - MARGIN_Y, "and the focused row shows whole");
+        let focused = cell(COLS, top, at, &settled(Some(1)));
+        assert_eq!(focused.y, edge, "the focused row rests on the edge");
+        assert!(focused.y + CARD_H + UNDER_LABEL_H <= SCR_H - MARGIN_Y, "and it shows whole");
         let at2 = snap_row(at, 2, len, top, edge);
-        assert_eq!(cell(6, top, at2, &settled(Some(2))).y, edge, "down again: the next row takes the edge");
-        assert_eq!(snap_row(at2, 1, len, top, edge), at2, "up to a row already on screen: no move");
+        assert_eq!(cell(2 * COLS, top, at2, &settled(Some(2))).y, edge, "down again: the next row takes the edge");
+        assert_eq!(snap_row(at2, 2, len, top, edge), at2, "the row it is already on: no move");
         assert_eq!(snap_row(at2, 0, len, top, edge), 0.0, "row 0 reveals the head");
     }
 
@@ -235,6 +259,30 @@ mod tests {
         bands.focus(None, true);
         for _ in 0..120 { bands.tick(k, 1.0 / 60.0); }
         assert!(bands.slots.iter().all(|(r, _)| r.is_none()));
+    }
+
+    /// **ONE card geometry, and this is where it is arithmetic instead of a habit.** The band, the
+    /// column count, the card width and the gap have to close exactly, because four surfaces lay
+    /// their columns out from these four numbers: Home's shelves, the Library's All grid, the
+    /// Library's shelves and the Collection page. A sixth column does not fit at 300 (it would run
+    /// 124px past the rail's band), and a gap chosen per screen is exactly the five-pixel drift the
+    /// owner reported as the four surfaces not looking alike.
+    #[test]
+    fn the_poster_columns_close_the_band_exactly() {
+        let used = COLS as f32 * CARD_W + (COLS as f32 - 1.0) * GAP;
+        assert!(
+            (used - BAND_W).abs() < 0.01,
+            "{COLS} columns of {CARD_W} plus {} gaps use {used}, the band is {BAND_W}",
+            COLS - 1
+        );
+        assert_eq!(GAP, crate::ui::consts::GAP, "one gap for every poster surface");
+        assert_eq!(STYLE.w, CARD_W);
+        assert_eq!(STYLE.gap, GAP);
+        // …and the last column ends inside the safe area, which is the whole reason the rail's
+        // band is reserved on screens that draw no rail.
+        let right = MARGIN_X + BAND_W;
+        assert!(right <= SCR_W - MARGIN_X + 0.01, "the band ends at the safe edge");
+        assert!((right - (SCR_W - MARGIN_X - RAIL_BAND)).abs() < 0.01);
     }
 
     #[test]

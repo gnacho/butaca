@@ -121,18 +121,23 @@ pub(super) fn home_syn_h() -> f32 {
     crate::ui::hero_syn_h(crate::ui::HERO_SYN_MAXLINES)
 }
 
-/// The TOP of home's title band, from the bottom-anchored stack the hero draws (`hero_content`):
-/// the reserved logo band + `space::MD` + a one-line BODY kicker + `space::SM` + the synopsis
-/// block, stacked UP from `HERO_TEXT_BOTTOM` through the screen's own `hero_stack_top`, so the
-/// contract reads the arithmetic the draw uses. Only the KICKER's height is still quoted like
-/// [`HERO_CAP_H`], because it is one line of a rung and the host opens no SDL_ttf.
+/// The TOP of home's title band - the block's head, which is the shared
+/// [`crate::ui::landing_hero::TEXT_TOP`] and not a stack computed upward any more (the owner's
+/// 2026-11-10 pass anchored the hero's text at the top).
 pub(super) fn home_title_band_top() -> f32 {
+    crate::ui::landing_hero::TEXT_TOP
+}
+
+/// The TOP of the blurb's block: the band, one `MD`, the one-line identity row and one `SM` under
+/// the head. Only the identity row's height is quoted like [`HERO_CAP_H`], because it is one line
+/// of a rung and the host opens no SDL_ttf.
+pub(super) fn home_synopsis_top() -> f32 {
     const META_H: f32 = 34.0; // one line of `size::BODY`
-    crate::ui::landing_hero::stack_top(
-        crate::ui::hero_logo::band_h(crate::ui::hero_logo::LogoRung::Hero),
-        META_H,
-        theme::space::SM + home_syn_h(),
-    )
+    home_title_band_top()
+        + crate::ui::hero_logo::band_h(crate::ui::hero_logo::LogoRung::Hero)
+        + theme::space::MD
+        + META_H
+        + theme::space::SM
 }
 
 /// …and the cap top of the TEXT it falls back to, which is what the legibility table grades.

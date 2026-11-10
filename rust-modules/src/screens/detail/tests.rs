@@ -123,7 +123,7 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         tabs: TabStrip::new(),
         season_pop: CtlPop::new(),
         ctl_pop: CtlPop::new(),
-        disc_unfurl: [Spring::at(0.0); 7],
+        disc_verb_a: Spring::at(0.0),
         season_metrics: season::Metrics::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
@@ -974,37 +974,6 @@ fn a_landed_view_state_refresh_puts_the_browsed_season_back_and_never_steers_ano
 }
 
 #[test]
-fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
-    let y = 812.0;
-    let set = hero::HeroSet {
-        restart: true,
-        trailer: false,
-        alt: false,
-        mark: PosterMark::InProgress,
-        favorite: None,
-        audio: false,
-        subs: false,
-        artwork: false,
-    };
-    let index = hero::watch_index(set).unwrap();
-    assert_eq!(hero::ctl_at(set, index - 1), Some(hero::HeroCtl::Restart));
-    for unfurl in [0.2, 0.6, 1.0] {
-        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl, 0.0, 0.0, 0.0, 0.0], [201.0, 0.0, 267.0, 0.0, 0.0, 0.0, 0.0]);
-        let widths = hero::HeroWidths {
-            pill: 230.0,
-            alt: 0.0,
-            disc,
-        };
-        let previous = hero::hero_btn_rect_at(set, index - 1, y, widths);
-        let capsule = hero::hero_btn_rect_at(set, index, y, widths);
-        assert!(capsule.w > hero::CD);
-        assert!(capsule.contains(capsule.x + capsule.w - 1.0, capsule.cy()));
-        assert!(!previous.contains(capsule.x + 1.0, capsule.cy()));
-        assert_eq!(capsule.y, y);
-    }
-}
-
-#[test]
 fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
     let _guard = crate::testlock::serial();
     use crate::ui::hit::{HitMap, PointerKind};
@@ -1064,53 +1033,43 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
                         + usize::from(set.favorite.is_some())
                         + usize::from(set.artwork));
                     sizes.insert(n);
-                    for unfurl in [
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.3, 0.0, 0.7, 0.0, 0.0, 0.0, 0.0],
-                        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                    ] {
-                        screen.disc_unfurl = unfurl.map(Spring::at);
-                        for scroll in [0.0, 48.0] {
-                            screen.scroll = Spring::at(scroll);
-                            let widths = hero::hero_widths(&measure, set, restart, unfurl, false);
-                            let mut stops = Vec::new();
-                            let mut drawn = Vec::new();
-                            for (i, control) in controls[..n].iter().enumerate() {
-                                let key = FocusKey { entry: EntryId(7), elem: control.elem() };
-                                let placed = Focusable::<TestHost>::place(&screen, &key.elem, &context, At::Drawn).expect("every drawn control places");
-                                // Same primitive geometry used by draw_buttons; its painter scroll
-                                // translation must match the screen-space hit placement exactly.
-                                let mut painted = hero::hero_btn_rect_at(set, i, screen.hero_chain(&crate::ui::fixture::FixtureMeasure, test_store().view()).btn_y, widths);
-                                painted.y -= scroll;
-                                assert_eq!((placed.rect.x, placed.rect.y, placed.rect.w, placed.rect.h),
-                                    (painted.x, painted.y, painted.w, painted.h),
-                                    "set={set:?} control={control:?} unfurl={unfurl:?}");
-                                assert_eq!(placed.index, Some(i as u32));
-                                drawn.push((key, painted));
-                                stops.push(Stop { key, rect: placed.rect, rest_rect: placed.rest_rect,
-                                    clip: placed.clip, hover: Hover::Focus, activate: Activate::Press });
-                            }
-                            let mut hit = HitMap::new();
-                            hit.fill(stops);
-                            hit.swap();
-                            for (key, rect) in &drawn {
-                                let resolved = hit.resolve(Some(key.entry), PointerKind::Click, rect.cx(), rect.cy(), None);
-                                assert_eq!(resolved.hit, Some(*key));
-                                assert_eq!(resolved.activate.map(|(key, _)| key), Some(*key));
-                            }
-                            for pair in drawn.windows(2) {
-                                let left = pair[0].1;
-                                let right = pair[1].1;
-                                assert!(left.x + left.w < right.x, "controls must not overlap");
-                                let gutter = (left.x + left.w + right.x) * 0.5;
-                                assert!(hit.resolve(Some(pair[0].0.entry), PointerKind::Click, gutter, left.cy(), None).miss,
-                                    "the painted gutter must not activate either control");
-                            }
-                            cases += 1;
+                    for scroll in [0.0, 48.0] {
+                        screen.scroll = Spring::at(scroll);
+                        let widths = hero::hero_widths(&measure, restart);
+                        let mut stops = Vec::new();
+                        let mut drawn = Vec::new();
+                        for (i, control) in controls[..n].iter().enumerate() {
+                            let key = FocusKey { entry: EntryId(7), elem: control.elem() };
+                            let placed = Focusable::<TestHost>::place(&screen, &key.elem, &context, At::Drawn).expect("every drawn control places");
+                            // Same primitive geometry used by draw_buttons; its painter scroll
+                            // translation must match the screen-space hit placement exactly.
+                            let mut painted = hero::hero_btn_rect_at(set, i, screen.hero_chain(&crate::ui::fixture::FixtureMeasure, test_store().view()).btn_y, widths);
+                            painted.y -= scroll;
+                            assert_eq!((placed.rect.x, placed.rect.y, placed.rect.w, placed.rect.h),
+                                (painted.x, painted.y, painted.w, painted.h),
+                                "set={set:?} control={control:?}");
+                            assert_eq!(placed.index, Some(i as u32));
+                            drawn.push((key, painted));
+                            stops.push(Stop { key, rect: placed.rect, rest_rect: placed.rest_rect,
+                                clip: placed.clip, hover: Hover::Focus, activate: Activate::Press });
                         }
+                        let mut hit = HitMap::new();
+                        hit.fill(stops);
+                        hit.swap();
+                        for (key, rect) in &drawn {
+                            let resolved = hit.resolve(Some(key.entry), PointerKind::Click, rect.cx(), rect.cy(), None);
+                            assert_eq!(resolved.hit, Some(*key));
+                            assert_eq!(resolved.activate.map(|(key, _)| key), Some(*key));
+                        }
+                        for pair in drawn.windows(2) {
+                            let left = pair[0].1;
+                            let right = pair[1].1;
+                            assert!(left.x + left.w < right.x, "controls must not overlap");
+                            let gutter = (left.x + left.w + right.x) * 0.5;
+                            assert!(hit.resolve(Some(pair[0].0.entry), PointerKind::Click, gutter, left.cy(), None).miss,
+                                "the painted gutter must not activate either control");
+                        }
+                        cases += 1;
                     }
                 }
             }
@@ -1120,7 +1079,7 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
     // test was written against: three controls with nothing optional, four with one, five with
     // both.
         assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![4, 5, 6]);
-        assert_eq!(cases, 192);
+        assert_eq!(cases, 32);
     clear();
     crate::registry::reset_for_test();
 }
