@@ -6,6 +6,10 @@ What it does not do is as deliberate as what it does: **no telemetry**, no accou
 
 It is in daily use on a 2019 LG set.
 
+> **Active development.** Butaca is in the middle of a large active development effort to
+> provide the best possible native Jellyfin experience on webOS. We are sorry for any
+> inconvenience while this work is in progress; it is expected to take about one to two weeks.
+
 Get started with the [installation guide](docs/install-and-verify.md).
 
 ## Jellyfin, and only Jellyfin
