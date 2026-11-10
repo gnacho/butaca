@@ -674,7 +674,16 @@ pub(crate) unsafe fn construct(
     // owns the channel, so the claim goes here with a bounded wait for its outcome; on any failure
     // SDL proceeds exactly as before, which is the pre-fix behaviour. Jellyfin flavour only: it is
     // the one with a launch-param deep link for the event to carry.
-    crate::webos::lifecycle::start();
+    // DIAGNOSTIC (issue #400/#402, firmware 03.53.45): the SAM lifecycle claim is skipped here so
+    // the reporter can tell whether the pre-SDL LS2 registration (`LSRegisterApplicationService`)
+    // is what leaves SDL's wayland driver hung in SDL_CreateWindow/SDL_GL_CreateContext. This is a
+    // diagnostic build only; flip the constant back to false once the root cause is confirmed.
+    const SKIP_SAMLIFE_CLAIM: bool = true;
+    if !SKIP_SAMLIFE_CLAIM {
+        crate::webos::lifecycle::start();
+    } else {
+        log("boot: DIAGNOSTIC - skipping the SAM lifecycle claim");
+    }
     // DEAD END, measured 2026-07-31 — do not re-try this. The obvious answer to "a parked TV
     // should blank itself" is to stop inhibiting the platform screensaver here (and re-allow it
     // per route, since webOS BACKGROUNDS the app to run one and `0x103` suspends the
@@ -753,16 +762,19 @@ pub(crate) unsafe fn construct(
     let title = c"Butaca";
     #[cfg(not(feature = "hostsim"))]
     let title = c"butaca";
+    log(&format!("boot: creating window {ww_req}x{wh_req} flags=0x{SDL_WINDOW_FLAGS:x}"));
     let win = SDL_CreateWindow(title.as_ptr(), wx, wy, ww_req, wh_req, SDL_WINDOW_FLAGS);
     if win.is_null() {
         log("CreateWindow failed");
         return Err(1);
     }
+    log("boot: window created");
     let ctx = SDL_GL_CreateContext(win);
     if ctx.is_null() {
         log("GL ctx failed");
         return Err(1);
     }
+    log("boot: GL context created");
     crate::surface::probe(win);
     // vsync on → the frame rate locks to the panel refresh. `/tmp/butaca-novsync` uncaps it so
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
