@@ -666,15 +666,12 @@ pub(crate) unsafe fn construct(
         crate::registry::restore_generation_seed(initial.primary_client).map_err(|_| 1)?;
     }
     SDL_SetMainReady();
-    // SAM's lifecycle claim (`webos::lifecycle`) MUST run before SDL initialises. Measured on the
-    // dev set (2026-10-18, butaca#71): the TV's SDL webOS driver claims the app id as its own LS2
-    // name during SDL_Init and registers THE app lifecycle subscription itself
-    // (`registerApp {"id":...}` -> registered, captured on the bus), and SAM then delivers
-    // `relaunch` deep links to that claimant - which drops them. Whoever claims the name first
-    // owns the channel, so the claim goes here with a bounded wait for its outcome; on any failure
-    // SDL proceeds exactly as before, which is the pre-fix behaviour. Jellyfin flavour only: it is
-    // the one with a launch-param deep link for the event to carry.
-    crate::webos::lifecycle::start();
+    // The SAM lifecycle claim (`webos::lifecycle`) is NOT made here any more. It used to run
+    // before SDL to win the app-id LS2 name race against SDL's wayland driver (butaca#71), which
+    // is what let SAM route `relaunch` deep links to us instead of SDL dropping them. The same
+    // pre-SDL claim leaves SDL's driver hung in `SDL_CreateWindow`/`SDL_GL_CreateContext` on
+    // firmware 03.53.45 (webOS 6.5.3, issue #400), so the claim now runs after the GL bring-up -
+    // see the call beside `surface::probe`. Boot has to win over the relaunch deep link.
     // DEAD END, measured 2026-07-31 — do not re-try this. The obvious answer to "a parked TV
     // should blank itself" is to stop inhibiting the platform screensaver here (and re-allow it
     // per route, since webOS BACKGROUNDS the app to run one and `0x103` suspends the
@@ -753,17 +750,27 @@ pub(crate) unsafe fn construct(
     let title = c"Butaca";
     #[cfg(not(feature = "hostsim"))]
     let title = c"butaca";
+    log(&format!("boot: creating window {ww_req}x{wh_req} flags=0x{SDL_WINDOW_FLAGS:x}"));
     let win = SDL_CreateWindow(title.as_ptr(), wx, wy, ww_req, wh_req, SDL_WINDOW_FLAGS);
     if win.is_null() {
         log("CreateWindow failed");
         return Err(1);
     }
+    log("boot: window created");
     let ctx = SDL_GL_CreateContext(win);
     if ctx.is_null() {
         log("GL ctx failed");
         return Err(1);
     }
+    log("boot: GL context created");
     crate::surface::probe(win);
+    // The SAM lifecycle claim, run only AFTER SDL has taken the app id. Before SDL it wins the
+    // name race and SAM routes `relaunch` deep links to us, but it also hangs SDL's wayland driver
+    // on firmware 03.53.45 (issue #400). Deferred, it fails cleanly with -1028 (SDL owns the name),
+    // logs it, and the app boots; the initial-launch deep link from argv[1] is unaffected.
+    // Relaunch-while-running deep links are lost until there is a conflict-free way to subscribe
+    // to registerApp.
+    crate::webos::lifecycle::start();
     // vsync on → the frame rate locks to the panel refresh. `/tmp/butaca-novsync` uncaps it so
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
     // blocking, so the software budget in `run` follows the same switch.
