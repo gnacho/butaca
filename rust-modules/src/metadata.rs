@@ -1368,6 +1368,12 @@ pub(crate) struct Detail {
     pub(crate) has_blur: bool,
     pub(crate) genres: Vec<String>,
     pub(crate) countries: Vec<String>,
+    /// Production companies / studios, in server order — the detail hero's "Studios" line. Empty
+    /// for every item whose server sent none; the skip keeps an item with no studios round-tripping
+    /// byte-identically (the replay gate's canonical check), and `default` keeps old cache records
+    /// valid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) studios: Vec<String>,
     pub(crate) cast: Vec<Cast>,
     /// Director[] tags, in server order — the hero's "Directed by …" line.
     pub(crate) directors: Vec<String>,

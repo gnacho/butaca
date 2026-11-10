@@ -2532,6 +2532,15 @@ impl DetailScreen {
             x += crate::ui::widgets::keyline_chip(p, x, cy, genre, theme::TEXT_SECONDARY, measure)
                 + theme::space::XS;
         }
+        // Studios, in the same chip vocabulary and after the genres: the production company the
+        // item page names. Capped at two so a co-production list cannot push the row past the edge.
+        for studio in d.studios.iter().take(2) {
+            if x + measure.width_str(studio, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
+                break;
+            }
+            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, theme::TEXT_SECONDARY, measure)
+                + theme::space::XS;
+        }
     }
 
     fn draw_ratings(
