@@ -19,13 +19,13 @@ pub(super) const GRID_HEAD_H: f32 = crate::ui::consts::TITLE_DY
 pub(super) const GRID_PITCH: f32 = CARD_H
     + crate::ui::card_row::LABEL_BAND_COLLAPSED
     + crate::ui::consts::UNDER_LABEL_AIR;
-pub(super) const RAIL_TRACK_W: f32 = crate::ui::poster_grid::RAIL_TRACK_W;
+pub(super) const RAIL_TRACK_W: f32 = 44.0;
 pub(super) const RAIL_PITCH: f32 = 34.0;
 pub(super) const RAIL_CAP_PAD: f32 = 10.0;
 /// The alphabet rail's band - the SHARED one ([`crate::ui::poster_grid::RAIL_BAND`]), because the
 /// grid's columns and Home's shelves have to sit on one lattice. Re-exported rather than
 /// re-declared, so the rail's own width cannot drift from the band it is given.
-pub(super) use crate::ui::poster_grid::RAIL_AIR;
+pub(super) use crate::ui::poster_grid::RAIL_BAND;
 /// The grid's right edge: the shared poster band's end. Home draws nothing in the rail's band but
 /// reserves it too, which is what makes the two screens' columns line up.
 pub(super) const GRID_RIGHT: f32 = MARGIN_X + crate::ui::poster_grid::BAND_W;
@@ -249,15 +249,12 @@ impl Layout {
 ///
 /// Its x is the CENTRE of the shared poster band's reserved strip rather than "the margin minus
 /// half a track": the strip is what Home reserves too (see
-/// [`crate::ui::poster_grid::RAIL_BAND`]), so the rail sits in the air it is charged for - and it is
-/// the strip's AIR that the track is pushed past, so the fifth column keeps the same air on its right
-/// as every other column has between it and its neighbour. The track's right edge lands on the safe
-/// frame, which is the one place in that band a 44px strip fits whole.
+/// [`crate::ui::poster_grid::RAIL_BAND`]), so the rail sits in the air it is charged for.
 pub(super) fn rail_geom(n: usize) -> (f32, f32, f32, f32) {
     const TOP: f32 = 232.0 + 8.0;
     let visible = ((SCR_H - MARGIN_Y - TOP - RAIL_CAP_PAD) / RAIL_PITCH).floor().max(1.0);
     let height = visible.min(n as f32) * RAIL_PITCH;
-    let cx = GRID_RIGHT + RAIL_AIR + RAIL_TRACK_W * 0.5;
+    let cx = GRID_RIGHT + (RAIL_BAND - RAIL_TRACK_W) * 0.5 + RAIL_TRACK_W * 0.5;
     (TOP, cx, height, (n as f32 * RAIL_PITCH - height).max(0.0))
 }
 
@@ -337,24 +334,6 @@ mod tests {
 
     fn posters(libraries: bool, shelves: usize, rows: usize, grid_head: bool) -> Layout {
         Layout::new(libraries, &vec![crate::ui::consts::ROW_PITCH; shelves], rows, grid_head)
-    }
-
-    /// **The caption band is the ROW's, and every card of that row is named in it.** The focused
-    /// cell draws its block bright and its four neighbours draw theirs dimmed
-    /// (`card_row::LabelInk`), so a row is one height whether or not the cursor is on it - which is
-    /// the defect the owner photographed ("solo la enfocada tiene título"). Rows without focus keep
-    /// their band closed: they have nowhere to put a block, and reserving 92px of emptiness under
-    /// every one of them is the regression `LABEL_BAND_COLLAPSED` exists to prevent.
-    #[test]
-    fn the_focused_row_captions_every_card_and_no_other_row_captions_any() {
-        use crate::ui::card_row::band_reveal;
-        let layout = posters(true, 0, 40, true).with_grid_focus(Some(3));
-        for row in 0..8 {
-            let open = layout.row_expansion(row);
-            let expected = if row == 3 { 1.0 } else { 0.0 };
-            assert_eq!(open, expected, "row {row}'s band");
-            assert_eq!(band_reveal(open), expected, "row {row}'s caption reveal");
-        }
     }
 
     #[test]
@@ -459,21 +438,11 @@ mod tests {
 
     #[test]
     fn six_column_grid_fills_only_the_reserved_content_band() {
-        use crate::ui::poster_grid::RAIL_BAND;
         let layout = posters(false, 0, 40, true);
         assert_eq!(layout.cell_x(0), MARGIN_X);
         let right = layout.cell_x(COLS - 1) + layout.card_w();
         assert!((right - GRID_RIGHT).abs() < 0.01);
         assert!(right + RAIL_BAND <= SCR_W - MARGIN_X + 0.01);
-        // The rail's own strip is clear of the band: `rail_geom` centres the track in the band's
-        // tail, past `RAIL_AIR` of air, and lands its right edge on the safe frame.
-        let (_, rail_cx, _, _) = rail_geom(12);
-        let track_left = rail_cx - RAIL_TRACK_W * 0.5;
-        let track_right = rail_cx + RAIL_TRACK_W * 0.5;
-        assert!((track_left - GRID_RIGHT - RAIL_AIR).abs() < 0.01,
-            "the rail starts one RAIL_AIR past the last column: {track_left} vs {GRID_RIGHT}");
-        assert!((track_right - (SCR_W - MARGIN_X)).abs() < 0.01,
-            "the rail's track ends on the safe frame: {track_right}");
     }
 
     #[test]

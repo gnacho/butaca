@@ -579,17 +579,11 @@ impl<H: LibraryLike> Part<H> for GridPart {
             let scale = self.tile_scale(index, false, 1.0);
             // Metadata still pages ahead via LibraryWork::Want. Hidden artwork must wait
             // until visible: repeated warms recycle cold cache slots and keep idle uploading.
-            if !card_row::paint_visible(p, rect, scale, true) {
+            if !card_row::paint_visible(p, rect, scale, false) {
                 continue;
             }
             let resume = if item.kind == 3 { None } else { item.resume_frac() };
-            // The row's other four cards are named too - the band the focused card opened is the
-            // row's, not the cell's. `band_reveal` is 0 for every row without focus, so an unfocused
-            // row draws no caption into a band that has not opened.
             card_row::draw_tile(p, grid_art(item), rect, scale, &style, resume);
-            let label = grid_label(item)
-                .revealed(card_row::band_reveal(self.layout.row_expansion(index / self.layout.cols())));
-            card_row::draw_tile_caption(p, rect, scale, &style, &label, f.measure);
             if item.kind == 3 {
                 crate::ui::widgets::still_overlay(p, item, rect, style.tile_radius(rect, scale), false, f.measure);
             }

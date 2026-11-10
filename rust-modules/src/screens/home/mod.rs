@@ -1330,18 +1330,7 @@ impl HomeScreen {
                 }
                 let (rect, scale) = self.drawn_card_geometry(row, col, 1.0);
                 let art = Art::Poster(Some(item));
-                // A shelf names every card it shows, not only the one the cursor is on: the same
-                // block the focused cell wears, in `LabelInk::Rest`'s dimmer ink.
-                let cw = self.rows[row].identity == HomeHubIdentity::ContinueWatching;
-                let mut caption = if cw {
-                    card_row::TileLabel::played(&item.title)
-                } else {
-                    card_row::TileLabel::title(&item.title)
-                };
-                caption.caption = card_row::focused_caption(item, cw);
                 card_row::draw_tile(p, art, rect, scale, self.row_style(row), item.resume_frac());
-                let caption = caption.revealed(self.grid.shelves[row].band_reveal());
-                card_row::draw_tile_caption(p, rect, scale, self.row_style(row), &caption, measure);
             }
         }
         self.draw_focused_cell(view, env, p, press_scale, focused, measure);
