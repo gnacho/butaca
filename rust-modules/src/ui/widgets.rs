@@ -1985,8 +1985,8 @@ const HERO_SCRIM_BAND_FULL_X: f32 = 1520.0;
 /// each end. It is not the title alone: the synopsis and the facts row are the same column of text
 /// and are graded by the same contract, so a band that stopped at the title would just move the
 /// failure down the page.
-const HERO_SCRIM_BAND_TOP: f32 = 366.0;
-const HERO_SCRIM_BAND_FLAT_TOP: f32 = 456.0;
+const HERO_SCRIM_BAND_TOP: f32 = 340.0;
+const HERO_SCRIM_BAND_FLAT_TOP: f32 = 420.0;
 const HERO_SCRIM_BAND_FLAT_BOT: f32 = 810.0;
 const HERO_SCRIM_BAND_BOT: f32 = 900.0;
 /// The band's alpha. Measured against the 3:1 floor: a widened column needs ~0.21 of extra alpha at
