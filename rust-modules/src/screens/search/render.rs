@@ -435,6 +435,10 @@ pub(super) fn tile<H: SearchLike>(
         );
     } else {
         card_row::draw_tile(p, art, rect, scale, &style, resume);
+        // The row's other results are named too, in `LabelInk::Rest`'s dimmer ink.
+        let fact = subtitle(model.kind, item);
+        let caption = TileLabel::titled(item.title(), &fact).revealed(model.motion.band_reveal());
+        card_row::draw_tile_caption(p, rect, scale, &style, &caption, f.measure);
     }
     if let (Kind::Episode, Item::Media(media)) = (model.kind, item) {
         crate::ui::widgets::still_overlay(p, media, rect, style.tile_radius(rect, scale), false, f.measure);
