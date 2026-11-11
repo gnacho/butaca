@@ -426,14 +426,12 @@ fn pill_w(measure: &dyn Measure, label: &CStr, sz: i32, icon: bool, trailing: bo
 }
 
 pub(crate) fn hero_pill_w(measure: &dyn Measure, has_restart: bool) -> f32 {
-    pill_w(
-        measure,
-        hero_pill_label(has_restart),
-        theme::size::BODY,
-        true,
-        false,
-    )
-    .max(PW)
+    // The PLAY control is a DISC now (the owner's 2026-11-10 pass: "el botón de play al mismo
+    // tamaño que el resto"): its width is its own diameter, not a pill's measured text. `has_restart`
+    // is kept in the signature so every caller stays one shape, and so the future return of a
+    // labelled pill does not have to touch them.
+    let _ = (measure, has_restart);
+    CD
 }
 
 pub(crate) fn alt_pill_w(measure: &dyn Measure) -> f32 {

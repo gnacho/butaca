@@ -2362,22 +2362,31 @@ impl DetailScreen {
             crate::ui::detail_layout::POSTER_W,
             crate::ui::detail_layout::POSTER_H,
         );
-        if let Some(m) = self.selected() {
-            crate::ui::card_row::draw_tile(
-                logo_alpha,
-                crate::ui::widgets::Art::Poster(Some(m)),
-                poster_rect,
-                1.0,
-                &crate::ui::card_row::RowStyle::HOME,
-                None,
-            );
-        } else if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
+        if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
             crate::ui::card_row::draw_tile(
                 logo_alpha,
                 crate::ui::widgets::Art::Thumb {
                     sid: d.sid,
                     key: &d.thumb,
-                    res: crate::ui::widgets::POSTER_RES,
+                    // The hero poster is 540x810, so ask for it at its own size: 300x450 was the
+                    // shelf tile's resolution and read soft here (the owner's 2026-11-10 pass:
+                    // "la carátula tiene que mostrarse con más definición... sobre todo en 4k").
+                    res: (540, 810),
+                },
+                poster_rect,
+                1.0,
+                &crate::ui::card_row::RowStyle::HOME,
+                None,
+            );
+        } else if let Some(m) = self.selected() {
+            // The catalog row's own poster: resolved at the size THIS tile draws, for the same
+            // definition reason as the branch above.
+            crate::ui::card_row::draw_tile(
+                logo_alpha,
+                crate::ui::widgets::Art::Thumb {
+                    sid: m.sid,
+                    key: &m.thumb,
+                    res: (540, 810),
                 },
                 poster_rect,
                 1.0,
