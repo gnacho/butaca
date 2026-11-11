@@ -28,7 +28,7 @@ use crate::ui::label::HAlign;
 use crate::ui::machine::{GroupId, Measure};
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::PosterMark;
-use crate::ui::{theme, Painter, Rect};
+use crate::ui::{theme, Rect};
 
 /// The hero's whole `u32` elem namespace. A later Detail package's own range must start here.
 pub(crate) const HERO_ELEM_RANGE_END: u32 = 64;
@@ -522,26 +522,6 @@ pub(crate) fn has_people(d: &Detail) -> bool {
     !d.cast.is_empty() || hero_credit(d).is_some()
 }
 
-pub(crate) fn draw_people(p: Painter, d: &Detail, top: f32, measure: &dyn Measure) {
-    let mut y = top;
-    if !d.cast.is_empty() {
-        // **No `Starring` lead.** The owner's pass removed the word from the band: a run of names
-        // under a film's own title needs no caption saying they are the cast, and the label cost
-        // the width the third name uses. The crew line KEEPS `Directed by` — that one names a
-        // role the names do not.
-        let names: Vec<&str> = d
-            .cast
-            .iter()
-            .take(PEOPLE_CAST)
-            .map(|credit| credit.tag.as_str())
-            .collect();
-        y += people_line(p, "", &names, y, measure);
-    }
-    if let Some((label, names)) = hero_credit(d) {
-        people_line(p, label, &names, y, measure);
-    }
-}
-
 /// The height the cast and crew band will take, without painting it: the hero chain has to know it
 /// before the action row can be placed (issue #315/#323).
 pub(crate) fn people_h(d: &Detail, measure: &dyn Measure) -> f32 {
@@ -586,21 +566,6 @@ fn people_view<'a>(joined: &'a str, label: &'a str, measure: &'a dyn Measure) ->
 fn people_line_h(label: &str, names: &[&str], measure: &dyn Measure) -> f32 {
     let joined = people_join(names);
     people_view(&joined, label, measure).measure_h(crate::ui::detail_layout::HERO_TEXT_W)
-}
-
-fn people_line(
-    p: Painter,
-    label: &str,
-    names: &[&str],
-    top: f32,
-    measure: &dyn Measure,
-) -> f32 {
-    use crate::ui::detail_layout::{HERO_TEXT_W, HERO_TEXT_X};
-    let joined = people_join(names);
-    let view = people_view(&joined, label, measure);
-    let h = view.measure_h(HERO_TEXT_W);
-    view.draw(p, Rect::new(HERO_TEXT_X, top, HERO_TEXT_W, 0.0));
-    h
 }
 
 /// **The item's own date, as the identity line says it**: the year alone for a film or a show, and

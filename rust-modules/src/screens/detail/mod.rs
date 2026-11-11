@@ -901,7 +901,15 @@ impl DetailScreen {
         stamp: LayoutStamp,
     ) -> LayoutCache {
         let chain = self.compute_hero_chain(Some(d), measure);
-        let content_top = chain.btn_y + hero::CD + theme::space::XL;
+        // The section flow starts UNDER the hero's own foot, not merely under the action row. With
+        // the 75% poster the row is a single line near the top of the column, so anchoring the
+        // flow to `btn_y` put the cast shelf INSIDE the hero (the owner's 2026-11-10 report: "el
+        // cast se monta encima de la carátula y de la landing"), and on a phone-shaped column it
+        // could even land above it. The hero owns everything down to the poster's foot, so that is
+        // where the page hands over.
+        let hero_foot = (crate::ui::detail_layout::POSTER_Y + crate::ui::detail_layout::POSTER_H)
+            .max(chain.btn_y + hero::CD);
+        let content_top = hero_foot + theme::space::XL;
         let (sections, n) = self.sections(Some(d));
         let live = &sections[..n];
         let mut top = [0.0f32; section::SLOTS];
@@ -935,7 +943,10 @@ impl DetailScreen {
         if let Some(d) = self.detail(meta) {
             self.ensure_layout(d, measure).content_top
         } else {
-            self.compute_hero_chain(None, measure).btn_y + hero::CD + theme::space::XL
+            // No item yet: nothing to anchor the flow to but the hero's own scaffolding.
+            let btn = self.compute_hero_chain(None, measure).btn_y + hero::CD;
+            (crate::ui::detail_layout::POSTER_Y + crate::ui::detail_layout::POSTER_H).max(btn)
+                + theme::space::XL
         }
     }
 
@@ -2420,7 +2431,10 @@ impl DetailScreen {
             }
         }
         if let Some(d) = d {
-            hero::draw_people(chrome, d, chain.people_y, measure);
+            // The plain-text cast/crew band is gone (the owner's 2026-11-10 pass: "el reparto lo
+            // quitamos de texto plano (está debajo con fotos)"). The cast shelf below the hero is
+            // the one place credits appear, with their photos.
+            let _ = d;
         }
         // Full-trailer mode takes the action row with the rest of the page: the viewer asked for
         // the trailer and nothing else, and the transport drawn over the top
