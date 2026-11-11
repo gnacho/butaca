@@ -2645,9 +2645,15 @@ impl DetailScreen {
             let rect = hero::hero_btn_rect_at(set, i, y, widths);
             let focused = current == Some(ctl.elem());
             let scale = self.ctl_pop.scale(i);
+            // The owner's 2026-11-10 pass gives the whole row a resting translucency, lifted on
+            // focus so the row recedes into the artwork until the remote reaches for it.
+            let row_alpha = if focused { 1.0 } else { 0.82 };
             match ctl {
                 hero::HeroCtl::Play => Button::new(
-                    hero::hero_pill_label(set.restart).as_ptr(),
+                    // The owner's 2026-11-10 pass: the primary pill keeps only its icon ("quitamos
+                    // el texto reproducir"). The verb is still spoken by the row's right-end
+                    // caption (`disc_verb`), which names the focused control.
+                    c"".as_ptr(),
                     theme::size::BODY,
                     rect,
                 )
@@ -2656,7 +2662,7 @@ impl DetailScreen {
                 .palette(palette)
                 .ground(ground)
                 .scale(scale)
-                .draw(&Env::inert(), p),
+                .draw(&Env::inert(), p.alpha(row_alpha)),
                 hero::HeroCtl::Alt => {
                     Button::new(hero::alt_label().as_ptr(), theme::size::BODY, rect)
                         .trailing_icon(crate::ui::icons::Icon::ChevronDown)
@@ -2664,7 +2670,7 @@ impl DetailScreen {
                         .palette(palette)
                         .ground(ground)
                         .scale(scale)
-                        .draw(&Env::inert(), p)
+                        .draw(&Env::inert(), p.alpha(row_alpha))
                 }
                 ctl => {
                     let icon = match ctl {
@@ -2698,7 +2704,7 @@ impl DetailScreen {
                         .palette(palette)
                         .ground(ground)
                         .scale(scale)
-                        .draw(&Env::inert(), p);
+                        .draw(&Env::inert(), p.alpha(row_alpha));
                 }
             }
         }

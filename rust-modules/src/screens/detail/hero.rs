@@ -395,6 +395,10 @@ pub(crate) fn trailer_play(d: &Detail) -> Option<(&Extra, &str)> {
 }
 
 /// The Play pill's label — the word the press will actually perform.
+///
+/// The DETAIL hero no longer draws it (the owner's 2026-11-10 pass: the primary control keeps only
+/// its icon). It survives for the row's measurement, so the pill's width stays a stable function of
+/// the verb and the row's right-justified start cannot jump between Resume and Play.
 pub(crate) fn hero_pill_label(has_restart: bool) -> &'static CStr {
     if has_restart {
         crate::i18n::msg::browse_detail_resume_c()
