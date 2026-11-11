@@ -1987,8 +1987,8 @@ const HERO_SCRIM_BAND_FULL_X: f32 = 1520.0;
 /// failure down the page.
 const HERO_SCRIM_BAND_TOP: f32 = 340.0;
 const HERO_SCRIM_BAND_FLAT_TOP: f32 = 420.0;
-const HERO_SCRIM_BAND_FLAT_BOT: f32 = 810.0;
-const HERO_SCRIM_BAND_BOT: f32 = 900.0;
+const HERO_SCRIM_BAND_FLAT_BOT: f32 = 1080.0;
+const HERO_SCRIM_BAND_BOT: f32 = 1140.0;
 /// The band's alpha. Measured against the 3:1 floor: a widened column needs ~0.21 of extra alpha at
 /// (1520, 514) over 0.85 artwork, so 0.34 leaves margin without turning the band into a bar.
 const HERO_SCRIM_BAND_A: f32 = 0.34;
