@@ -379,7 +379,11 @@ impl Drop for LayoutPin<'_> {
 /// same role over a peeking shelf and has no accordion to open: past three lines it would walk its
 /// pinned row into that shelf. The detail page has the room (its hero top moved up to pay for
 /// exactly these two lines) and the mark that gives them back.
-const DETAIL_SYN_MAXLINES: usize = 5;
+/// The detail synopsis is shown in FULL (the owner's 2026-11-10 pass: "sinopsis completa,
+/// tenemos espacio"). The hero now has ~810px of copy height beside the 75% poster, which pays for
+/// most real synopses; the cap stays only as a guard against a pathological one, and the MÁS mark
+/// still exists for the rare item that exceeds it.
+const DETAIL_SYN_MAXLINES: usize = 14;
 
 /// The CLOSED synopsis view: one builder for the chain's measure, the paint and the mark's own
 /// rect, so the three cannot disagree about where the block ends.

@@ -1275,7 +1275,10 @@ impl Rig<AppHost> for Bridge {
             .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
             .icon(crate::ui::icons::Icon::Settings)
             .focused(self.strip.gear_focused());
-        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p);
+        // Idle gear sits back at a partial alpha (the owner's 2026-11-10 pass: "transparencia al
+        // icono de ajustes"); focused, it comes fully forward.
+        let gear_alpha = if self.strip.gear_focused() { 1.0 } else { 0.55 };
+        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p.alpha(gear_alpha));
     }
     /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — a scrim lift borrows the SAME
     /// captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher adds this
