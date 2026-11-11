@@ -2779,6 +2779,19 @@ pub(crate) fn draw_back_control(p: Painter, focused: bool) {
         .icon(crate::ui::icons::Icon::ChevronLeft)
         .ground(ControlGround::Unkeyed)
         .focused(focused);
+    // The one lit tone of the chrome (owner: hover and Back share #7373CB). Drawn under the disc
+    // as a soft ring so the tone reads on both the lit and the idle state.
+    if focused {
+        crate::ui::widgets::control_rim(
+            p,
+            CHIP_FRAME,
+            CHIP_FRAME.h * 0.5,
+            theme::with_a(theme::CHROME_LIT, 0.9),
+            theme::with_a(theme::CHROME_LIT, 0.55),
+            true,
+            ControlGround::Unkeyed,
+        );
+    }
     button.draw(&Env::inert(), p);
 }
 

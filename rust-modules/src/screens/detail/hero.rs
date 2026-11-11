@@ -28,7 +28,7 @@ use crate::ui::label::HAlign;
 use crate::ui::machine::{GroupId, Measure};
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::PosterMark;
-use crate::ui::{theme, Rect};
+use crate::ui::{theme, Painter, Rect};
 
 /// The hero's whole `u32` elem namespace. A later Detail package's own range must start here.
 pub(crate) const HERO_ELEM_RANGE_END: u32 = 64;
@@ -532,6 +532,37 @@ pub(crate) fn people_h(d: &Detail, measure: &dyn Measure) -> f32 {
     if let Some((label, names)) = hero_credit(d) {
         h += people_line_h(label, &names, measure);
     }
+    h
+}
+
+pub(crate) fn draw_people(p: Painter, d: &Detail, top: f32, measure: &dyn Measure) {
+    let mut y = top;
+    if !d.cast.is_empty() {
+        let names: Vec<&str> = d
+            .cast
+            .iter()
+            .take(PEOPLE_CAST)
+            .map(|credit| credit.tag.as_str())
+            .collect();
+        y += people_line(p, "", &names, y, measure);
+    }
+    if let Some((label, names)) = hero_credit(d) {
+        people_line(p, label, &names, y, measure);
+    }
+}
+
+fn people_line(
+    p: Painter,
+    label: &str,
+    names: &[&str],
+    top: f32,
+    measure: &dyn Measure,
+) -> f32 {
+    use crate::ui::detail_layout::{HERO_TEXT_W, HERO_TEXT_X};
+    let joined = people_join(names);
+    let view = people_view(&joined, label, measure);
+    let h = view.measure_h(HERO_TEXT_W);
+    view.draw(p, Rect::new(HERO_TEXT_X, top, HERO_TEXT_W, 0.0));
     h
 }
 

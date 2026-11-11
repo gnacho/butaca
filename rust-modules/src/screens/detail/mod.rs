@@ -2440,10 +2440,10 @@ impl DetailScreen {
             }
         }
         if let Some(d) = d {
-            // The plain-text cast/crew band is gone (the owner's 2026-11-10 pass: "el reparto lo
-            // quitamos de texto plano (está debajo con fotos)"). The cast shelf below the hero is
-            // the one place credits appear, with their photos.
-            let _ = d;
+            // The cast/crew band stays in the hero: it is what carries `Directed by` (and, for a
+            // show, `Created by`) and the first names, which is the only place the page names a
+            // DIRECTOR. The photo shelf further down is the browsable one.
+            hero::draw_people(chrome, d, chain.people_y, measure);
         }
         // Full-trailer mode takes the action row with the rest of the page: the viewer asked for
         // the trailer and nothing else, and the transport drawn over the top

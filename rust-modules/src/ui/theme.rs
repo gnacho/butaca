@@ -301,6 +301,10 @@ pub mod logo {
 /// `#ffcea3`: a control lights up for exactly one reason, the remote is on it. Nothing is filled by
 /// rank, so there is no always-filled primary CTA: the hero Play pill sits idle like everything
 /// else until focus reaches it.
+/// The ONE hover/focus tone of the chromeless chrome (the owner's 2026-11-10 pass: "el tono del
+/// hover y del botón back los unificamos a #7373CB"). It is the Jellyfin violet, a step lighter than
+/// the page ground so a lit control separates from it without going white.
+pub const CHROME_LIT: [f32; 4] = rgb8(0x73, 0x73, 0xcb);
 pub const ACCENT: [f32; 4] = WARM_100;
 /// Near-black ink/glyphs drawn over [`ACCENT`].
 pub const ACCENT_INK: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
