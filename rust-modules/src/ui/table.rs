@@ -997,6 +997,10 @@ impl TableView {
             cell_w,
             (py1 - py0).max(1.0),
         );
+        // The mockup's focused CARD: a wash of the chrome's lit tone under the row plus a thin
+        // border on the same tone, not the near-white accent capsule the app used to paint. The
+        // caller's `selection_fill` still decides WHERE the pill is (and every non-settings table
+        // keeps its own), but a settings grid passes the lit tone and the ink stays readable.
         if self.list_focused && pill.y + pill.h > vis_top && pill.y < vis_bot {
             self.group_painter(p, self.section_of_row(self.sel)).rrect(
                 pill,
@@ -1026,20 +1030,10 @@ impl TableView {
                     let sec = &self.sections[si];
                     let hair_x = frame.x + SIDE + CONTENT_PAD;
                     let hair_w = frame.w - 2.0 * (SIDE + CONTENT_PAD);
-                    if si > 0 {
-                        p.rect(
-                            Rect::new(
-                                hair_x,
-                                sy - DIV_H * 0.5,
-                                hair_w,
-                                2.0,
-                            ),
-                            0.0,
-                            theme::HAIRLINE,
-                            theme::HAIRLINE,
-                            0.0,
-                        );
-                    }
+                    // No hairline between groups: the mockup separates them with the spaced-caps
+                    // label and its own air, which is what keeps the settings grid reading as
+                    // cards rather than as a ruled form. (`hair_x`/`hair_w` stay because the
+                    // header band below is aligned to them.)
                     // **CAPS at CAPTION, one size in BOTH size classes.** The caps are what make a
                     // header read as a label rather than as a row, which is why the size stops
                     // varying: at HEADLINE — what the non-compact class used to draw — a header
@@ -1058,8 +1052,8 @@ impl TableView {
                         hair_w,
                         baseline - cap_top,
                     );
-                    if let Ok(cs) = CString::new(sec.header.to_uppercase()) {
-                        Label::new(cs.as_ptr(), hsz, self.header_ink)
+                    if let Ok(cs) = CString::new(spaced_caps(&sec.header)) {
+                        Label::new(cs.as_ptr(), hsz, theme::CHROME_LIT)
                             .v(VAlign::CapTop)
                             .draw(p, header_band);
                     }
@@ -1346,6 +1340,21 @@ fn row_value_ink(row: &Row, focused: bool) -> [f32; 4] {
         (false, false, false) => theme::TEXT_SECONDARY,
         (false, false, true) => theme::TEXT_TERTIARY,
     }
+}
+
+
+/// A section header in the mockup's voice: upper-case with one thin space between characters, so a
+/// two-word group reads as a label rather than as a row of text. Non-ASCII scripts are left alone
+/// (spacing a Cyrillic or CJK run letter by letter is noise, not emphasis).
+fn spaced_caps(text: &str) -> String {
+    if !text.is_ascii() {
+        return text.to_uppercase();
+    }
+    text.to_uppercase()
+        .chars()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join("\u{2009}")
 }
 
 #[cfg(test)]
