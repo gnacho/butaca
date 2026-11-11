@@ -59,7 +59,10 @@ pub(crate) const ELEM_ARTWORK: u32 = 10;
 /// group.
 pub(crate) const HERO_GROUP: GroupId = GroupId(0);
 
-/// The Play/Resume pill's minimum width — a pathologically short label still gets a pill.
+/// The Play/Resume pill's minimum width — a pathologically short label still gets a pill. The
+/// detail row's Play is a disc now, so this is read only by the widest-row test that keeps the
+/// pill's old shape honest.
+#[cfg(test)]
 const PW: f32 = 168.0;
 
 /// The focused disc's verb caption fades in at the row's own pace - the profile chip's unfurl
