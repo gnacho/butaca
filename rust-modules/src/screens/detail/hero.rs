@@ -195,6 +195,13 @@ pub(crate) struct HeroSet {
 pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 9], usize) {
     let mut v = [HeroCtl::Play; 9];
     let mut n = 1;
+    // The owner's 2026-11-10 order: play, trailer, language, subtitles, mark-watched, favourite,
+    // image. The discs are reordered where the row is BUILT, so focus, hit-testing and drawing all
+    // read one list.
+    if set.trailer {
+        v[n] = HeroCtl::Trailer;
+        n += 1;
+    }
     if set.restart {
         v[n] = HeroCtl::Restart;
         n += 1;
@@ -219,12 +226,6 @@ pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 9], usize) {
     }
     if set.subs {
         v[n] = HeroCtl::Subtitles;
-        n += 1;
-    }
-    // The owner's 2026-11-10 pass: the trailer sits beside the language and subtitle discs, not up
-    // by the primary Play/Restart pair - it is the same kind of "what this file offers" control.
-    if set.trailer {
-        v[n] = HeroCtl::Trailer;
         n += 1;
     }
     if set.artwork {
@@ -1226,17 +1227,17 @@ mod tests {
     }
 
     #[test]
-    fn trailer_true_sits_beside_the_language_discs() {
+    fn trailer_true_follows_play() {
         let set = set_full(true, true, PosterMark::None, true);
         let (controls, n) = hero_ctls(set);
         assert_eq!(
             &controls[..n],
             &[
                 HeroCtl::Play,
+                HeroCtl::Trailer,
                 HeroCtl::Restart,
                 HeroCtl::Alt,
-                HeroCtl::MarkWatched,
-                HeroCtl::Trailer
+                HeroCtl::MarkWatched
             ]
         );
     }
@@ -1248,11 +1249,10 @@ mod tests {
         assert_eq!(index_of(before, HeroCtl::Play), Some(0));
         assert_eq!(index_of(after, HeroCtl::Play), Some(0));
         assert_eq!(index_of(before, HeroCtl::Trailer), None);
-        // The trailer now sits AFTER the watch toggle, beside the language discs, so it does not
-        // move the watch identity at all.
-        assert_eq!(index_of(after, HeroCtl::Trailer), Some(2));
+        // The trailer sits right after Play, ahead of the watch toggle.
+        assert_eq!(index_of(after, HeroCtl::Trailer), Some(1));
         let watch = index_of(after, HeroCtl::MarkWatched).unwrap();
-        assert_eq!(watch, index_of(before, HeroCtl::MarkWatched).unwrap());
+        assert_eq!(watch, index_of(before, HeroCtl::MarkWatched).unwrap() + 1);
         assert_eq!(ctl_at(after, watch).unwrap().elem(), ELEM_MARK_WATCHED);
     }
 
@@ -1260,7 +1260,7 @@ mod tests {
     fn losing_the_trailer_disc_drops_its_identity() {
         let with = set_full(true, false, PosterMark::None, true);
         let without = set(true, false, PosterMark::None);
-        assert_eq!(index_of(with, HeroCtl::Trailer), Some(3));
+        assert_eq!(index_of(with, HeroCtl::Trailer), Some(1));
         assert_eq!(index_of(without, HeroCtl::Trailer), None);
     }
 
