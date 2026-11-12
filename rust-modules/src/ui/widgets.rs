@@ -1961,7 +1961,7 @@ const HERO_SCRIM_TOP: f32 = 0.13 * crate::ui::consts::SCR_H; // 140
 /// still feathering in rather than absent, which is the reason nit 2's taller logos were sequenced
 /// AFTER this component; the clearance that binds them is the top chrome's
 /// ([`TOP_BAR_BOTTOM`]), asserted in `home.rs`, not this knee.
-pub(crate) const HERO_SCRIM_KNEE: f32 = 0.19 * crate::ui::consts::SCR_H; // 205 — the detail title is plain type now, so the copy's first line sits at y=216
+pub(crate) const HERO_SCRIM_KNEE: f32 = crate::ui::widgets::TOP_BAR_BOTTOM + theme::space::SM; // 146 — the detail copy's first line sits on the top bar's foot
 
 /// The mirrored RIGHT wedge — for a hero with a right-aligned column, which today means detail's
 /// "Starring" block at x 1270..1830, the one piece of hero copy the left wedge by definition cannot
@@ -1978,15 +1978,15 @@ const HERO_SCRIM_R_A: f32 = 0.50;
 /// at zero without drawing a seam, and it reaches full weight exactly where a widened detail column
 /// ends its longest line. Past that it stays at full: the band is about the copy, and the copy does
 /// not get lighter at its last character.
-const HERO_SCRIM_BAND_X: f32 = 1344.0;
-const HERO_SCRIM_BAND_FULL_X: f32 = 1520.0;
+const HERO_SCRIM_BAND_X: f32 = 600.0;
+const HERO_SCRIM_BAND_FULL_X: f32 = 760.0;
 /// The vertical band the band-scrim darkens: the detail hero's whole copy column, from the top of
 /// its text block (`TITLE_BOTTOM - 200`) to below the facts row, with a flat middle and a feather at
 /// each end. It is not the title alone: the synopsis and the facts row are the same column of text
 /// and are graded by the same contract, so a band that stopped at the title would just move the
 /// failure down the page.
-const HERO_SCRIM_BAND_TOP: f32 = 180.0;
-const HERO_SCRIM_BAND_FLAT_TOP: f32 = 216.0;
+const HERO_SCRIM_BAND_TOP: f32 = 120.0;
+const HERO_SCRIM_BAND_FLAT_TOP: f32 = 146.0;
 const HERO_SCRIM_BAND_FLAT_BOT: f32 = 1080.0;
 const HERO_SCRIM_BAND_BOT: f32 = 1140.0;
 /// The band's alpha. Measured against the 3:1 floor: a widened column needs ~0.21 of extra alpha at
@@ -2009,7 +2009,7 @@ const HERO_SCRIM_BAND_A: f32 = 0.46;
 /// the bottom-up curve had less of itself left to give it. Graded over blown-white artwork that row
 /// came back 2.47:1 against a 2.5 floor; the earlier start is worth 0.04 of alpha there and leaves
 /// the foot where it was.
-pub(crate) const HERO_BASE_SCRIM_Y0: f32 = 0.30 * crate::ui::consts::SCR_H; // 324
+pub(crate) const HERO_BASE_SCRIM_Y0: f32 = crate::ui::widgets::TOP_BAR_BOTTOM + theme::space::SM; // 146 — the detail copy starts on the top bar's foot now
 
 /// The hero wedge's alpha at `x`, at or below [`HERO_SCRIM_KNEE`] — which is where every hero text
 /// anchor sits, by construction (see that const). Pure, because the legibility contract is graded

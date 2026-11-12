@@ -19,7 +19,7 @@ pub(crate) const POSTER_GAP: f32 = 24.0;
 /// bottom-aligned, so its head lands at `SCR_H - MARGIN_Y - POSTER_H`; the title band and the copy
 /// column share that head. The whole column below it moved up with it, which is what pays for the
 /// poster's new height.
-pub(crate) const HERO_TOP: f32 = SCR_H - MARGIN_Y - POSTER_H;
+pub(crate) const HERO_TOP: f32 = crate::ui::widgets::TOP_BAR_BOTTOM + theme::space::SM;
 /// The poster's top edge: the hero's own top, shared with the title band.
 pub(crate) const POSTER_Y: f32 = HERO_TOP;
 /// Where the hero's copy column begins, right of the poster. Every left-anchored row of the hero

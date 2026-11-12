@@ -138,7 +138,12 @@ fn the_wedges_two_quads_abut_with_no_step() {
 fn the_wedge_leaves_the_top_chrome_alone() {
     let (q, _) = hero_scrim_quads(1.0, true);
     let bar_bottom = TOP_BAR_Y + TAB_PILL_H + TAB_TRACK_PAD + theme::space::XS;
-    for (i, (r, _)) in q.iter().enumerate() {
+    // The WEDGE (quads 0-2) must stay clear of the top chrome. The TEXT BAND (quads 3-5) is the
+    // field drawn for the copy column, and the detail copy now starts on the top bar's foot — its
+    // entry quad therefore reaches up to meet that first line. It is only ever drawn for a hero
+    // with copy, and a hero's copy is never under the chrome: the band's own top is bounded by
+    // `HERO_SCRIM_BAND_TOP`, which the caller sets from the hero's head.
+    for (i, (r, _)) in q.iter().enumerate().take(3) {
         assert!(
             r.y >= bar_bottom,
             "quad {i} starts at y={} — inside the top chrome's band ({bar_bottom})",
@@ -371,9 +376,11 @@ fn the_hero_text_reads_over_bright_artwork() {
             0.0
         };
         // The text band (issue #315/#323) is part of the field a widened detail column is read
-        // through. Home has none: it has no copy past the wedge's reach.
+        // through, and since the copy column starts right of a 540px poster (x=660) it is the
+        // field that CARRIES the detail title: the wedge has given up long before 660. Home has
+        // none: it has no copy past the wedge's reach.
         let tb = if right {
-            hero_scrim_band_a(x, y, 1.0)
+            hero_scrim_band_a(x, y, 1.0).max(crate::ui::detail_layout::base_scrim_a(y, 1.0))
         } else {
             0.0
         };
