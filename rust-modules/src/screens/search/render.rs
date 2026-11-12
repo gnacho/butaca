@@ -206,7 +206,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         22.0,
         theme::SURFACE_PANEL,
         theme::SURFACE_PANEL,
-        if screen.editing { theme::ACCENT } else { theme::HAIRLINE },
+        if screen.editing { theme::CHROME_LIT } else { theme::HAIRLINE },
         0.0,
     );
     // **One vertical centre for the field's ink, keyboard up or down.** The box does not move
@@ -307,7 +307,7 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
                 ),
                 crate::ui::table::PILL_RAD,
                 crate::ui::table::PILL_RAD,
-                theme::ACCENT,
+                theme::CHROME_LIT,
             );
         }
         let Some(run) = screen.render.recent_runs.get(index) else {

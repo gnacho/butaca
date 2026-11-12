@@ -5324,9 +5324,9 @@ impl TabStrip {
         // and it had the identical defect for the identical reason, so `cast: true` below.
         match ground {
             TabGround::Plated { pop } => {
-                cap(&self.foc, crate::ui::ACCENT, Some(theme::CARD_SHEEN), pop, true)
+                cap(&self.foc, theme::CHROME_LIT, Some(theme::CARD_SHEEN), pop, true)
             }
-            TabGround::Tracked { .. } => cap(&self.foc, crate::ui::ACCENT, None, 1.0, false),
+            TabGround::Tracked { .. } => cap(&self.foc, theme::CHROME_LIT, None, 1.0, false),
         }
     }
     /// The `(focus, selected)` mixes pill `pill` (content-space `(x, w)`) should ink itself with —
