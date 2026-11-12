@@ -61,6 +61,11 @@ use crate::screens::registry::AppLike;
 pub(crate) struct PrePlayArg {
     pub host: crate::ui::machine::InstanceId,
     pub anchor: [u32; 4],
+    /// The page's current answers, so the window opens STATING what the press would play rather
+    /// than a blank: `audio_sid` 0 and `sub_sid` -1 are [`crate::route::StartTracks::NONE`], the
+    /// ladder's own pick, which is what the hero's discs leave behind when nobody touched them.
+    pub audio_sid: i64,
+    pub sub_sid: i64,
 }
 
 impl LogicalState for PrePlayArg {
@@ -69,6 +74,7 @@ impl LogicalState for PrePlayArg {
         for word in self.anchor {
             c.u32(word);
         }
+        c.u64(self.audio_sid as u64).u64(self.sub_sid as u64);
     }
     fn probe(&self, out: &mut String) {
         out.push_str("preplay_window");
@@ -88,7 +94,7 @@ pub(crate) const PANEL_W: f32 = 720.0;
 /// `registry::SCREEN_SHAPES`): the argument, the file block, the verb and the table's cursor.
 pub(crate) const SHAPE: [&str; 2] = [
     "PrePlayWindowArg{host:u32,anchor:[u32;4]}",
-    "PrePlayWindow{facts:seq(label:str,value:str),action:str,table:TableViewMotion}",
+    "PrePlayWindow{facts:seq(label:str,value:str),action:str,audio:i64,sub:i64,table:TableViewMotion}",
 ];
 
 pub(crate) struct PrePlayWindowScreen {
@@ -98,6 +104,15 @@ pub(crate) struct PrePlayWindowScreen {
     facts: Vec<(String, String)>,
     /// The verb on the action row, likewise.
     action: String,
+    /// **The two answers the window owns** (issue #355, slice 2): the audio stream id and the
+    /// subtitle answer, in [`crate::route::StartTracks`]'s own encoding (`0` and `-1` are the
+    /// ladder's). They start at the page's own, so a viewer who set a language on the hero's disc
+    /// finds it already stated here instead of being asked again.
+    audio_sid: i64,
+    sub_sid: i64,
+    /// The two rows' read-outs, rebuilt whenever a choice changes or the item lands.
+    audio_label: String,
+    sub_label: String,
     table: TableView,
 }
 
@@ -107,7 +122,17 @@ impl PrePlayWindowScreen {
         arg: PrePlayArg,
         meta: crate::metadata::MetadataView<'_>,
     ) -> Self {
-        let mut screen = Self { entry, arg, facts: Vec::new(), action: String::new(), table: TableView::new() };
+        let mut screen = Self {
+            entry,
+            arg,
+            facts: Vec::new(),
+            action: String::new(),
+            audio_sid: arg.audio_sid,
+            sub_sid: arg.sub_sid,
+            audio_label: String::new(),
+            sub_label: String::new(),
+            table: TableView::new(),
+        };
         screen.rebuild(meta);
         screen
     }
@@ -117,20 +142,77 @@ impl PrePlayWindowScreen {
     fn rebuild(&mut self, meta: crate::metadata::MetadataView<'_>) {
         let d = meta.current();
         let (facts, action) = d.map_or((Vec::new(), None), |d| (file_block(d), Some(verb(d))));
-        if self.facts == facts && action.as_deref().is_some_and(|a| a == self.action) {
+        let (audio_label, sub_label) = d.map_or((String::new(), String::new()), |d| {
+            (chosen_audio(d, self.audio_sid), chosen_sub(d, self.sub_sid))
+        });
+        if self.facts == facts
+            && action.as_deref().is_some_and(|a| a == self.action)
+            && audio_label == self.audio_label
+            && sub_label == self.sub_label
+            && self.table.n_rows() > 0
+        {
             return;
         }
         self.facts = facts;
         self.action = action.unwrap_or_else(|| msg::browse_detail_play().to_string());
+        self.audio_label = audio_label;
+        self.sub_label = sub_label;
         let mut facts = Section::new("");
         for (label, value) in &self.facts {
             facts = facts.row(Row::new(label).value(value).value_dim(true));
         }
+        // **The two answers, in their own section** (issue #355, slice 2): they are choices, so they
+        // are stops and they read out what is chosen, unlike the facts above.
+        let choice = Section::new("")
+            .row(Row::new(msg::widgets_tracks_audio_heading()).value(&self.audio_label).chevron(true))
+            .row(Row::new(msg::widgets_tracks_subtitles_heading()).value(&self.sub_label).chevron(true));
         // The one control, in its own section so it never reads as one more fact.
         let control = Section::new("").row(Row::new(&self.action));
         let keep = self.table.sel;
         self.table.compact = false;
-        self.table.set_sections(vec![facts, control], keep, false);
+        self.table.set_sections(vec![facts, choice, control], keep, false);
+    }
+
+    /// The two rows that are choices, and the control, in the order DOWN walks them.
+    fn stops(&self) -> usize {
+        if self.table.n_rows() == 0 {
+            return 0;
+        }
+        if self.facts.is_empty() {
+            1
+        } else {
+            3
+        }
+    }
+
+    /// Row index of stop `elem`: the audio row, the subtitle row, the control.
+    fn stop_row(&self, elem: u32) -> i32 {
+        let n = self.table.n_rows() as i32;
+        let last = (n - 1).max(0);
+        match elem {
+            0 => (last - 2).max(0),
+            1 => (last - 1).max(0),
+            _ => last,
+        }
+    }
+
+    /// **Apply a committed choice** (the picker's own message): the encoded sid, and nothing else.
+    /// Pure so the encoding rule is graded without a surface.
+    fn apply_tracks(&mut self, audio_sid: Option<i64>, sub_sid: Option<i64>) {
+        if let Some(sid) = audio_sid {
+            self.audio_sid = sid;
+        }
+        if let Some(sid) = sub_sid {
+            self.sub_sid = sid;
+        }
+    }
+
+    /// The verdict this window hands the page: the two ids, in the play request's own encoding.
+    fn verdict(&self) -> crate::screens::registry::AppMsg {
+        crate::screens::registry::AppMsg::PrePlayGo {
+            audio_sid: self.audio_sid,
+            sub_sid: self.sub_sid,
+        }
     }
 
     /// The last row's index: the control.
@@ -155,9 +237,55 @@ impl PrePlayWindowScreen {
         self.dismiss(fx);
         fx.push(Fx::Deliver(
             MachineId::Instance(self.arg.host),
-            Delivery::Screen(ScreenEvent::App(crate::screens::registry::AppMsg::PrePlayGo)),
+            Delivery::Screen(ScreenEvent::App(self.verdict())),
         ));
     }
+
+    /// Open the track picker for one half, anchored under its own row, with the id this window
+    /// would play today so the menu checks it (the hero disc's own contract).
+    fn pick<H: AppLike>(&self, audio: bool, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
+        let elem = if audio { 0 } else { 1 };
+        let Some(placed) = <Self as Focusable<H>>::place(self, &elem, cx, At::Drawn) else {
+            return;
+        };
+        let rect = placed.rect;
+        fx.push(Fx::App(crate::screens::registry::AppFx::Content(
+            crate::screens::registry::ContentReq::Panel(
+                crate::screens::registry::ContentPanel::TrackPick {
+                    audio,
+                    chosen: if audio { self.audio_sid } else { self.sub_sid },
+                    anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
+                },
+            ),
+        )));
+    }
+}
+
+/// **What the audio row says**: the track the window would play today, in the picker's own words
+/// ([`crate::screens::track_pick::row_label`]) so the window and the menu cannot describe the same
+/// stream two ways. `0` is "nothing chosen", whose answer is the item's first audio track.
+fn chosen_audio(d: &Detail, sid: i64) -> String {
+    let picked = if sid > 0 {
+        d.audio.iter().find(|s| s.id == sid)
+    } else {
+        d.audio.first()
+    };
+    picked.map(crate::screens::track_pick::row_label).unwrap_or_default()
+}
+
+/// **What the subtitle row says**: `Off` when the viewer turned them off (`0`), the track's own line
+/// when a subtitle id was chosen, and the item's first subtitle as the ladder's own answer when
+/// nothing was chosen (`-1`).
+fn chosen_sub(d: &Detail, sid: i64) -> String {
+    if sid == 0 {
+        return msg::widgets_tracks_off().to_string();
+    }
+    let picked = if sid > 0 {
+        d.subs.iter().find(|s| s.id == sid)
+    } else {
+        d.subs.first()
+    };
+    picked.map(crate::screens::track_pick::sub_row_label).unwrap_or_else(|| msg::widgets_tracks_off().to_string())
 }
 
 /// The FILE block, in the app's own vocabulary: the same rows Track information prints, cut to the
@@ -198,7 +326,7 @@ impl<H: AppLike> Focusable<H> for PrePlayWindowScreen {
         if self.table.n_rows() == 0 {
             return;
         }
-        // ONE stop, and it is the control. The facts are read, not chosen.
+        // The facts are read, not chosen. The two language rows and the control are the stops.
         out.push(GroupSpec {
             id: GroupId(0),
             kind: GroupKind::Column,
@@ -206,28 +334,41 @@ impl<H: AppLike> Focusable<H> for PrePlayWindowScreen {
             reachable: AxisMask::BOTH,
             edge: [EdgeRule::Stop; 4],
             extent: self.frame(),
-            len: 1,
+            len: self.stops(),
             elem: ElemKind::Bare,
         });
     }
     fn group_of(&self, elem: &u32, _cx: &Cx<'_, H>) -> Option<GroupId> {
-        (*elem == 0 && self.table.n_rows() > 0).then_some(GroupId(0))
+        ((*elem as usize) < self.stops()).then_some(GroupId(0))
     }
-    fn neighbour(&self, _key: FocusKey<u32>, _dir: Dir, _cx: &Cx<'_, H>) -> Step<u32> {
-        Step::Edge
+    fn neighbour(&self, key: FocusKey<u32>, dir: Dir, _cx: &Cx<'_, H>) -> Step<u32> {
+        let n = self.stops() as u32;
+        let next = match dir {
+            Dir::Down if key.elem + 1 < n => Some(key.elem + 1),
+            Dir::Up if key.elem > 0 => Some(key.elem - 1),
+            _ => None,
+        };
+        match next {
+            Some(elem) => Step::Move(FocusKey { entry: self.entry, elem }),
+            None => Step::Edge,
+        }
     }
     fn place(&self, elem: &u32, _cx: &Cx<'_, H>, _at: At) -> Option<Placed> {
-        if *elem != 0 {
+        if (*elem as usize) >= self.stops() {
             return None;
         }
-        let rect = self.table.row_frame(self.frame(), self.action_row())?;
-        Some(Placed { rect, rest_rect: rect, clip: self.frame(), index: Some(0) })
+        let rect = self.table.row_frame(self.frame(), self.stop_row(*elem))?;
+        Some(Placed { rect, rest_rect: rect, clip: self.frame(), index: Some(*elem) })
     }
-    fn reconcile(&self, _want: FocusKey<u32>, _cx: &Cx<'_, H>) -> FocusKey<u32> {
-        FocusKey { entry: self.entry, elem: 0 }
+    fn reconcile(&self, want: FocusKey<u32>, _cx: &Cx<'_, H>) -> FocusKey<u32> {
+        if self.group_of(&want.elem, _cx).is_some() {
+            want
+        } else {
+            FocusKey { entry: self.entry, elem: self.stops().saturating_sub(1) as u32 }
+        }
     }
     fn seat(&self, _g: GroupId, _from: Placed, _cx: &Cx<'_, H>) -> FocusKey<u32> {
-        FocusKey { entry: self.entry, elem: 0 }
+        FocusKey { entry: self.entry, elem: self.stops().saturating_sub(1) as u32 }
     }
 }
 
@@ -267,9 +408,20 @@ impl<H: AppLike + crate::screens::registry::MetadataLike> Machine<H>
                 Handled::Yes
             }
             ScreenEvent::Activate(elem) => {
-                if *elem == 0 {
-                    self.go(fx);
+                match *elem {
+                    // The two language rows open their own picker, anchored under themselves. The
+                    // picker's commit comes back as `AppMsg::DetailTracks`, addressed to the
+                    // surface that presented it, which is this window.
+                    0 => self.pick(true, cx, fx),
+                    1 => self.pick(false, cx, fx),
+                    _ => self.go(fx),
                 }
+                Handled::Yes
+            }
+            ScreenEvent::App(crate::screens::registry::AppMsg::DetailTracks { audio_sid, sub_sid }) => {
+                self.apply_tracks(*audio_sid, *sub_sid);
+                self.rebuild(H::metadata(cx));
+                fx.invalidate(crate::ui::present::Provenance::Input);
                 Handled::Yes
             }
             ScreenEvent::PressCommit(_) => {
@@ -311,22 +463,29 @@ impl<H: AppLike + crate::screens::registry::MetadataLike> Screen<H>
         let measure = f.measure;
         let field = f.underlay;
         panel_ground(p, r, theme::CARD_RING_RAD, field);
-        // The facts are rows of the same table as the control, but only the control is a stop: the
-        // table draws its own cursor, so it is told which row that is.
-        self.table.sel = self.action_row();
+        // The facts are rows of the same table as the stops: the table draws its own cursor, so it
+        // is told which row the engine's focus is on (the control when nothing says otherwise).
+        self.table.sel = f
+            .cx
+            .focus
+            .current
+            .filter(|key| key.entry == self.entry)
+            .map_or_else(|| self.action_row(), |key| self.stop_row(key.elem));
         self.table.draw(p, r, measure);
-        if let Some(placed) = <Self as Focusable<H>>::place(self, &0, f.cx, At::Drawn) {
-            f.stop(
-                p,
-                Stop {
-                    key: FocusKey { entry: self.entry, elem: 0 },
-                    rect: placed.rect,
-                    rest_rect: placed.rest_rect,
-                    clip: placed.clip,
-                    hover: Hover::Focus,
-                    activate: Activate::Immediate,
-                },
-            );
+        for elem in 0..self.stops() as u32 {
+            if let Some(placed) = <Self as Focusable<H>>::place(self, &elem, f.cx, At::Drawn) {
+                f.stop(
+                    p,
+                    Stop {
+                        key: FocusKey { entry: self.entry, elem },
+                        rect: placed.rect,
+                        rest_rect: placed.rest_rect,
+                        clip: placed.clip,
+                        hover: Hover::Focus,
+                        activate: Activate::Immediate,
+                    },
+                );
+            }
         }
     }
     fn render(&self) -> RenderStrategy {
@@ -350,6 +509,18 @@ impl<H: AppLike + crate::screens::registry::MetadataLike> Screen<H>
 mod tests {
     use super::*;
 
+    fn stream(id: i64, lang: &str, codec: &str) -> crate::metadata::Stream {
+        crate::metadata::Stream {
+            id,
+            index: id,
+            lang: lang.into(),
+            lang_code: lang.into(),
+            codec: codec.into(),
+            channels: 6,
+            ..Default::default()
+        }
+    }
+
     fn item(resume_ms: i64, acodec: &str) -> Detail {
         let mut d = Detail::default();
         d.container = "mkv".into();
@@ -361,12 +532,32 @@ mod tests {
         d.vcodec = "hevc".into();
         d.acodec = acodec.into();
         d.resume_ms = resume_ms;
+        d.audio = vec![stream(1, "English", "eac3"), stream(2, "Spanish", "ac3")];
+        d.subs = vec![stream(3, "English", "subrip"), stream(4, "Spanish", "subrip")];
         d
     }
 
+    fn screen() -> PrePlayWindowScreen {
+        PrePlayWindowScreen {
+            entry: EntryId(1),
+            arg: PrePlayArg {
+                host: crate::ui::machine::InstanceId(2),
+                anchor: [0; 4],
+                audio_sid: 0,
+                sub_sid: -1,
+            },
+            facts: Vec::new(),
+            action: String::new(),
+            audio_sid: 0,
+            sub_sid: -1,
+            audio_label: String::new(),
+            sub_label: String::new(),
+            table: TableView::new(),
+        }
+    }
+
     /// **The block is the app's own vocabulary, not a second one.** Every line is a row Track
-    /// information already prints (container, size, bitrate, duration, aspect, codec, resolution),
-    /// so the window cannot start describing the same file in words the panel does not use.
+    /// information already prints, so the window cannot describe the same file in other words.
     #[test]
     fn the_file_block_reuses_the_house_vocabulary() {
         let rows = file_block(&item(0, "eac3"));
@@ -389,29 +580,78 @@ mod tests {
         assert_eq!(verb(&item(60_000, "eac3")), msg::browse_detail_resume().to_string());
     }
 
-    /// **The action row is the last row of the one table**, so its rect, its stop and its painting
-    /// cannot disagree: this is the arithmetic `place` and `draw` both read.
-    #[test]
-    fn the_control_is_the_last_row_and_the_only_stop() {
-        let mut screen = PrePlayWindowScreen {
-            entry: EntryId(1),
-            arg: PrePlayArg { host: crate::ui::machine::InstanceId(2), anchor: [0; 4] },
-            facts: Vec::new(),
-            action: String::new(),
-            table: TableView::new(),
-        };
-        let (facts, action) = (file_block(&item(0, "eac3")), verb(&item(0, "eac3")));
-        screen.facts = facts.clone();
-        screen.action = action;
-        let mut section = Section::new("");
-        for (label, value) in &screen.facts {
-            section = section.row(Row::new(label).value(value));
+    /// The two ids a verdict carries. `AppMsg` is a plain command enum with no `PartialEq`, and the
+    /// window's only verdict is this one, so the shape is asserted by destructuring.
+    fn ids(msg: crate::screens::registry::AppMsg) -> (i64, i64) {
+        match msg {
+            crate::screens::registry::AppMsg::PrePlayGo { audio_sid, sub_sid } => (audio_sid, sub_sid),
+            _ => panic!("the window's verdict is the play message"),
         }
-        screen.table.set_sections(vec![section, Section::new("").row(Row::new("Reproducir"))], 0, false);
+    }
+
+    /// **The choice travels with the verdict** (slice 2). The window's two answers are handed to
+    /// the page in `StartTracks`' own encoding, so a film starts with the audio and the subtitle
+    /// chosen before the picture instead of the ladder's pick.
+    #[test]
+    fn the_choice_travels_with_the_verdict() {
+        let mut s = screen();
         assert_eq!(
-            screen.table.n_rows() as i32,
-            screen.action_row() + 1,
-            "the control is the last row: its index is the table's own arithmetic"
+            ids(s.verdict()),
+            (0, -1),
+            "untouched, the window promises exactly the ladder's own answers"
+        );
+        s.apply_tracks(Some(2), Some(4));
+        assert_eq!(ids(s.verdict()), (2, 4));
+        // …and one half alone never clears the other: the audio picker reports audio only.
+        s.apply_tracks(Some(1), None);
+        assert_eq!(ids(s.verdict()), (1, 4));
+        // An EXPLICIT Off is `0`, which is not the same answer as "nothing chosen".
+        s.apply_tracks(None, Some(0));
+        assert_eq!(ids(s.verdict()), (1, 0));
+    }
+
+    /// **The rows state the choice in the picker's own words**, so the window and the menu cannot
+    /// describe one stream two ways, and `Off` reads as Off rather than as an empty row.
+    #[test]
+    fn the_rows_state_the_choice_in_the_pickers_words() {
+        let d = item(0, "eac3");
+        assert!(chosen_audio(&d, 2).contains("Spanish"));
+        assert_eq!(chosen_audio(&d, 0), chosen_audio(&d, 1), "nothing chosen follows the first track");
+        assert!(chosen_sub(&d, 4).contains("Spanish"));
+        assert_eq!(chosen_sub(&d, 0), msg::widgets_tracks_off().to_string());
+        assert_eq!(chosen_sub(&d, -1), chosen_sub(&d, 3), "the ladder's own answer");
+    }
+
+    /// **The rows put the two choices between the facts and the control**, and the control is the
+    /// last row: this is the arithmetic `place`, `stop_row` and the paint all read, so a row cannot
+    /// be focusable at one index and drawn at another.
+    #[test]
+    fn the_two_choices_sit_between_the_facts_and_the_control() {
+        let mut s = screen();
+        let d = item(0, "eac3");
+        s.facts = file_block(&d);
+        s.action = verb(&d);
+        s.audio_label = chosen_audio(&d, 0);
+        s.sub_label = chosen_sub(&d, -1);
+        let mut facts = Section::new("");
+        for (label, value) in &s.facts {
+            facts = facts.row(Row::new(label).value(value));
+        }
+        let choice = Section::new("")
+            .row(Row::new("Audio").value(&s.audio_label))
+            .row(Row::new("Subtitles").value(&s.sub_label));
+        s.table.set_sections(
+            vec![facts, choice, Section::new("").row(Row::new(&s.action))],
+            0,
+            false,
+        );
+        assert_eq!(s.stops(), 3);
+        let rows: Vec<i32> = (0..3).map(|e| s.stop_row(e)).collect();
+        assert_eq!(rows, vec![s.facts.len() as i32, s.facts.len() as i32 + 1, s.action_row()]);
+        assert_eq!(
+            s.table.n_rows() as i32,
+            s.action_row() + 1,
+            "the control is the last row of the one table"
         );
     }
 }

@@ -1941,7 +1941,12 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
             // **The pre-playback window committed its one control** (issue #355): start the film
             // exactly as this page's own Play disc does, so the window cannot promise a start the
             // page would not give.
-            ScreenEvent::App(AppMsg::PrePlayGo) => {
+            ScreenEvent::App(AppMsg::PrePlayGo { audio_sid, sub_sid }) => {
+                // The window's two answers become this page's, which is what `play_hero` hands to
+                // `StartTracks` — so the first `PlaybackInfo` carries them and nothing has to be
+                // re-selected on top of a running picture.
+                self.audio_sid = Some(*audio_sid);
+                self.sub_sid = Some(*sub_sid);
                 self.play_hero(false, fx, meta);
                 Handled::Yes
             }
@@ -4023,6 +4028,10 @@ impl DetailScreen {
             fx,
             ContentReq::Panel(ContentPanel::PrePlay {
                 anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
+                // The page's own answers travel with the panel, so the window opens stating what
+                // this press would play instead of an empty choice.
+                audio_sid: self.audio_sid.unwrap_or(0),
+                sub_sid: self.sub_sid.unwrap_or(-1),
             }),
         );
     }

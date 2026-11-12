@@ -929,7 +929,7 @@ pub(crate) enum ContentPanel {
     /// **The pre-playback window** (issue #355, `screens::preplay_window`): the film's own file,
     /// opened by a poster press over the page that press opened, before anything plays. It carries
     /// the host instance its verdict goes back to, and the drawn rect it opens against.
-    PrePlay { anchor: [u32; 4] },
+    PrePlay { anchor: [u32; 4], audio_sid: i64, sub_sid: i64 },
     /// **Edit images** (`screens::images`): the pictures the metadata providers already hold for
     /// the item the page is standing on, anchored to the control that opened it. It came back with
     /// the artwork disc (the owner asked for "Cambiar imagen" and the pre-playback window that used
@@ -988,9 +988,14 @@ impl ContentPanel {
                     anchor,
                 }),
             ),
-            Self::PrePlay { anchor } => (
+            Self::PrePlay { anchor, audio_sid, sub_sid } => (
                 Style::Compact,
-                AppArg::PrePlayWindow(crate::screens::preplay_window::PrePlayArg { host, anchor }),
+                AppArg::PrePlayWindow(crate::screens::preplay_window::PrePlayArg {
+                    host,
+                    anchor,
+                    audio_sid,
+                    sub_sid,
+                }),
             ),
             Self::Images { anchor } => (
                 Style::Compact,
@@ -1121,10 +1126,12 @@ pub(crate) enum AppMsg {
     /// next Play starts with. `None` means "this half was not the one being chosen", so a picker
     /// for audio never clears a subtitle the viewer set from the other disc.
     DetailTracks { audio_sid: Option<i64>, sub_sid: Option<i64> },
-    /// **The pre-playback window committed its one control** (issue #355): the page starts the film
+    /// **The pre-playback window committed its control** (issue #355): the page starts the film
     /// exactly as its own Play disc would, because the promise (Play or Resume) is the page's and
-    /// the window only states it.
-    PrePlayGo,
+    /// the window only states it — and it states the two answers with it, in
+    /// [`crate::route::StartTracks`]'s own encoding, so the film starts with the audio and the
+    /// subtitle chosen before the picture.
+    PrePlayGo { audio_sid: i64, sub_sid: i64 },
 }
 
 /// What an owned screen asks the LEGACY LOOP to do, because the owner of that decision is not on
@@ -2249,7 +2256,11 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // **`PrePlayWindow` joins** (0x16df_9f5e_e595_f1be before it): the pre-playback window of #355, a new
 // surface and a new argument. Additive in the same way the picker's host was: no committed recording
 // opens it, and the replay proves that rather than the comment.
-const SCREEN_SHAPES_PIN: u64 = 0xc5a7_8989_3ded_9df3;
+//
+// **`PrePlayWindow` learns its choice** (0xc5a7_8989_3ded_9df3 before it, slice 2 of #355): the
+// window carries the page's two answers in and hands its own two back, so the shape records them.
+// Additive again: no committed recording opens the window.
+const SCREEN_SHAPES_PIN: u64 = 0x85c1_d268_7fd9_a355;
 
 #[cfg(test)]
 mod arg_tests {

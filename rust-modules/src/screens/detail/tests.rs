@@ -611,6 +611,37 @@ fn the_filmstrips_text_row_opens_that_episodes_own_page() {
     clear();
 }
 
+/// **The track chosen in the window is the track that plays** (issue #355, slice 2).
+///
+/// The window does not start anything itself: it hands its two answers to the page, the page makes
+/// them its own, and its ordinary Play passes them to `ContentReq::Play`'s `StartTracks` — which is
+/// what the first `PlaybackInfo` POST carries. This grades the joint, end to end on the page's own
+/// effect, rather than the window's message alone.
+#[test]
+fn the_track_chosen_in_the_window_is_the_track_the_play_asks_for() {
+    let mut film = detail(ServerId::UNSET, "film");
+    film.is_show = false;
+    film.kind = "movie".into();
+    film.seasons.clear();
+    film.episodes.clear();
+    film.part = "/library/parts/film".into();
+    let _guard = install(film);
+    let mut screen = bare(&_guard, ServerId::UNSET, "film");
+    let (_, effects) = step(
+        &mut screen,
+        &ScreenEvent::App(AppMsg::PrePlayGo { audio_sid: 2, sub_sid: 4 }),
+        None,
+    );
+    let tracks = effects.iter().find_map(|effect| match &effect.fx {
+        Fx::App(AppFx::Content(ContentReq::Play { tracks, .. })) => Some(*tracks),
+        _ => None,
+    });
+    let tracks = tracks.expect("the window's verdict starts the film");
+    assert_eq!(tracks.audio_sid, 2, "the audio the viewer chose is the one asked for");
+    assert_eq!(tracks.sub_sid, 4, "…and so is the subtitle");
+    clear();
+}
+
 /// **A film's poster opens the pre-playback window over the page it opened** (issue #355).
 ///
 /// The press arms it, the landing spends it: the window's file block and its verb do not exist
