@@ -870,7 +870,9 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
         let root = Painter::root();
         // `super::family` here matches this file's own `use super::family::{inner_cx, table_focus,
         // InnerHost, SettingsPage};` above — `family` is shared vocabulary, not a sibling screen.
-        super::family::set_palette(self.ground.palette());
+        // The family's lit face is the chrome's one tone, not an ambient derivation: the settings
+        // hover kept the old warm plate while every other list had moved (the owner's pass).
+        super::family::set_palette(crate::ui::widgets::ControlPalette::lit());
         match self.kind {
             Family::Settings => {
                 // the scrim over the live host while the modal fades in; invisible under the
