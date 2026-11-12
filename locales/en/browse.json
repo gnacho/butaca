@@ -1998,6 +1998,13 @@
     "value": "Remove from Deck",
     "description": "browse menu remove_deck"
   },
+  "browse.person.age": {
+    "description": "Age in years of a person, e.g. 'Age 63'.",
+    "value": "Age {age}",
+    "args": {
+      "age": "i64"
+    }
+  },
   "browse.person.born": {
     "value": "Born {date}",
     "args": {

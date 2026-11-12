@@ -3,6 +3,8 @@
   "images.kind.logo": "Logo",
   "images.kind.primary": "Principal",
   "images.kind.thumb": "Miniatura",
+  "images.more": "Cargar más",
+  "images.tab.all_languages": "Todos los idiomas",
   "widgets.action.mark_unwatched": "Marcar como no visto",
   "widgets.action.mark_watched": "Marcar como visto",
   "widgets.action.play_start": "Reproducir desde el principio",

@@ -447,6 +447,7 @@
   "browse.menu.go_season": "Ir a la temporada",
   "browse.menu.go_show": "Ir a la serie",
   "browse.menu.remove_deck": "Quitar de Continuar viendo",
+  "browse.person.age": "Edad {age}",
   "browse.person.born": "Nacimiento: {date}",
   "browse.person.born_place": "Nacimiento: {date}, {place}",
   "browse.person.credits": {

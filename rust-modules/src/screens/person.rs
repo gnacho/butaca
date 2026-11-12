@@ -597,6 +597,22 @@ impl LogicalState for PersonScreen {
     }
 }
 
+
+/// A person's age in whole years, from the two ISO dates the server sends (`""` when unknown).
+/// `None` when the birth date cannot be read: no birth, no age — the page simply does not say it.
+///
+/// `now` is the calendar's own year taken from `today_iso`, which the caller does not have to pass:
+/// this is display arithmetic on a biography, not a domain clock.
+fn person_age(born: &str, died: &str) -> Option<i64> {
+    let birth_year = crate::ui::fmt::year_of(born)?;
+    let end_year = if died.trim().is_empty() {
+        crate::ui::fmt::current_year()?
+    } else {
+        crate::ui::fmt::year_of(died)?
+    };
+    (end_year >= birth_year).then_some(end_year - birth_year)
+}
+
 impl PersonScreen {
     pub(crate) const SHAPE: &'static str = "PersonScreen{entry:EntryId,sid:ServerId,key:String,guid:String,name:String,thumb:String,header_marked:bool,return_pending:bool,next_card_elem:u32,card_keys:[{sid:ServerId,rk:String,elem:u32}]}";
 
@@ -789,6 +805,12 @@ impl PersonScreen {
         let died = crate::ui::fmt::pretty_date(&p.died, 0);
         if !died.is_empty() {
             self.life_parts.push(crate::i18n::msg::browse_person_died(&died));
+        }
+        // **The age** (the owner's 2026-11-10 pass: "edad, nacimiento"). Computed from the birth and
+        // death dates the server already sends, so it needs no new field: a living person's age is
+        // today minus the birth, a late one's is the span between the two.
+        if let Some(age) = person_age(&p.born, &p.died) {
+            self.life_parts.push(crate::i18n::msg::browse_person_age(age));
         }
 
         for k in 0..NSHELF {

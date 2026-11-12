@@ -15,6 +15,14 @@
     "description": "The small still or thumbnail a card shows.",
     "value": "Thumb"
   },
+  "images.more": {
+    "description": "Button that loads the next page of image results.",
+    "value": "Load more"
+  },
+  "images.tab.all_languages": {
+    "description": "Filter that asks the server for images in every language, not only the set's.",
+    "value": "All languages"
+  },
   "widgets.action.mark_unwatched": {
     "value": "Mark as Unwatched",
     "description": "Action verb shared by the media context menu and detail-page controls."

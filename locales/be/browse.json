@@ -452,6 +452,7 @@
   "browse.menu.go_season": "Перайсці да сезона",
   "browse.menu.go_show": "Перайсці да серыяла",
   "browse.menu.remove_deck": "Прыбраць з працягу прагляду",
+  "browse.person.age": "Узрост {age}",
   "browse.person.born": "Нараджэнне: {date}",
   "browse.person.born_place": "Нараджэнне: {date}, {place}",
   "browse.person.credits": {
