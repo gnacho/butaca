@@ -6841,6 +6841,13 @@ pub struct ControlPalette {
     spent: [f32; 4],
 }
 
+/// How much of the chrome tone an IDLE control carries: enough to read as the same family as the
+/// focused one, quiet enough that the focused control still leads.
+const IDLE_TINT: f32 = 0.62;
+/// The same, over a video plane: a touch more film, since the picture moves under it.
+const UNKEYED_IDLE_TINT: f32 = 0.55;
+
+
 impl ControlPalette {
     /// **The chrome's one lit tone**, fixed rather than derived from artwork: the owner's
     /// 2026-11-10 pass names the colour ("#7373CB"), so the focused face is that colour and the
@@ -6850,6 +6857,12 @@ impl ControlPalette {
         let mut p = Self::default();
         p.focus_top = theme::CHROME_LIT;
         p.focus_body = theme::with_a(theme::CHROME_LIT, 0.92);
+        // **Every button, not only the lit one** (the owner's 2026-11-10 pass: "de hecho todos los
+        // botones #7373CB"). The idle face is the same tone, quieter: a control at rest reads as
+        // the same family as the one under the cursor, which is what makes the whole row feel like
+        // one set. `spent` stays the palette's own, since it encodes a countdown rather than a
+        // colour choice.
+        p.idle = theme::with_a(theme::CHROME_LIT, IDLE_TINT);
         p
     }
 }
@@ -7149,7 +7162,9 @@ impl ControlStyle {
                 flat(theme::ACCENT, theme::ACCENT_INK, theme::CONTROL_SPENT_FILL)
             }
             ControlStyle::Accent if ground == ControlGround::Unkeyed => flat(
-                theme::CONTROL_IDLE_FILL_UNKEYED,
+                // The idle face over video is the chrome tone at a film's weight, so the transport
+                // and the hero's discs are the same colour family as everything else.
+                theme::with_a(theme::CHROME_LIT, UNKEYED_IDLE_TINT),
                 theme::CONTROL_IDLE_INK,
                 theme::CONTROL_SPENT_FILL,
             ),
