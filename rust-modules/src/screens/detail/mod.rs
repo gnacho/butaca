@@ -86,6 +86,12 @@ pub(crate) fn genre_elem(i: usize) -> u32 {
     GENRE_ELEM_BASE + i as u32
 }
 
+/// **The studio chips' elems** — same treatment, their own range.
+pub(crate) const STUDIO_ELEM_BASE: u32 = 0x2010;
+pub(crate) fn studio_elem(i: usize) -> u32 {
+    STUDIO_ELEM_BASE + i as u32
+}
+
 pub(crate) const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;7],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
 const _: () = assert!(hero::HERO_ELEM_RANGE_END == season::SEASON_ELEM_RANGE_START);
@@ -2525,12 +2531,13 @@ impl DetailScreen {
         }
         // Studios, in the same chip vocabulary and after the genres: the production company the
         // item page names. Capped at two so a co-production list cannot push the row past the edge.
-        for studio in d.studios.iter().take(2) {
+        for (i, studio) in d.studios.iter().take(2).enumerate() {
             if x + measure.width_str(studio, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
                 break;
             }
-            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, theme::TEXT_SECONDARY, measure)
-                + theme::space::XS;
+            let lit = focus == Some(studio_elem(i));
+            let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
+            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, ink, measure) + theme::space::XS;
         }
     }
 
@@ -2766,6 +2773,9 @@ impl DetailScreen {
         if let Some(d) = self.detail(meta) {
             for i in 0..d.genres.len().min(3) {
                 elems.push((genre_elem(i), Activate::Press));
+            }
+            for i in 0..d.studios.len().min(2) {
+                elems.push((studio_elem(i), Activate::Press));
             }
         }
         if let Some(d) = self.detail(meta) {
