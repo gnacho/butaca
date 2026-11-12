@@ -62,6 +62,13 @@ const TAB_EP_GAP: f32 = theme::space::MD;
 /// title's band, which is the moment the owner asked for it to be gone. Pure, and separate from the
 /// draw, because the direction of this ramp is the whole rule and both wrong directions shipped to
 /// the panel once each.
+/// Does the poster column belong on screen this frame? It rides the page CHROME, not the backdrop
+/// fade: the poster is part of the hero's furniture and recedes with it when a trailer preview
+/// takes the frame.
+fn preview_art_visible(chrome: f32) -> bool {
+    chrome > 0.01
+}
+
 fn compact_title_alpha(scroll: f32, first_top: f32, hero_visible: f32) -> f32 {
     let hide_at = (first_top - crate::ui::detail_layout::TOP_MARGIN).max(0.0);
     let travelled = ((scroll - hide_at) / COMPACT_TITLE_FADE).clamp(0.0, 1.0);
@@ -2355,6 +2362,61 @@ impl DetailScreen {
                 .bold()
                 .v(crate::ui::label::VAlign::Baseline)
                 .draw(chrome, title_band);
+        }
+
+        // **The poster column.** 540x810, bottom-aligned under the top bar (the owner's pass:
+        // "que ocupe el 75% de la pantalla"). It steps aside for a playing trailer preview, which
+        // owns the whole frame, and it draws from whatever the page actually has: the loaded
+        // item's Primary (the poster for a film and a show, a 16:9 still for an episode, so an
+        // episode falls back to the shelf's series poster), resolved at the tile's own size so a
+        // 4K library is not upscaled into it.
+        if preview_art_visible(self.preview_chrome) {
+            let poster_rect = Rect::new(
+                crate::ui::consts::MARGIN_X,
+                crate::ui::detail_layout::POSTER_Y,
+                crate::ui::detail_layout::POSTER_W,
+                crate::ui::detail_layout::POSTER_H,
+            );
+            if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
+                crate::ui::card_row::draw_tile(
+                    chrome,
+                    crate::ui::widgets::Art::Thumb {
+                        sid: d.sid,
+                        key: &d.thumb,
+                        res: (540, 810),
+                    },
+                    poster_rect,
+                    1.0,
+                    &crate::ui::card_row::RowStyle::HOME,
+                    None,
+                );
+            } else if let Some(m) = self.selected() {
+                crate::ui::card_row::draw_tile(
+                    chrome,
+                    crate::ui::widgets::Art::Thumb {
+                        sid: m.sid,
+                        key: &m.thumb,
+                        res: (540, 810),
+                    },
+                    poster_rect,
+                    1.0,
+                    &crate::ui::card_row::RowStyle::HOME,
+                    None,
+                );
+            } else if let Some(d) = d.filter(|d| d.kind == "episode" && !d.thumb.is_empty()) {
+                crate::ui::card_row::draw_tile(
+                    chrome,
+                    crate::ui::widgets::Art::Thumb {
+                        sid: d.sid,
+                        key: &d.thumb,
+                        res: (540, 810),
+                    },
+                    poster_rect,
+                    1.0,
+                    &crate::ui::card_row::RowStyle::HOME,
+                    None,
+                );
+            }
         }
 
         let (lead, synopsis) = hero_blurb(d, self.selected());
