@@ -587,6 +587,13 @@ impl Bridge {
         matches!(page.probe_viewport(d.input.engine.current(InputOwner::Entry(entry.id))).0, "grid" | "shelf")
     }
 
+    /// Open the Library filtered by one genre — a detail page's genre chip. The name travels on
+    /// the mounter and the Library resolves it against its own genre list once the listing is up.
+    pub(crate) fn open_library_genre(&mut self, genre: &str) {
+        self.mounter.pending_genre = Some(genre.to_string());
+        self.mounter.library_kind = None;
+    }
+
     pub(crate) fn enter_library(&mut self, kind: crate::browse::SecKind) {
         self.mounter.library_kind = Some(kind);
         self.library_commands.clear();

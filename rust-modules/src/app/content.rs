@@ -846,6 +846,13 @@ fn library_requests(app: &mut App, now: u32) {
                 app.pages.request(source, NavOp::Present(AppArg::LibraryMenu(LibraryMenuArg { host: instance, target, kind, anchor })));
             }
             LibraryReq::Account => chip_activate(&mut app.pages),
+            // A detail chip's genre: the mounter carries it and the Library applies it on mount,
+            // so the pill press lands on the filtered grid rather than on an unfiltered one it
+            // then has to chase.
+            LibraryReq::OpenGenre(ref genre) => {
+                app.bridge.open_library_genre(genre);
+                bridge::nav_select_tab(&mut app.pages, AppArg::Library);
+            }
             LibraryReq::BackToHome { kind } => {
                 bridge::nav_tab(&mut app.pages, &mut app.bridge, HomeTab::Home,
                     Some(crate::app::chrome::Pill::Section(kind)), Some(ret));

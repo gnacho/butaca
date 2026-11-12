@@ -244,6 +244,8 @@ pub(crate) enum LibraryReq {
     Account,
     Tab(HomeTab),
     BackToHome { kind: crate::stores::browse::SecKind },
+    /// A detail page's genre chip: open the Library filtered by that genre.
+    OpenGenre(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1750,6 +1752,10 @@ pub(crate) struct AppMounter {
     /// it is now the absence of a write.
     pub(crate) player_origin: Option<crate::screens::player::Origin>,
     pub(crate) library_kind: Option<crate::stores::browse::SecKind>,
+    /// A genre a detail-page chip asked the Library to open with (the owner's 2026-11-10 pass:
+    /// "los tags deben ser enlazables"). Taken once, at the Library's mount; `None` is the plain
+    /// library the strip pill opens.
+    pub(crate) pending_genre: Option<String>,
     /// How long the NEXT player instance pins its transport for, in ms — `HUD_LINGER_MS` for an
     /// ordinary start and `HUD_HEADLESS_MS` for a capture run. It is a seed rather than a constant
     /// because `start_playback` is what knows which, and because the deadline must be stamped from
@@ -1874,6 +1880,7 @@ where
                     .unwrap_or(crate::stores::browse::SecKind::Movie);
                 let mut page = crate::screens::library::LibraryScreen::new(entry, id, kind);
                 if let PageMemory::Library(memory) = &ret.memory { page.restore(memory); }
+                page.open_genre = self.pending_genre.take();
                 Box::new(page)
             }
             AppArg::Search => {

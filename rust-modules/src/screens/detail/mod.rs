@@ -77,6 +77,15 @@ const EP_SCALE_MAX: usize = 40;
 const K_SCROLL: f32 = crate::ui::consts::K_SCROLL;
 const K_STRIP_SCROLL: f32 = 240.0;
 
+
+/// **The genre chips' elems** — one per chip, in a range of their own so the hero's identities,
+/// the sections' and these cannot collide. They are real focus stops: pressing one lands on the
+/// Library filtered by that genre.
+pub(crate) const GENRE_ELEM_BASE: u32 = 0x2000;
+pub(crate) fn genre_elem(i: usize) -> u32 {
+    GENRE_ELEM_BASE + i as u32
+}
+
 pub(crate) const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;7],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
 const _: () = assert!(hero::HERO_ELEM_RANGE_END == season::SEASON_ELEM_RANGE_START);
@@ -2353,7 +2362,8 @@ impl DetailScreen {
         // nothing there vanish and come back under a playing preview.
         let prose = p.alpha(self.preview_chrome * self.preview_prose);
         if let Some(d) = d {
-            self.draw_identity_line(prose, d, chain.meta_y, cx.measure);
+            let focus_now = cx.focus.current.filter(|k| k.entry == self.entry).map(|k| k.elem);
+            self.draw_identity_line(prose, d, chain.meta_y, cx.measure, focus_now);
             self.draw_ratings(prose, d, chain.ratings_y, cx.measure);
         }
         if !synopsis.is_empty() {
@@ -2411,7 +2421,7 @@ impl DetailScreen {
         );
     }
 
-    fn draw_identity_line(&self, p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui::machine::Measure) {
+    fn draw_identity_line(&self, p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui::machine::Measure, focus: Option<u32>) {
         let ordinal = (d.kind == "episode" && d.season > 0 && d.index > 0)
             .then(|| crate::ui::fmt::episode_ordinal(d.season, d.index))
             .unwrap_or_default();
@@ -2498,15 +2508,20 @@ impl DetailScreen {
         }
         // The mockup's genre chips: the same outlined capsule the state badges wear, so one row
         // says what the item is and how it plays in a single visual vocabulary.
-        for genre in d.genres.iter().take(3) {
+        // **Genre chips are LINKS** (the owner's 2026-11-10 pass: "los tags deben ser enlazables"):
+        // each one lands on the Library filtered by that genre, so a chip reads as a way into the
+        // catalogue rather than as decoration. The chip's ink lifts while the remote is on it.
+        for (i, genre) in d.genres.iter().take(3).enumerate() {
             // The server names genres in the metadata provider's English; a Spanish UI shows them
             // in Spanish (an unknown, hand-added genre passes through untouched).
             let label = crate::metadata::localized_genre(genre);
-            if x + measure.width_str(&label, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
+            let w = measure.width_str(&label, theme::size::CAPTION, false);
+            if x + w > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
                 break;
             }
-            x += crate::ui::widgets::keyline_chip(p, x, cy, &label, theme::TEXT_SECONDARY, measure)
-                + theme::space::XS;
+            let lit = focus == Some(genre_elem(i));
+            let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
+            x += crate::ui::widgets::keyline_chip(p, x, cy, &label, ink, measure) + theme::space::XS;
         }
         // Studios, in the same chip vocabulary and after the genres: the production company the
         // item page names. Capped at two so a co-production list cannot push the row past the edge.
@@ -2746,6 +2761,12 @@ impl DetailScreen {
         // same condition that draws it, so a short blurb offers neither.
         if self.synopsis_more_rect(f.cx.measure, meta).is_some() {
             elems.push((hero::ELEM_SYNOPSIS_MORE, Activate::Press));
+        }
+        // The genre chips are links to the Library filtered by that genre (the owner's pass).
+        if let Some(d) = self.detail(meta) {
+            for i in 0..d.genres.len().min(3) {
+                elems.push((genre_elem(i), Activate::Press));
+            }
         }
         if let Some(d) = self.detail(meta) {
             elems.extend(
@@ -3653,6 +3674,14 @@ impl DetailScreen {
         let local = self.locate(elem, meta).and_then(Located::local_key).unwrap_or(elem);
         match self.locate(elem, meta) {
             Some(Located::Hero(ctl)) => self.activate_hero(ctl, cx, fx, meta),
+            _ if elem >= genre_elem(0) && elem < genre_elem(3) => {
+                if let Some(genre) = self
+                    .detail(meta)
+                    .and_then(|d| d.genres.get((elem - genre_elem(0)) as usize).cloned())
+                {
+                    fx.push(Fx::App(AppFx::Library(crate::screens::registry::LibraryReq::OpenGenre(genre))));
+                }
+            }
             // The accordion is one-way: the press opens the whole blurb and the mark leaves with
             // it, so there is no second state to word or to return to.
             Some(Located::Synopsis) => {
