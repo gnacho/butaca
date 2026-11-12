@@ -1035,7 +1035,10 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
                     sizes.insert(n);
                     for scroll in [0.0, 48.0] {
                         screen.scroll = Spring::at(scroll);
-                        let widths = hero::hero_widths(&measure, restart);
+                        // The Play capsule's width follows the STORE's own resume point, which is
+                        // what `place` and `draw_buttons` both read — the fixture must agree with
+                        // it rather than assume a restart implies a resume.
+                        let widths = hero::hero_widths(&measure, screen.resume_ms(test_store().view()));
                         let mut stops = Vec::new();
                         let mut drawn = Vec::new();
                         for (i, control) in controls[..n].iter().enumerate() {

@@ -417,13 +417,25 @@ fn pill_w(measure: &dyn Measure, label: &CStr, sz: i32, icon: bool, trailing: bo
     isz + gap + measure.width(label, sz, true) + tgap + tsz + crate::ui::widgets::BTN_PILL_AIR
 }
 
-pub(crate) fn hero_pill_w(measure: &dyn Measure, has_restart: bool) -> f32 {
-    // The PLAY control is a DISC now (the owner's 2026-11-10 pass: "el botón de play al mismo
-    // tamaño que el resto"): its width is its own diameter, not a pill's measured text. `has_restart`
-    // is kept in the signature so every caller stays one shape, and so the future return of a
-    // labelled pill does not have to touch them.
-    let _ = (measure, has_restart);
-    CD
+/// The PLAY control's width. With nothing watched it is a plain disc, the same diameter as the rest
+/// of the row ("el botón de play al mismo tamaño que el resto"). With a resume point it WIDENS into
+/// a capsule that carries the elapsed minutes INSIDE it ("46m"), so the primary control answers
+/// "how far in am I" without a second label anywhere (the owner's 2026-11-10 pass).
+pub(crate) fn hero_pill_w_for(measure: &dyn Measure, resume_ms: i64) -> f32 {
+    if resume_ms < 60_000 {
+        return CD;
+    }
+    let label = play_elapsed(resume_ms);
+    let text = measure.width_str(&label, theme::size::CAPTION, true);
+    // Icon box + gap + the run + the capsule's own air, never narrower than a plain disc.
+    (CD * 0.55 + 10.0 + text + CD * 0.45).max(CD)
+}
+
+/// The elapsed minutes a resume point has behind it, as the Play capsule prints them ("46m"). Sub
+/// minute reads as "1m": a capsule that says "0m" is a read-out saying nothing.
+pub(crate) fn play_elapsed(resume_ms: i64) -> String {
+    let mins = (resume_ms / 60_000).max(1);
+    crate::i18n::msg::core_duration_short_minutes(mins)
 }
 
 pub(crate) fn alt_pill_w(measure: &dyn Measure) -> f32 {
@@ -490,9 +502,9 @@ pub(crate) fn disc_caps() -> [f32; 7] {
 /// The live widths, combining [`hero_pill_w`]/[`alt_pill_w`]/[`disc_caps`] — the one function
 /// `DetailScreen`'s `Focusable` queries and `draw` both call, so they can never drift (mirrors
 /// `ui/detail.rs::hero_widths`, over `Measure` instead of `crate::text` directly).
-pub(crate) fn hero_widths(measure: &dyn Measure, has_restart: bool) -> HeroWidths {
+pub(crate) fn hero_widths(measure: &dyn Measure, resume_ms: i64) -> HeroWidths {
     HeroWidths {
-        pill: hero_pill_w(measure, has_restart),
+        pill: hero_pill_w_for(measure, resume_ms),
         alt: alt_pill_w(measure),
         disc: disc_caps(),
     }
@@ -1180,7 +1192,7 @@ mod tests {
                                 for artwork in [false, true] {
                                     let set = HeroSet { restart, trailer, alt, mark, favorite: Some(false), audio, subs, artwork };
                                     let (_, n) = hero_ctls(set);
-                                    let widths = hero_widths(&measure, restart);
+                                    let widths = hero_widths(&measure, if restart { 2_760_000 } else { 0 });
                                     let last = hero_btn_rect_at(set, n - 1, 0.0, widths);
                                     assert!(
                                         last.x + last.w <= crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X + 0.01,

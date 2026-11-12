@@ -1163,7 +1163,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
         let meta = H::metadata(cx);
         let measure = cx.measure;
         let set = self.hero_set(meta);
-        let widths = hero::hero_widths(cx.measure, set.restart);
+        let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
         let (_, hero_n) = hero::visible_ctls(set, self.full_trailer());
         let hero_y = self.hero_chain(measure, meta).btn_y;
         let hero_last = hero::hero_btn_rect_at(set, hero_n.saturating_sub(1), hero_y, widths);
@@ -1373,7 +1373,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
             Located::Hero(ctl) => {
                 let set = self.hero_set(meta);
                 let i = hero::index_of(set, ctl)?;
-                let widths = hero::hero_widths(cx.measure, set.restart);
+                let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                 let base =
                     hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y - vertical, widths);
                 (
@@ -2650,7 +2650,7 @@ impl DetailScreen {
     fn draw_buttons<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, y: f32, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let set = self.hero_set(meta);
-        let widths = hero::hero_widths(cx.measure, set.restart);
+        let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
         let current = cx.focus.current.map(|k| k.elem);
         // Deliberately `hero_ctls`, not `hero::visible_ctls`: the row's FOCUSABLE extent narrows
         // to Play the instant `full_trailer()` flips (that gate lives in `valid`/`focusable` and
@@ -2691,20 +2691,22 @@ impl DetailScreen {
             // focus so the row recedes into the artwork until the remote reaches for it.
             let row_alpha = if focused { 1.0 } else { 0.82 };
             match ctl {
-                hero::HeroCtl::Play => Button::new(
-                    // The owner's 2026-11-10 pass: the primary pill keeps only its icon ("quitamos
-                    // el texto reproducir"). The verb is still spoken by the row's right-end
-                    // caption (`disc_verb`), which names the focused control.
-                    c"".as_ptr(),
-                    theme::size::BODY,
-                    rect,
-                )
-                .icon(crate::ui::icons::Icon::Play)
-                .focused(focused)
-                .palette(palette)
-                .ground(ground)
-                .scale(scale)
-                .draw(&Env::inert(), p.alpha(row_alpha)),
+                hero::HeroCtl::Play => {
+                    // With a resume point the capsule carries the ELAPSED MINUTES inside it
+                    // ("46m"), so the primary control answers "how far in am I" without a second
+                    // label. Without one it is a plain disc with only its icon ("quitamos el
+                    // texto reproducir"), and the row's caption still names the verb.
+                    let resume = self.resume_ms(meta);
+                    let elapsed = if resume > 0 { hero::play_elapsed(resume) } else { String::new() };
+                    let Ok(label) = std::ffi::CString::new(elapsed) else { return };
+                    Button::new(label.as_ptr(), theme::size::CAPTION, rect)
+                        .icon(crate::ui::icons::Icon::Play)
+                        .focused(focused)
+                        .palette(palette)
+                        .ground(ground)
+                        .scale(scale)
+                        .draw(&Env::inert(), p.alpha(row_alpha))
+                }
                 hero::HeroCtl::Alt => {
                     Button::new(hero::alt_label().as_ptr(), theme::size::BODY, rect)
                         .trailing_icon(crate::ui::icons::Icon::ChevronDown)
@@ -3680,6 +3682,12 @@ impl DetailScreen {
         true
     }
 
+    /// How far into the item the Play control's resume point is, in ms — 0 when there is none. The
+    /// Play disc widens to carry the elapsed minutes when there is.
+    fn resume_ms(&self, meta: crate::metadata::MetadataView<'_>) -> i64 {
+        self.detail(meta).map(hero::hero_resume_ns).unwrap_or(0) / 1_000_000
+    }
+
     fn hero_set(&self, meta: crate::metadata::MetadataView<'_>) -> hero::HeroSet {
         let (restart, mark) = self
             .detail(meta)
@@ -3861,7 +3869,7 @@ impl DetailScreen {
             hero::HeroCtl::Alt => {
                 let set = self.hero_set(meta);
                 if let Some(i) = hero::index_of(set, ctl) {
-                    let widths = hero::hero_widths(cx.measure, set.restart);
+                    let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                     let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                     rect.y -= self.scroll.pos;
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
@@ -3880,7 +3888,7 @@ impl DetailScreen {
                 let audio = ctl == hero::HeroCtl::Audio;
                 let set = self.hero_set(meta);
                 let Some(i) = hero::index_of(set, ctl) else { return };
-                let widths = hero::hero_widths(cx.measure, set.restart);
+                let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                 let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                 rect.y -= self.scroll.pos;
                 let chosen = if audio {
@@ -3903,7 +3911,7 @@ impl DetailScreen {
             hero::HeroCtl::Artwork => {
                 let set = self.hero_set(meta);
                 let Some(i) = hero::index_of(set, ctl) else { return };
-                let widths = hero::hero_widths(cx.measure, set.restart);
+                let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                 let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                 rect.y -= self.scroll.pos;
                 self.content(
