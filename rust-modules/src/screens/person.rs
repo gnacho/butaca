@@ -100,10 +100,15 @@ const fn text_w_const(d: f32) -> f32 {
     SCR_W - MARGIN_X - (MARGIN_X + d + BAND_GAP)
 }
 const BIO_W: f32 = text_w_const(PORTRAIT_EXP);
-const BIO_LINES: usize = 3;
+/// **The header shows the WHOLE biography** (the owner's 2026-11-10 pass: "la bio completa sin
+/// botón más"). It used to be cut to three lines behind a pinned `MORE` mark; the mark is gone with
+/// it, because a page that scrolls does not need an accordion — and a mark that only exists to undo
+/// a truncation is furniture. The alert panel behind that mark is retired with it.
+const BIO_LINES: usize = 0;
 const BIO_LEAD: f32 = 40.0;
 const HL_PAD_X: f32 = 26.0;
 const HL_PAD_Y: f32 = 24.0;
+#[allow(dead_code)] // The mark it spaced is retired with the truncation (`BIO_LINES = 0`).
 const BIO_MORE_GAP: f32 = theme::space::LG;
 // The owner's reference mock, 2026-09-19: the Filmography pill sits one rung under the shelf
 // heading below it, not the full `XL` region gap the band and its first shelf shipped with — the
@@ -266,7 +271,6 @@ fn bio_view<'a>(bio: &'a str, a: f32, measure: &'a dyn Measure) -> TextView<'a> 
     .with_measure(measure)
     .leading(BIO_LEAD)
     .max_lines(BIO_LINES)
-    .fade_for_more(BIO_MORE_GAP)
 }
 
 fn text_w(d: f32) -> f32 {
@@ -2343,14 +2347,18 @@ mod tests {
         let _serial = crate::testlock::serial();
         let (mut store, mut s) = seed(1, 0);
         let m = FixtureMeasure;
+        // The header shows the WHOLE biography now (the owner's pass: "la bio completa sin botón
+        // más"), so nothing is ever truncated and the mark's gate never opens — however long the
+        // text is. What this test still pins is the SEAM: the gate reads the header's own measured
+        // flag, not a fresh wrap.
         let long = "A biography far longer than the header's three lines can hold. ".repeat(40);
-        for (bio, want) in [(long.as_str(), true), ("One short line.", false)] {
+        for bio in [long.as_str(), "One short line."] {
             let flow = header_flow(false, bio, false, false, false, &m);
             assert_eq!(flow.bio_truncated, bio_view(bio, 1.0, &m).truncates(BIO_W));
-            assert_eq!(flow.bio_truncated, want, "fixture sanity for {:.20}", bio);
+            assert!(!flow.bio_truncated, "the header never truncates now: {:.20}", bio);
             s.header = flow;
             s.header_dirty = false;
-            assert_eq!(s.bio_more(), want);
+            assert!(!s.bio_more());
         }
         s.header = header_flow(false, &long, false, false, false, &m);
         s.header_dirty = true;
