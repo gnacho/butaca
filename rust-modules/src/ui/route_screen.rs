@@ -788,15 +788,19 @@ impl RouteLayout {
         let x = SAFE.x + (SAFE.w - w) * 0.5;
         let top = SAFE.y + TOP_INSET;
         let bottom = SAFE.y + SAFE.h;
+        // **The band flows from what is drawn, not from a worst case** (issue #415: the mockup
+        // puts the first group right under the screen's subtitle). It used to reserve THREE copy
+        // lines for every locale, so a one-line subtitle left a third of the page empty before
+        // the first card. One line plus the group's own step is what the mockup measures.
         let head = CRUMB_BAND
             + theme::space::SM
             + theme::size::HERO as f32
             + theme::space::MD
-            + 3.0 * (theme::size::LABEL as f32 + theme::space::XS)
-            + theme::space::LG;
+            + theme::size::LABEL as f32
+            + theme::space::XS;
         let narrative = Rect::new(x, top, w, head);
         let action = Rect::new(x, top + head, w, ACTION_H);
-        let content_top = top + head + theme::space::LG;
+        let content_top = top + head + theme::space::MD;
         let content = Rect::new(x, content_top, w, (bottom - content_top).max(0.0));
         Self { narrative, content, action }
     }
@@ -1075,7 +1079,10 @@ impl RouteLayout {
         title.draw(p, Rect::new(self.narrative.x, top, self.narrative.w, title_h));
 
         let copy_top = top + title_h + theme::space::MD;
-        let copy_bottom = self.action.y - theme::space::XL;
+        // The narrative band's foot IS the copy's floor on a centred route, whose band is sized
+        // from the copy it holds (issue #415); the `XL` step below it belongs to the two-column
+        // routes, where the band ends at the action row.
+        let copy_bottom = self.action.y;
         TextView::new(copy, copy_size, theme::TEXT_READING)
             .leading(copy_size as f32 + theme::space::XS)
             .max_lines(12)

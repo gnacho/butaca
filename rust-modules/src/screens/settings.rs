@@ -1072,6 +1072,10 @@ impl RootPage {
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
         self.table.grid(2);
+        // **The root is the mockup's grid of cards** (issue #415): each row its own plate, the
+        // focused one washed in the chrome's tone. The sub-pages stay lists until they are
+        // designed the same way.
+        self.table.cards(true);
         self.table.set_sections(vec![servers, preferences, sign_out], sel, false);
         self.table.list_focused = true;
     }

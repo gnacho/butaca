@@ -940,6 +940,14 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WARM_100, 0.12);
+
+/// The settings grid's card plate (issue #415): a step ABOVE the panel rather than a colour, so a
+/// row reads as its own object over the page. Every other table keeps drawing rows on the panel.
+pub const TABLE_CARD_FILL: [f32; 4] = with_a(WHITE, 0.05);
+
+
+/// The focused card's edge, drawn as a ring on the same tone.
+pub const TABLE_CARD_RING: [f32; 4] = with_a(CHROME_LIT, 0.85);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
 /// tiles' own [`CARD_SHEEN`] (.22) because a sheet's edge is quieter than a card's.
 ///
