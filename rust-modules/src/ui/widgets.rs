@@ -4278,6 +4278,10 @@ impl View for TransportButton {
         });
         let s = (r.w * DISC_ICON_RATIO).round();
         let ir = Rect::new(r.x + (r.w - s) * 0.5, r.y + (r.h - s) * 0.5, s, s);
+        // **On its INK, in the transport family's band.** A box-centred `play.svg` is the one mark
+        // that sits off-centre in this disc (its ink is wider and taller than a pause's), which is
+        // what read as "el play del reproductor no está centrado".
+        let ir = crate::ui::icons::centred_on_ink(id, ir, crate::ui::icons::band(Icon::Pause));
         crate::ui::icons::draw(p, id, ir, ink);
     }
 }

@@ -316,6 +316,33 @@ pub(crate) const fn band(id: Icon) -> f32 {
     }
 }
 
+/// **A mark centred on its INK, not on its box.** `play.svg` is the off-band member
+/// ([`band`]'s doc): drawn box-centred it sits visibly right of and above where a pause, a stop or
+/// a skip sits in the same disc, which is the "el play no está centrado" the owner saw. The fix is
+/// arithmetic on the asset's own bounds, so it holds for every caller and every size:
+///
+/// * horizontally, the box is shifted by the difference between the ink's centre and the box's;
+/// * vertically, the box is shrunk to the family's band and centred in the disc, so the mark's INK
+///   occupies the same 14-unit band the other transport marks do.
+pub(crate) fn centred_on_ink(id: Icon, box_rect: Rect, family_band: f32) -> Rect {
+    let (l, r) = ink_x(id);
+    let ink_center = (l + r) * 0.5;
+    let dx = -(ink_center - 0.5) * box_rect.w;
+    let b = band(id);
+    let (w, h) = if (b - family_band).abs() > 1e-6 && b > 0.0 {
+        let scaled = box_rect.h * (family_band / b);
+        (box_rect.w, scaled)
+    } else {
+        (box_rect.w, box_rect.h)
+    };
+    Rect::new(
+        box_rect.x + dx,
+        box_rect.y + (box_rect.h - h) * 0.5,
+        w,
+        h,
+    )
+}
+
 fn src(id: Icon) -> &'static str {
     match id {
         Icon::Agreement => include_str!("../../../assets/icons/agreement.svg"),
@@ -485,6 +512,48 @@ pub(crate) fn draw(p: Painter, id: Icon, r: Rect, tint: [f32; 4]) {
             r.h,
         );
         p.tex(tex, r, 0.0, tint);
+    }
+}
+
+#[cfg(test)]
+mod centre_tests {
+    use super::*;
+
+    /// **`play.svg` lands on the same band as its family.** Drawn box-centred it is taller and
+    /// wider than a pause, which is the off-centre mark the owner reported; centred on its ink it
+    /// occupies pause's band vertically and its ink's centre horizontally.
+    #[test]
+    fn play_sits_in_the_transport_band_and_centres_its_ink() {
+        let disc = Rect::new(0.0, 0.0, 64.0, 64.0);
+        let icon = Rect::new(16.0, 16.0, 32.0, 32.0);
+        let play = centred_on_ink(Icon::Play, icon, band(Icon::Pause));
+        let pause = centred_on_ink(Icon::Pause, icon, band(Icon::Pause));
+
+        // Same INK band: play's box is shrunk by band(Pause)/band(Play), so the mark it paints
+        // covers the same vertical run a pause does.
+        let play_ink = play.h * band(Icon::Play);
+        let pause_ink = pause.h * band(Icon::Pause);
+        assert!(
+            (play_ink - pause_ink).abs() < 1e-3,
+            "play ink {play_ink} vs pause ink {pause_ink}"
+        );
+        assert!((play.cy() - disc.cy()).abs() < 0.51, "vertically centred: {}", play.cy());
+
+        // Horizontally the ink's own centre is what sits on the disc's centre: play's ink runs
+        // 6..20 of 24, so its centre is 0.5417 of the box and the box shifts LEFT by that excess.
+        let (l, r) = ink_x(Icon::Play);
+        let want = disc.cx() - ((l + r) * 0.5) * play.w;
+        assert!(play.x < icon.x, "the box moves left to centre the ink");
+        assert!((play.x - want).abs() < 0.51, "ink centre at {} vs {}", play.x, want);
+    }
+
+    /// A symmetrical mark is left where it is: the helper must not nudge what was already centred.
+    #[test]
+    fn a_symmetric_mark_is_not_moved() {
+        let icon = Rect::new(10.0, 10.0, 30.0, 30.0);
+        let stop = centred_on_ink(Icon::Stop, icon, band(Icon::Pause));
+        assert!((stop.x - icon.x).abs() < 1e-4);
+        assert!((stop.h - icon.h).abs() < 1e-4);
     }
 }
 
