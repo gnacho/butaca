@@ -285,6 +285,59 @@ pub(crate) fn resume_ns(resume_ms: i64, dur_ms: i64) -> i64 {
     }
 }
 
+/// A genre in the UI's own language. The server ships the metadata provider's English name
+/// ("Science Fiction"), so the es_ES UI would otherwise show English chips on a Spanish page. An
+/// unknown genre is returned unchanged — a custom genre a viewer added by hand must not vanish.
+pub(crate) fn localized_genre(raw: &str) -> String {
+    let key = raw.trim().to_lowercase().replace(' ', "_").replace('&', "and").replace('-', "_");
+    let text = match key.as_str() {
+        "action" => crate::i18n::msg::browse_genre_action(),
+        "adventure" => crate::i18n::msg::browse_genre_adventure(),
+        "animation" => crate::i18n::msg::browse_genre_animation(),
+        "comedy" => crate::i18n::msg::browse_genre_comedy(),
+        "crime" => crate::i18n::msg::browse_genre_crime(),
+        "documentary" => crate::i18n::msg::browse_genre_documentary(),
+        "drama" => crate::i18n::msg::browse_genre_drama(),
+        "family" => crate::i18n::msg::browse_genre_family(),
+        "fantasy" => crate::i18n::msg::browse_genre_fantasy(),
+        "history" => crate::i18n::msg::browse_genre_history(),
+        "horror" => crate::i18n::msg::browse_genre_horror(),
+        "music" => crate::i18n::msg::browse_genre_music(),
+        "mystery" => crate::i18n::msg::browse_genre_mystery(),
+        "romance" => crate::i18n::msg::browse_genre_romance(),
+        "science_fiction" => crate::i18n::msg::browse_genre_science_fiction(),
+        "tv_movie" => crate::i18n::msg::browse_genre_tv_movie(),
+        "thriller" => crate::i18n::msg::browse_genre_thriller(),
+        "war" => crate::i18n::msg::browse_genre_war(),
+        "western" => crate::i18n::msg::browse_genre_western(),
+        "kids" => crate::i18n::msg::browse_genre_kids(),
+        "reality" => crate::i18n::msg::browse_genre_reality(),
+        "talk" => crate::i18n::msg::browse_genre_talk(),
+        "news" => crate::i18n::msg::browse_genre_news(),
+        "soap" => crate::i18n::msg::browse_genre_soap(),
+        "short" => crate::i18n::msg::browse_genre_short(),
+        "sport" => crate::i18n::msg::browse_genre_sport(),
+        "travel" => crate::i18n::msg::browse_genre_travel(),
+        "food" => crate::i18n::msg::browse_genre_food(),
+        "game_show" => crate::i18n::msg::browse_genre_game_show(),
+        "anime" => crate::i18n::msg::browse_genre_anime(),
+        "biography" => crate::i18n::msg::browse_genre_biography(),
+        "musical" => crate::i18n::msg::browse_genre_musical(),
+        "film_noir" => crate::i18n::msg::browse_genre_film_noir(),
+        "adult" => crate::i18n::msg::browse_genre_adult(),
+        "award_show" => crate::i18n::msg::browse_genre_award_show(),
+        "home_and_garden" => crate::i18n::msg::browse_genre_home_and_garden(),
+        "indie" => crate::i18n::msg::browse_genre_indie(),
+        "mini_series" => crate::i18n::msg::browse_genre_mini_series(),
+        "politics" => crate::i18n::msg::browse_genre_politics(),
+        "religion" => crate::i18n::msg::browse_genre_religion(),
+        "sci_fi_and_fantasy" => crate::i18n::msg::browse_genre_sci_fi_and_fantasy(),
+        "suspense" => crate::i18n::msg::browse_genre_suspense(),
+        _ => return raw.to_string(),
+    };
+    text.to_string()
+}
+
 /// Friendly display name for an audio/subtitle codec id — the ONE codec→name map (the track
 /// menu's section accessory and the Info card's track line both read it, so the same track
 /// can't be named two ways).

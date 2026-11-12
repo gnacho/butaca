@@ -2499,10 +2499,13 @@ impl DetailScreen {
         // The mockup's genre chips: the same outlined capsule the state badges wear, so one row
         // says what the item is and how it plays in a single visual vocabulary.
         for genre in d.genres.iter().take(3) {
-            if x + measure.width_str(genre, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
+            // The server names genres in the metadata provider's English; a Spanish UI shows them
+            // in Spanish (an unknown, hand-added genre passes through untouched).
+            let label = crate::metadata::localized_genre(genre);
+            if x + measure.width_str(&label, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
                 break;
             }
-            x += crate::ui::widgets::keyline_chip(p, x, cy, genre, theme::TEXT_SECONDARY, measure)
+            x += crate::ui::widgets::keyline_chip(p, x, cy, &label, theme::TEXT_SECONDARY, measure)
                 + theme::space::XS;
         }
         // Studios, in the same chip vocabulary and after the genres: the production company the
