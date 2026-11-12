@@ -1003,13 +1003,13 @@ impl RouteLayout {
     fn draw_crumb(self, p: Painter, top: f32, back_to: &str, measure: &dyn Measure, focused: bool) {
         let h = CRUMB_BAND;
         let cy = top + h * 0.5;
-        let ink = if focused { theme::ACCENT_INK } else { theme::TEXT_SECONDARY };
+        let ink = if focused { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
         if focused {
             // The capsule stops at the narrative's left edge, i.e. on the safe margin: an inflated
             // one would put its own edge inside the overscan exclusion zone, which is the defect
             // `CHIP_FRAME` records for the profile chip. The chevron's bearing supplies the lead.
             let w = (self.crumb_rect(back_to, measure).w + theme::space::XS).min(self.narrative.w);
-            p.rrect(Rect::new(self.narrative.x, top, w, h), h * 0.5, h * 0.5, theme::ACCENT);
+            p.rrect(Rect::new(self.narrative.x, top, w, h), h * 0.5, h * 0.5, theme::CHROME_LIT);
         }
         icons::draw(
             p,
