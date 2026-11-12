@@ -123,7 +123,11 @@ pub const TEXT_SECONDARY: [f32; 4] = WARM_500;
 /// hero's synopsis, which is the longest run of text on the page and sits over the backdrop scrim;
 /// at [`TEXT_SECONDARY`] it read as fine print rather than as the blurb. A one-line metadata VALUE
 /// stays secondary — the distinction is paragraph-vs-label, not importance.
-pub const TEXT_READING: [f32; 4] = WARM_300;
+/// **Reading copy, on the Jellyfin palette** (the owner's 2026-11-10 pass: "el texto del resumen
+/// debería ser misma gama cromática que el logo de jellyfin"). A pale violet that belongs to the
+/// page's own family rather than the warm ink it used to be, and still far enough from the ground
+/// to clear the 3:1 the synopsis is graded at over bright artwork.
+pub const TEXT_READING: [f32; 4] = rgb8(0xd8, 0xd4, 0xf0);
 /// Tertiary text: runtime, kickers, inactive tabs, About labels, dim/empty states.
 pub const TEXT_TERTIARY: [f32; 4] = WARM_700;
 /// The `·` between fine-print facts, and **only** that — a step below the words it separates.
