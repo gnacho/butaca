@@ -2791,24 +2791,23 @@ pub(crate) fn draw_back_control(p: Painter, focused: bool) {
 /// [`draw_back_control`] in an explicit box — the detail page's Back sits at the very top of the
 /// safe area (`detail_back_frame`), since the poster now starts on the top bar's foot.
 pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
+    // **The lit Back disc is a FILLED #7373CB plate** with a white chevron, the same treatment a
+    // focused control wears (the owner's 2026-11-10 pass: hover and Back share one tone). A ring
+    // under an unfilled disc did not read as "the same colour" at all.
+    let lit = focused;
     let button = CircleButton::new(std::ptr::null())
         .frame(frame)
         .icon(crate::ui::icons::Icon::ChevronLeft)
         .ground(ControlGround::Unkeyed)
-        .focused(focused);
-    // The one lit tone of the chrome (owner: hover and Back share #7373CB). Drawn under the disc
-    // as a soft ring so the tone reads on both the lit and the idle state.
-    if focused {
-        crate::ui::widgets::control_rim(
-            p,
-            frame,
-            frame.h * 0.5,
-            theme::with_a(theme::CHROME_LIT, 0.9),
-            theme::with_a(theme::CHROME_LIT, 0.55),
-            true,
-            ControlGround::Unkeyed,
-        );
-    }
+        .style(if lit {
+            ControlStyle::Custom {
+                fill: theme::CHROME_LIT,
+                ink: theme::TEXT_PRIMARY,
+            }
+        } else {
+            ControlStyle::Accent
+        })
+        .focused(lit);
     button.draw(&Env::inert(), p);
 }
 
