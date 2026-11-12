@@ -168,6 +168,11 @@ The path data `M5 13l4 4L19 7` on a 24×24 grid is identical to Heroicons v1
 `optimized/outline/check.svg` (confirmed against upstream). *Modified*: stroke width 2 → 3,
 stroke colour set to white.
 
+**Heroicons** - the `heart` and `heart-fill` icons (`assets/icons/heart.svg`, `assets/icons/heart-fill.svg`)
+
+Both are Heroicons v1 "heart" (MIT). The outline is drawn from the SOLID path so the two states
+share one silhouette: the favourite control changes its fill, never its shape (issue #414).
+
 **Heroicons** - the `home` icon (`assets/icons/home.svg`)
 Copyright (c) Tailwind Labs, Inc. Licence: **MIT** (`licenses/MIT.txt`).
 The house is Heroicons v1 `optimized/outline/home.svg`, re-expressed as one path so the
