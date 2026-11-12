@@ -2148,9 +2148,10 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
             crate::ui::widgets::back_control_focused(f),
         );
         if !self.full_trailer() {
-            crate::ui::widgets::draw_back_control(
+            crate::ui::widgets::draw_back_control_at(
                 p.alpha(self.preview_chrome),
                 crate::ui::widgets::back_control_focused(f),
+                crate::ui::widgets::detail_back_frame(),
             );
         }
 
@@ -2792,7 +2793,12 @@ impl DetailScreen {
         // The union of the two sites that DRAW it: this page's own disc, and the full-trailer
         // transport's scrim (`player_hud::draw_scrim`, under `trailer_ctl`).
         if !self.full_trailer() || self.trailer_ctl.visible() {
-            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
+            crate::ui::widgets::back_control_stop_at(
+                f,
+                self.entry,
+                crate::screens::registry::HEADER_CRUMB,
+                crate::ui::widgets::detail_back_frame(),
+            );
         }
     }
 }

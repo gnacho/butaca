@@ -1806,7 +1806,8 @@ fn the_visible_back_control_registers_and_navigates() {
     let context = cx(&crate::ui::fixture::FixtureMeasure, None);
     let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
     screen.record_stops(&mut frame);
-    let frame_origin = crate::ui::widgets::CHIP_FRAME;
+    // The detail page draws its Back at the top of the safe area, not in the shared chip box.
+    let frame_origin = crate::ui::widgets::detail_back_frame();
     let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
         .expect("Detail publishes its visible Back control");
     assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],

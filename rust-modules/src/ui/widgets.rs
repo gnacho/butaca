@@ -2773,9 +2773,22 @@ impl View for CircleButton {
 /// group, `dispatch::BACK`), so a viewer whose remote's BACK key is broken can still leave the
 /// page with the arrows, and it lights up in the circle-button family's own focus face rather
 /// than in a treatment invented for it.
+/// The DETAIL page's Back disc sits at the very top of the safe area, level with the chrome's own
+/// row, since the poster now starts on the top bar's foot (the owner's 2026-11-10 pass). A pure
+/// geometry helper so the draw, the pointer stop and the focus ring share one box.
+pub(crate) fn detail_back_frame() -> Rect {
+    Rect::new(crate::ui::consts::MARGIN_X, crate::ui::consts::MARGIN_Y, CHIP_D, CHIP_D)
+}
+
 pub(crate) fn draw_back_control(p: Painter, focused: bool) {
+    draw_back_control_at(p, focused, CHIP_FRAME);
+}
+
+/// [`draw_back_control`] in an explicit box — the detail page's Back sits at the very top of the
+/// safe area (`detail_back_frame`), since the poster now starts on the top bar's foot.
+pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
     let button = CircleButton::new(std::ptr::null())
-        .frame(CHIP_FRAME)
+        .frame(frame)
         .icon(crate::ui::icons::Icon::ChevronLeft)
         .ground(ControlGround::Unkeyed)
         .focused(focused);
@@ -2784,8 +2797,8 @@ pub(crate) fn draw_back_control(p: Painter, focused: bool) {
     if focused {
         crate::ui::widgets::control_rim(
             p,
-            CHIP_FRAME,
-            CHIP_FRAME.h * 0.5,
+            frame,
+            frame.h * 0.5,
             theme::with_a(theme::CHROME_LIT, 0.9),
             theme::with_a(theme::CHROME_LIT, 0.55),
             true,
