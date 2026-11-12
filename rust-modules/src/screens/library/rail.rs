@@ -141,8 +141,8 @@ impl RailPart {
             let focused = f.focus.current == Some(FocusKey { entry: self.entry, elem: self.elems[index] });
             let ink = if focused {
                 let disc = Rect::new(slot.cx() - 19.0, slot.cy() - 19.0, 38.0, 38.0);
-                q.rect(disc, 19.0, crate::ui::ACCENT, crate::ui::ACCENT, 0.0);
-                crate::ui::ACCENT_INK
+                q.rect(disc, 19.0, theme::CHROME_LIT, theme::CHROME_LIT, 0.0);
+                theme::TEXT_PRIMARY
             } else if current == Some(index) { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
             crate::ui::label::Label::new(label.as_ptr(), theme::size::CAPTION, ink).bold()
                 .h(crate::ui::label::HAlign::Center).draw(q, slot);

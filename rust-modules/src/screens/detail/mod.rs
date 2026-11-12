@@ -2447,7 +2447,7 @@ impl DetailScreen {
                 let ink = if cx.focus.current.is_some_and(|k| {
                     k.entry == self.entry && k.elem == hero::ELEM_SYNOPSIS_MORE
                 }) {
-                    theme::ACCENT
+                    theme::CHROME_LIT
                 } else {
                     theme::TEXT_TERTIARY
                 };

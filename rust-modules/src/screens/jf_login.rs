@@ -123,7 +123,8 @@ impl JfLoginScreen {
         if self.editing.is_some() {
             theme::TABLE_FIELD_EDITING_FILL
         } else {
-            theme::ACCENT
+            // The lit row of the sign-in list is the chrome's one tone, like every other list.
+            theme::CHROME_LIT
         }
     }
 
@@ -969,12 +970,12 @@ mod tests {
     #[test]
     fn editing_a_text_field_uses_a_distinct_subtle_selection_fill() {
         let mut screen = JfLoginScreen::new(EntryId(9));
-        assert_eq!(screen.selection_fill(), theme::ACCENT);
+        assert_eq!(screen.selection_fill(), theme::CHROME_LIT);
         screen.editing = Some(F_SERVER);
         assert_eq!(screen.selection_fill(), theme::TABLE_FIELD_EDITING_FILL);
         let max_channel_delta = theme::TABLE_FIELD_EDITING_FILL
             .iter()
-            .zip(theme::ACCENT)
+            .zip(theme::CHROME_LIT)
             .map(|(editing, focused)| (*editing - focused).abs())
             .fold(0.0f32, f32::max);
         assert!(
@@ -994,7 +995,7 @@ mod tests {
         assert!(screen.close_editing_on_key(Key::Ok));
         assert_eq!(screen.editing, None);
         assert_eq!(screen.table.sel, F_USER as i32, "focus stays parked for hover");
-        assert_eq!(screen.selection_fill(), theme::ACCENT, "the editing cue is removed");
+        assert_eq!(screen.selection_fill(), theme::CHROME_LIT, "the editing cue is removed");
         assert!(!screen.close_editing_on_key(Key::Ok), "a closed field is not reopened");
 
         screen.editing = Some(F_USER);
