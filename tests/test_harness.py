@@ -5693,7 +5693,7 @@ impl PersonOwnerGateFixture {
         "store-seams.txt": 0,
         "threads.txt": 0,
         "ticks.txt": 2,
-        "wall.txt": 3,
+        "wall.txt": 4,  # + ui/fmt.rs: the person page's age is display arithmetic over a birth year
     }
 
     def test_allowlist_counts_match_the_pinned_table(self):
