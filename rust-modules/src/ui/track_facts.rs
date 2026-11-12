@@ -414,3 +414,86 @@ pub(crate) fn dovi_rows(d: &Detail) -> Vec<Pair> {
 pub(crate) fn track_head(word: &str, n: usize) -> String {
     crate::i18n::msg::widgets_tracks_count_heading(n as i64, word)
 }
+
+/// An audio track's channel count in the vocabulary people use: "5.1", "7.1", "Stereo", "Mono".
+/// The server's `layout` is preferred (it names the configuration) and its channel COUNT is the
+/// fallback. A stream with neither answers `None`, so a subtitle row never wears one.
+pub(crate) fn channel_count(stream: &crate::metadata::Stream) -> Option<String> {
+    let layout = stream.layout.trim();
+    if !layout.is_empty() {
+        let head = layout.split(['(', ' ']).next().unwrap_or(layout).trim();
+        if !head.is_empty() {
+            match head.to_ascii_lowercase().as_str() {
+                "stereo" => return Some("Stereo".to_string()),
+                "mono" => return Some("Mono".to_string()),
+                _ => {}
+            }
+            if head.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                return Some(head.to_string());
+            }
+        }
+    }
+    match stream.channels {
+        0 => None,
+        1 => Some("Mono".to_string()),
+        2 => Some("Stereo".to_string()),
+        6 => Some("5.1".to_string()),
+        8 => Some("7.1".to_string()),
+        n => Some(format!("{n} ch")),
+    }
+}
+
+/// A SUBTITLE row's line: the same language and codec, then whether the track is plain text and
+/// the country/region its tag names (the owner's 2026-11-10 pass: "los subs si son planos y
+/// pais"). A text codec is a subtitle one can restyle, which is the distinction a viewer makes.
+pub(crate) fn sub_row_label(stream: &crate::metadata::Stream) -> String {
+    let mut text = row_label(stream);
+    if is_plain_text_sub(stream) {
+        text = format!("{text} \u{b7} {}", crate::i18n::msg::widgets_subs_plain_text());
+    }
+    if let Some(region) = crate::metadata::region_name(&stream.language_tag) {
+        text = format!("{text} \u{b7} {region}");
+    }
+    text
+}
+
+/// Is this subtitle track PLAIN TEXT (restylable) rather than image-based? The server's codec is the
+/// answer: `subrip`/`srt`/`mov_text`/`ass` are text, `pgs`/`dvdsub` are pictures.
+pub(crate) fn is_plain_text_sub(stream: &crate::metadata::Stream) -> bool {
+    matches!(
+        stream.codec.to_ascii_lowercase().as_str(),
+        "subrip" | "srt" | "mov_text" | "ass" | "ssa" | "webvtt" | "vtt" | "text"
+    )
+}
+
+/// A track's line: its language and its codec, plus the two flags a viewer chooses between.
+/// The same facts the About footer's Languages column printed, which is where the owner moved
+/// them from.
+pub(crate) fn row_label(stream: &crate::metadata::Stream) -> String {
+    let lang = if stream.lang.is_empty() {
+        crate::i18n::msg::browse_detail_unknown().to_string()
+    } else {
+        crate::metadata::language_name(&stream.lang)
+    };
+    let mut text = if stream.codec.is_empty() {
+        lang
+    } else {
+        format!("{lang} \u{b7} {}", crate::metadata::friendly_codec(&stream.codec))
+    };
+    // **How many channels** (the owner's 2026-11-10 pass: "los idiomas deberiamos anadir el numero
+    // de canales"). The layout the server reports is already the natural name ("5.1(side)"), so it
+    // is normalised to "5.1"; a track that only says a count falls back to it.
+    if let Some(ch) = channel_count(stream) {
+        text = format!("{text} \u{b7} {ch}");
+    }
+    for (on, tag) in [
+        (stream.forced, crate::i18n::msg::widgets_tracks_forced()),
+        (stream.sdh, crate::i18n::msg::widgets_badge_sdh()),
+    ] {
+        if on {
+            text = format!("{text} \u{b7} {tag}");
+        }
+    }
+    text
+}
+

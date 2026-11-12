@@ -291,7 +291,7 @@ fn cast_block(d: &Detail) -> Vec<(String, String)> {
 }
 
 /// **What the audio row says**: the track the window would play today, in the picker's own words
-/// ([`crate::screens::track_pick::row_label`]) so the window and the menu cannot describe the same
+/// ([`crate::ui::track_facts::row_label`]) so the window and the menu cannot describe the same
 /// stream two ways. `0` is "nothing chosen", whose answer is the item's first audio track.
 fn chosen_audio(d: &Detail, sid: i64) -> String {
     let picked = if sid > 0 {
@@ -299,7 +299,7 @@ fn chosen_audio(d: &Detail, sid: i64) -> String {
     } else {
         d.audio.first()
     };
-    picked.map(crate::screens::track_pick::row_label).unwrap_or_default()
+    picked.map(crate::ui::track_facts::row_label).unwrap_or_default()
 }
 
 /// **What the subtitle row says**: `Off` when the viewer turned them off (`0`), the track's own line
@@ -314,7 +314,9 @@ fn chosen_sub(d: &Detail, sid: i64) -> String {
     } else {
         d.subs.first()
     };
-    picked.map(crate::screens::track_pick::sub_row_label).unwrap_or_else(|| msg::widgets_tracks_off().to_string())
+    picked
+        .map(crate::ui::track_facts::sub_row_label)
+        .unwrap_or_else(|| msg::widgets_tracks_off().to_string())
 }
 
 /// The FILE block, in the app's own vocabulary: the same rows Track information prints, cut to the
