@@ -43,6 +43,9 @@ use crate::ui::screen::{
 };
 use crate::ui::{theme, Rect};
 
+/// The type tab row's height and the air between two tabs.
+const TAB_H: f32 = theme::size::BODY as f32 * 1.4;
+const TAB_GAP: f32 = 12.0;
 /// The grid's columns. Six posters across, the app's own poster grid (`ui::poster_grid::COLS`),
 /// so a picker reads as the shelf it belongs to.
 const COLS: usize = 6;
@@ -104,10 +107,19 @@ pub(crate) struct ImagesScreen {
     total: i32,
     /// The phase the grid was built under; a change repaints the line.
     status: ImagesStatus,
+    /// WHICH image type the grid is showing — the lit tab.
+    kind: crate::jellyfin::images::ImageKind,
     /// The selected cell. The grid is the surface's own cursor, like the table's `sel`.
     sel: i32,
 }
 
+
+/// **The type tabs' elems.** They live above the grid's own index space (pictures are `0..n`), so a
+/// tab press and a picture press cannot be confused.
+pub(crate) const TAB_ELEM_BASE: u32 = 0x4000;
+pub(crate) fn tab_elem(index: usize) -> u32 {
+    TAB_ELEM_BASE + index as u32
+}
 impl ImagesScreen {
     pub(crate) fn new(entry: EntryId, arg: ImagesArg) -> Self {
         Self {
@@ -116,30 +128,48 @@ impl ImagesScreen {
             images: Vec::new(),
             total: 0,
             status: ImagesStatus::Idle,
+            kind: crate::jellyfin::images::ImageKind::Primary,
             sel: 0,
         }
     }
 
     /// The pictures the store holds for THIS item, or nothing: an answer about another item is not
-    /// this surface's to draw.
-    fn live(&self, meta: crate::metadata::MetadataView<'_>) -> Option<(Vec<RemoteImage>, i32, ImagesStatus)> {
+    /// this surface's to draw. The KIND travels with them: it is the tab that is lit.
+    fn live(&self, meta: crate::metadata::MetadataView<'_>) -> Option<(Vec<RemoteImage>, i32, ImagesStatus, crate::jellyfin::images::ImageKind)> {
         let d = meta.current()?;
         let state = meta.images();
         if !state.is_about(d.sid, &d.rk) {
             return None;
         }
-        Some((state.images().to_vec(), state.total(), state.status()))
+        Some((state.images().to_vec(), state.total(), state.status(), state.kind()))
+    }
+
+    /// Does the grid offer a "load more" as its LAST element? It does exactly while the store says
+    /// there is another page, which is what makes the tile appear and vanish as pages land.
+    fn has_more(&self) -> bool {
+        self.status == ImagesStatus::Ready && (self.images.len() as i32) < self.total
+    }
+
+    /// The grid's element count: the pictures plus the trailing "load more" tile when there is one.
+    fn elem_count(&self) -> usize {
+        self.images.len() + usize::from(self.has_more())
+    }
+
+    /// Is `elem` the trailing "load more" tile?
+    fn is_more(&self, elem: usize) -> bool {
+        self.has_more() && elem == self.images.len()
     }
 
     /// Materialise the store into the grid, when and only when the drawn content would differ.
     fn refresh(&mut self, meta: crate::metadata::MetadataView<'_>) -> bool {
-        let (images, total, status) = self.live(meta).unwrap_or_default();
-        if images == self.images && total == self.total && status == self.status {
+        let (images, total, status, kind) = self.live(meta).unwrap_or_default();
+        if images == self.images && total == self.total && status == self.status && kind == self.kind {
             return false;
         }
         self.images = images;
         self.total = total;
         self.status = status;
+        self.kind = kind;
         self.sel = self.sel.clamp(0, (self.images.len() as i32 - 1).max(0));
         true
     }
@@ -228,11 +258,23 @@ impl ImagesScreen {
         )
     }
 
+    /// Where a type tab sits: the panel's head, one column per kind.
+    fn tab_rect(&self, index: usize, frame: Rect) -> Rect {
+        let n = crate::jellyfin::images::ImageKind::ALL.len() as f32;
+        let w = (frame.w - 2.0 * PAD) / n;
+        Rect::new(
+            frame.x + PAD + index as f32 * w,
+            frame.y + PAD * 0.5,
+            w - TAB_GAP,
+            TAB_H,
+        )
+    }
+
     /// One cell: the poster on top and its caption band under it. ONE function for the painter,
     /// the focus model and the hit stops, so the capsule a person aims at cannot drift off the
     /// tile it lights.
     fn cell(&self, index: usize, frame: Rect) -> Option<Rect> {
-        if index >= self.images.len() {
+        if index >= self.elem_count() {
             return None;
         }
         let (row, col) = (index / COLS, index % COLS);
@@ -268,6 +310,19 @@ impl ImagesScreen {
         fx: &mut Effects<'_, H>,
     ) {
         if self.status != ImagesStatus::Ready {
+            return;
+        }
+        // The trailing tile is not a picture: it asks the store for the next page.
+        if self.is_more(elem as usize) {
+            if let Some(d) = H::metadata(cx).current() {
+                fx.push(Fx::App(AppFx::Store(
+                    StoreId::Metadata,
+                    StoreCmd::Metadata(MetadataCmd::ImagesMore {
+                        sid: d.sid,
+                        rk: d.rk.clone(),
+                    }),
+                )));
+            }
             return;
         }
         let Some(img) = self.images.get(elem as usize).cloned() else { return };
@@ -311,6 +366,22 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + MetadataLike> M
                 Handled::Yes
             }
             ScreenEvent::Activate(elem) => {
+                if *elem >= TAB_ELEM_BASE {
+                    // A type tab: restart the list for that kind.
+                    let index = (*elem - TAB_ELEM_BASE) as usize;
+                    let kind = crate::jellyfin::images::ImageKind::at(index);
+                    if let Some(d) = H::metadata(cx).current() {
+                        fx.push(Fx::App(AppFx::Store(
+                            StoreId::Metadata,
+                            StoreCmd::Metadata(MetadataCmd::ImagesKind {
+                                sid: d.sid,
+                                rk: d.rk.clone(),
+                                kind,
+                            }),
+                        )));
+                    }
+                    return Handled::Yes;
+                }
                 self.commit(*elem, cx, fx);
                 Handled::Yes
             }
@@ -350,15 +421,15 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory>> Focusable<H> for
             // directional press at its edge must not hand focus to the page behind the surface.
             edge: [EdgeRule::Stop; 4],
             extent: self.frame(),
-            len: self.images.len(),
+            len: self.elem_count(),
             elem: ElemKind::Card,
         });
     }
     fn group_of(&self, elem: &u32, _cx: &Cx<'_, H>) -> Option<GroupId> {
-        ((*elem as usize) < self.images.len()).then_some(GroupId(0))
+        ((*elem as usize) < self.elem_count()).then_some(GroupId(0))
     }
     fn neighbour(&self, key: FocusKey<u32>, dir: Dir, _cx: &Cx<'_, H>) -> Step<u32> {
-        match crate::ui::poster_grid::neighbour(key.elem as usize, self.images.len(), COLS, dir) {
+        match crate::ui::poster_grid::neighbour(key.elem as usize, self.elem_count(), COLS, dir) {
             Some(i) => Step::Move(FocusKey {
                 entry: self.entry,
                 elem: i as u32,
@@ -446,6 +517,25 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + MetadataLike> S
                 .current
                 .filter(|key| key.entry == self.entry)
                 .map(|key| key.elem);
+            // **The type tabs.** Four kinds across the panel's head; the lit one is the kind the
+            // grid is showing, and each is a press (the owner's 2026-11-10 pass: "cada imagen
+            // debería tener las pestañas miniatura / logo / principal / imágenes de fondo").
+            for (i, kind) in crate::jellyfin::images::ImageKind::ALL.iter().enumerate() {
+                let tab = self.tab_rect(i, r);
+                let lit = *kind == self.kind;
+                let focused_tab = focused == Some(tab_elem(i));
+                let ink = if lit || focused_tab { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
+                if let Ok(cs) = std::ffi::CString::new(kind.label()) {
+                    Label::new(cs.as_ptr(), theme::size::BODY, ink)
+                        .h(crate::ui::label::HAlign::Left)
+                        .v(crate::ui::label::VAlign::CapTop)
+                        .draw(p, tab);
+                }
+                if lit || focused_tab {
+                    let underline = Rect::new(tab.x, tab.y + tab.h, tab.w, 3.0);
+                    p.rect(underline, 0.0, theme::CHROME_LIT, theme::CHROME_LIT, 0.0);
+                }
+            }
             for (index, img) in self.images.iter().enumerate() {
                 let Some(cell) = self.cell(index, r) else { continue };
                 let art = Rect::new(cell.x, cell.y, TILE_W, TILE_H);
@@ -462,6 +552,19 @@ impl<H: AppLike<Memory = crate::screens::registry::PageMemory> + MetadataLike> S
                     1.0,
                 );
                 self.caption(p, img, cell, f.measure);
+            }
+            // The trailing "load more" tile: a labelled plate in the next free cell.
+            if let Some(cell) = self.cell(self.images.len(), r) {
+                let plate = Rect::new(cell.x, cell.y, TILE_W, TILE_H);
+                let lit = focused == Some(self.images.len() as u32);
+                let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
+                p.rect(plate, 12.0, theme::with_a(theme::SURFACE_PANEL, 0.9), theme::with_a(theme::SURFACE_PANEL, 0.9), 0.0);
+                if let Ok(cs) = std::ffi::CString::new(crate::i18n::msg::images_more().to_string()) {
+                    Label::new(cs.as_ptr(), theme::size::BODY, ink)
+                        .h(crate::ui::label::HAlign::Center)
+                        .v(crate::ui::label::VAlign::CapTop)
+                        .draw(p, Rect::new(plate.x, plate.y + plate.h * 0.5 - 10.0, plate.w, 30.0));
+                }
             }
             if let Some(text) = self.status_text() {
                 if let Ok(cs) = std::ffi::CString::new(text) {
