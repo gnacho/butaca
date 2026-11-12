@@ -1939,12 +1939,12 @@ pub(crate) fn art_scrim(p: Painter, card: Rect, rad: f32, h: f32, a: f32) {
 /// (`MARGIN_X` + its `HERO_TEXT_W`) and its facts line to ~1270. A tighter falloff strands exactly
 /// the ends of the lines a long title or blurb produces. The last fifth of the frame is left
 /// completely alone: that is the side of the picture the composition is usually about.
-const HERO_SCRIM_W: f32 = 0.80 * crate::ui::consts::SCR_W; // 1536
+const HERO_SCRIM_W: f32 = 0.98 * crate::ui::consts::SCR_W; // 1882 — the copy column now starts right of a 540px poster, so the wedge has to reach the right edge
 
 /// Where the wedge starts feathering in. Clears the tab track's own band ([`TOP_BAR_Y`] 62 +
 /// [`TAB_PILL_H`] 60 + [`TAB_TRACK_PAD`] 8 = 130) by 32px: the top chrome owns its legibility with
 /// its own dark capsule (`draw_tab_row`) and must not get a second treatment stacked under it.
-const HERO_SCRIM_TOP: f32 = 0.15 * crate::ui::consts::SCR_H; // 162
+const HERO_SCRIM_TOP: f32 = 0.13 * crate::ui::consts::SCR_H; // 140
 /// Where the wedge reaches full strength — and the seam between its two quads, named once so the
 /// pair is watertight by construction. It sits above every hero TEXT anchor, which is what lets
 /// [`hero_scrim_a`] be a function of x alone.
@@ -1961,7 +1961,7 @@ const HERO_SCRIM_TOP: f32 = 0.15 * crate::ui::consts::SCR_H; // 162
 /// still feathering in rather than absent, which is the reason nit 2's taller logos were sequenced
 /// AFTER this component; the clearance that binds them is the top chrome's
 /// ([`TOP_BAR_BOTTOM`]), asserted in `home.rs`, not this knee.
-pub(crate) const HERO_SCRIM_KNEE: f32 = 0.31 * crate::ui::consts::SCR_H; // 334.8
+pub(crate) const HERO_SCRIM_KNEE: f32 = 0.19 * crate::ui::consts::SCR_H; // 205 — the detail title is plain type now, so the copy's first line sits at y=216
 
 /// The mirrored RIGHT wedge — for a hero with a right-aligned column, which today means detail's
 /// "Starring" block at x 1270..1830, the one piece of hero copy the left wedge by definition cannot
@@ -1985,13 +1985,13 @@ const HERO_SCRIM_BAND_FULL_X: f32 = 1520.0;
 /// each end. It is not the title alone: the synopsis and the facts row are the same column of text
 /// and are graded by the same contract, so a band that stopped at the title would just move the
 /// failure down the page.
-const HERO_SCRIM_BAND_TOP: f32 = 340.0;
-const HERO_SCRIM_BAND_FLAT_TOP: f32 = 420.0;
+const HERO_SCRIM_BAND_TOP: f32 = 180.0;
+const HERO_SCRIM_BAND_FLAT_TOP: f32 = 216.0;
 const HERO_SCRIM_BAND_FLAT_BOT: f32 = 1080.0;
 const HERO_SCRIM_BAND_BOT: f32 = 1140.0;
 /// The band's alpha. Measured against the 3:1 floor: a widened column needs ~0.21 of extra alpha at
 /// (1520, 514) over 0.85 artwork, so 0.34 leaves margin without turning the band into a bar.
-const HERO_SCRIM_BAND_A: f32 = 0.34;
+const HERO_SCRIM_BAND_A: f32 = 0.46;
 
 /// Where the frame-wide ATMOSPHERIC ramp starts — the treatment's other half, which both heroes
 /// paint under this wedge (`screens::home`'s `Backdrop::draw` / `detail::draw_backdrop`): nothing above this

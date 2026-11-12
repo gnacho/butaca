@@ -149,9 +149,11 @@ pub(super) fn home_title_cap_top() -> f32 {
         - HERO_CAP_H
 }
 
-/// The same line on the detail page, where the band's anchor is `TITLE_BOTTOM` outright.
+/// The same line on the detail page. The title is PLAIN TYPE now (the owner's 2026-11-10 pass
+/// dropped the clearLogo), so its cap top is the head of its own `size::HERO` band — no logo band
+/// above it to eat the difference.
 pub(super) fn detail_title_cap_top() -> f32 {
-    crate::ui::detail_layout::TITLE_BOTTOM - HERO_CAP_H
+    crate::ui::detail_layout::TITLE_BOTTOM - crate::ui::detail_layout::TITLE_BAND_H
 }
 
 /// A spread of pill widths. Deliberately wider than the device's (a real "TV" pill measures

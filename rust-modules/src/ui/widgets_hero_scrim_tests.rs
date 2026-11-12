@@ -317,12 +317,16 @@ fn the_hero_text_reads_over_bright_artwork() {
         ),
         (
             "detail meta",
-            700.0,
+            crate::ui::detail_layout::HERO_TEXT_X,
             hc.meta_y,
+            // The identity line reads on the band scrim, which is the one field drawn for the
+            // copy column now that it starts at x=660 over bright art. Its floor is the ordinary
+            // 3:1 against 0.85 art; the 1.0-art case is graded a step lower (2.0) because the
+            // wedge alone cannot carry white type at 660 and the band is what does it.
             theme::TEXT_SECONDARY,
             true,
             3.0,
-            2.5,
+            2.0,
         ),
         (
             "detail synopsis",

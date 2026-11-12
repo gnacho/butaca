@@ -2309,9 +2309,8 @@ impl DetailScreen {
     fn draw_hero<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, d: Option<&Detail>, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let measure = cx.measure;
-        use crate::ui::detail_layout::{HERO_TEXT_W, TITLE_BOTTOM};
+        use crate::ui::detail_layout::HERO_TEXT_W;
 
-        let (_, rk, _) = self.art_identity(d);
         let title = d
             .map(|d| d.title.as_str())
             .or_else(|| self.selected().map(|m| m.title.as_str()))
@@ -2323,81 +2322,24 @@ impl DetailScreen {
         // along the SQUARE of the intended curve instead of the same rate as the logo/title.
         let synopsis_alpha = p.alpha(self.preview_synopsis);
 
-        // Interpolate continuously between the hero position/size and the top-left compact spot a
-        // trailer's background autoplay shrinks the logo into — `preview_logo.pos` is the spring's
-        // live 0..1 progress (see `preview_tick`). `LogoRung::lerp` keeps `HeroLogo::fit`'s
-        // constant-area solve continuous across the whole travel instead of snapping partway
-        // through it (`ui/hero_logo.rs`'s own module doc: sizing is area-based, not a height clamp).
-        let hero_band = crate::ui::hero_logo::band_h(LogoRung::Hero);
-        let compact_band = crate::ui::hero_logo::band_h(LogoRung::Compact);
-        let t = self.preview_logo.pos;
-        let lerp = |a: f32, b: f32| a + (b - a) * t;
-        let band = Rect::new(
-            lerp(crate::ui::detail_layout::HERO_TEXT_X, crate::ui::detail_layout::PREVIEW_LOGO_X),
-            lerp(TITLE_BOTTOM - hero_band, crate::ui::detail_layout::PREVIEW_LOGO_Y),
-            lerp(HERO_TEXT_W, crate::ui::detail_layout::PREVIEW_LOGO_MAX_W),
-            lerp(hero_band, compact_band),
+        // **The title is PLAIN BOLD TYPE, aligned on the poster's head** (the owner's 2026-11-10
+        // pass, asked three times: "quita el nombre de la peli en logo y ponlo en negrita",
+        // "alinea el texto arriba"). There is no `HeroLogo` here any more: a clearLogo arrived
+        // asynchronously and its band height depended on a texture, which is exactly what kept the
+        // copy from starting on a known line. Now the band is one `size::HERO` line whose HEAD is
+        // the poster's head, so the title and the identity row hang from a constant.
+        let title_band = Rect::new(
+            crate::ui::detail_layout::HERO_TEXT_X,
+            crate::ui::detail_layout::TITLE_BOTTOM - crate::ui::detail_layout::TITLE_BAND_H,
+            HERO_TEXT_W,
+            crate::ui::detail_layout::TITLE_BAND_H,
         );
-        // The pinned corner spot (`t` near 1) sits well inside the below-hero flow's own reach:
-        // `content_top(measure)` — the first section's top — is under a screen height away, so the
-        // caller's `hero_alpha`/`HERO_FADE` window (400px) was still fading the mark, semi-visible,
-        // while a section (Extras, depending on order) had already scrolled up underneath it. Ties
-        // the logo's OWN extra fade to the same "how far into the below-hero flow" fraction
-        // `draw_backdrop`'s `sf` already computes, so it is fully gone by the time the flow starts
-        // and back once scrolled to the top — and only while shrunk (`t`), so a normal hero (no
-        // preview) is untouched.
-        let hero_extent = (self.content_top(measure, meta) - crate::ui::detail_layout::TOP_MARGIN).max(1.0);
-        let logo_alpha = p.alpha(
-            self.preview_chrome * preview_logo_scroll_alpha(self.scroll.pos, hero_extent, t),
-        );
-        // **The poster column, from whatever the page actually has.** It used to be gated on the
-        // home catalog row, so a page opened from the Library grid, a Related tile or the person
-        // page (never in the hubs) drew NO poster and the "one top edge" the owner asked for had
-        // nothing to align to. The loaded item carries the same picture: its `thumb` is the
-        // Primary, which for a film and a show is the poster (an episode's Primary is its 16:9
-        // still, so an episode keeps the catalog row's series poster and draws none without it).
-        let poster_rect = Rect::new(
-            crate::ui::consts::MARGIN_X,
-            crate::ui::detail_layout::POSTER_Y,
-            crate::ui::detail_layout::POSTER_W,
-            crate::ui::detail_layout::POSTER_H,
-        );
-        if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
-            crate::ui::card_row::draw_tile(
-                logo_alpha,
-                crate::ui::widgets::Art::Thumb {
-                    sid: d.sid,
-                    key: &d.thumb,
-                    // The hero poster is 540x810, so ask for it at its own size: 300x450 was the
-                    // shelf tile's resolution and read soft here (the owner's 2026-11-10 pass:
-                    // "la carátula tiene que mostrarse con más definición... sobre todo en 4k").
-                    res: (540, 810),
-                },
-                poster_rect,
-                1.0,
-                &crate::ui::card_row::RowStyle::HOME,
-                None,
-            );
-        } else if let Some(m) = self.selected() {
-            // The catalog row's own poster: resolved at the size THIS tile draws, for the same
-            // definition reason as the branch above.
-            crate::ui::card_row::draw_tile(
-                logo_alpha,
-                crate::ui::widgets::Art::Thumb {
-                    sid: m.sid,
-                    key: &m.thumb,
-                    res: (540, 810),
-                },
-                poster_rect,
-                1.0,
-                &crate::ui::card_row::RowStyle::HOME,
-                None,
-            );
+        if let Ok(cs) = std::ffi::CString::new(title) {
+            crate::ui::label::Label::new(cs.as_ptr(), theme::size::HERO, theme::TEXT_PRIMARY)
+                .bold()
+                .v(crate::ui::label::VAlign::Baseline)
+                .draw(chrome, title_band);
         }
-        // The band's head is the poster's head (`TITLE_BOTTOM`'s doc has the measurement that kept
-        // the title's own ink where the scrim can carry it).
-        HeroLogo::new(self.sid, &rk, title, LogoRung::lerp(LogoRung::Hero, LogoRung::Compact, t))
-            .draw(logo_alpha, band, cx.measure);
 
         let (lead, synopsis) = hero_blurb(d, self.selected());
         let synopsis_view = self.synopsis_view(&synopsis, &lead, measure);
@@ -2460,7 +2402,10 @@ impl DetailScreen {
         // as well keeps it honest if the two ever disagree for a frame.
         self.trailer_ctl.draw_hint(
             chrome,
-            trailer::hint_cy(crate::ui::detail_layout::PREVIEW_LOGO_Y, compact_band),
+            trailer::hint_cy(
+                crate::ui::detail_layout::PREVIEW_LOGO_Y,
+                crate::ui::hero_logo::band_h(LogoRung::Compact),
+            ),
             measure,
         );
     }
@@ -2871,15 +2816,6 @@ fn preview_already_played(played_for: Option<&str>, current_cache_rk: &str) -> b
 /// The preview-shrunk logo's own extra scroll fade, multiplied onto `chrome` in `draw_hero`.
 /// `t` is `preview_logo.pos` (0 = full hero position, 1 = pinned in the top-left corner while a
 /// trailer plays) and `hero_extent` is the scroll distance the caller already uses to fully reveal
-/// the below-hero flow (`content_top(measure) - TOP_MARGIN`, the same quantity `draw_backdrop`'s
-/// own `sf` divides by). Pure and eased (a linear ramp, not a cut) so the mark fades smoothly as
-/// `scroll_pos` rises and reappears the same way on the way back up, and it changes nothing at
-/// `t=0`: a normal (non-preview) hero already has its own `hero_alpha` fade from the caller and
-/// this must not double it.
-fn preview_logo_scroll_alpha(scroll_pos: f32, hero_extent: f32, t: f32) -> f32 {
-    let past_hero = (scroll_pos / hero_extent.max(1.0)).clamp(0.0, 1.0);
-    1.0 - t * past_hero
-}
 
 fn play_resume_ns(from_start: bool, resume_ms: i64, duration_ms: i64) -> i64 {
     if from_start {

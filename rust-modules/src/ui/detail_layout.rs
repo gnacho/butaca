@@ -30,12 +30,14 @@ pub(crate) const HERO_TEXT_X: f32 = MARGIN_X + POSTER_W + POSTER_GAP;
 /// the identity row hangs under.
 ///
 /// **The rung's ceiling, so the band's HEAD is the poster's head** (the owner's "alinear el logo
-/// con la carátula"): the two columns start on one line. The title's own ink stays at the band's
-/// foot rather than at its head, and that is not negotiable: the hero's scrim reaches full strength
-/// only at [`crate::ui::widgets`]' knee, and a `size::HERO` run moved up to 282 measured 1.41:1 over
-/// bright artwork against the design system's 3:1 floor. A clearLogo is placed by the same foot and
-/// spills upward as paint, which is what makes the alignment visible for the art case.
-pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + theme::logo::HERO_H_MAX;
+/// con la carátula"): the two columns start on one line.
+///
+/// **The title is PLAIN TYPE now, not a clearLogo** (the owner's 2026-11-10 pass, asked three
+/// times: "quita el nombre de la peli en logo y ponlo en negrita"). That removes the async logo
+/// band entirely — the height of the band no longer depends on whether a wordmark exists — so the
+/// band is exactly one `size::HERO` line and its HEAD is the poster's head.
+pub(crate) const TITLE_BAND_H: f32 = theme::size::HERO as f32;
+pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + TITLE_BAND_H;
 /// The cast and crew band, which is now a BAND under the facts row rather than a column beside the
 /// copy. A 560-wide column at the right edge was what capped the copy at 943: the two shared a
 /// horizontal strip, so widening the text meant running under the names. Stacked, each gets the
