@@ -6838,6 +6838,19 @@ pub struct ControlPalette {
     spent: [f32; 4],
 }
 
+impl ControlPalette {
+    /// **The chrome's one lit tone**, fixed rather than derived from artwork: the owner's
+    /// 2026-11-10 pass names the colour ("#7373CB"), so the focused face is that colour and the
+    /// renderer must not re-derive it from a poster's ambient key. Idle and spent keep the
+    /// palette's own roles — this changes the LIT state only.
+    pub fn lit() -> Self {
+        let mut p = Self::default();
+        p.focus_top = theme::CHROME_LIT;
+        p.focus_body = theme::with_a(theme::CHROME_LIT, 0.92);
+        p
+    }
+}
+
 impl Default for ControlPalette {
     fn default() -> Self {
         Self::ambient([
@@ -7140,7 +7153,10 @@ impl ControlStyle {
             ControlStyle::Accent if focused => ControlFace {
                 top: palette.focus_top,
                 body: palette.focus_body,
-                ink: theme::ACCENT_INK,
+                // **White, not the accent plate's near-black.** That ink was tuned for a warm
+                // off-white plate; on the chrome's violet it measured ~2:1, which is what made the
+                // focused control look "wrong" rather than merely a different hue.
+                ink: theme::TEXT_PRIMARY,
                 spent: palette.spent,
             },
             ControlStyle::Accent => flat(palette.idle, theme::CONTROL_IDLE_INK, palette.spent),

@@ -352,10 +352,12 @@ fn the_unkeyed_ground_drops_the_ambient_contract_whole() {
         (video_focus.top, video_focus.body),
         (theme::ACCENT, theme::ACCENT)
     );
-    assert_eq!(
-        keyed_focus.ink, video_focus.ink,
-        "focus ink keeps the same meaning on both grounds"
-    );
+    // The two grounds keep the same MEANING (an ink that reads on the lit face) but no longer the
+    // same token: the keyed face is the chrome's violet, so its ink is white, while the unkeyed
+    // face is still the warm accent plate and keeps its near-black. They briefly shared a token
+    // and the violet plate then measured ~2:1 against it.
+    assert_eq!(keyed_focus.ink, theme::TEXT_PRIMARY);
+    assert_eq!(video_focus.ink, theme::ACCENT_INK);
 }
 
 /// **Why the unkeyed idle face is a light FILM and not a darker plate** — the polarity argument,

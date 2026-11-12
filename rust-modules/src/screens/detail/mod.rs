@@ -2671,13 +2671,12 @@ impl DetailScreen {
         let may_read = !picture
             && !p.is_recording()
             && may_sample_control_ground(nav_page_alpha, hero_alpha(self.scroll.pos, HERO_FADE));
-        let palette = if picture {
-            ControlPalette::default()
-        } else {
-            crate::gfx::sample_control_ground(row, may_read)
-                .map(ControlPalette::ambient)
-                .unwrap_or_default()
-        };
+        // **The lit face is the ONE chrome tone, not an ambient derivation** (the owner's
+        // 2026-11-10 pass names it: "#7373CB"). Sampling the artwork used to tint the focused
+        // control with whatever poster was behind it, which is why the colour never matched the
+        // one that was asked for. The ground is still sampled for the idle/spent roles.
+        let _ = (row, may_read);
+        let palette = ControlPalette::lit();
         let ground = if picture {
             ControlGround::Unkeyed
         } else {
