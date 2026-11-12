@@ -946,7 +946,10 @@ impl TableView {
     }
 
     pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
-        self.draw_with_selection_fill(p, frame, measure, theme::ACCENT);
+        // **The lit row is the chrome's one tone.** It was `ACCENT` — the warm off-white of the old
+        // mockup — which is why every menu's hover still read #FFCEA3 after the palette moved
+        // (the owner's 2026-11-10 pass: "el hover del menú ... debería tener #7373CB").
+        self.draw_with_selection_fill(p, frame, measure, theme::CHROME_LIT);
     }
 
     /// Draw with an owner-supplied selected-row fill, keeping all other table states shared.
@@ -1118,7 +1121,7 @@ impl TableView {
             } else {
                 white
             };
-            let row_bg = if focused { crate::ui::ACCENT } else { PANEL_BG };
+            let row_bg = if focused { theme::CHROME_LIT } else { PANEL_BG };
             let cyc = sy + h * 0.5; // row vertical center
 
             // Leading column (SVG): the PICKER's tick, or an ACTION's glyph — one or the other, and
@@ -1355,6 +1358,23 @@ fn spaced_caps(text: &str) -> String {
         .map(|c| c.to_string())
         .collect::<Vec<_>>()
         .join("\u{2009}")
+}
+
+#[cfg(test)]
+mod selection_tone_tests {
+    use super::*;
+
+    /// **Every list and menu lights its row with the chrome's one tone** (issue: the menu hover
+    /// still drew #FFCEA3 after the palette moved). The table's public `draw` is the path every
+    /// popover takes, so pinning its fill is what keeps them from drifting back.
+    #[test]
+    fn the_selected_row_fill_is_the_chrome_tone() {
+        assert_eq!(theme::CHROME_LIT[0], 0x73 as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT[1], 0x73 as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT[2], 0xcb as f32 / 255.0);
+        // The old warm plate must not come back as the default fill.
+        assert_ne!(theme::CHROME_LIT, theme::ACCENT);
+    }
 }
 
 #[cfg(test)]
