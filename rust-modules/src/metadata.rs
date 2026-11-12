@@ -2784,6 +2784,16 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
             request_images_apply(state, adapter, sid, &rk, img);
             true
         }
+        // The picker's type tabs and its "load more". Both restart nothing the viewer chose: a tab
+        // press starts that kind from its first page, a load-more appends the next one.
+        MetadataCmd::ImagesKind { sid, rk, kind } => {
+            request_images_kind(state, adapter, sid, &rk, kind);
+            true
+        }
+        MetadataCmd::ImagesMore { sid, rk } => {
+            request_images_more(state, adapter, sid, &rk);
+            true
+        }
         MetadataCmd::IntrosLoad { sid, rk } => {
             request_intros(state, adapter, sid, &rk);
             true
@@ -3742,6 +3752,53 @@ fn request_identify(
     });
 }
 
+/// MAIN THREAD, NON-BLOCKING. Ask for `kind`'s first page, replacing whatever kind was on screen.
+fn request_images_kind(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    kind: crate::jellyfin::images::ImageKind,
+) {
+    if state.images.kind() == kind && state.images.is_about(sid, rk)
+        && state.images.status() == ImagesStatus::Loading
+    {
+        return;
+    }
+    state.images.begin_kind(sid, rk, kind);
+    request_images_page_with_spawn(state, adapter, sid, rk, kind, 0, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        crate::task::spawn_small("images", move || {
+            let page = crate::jellyfin::images::list_kind(sid, &rk, kind, 0);
+            adapter.images.post((gen, ImagesAnswer::List(page)), |old| old.0 < gen);
+        })
+    }, false);
+}
+
+/// MAIN THREAD, NON-BLOCKING. Append the next page of the kind already on screen. A no-op when
+/// there is nothing left, so a held key cannot spin the worker.
+fn request_images_more(
+    state: &mut MetadataState,
+    adapter: &std::sync::Arc<MetadataAdapter>,
+    sid: crate::registry::ServerId,
+    rk: &str,
+) {
+    if !state.images.is_about(sid, rk) || !state.images.has_more() {
+        return;
+    }
+    let kind = state.images.kind();
+    let start = state.images.images().len() as i32;
+    request_images_page_with_spawn(state, adapter, sid, rk, kind, start, |gen| {
+        let adapter = std::sync::Arc::clone(adapter);
+        let rk = rk.to_string();
+        crate::task::spawn_small("images", move || {
+            let page = crate::jellyfin::images::list_kind(sid, &rk, kind, start);
+            adapter.images.post((gen, ImagesAnswer::More(page)), |old| old.0 < gen);
+        })
+    }, true);
+}
+
 /// The shared admission/spawn path, split out so a test injects the spawn outcome and posts the
 /// answer itself instead of racing a worker thread (the same seam `request_detail_with_spawn`
 /// keeps, and for the same reason: a fetch for an unknown server returns in microseconds).
@@ -3882,6 +3939,11 @@ pub(crate) struct ImagesState {
     images: Vec<RemoteImage>,
     /// How many the server holds in total, which may exceed the page this client asked for.
     total: i32,
+    /// WHICH image type this state describes (the picker's tab axis). Changing it restarts the
+    /// list from page 0.
+    kind: crate::jellyfin::images::ImageKind,
+    /// How many pictures of this kind are loaded so far — the next page's `startIndex`.
+    loaded: usize,
 }
 
 #[allow(dead_code)] // Its surface (the pre-playback menu) was removed; the data layer waits for one.
@@ -3907,10 +3969,54 @@ impl ImagesState {
     }
 
     fn begin(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.begin_kind(sid, rk, crate::jellyfin::images::ImageKind::Primary);
+    }
+
+    /// Start (or restart) the list for one KIND. Any other kind's pictures go with it: a grid that
+    /// mixed a poster and a backdrop would be a grid of two different things.
+    fn begin_kind(
+        &mut self,
+        sid: crate::registry::ServerId,
+        rk: &str,
+        kind: crate::jellyfin::images::ImageKind,
+    ) {
         self.key = Some((sid, rk.to_string()));
         self.status = ImagesStatus::Loading;
         self.images.clear();
         self.total = 0;
+        self.kind = kind;
+        self.loaded = 0;
+    }
+
+    /// The kind on screen.
+    pub(crate) fn kind(&self) -> crate::jellyfin::images::ImageKind {
+        self.kind
+    }
+
+    /// Is there another page to ask for?
+    pub(crate) fn has_more(&self) -> bool {
+        self.status == ImagesStatus::Ready && (self.images.len() as i32) < self.total
+    }
+
+    /// Append a LATER page (a "load more"): the first page keeps its place, the new pictures join
+    /// the end, and the status stays Ready so the grid never blinks back through Loading.
+    fn append_page(&mut self, page: Option<crate::jellyfin::images::RemoteImages>) -> bool {
+        if self.status != ImagesStatus::Loading {
+            return false;
+        }
+        match page {
+            Some(page) => {
+                self.images.extend(page.images);
+                self.total = page.total.max(self.images.len() as i32);
+                self.loaded = self.images.len();
+                self.status = ImagesStatus::Ready;
+            }
+            None => {
+                // A failed LATER page keeps what is already drawn: the first page is still good.
+                self.status = if self.images.is_empty() { ImagesStatus::Failed } else { ImagesStatus::Ready };
+            }
+        }
+        true
     }
 
     /// A landed list. `None` is the request FAILING, which is not the same answer as an empty
@@ -3923,11 +4029,20 @@ impl ImagesState {
             Some(page) => {
                 self.images = page.images;
                 self.total = page.total;
+                self.loaded = self.images.len();
                 self.status = ImagesStatus::Ready;
             }
             None => self.status = ImagesStatus::Failed,
         }
         true
+    }
+
+    /// A "load more" is out: the status stays Loading so a second press is ignored, but the
+    /// pictures already on screen are kept.
+    fn mark_loading(&mut self) {
+        if self.status == ImagesStatus::Ready {
+            self.status = ImagesStatus::Loading;
+        }
     }
 
     fn applying(&mut self) {
@@ -3957,6 +4072,8 @@ impl ImagesState {
 enum ImagesAnswer {
     /// `None` is the list request failing.
     List(Option<crate::jellyfin::images::RemoteImages>),
+    /// A LATER page of the same kind: appended, never replacing what is drawn.
+    More(Option<crate::jellyfin::images::RemoteImages>),
     Applied(bool),
 }
 
@@ -3982,6 +4099,37 @@ fn request_images(
 
 /// The shared admission/spawn path, split out so a test injects the spawn outcome and posts the
 /// answer itself ([`request_identify_with_spawn`]'s seam, for its reason).
+/// One page of one kind, through the shared admission path. `append` decides whether the landing
+/// REPLACES the grid (a first page) or joins it (a "load more") — the two answers are different
+/// because a replacement that arrived late would wipe pictures the viewer is already looking at.
+#[allow(clippy::too_many_arguments)]
+fn request_images_page_with_spawn(
+    state: &mut MetadataState,
+    adapter: &MetadataAdapter,
+    sid: crate::registry::ServerId,
+    rk: &str,
+    _kind: crate::jellyfin::images::ImageKind,
+    _start: i32,
+    spawn: impl FnOnce(u32) -> bool,
+    append: bool,
+) {
+    let _ = append;
+    use std::sync::atomic::Ordering;
+    if append {
+        // The first page stays on screen while the next one is out: the grid must not blink.
+        state.images.mark_loading();
+    } else {
+        state.images.begin_kind(sid, rk, _kind);
+    }
+    let gen = adapter.images_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    adapter.images.clear();
+    adapter.images.claim();
+    if !spawn(gen) {
+        adapter.images.release();
+        state.images.fail();
+    }
+}
+
 fn request_images_with_spawn(
     state: &mut MetadataState,
     adapter: &MetadataAdapter,
@@ -4052,6 +4200,7 @@ pub(crate) fn pump_images(
     }
     match answer {
         ImagesAnswer::List(page) => state.images.land_images(page),
+        ImagesAnswer::More(page) => state.images.append_page(page),
         ImagesAnswer::Applied(ok) => {
             let changed = state.images.land_applied(ok);
             if ok {

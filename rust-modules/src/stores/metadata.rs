@@ -213,6 +213,17 @@ pub(crate) enum MetadataCmd {
     /// server's own artwork, reached only from a press on a tile. The picture travels whole (never
     /// an index): a newer page replaces the grid, and an index would then name a different URL than
     /// the one the viewer saw.
+    /// The picker's type tab: restart the list for another image KIND.
+    ImagesKind {
+        sid: crate::registry::ServerId,
+        rk: String,
+        kind: crate::jellyfin::images::ImageKind,
+    },
+    /// "Load more": append the next page of the kind already on screen.
+    ImagesMore {
+        sid: crate::registry::ServerId,
+        rk: String,
+    },
     ImagesApply {
         sid: ServerId,
         rk: String,

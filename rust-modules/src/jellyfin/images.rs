@@ -28,8 +28,70 @@
 
 use crate::registry::ServerId;
 
-/// The image type both calls name. `Primary` is the poster (and the thumbnail a card wears).
+/// The image type both calls name by default. `Primary` is the poster (and the thumbnail a card
+/// wears).
 pub(crate) const PRIMARY: &str = "Primary";
+
+/// **The picker's type axis.** The owner's 2026-11-10 pass: "cada imagen debería tener las
+/// pestañas miniatura / logo / principal / imágenes de fondo". These are Jellyfin's own `ImageType`
+/// spellings, sent verbatim on both calls, and each one has its own tile shape because that is what
+/// the picture IS: a poster is 2:3, a backdrop 16:9, a logo is whatever the provider cut, and a
+/// thumb is the small still a card wears.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum ImageKind {
+    /// The poster. The default, and the only type this picker used to offer.
+    #[default]
+    Primary,
+    Logo,
+    Backdrop,
+    Thumb,
+}
+
+impl ImageKind {
+    /// Every kind, in the order the tabs read.
+    pub(crate) const ALL: [ImageKind; 4] =
+        [Self::Primary, Self::Logo, Self::Backdrop, Self::Thumb];
+
+    /// The server's own spelling, sent on the wire.
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            Self::Primary => "Primary",
+            Self::Logo => "Logo",
+            Self::Backdrop => "Backdrop",
+            Self::Thumb => "Thumb",
+        }
+    }
+
+    /// The tab's word, in the UI language.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Primary => crate::i18n::msg::images_kind_primary(),
+            Self::Logo => crate::i18n::msg::images_kind_logo(),
+            Self::Backdrop => crate::i18n::msg::images_kind_backdrop(),
+            Self::Thumb => crate::i18n::msg::images_kind_thumb(),
+        }
+    }
+
+    /// The tile's aspect, `(w, h)`: a poster is 2:3, a backdrop 16:9, and a logo or a thumb is drawn
+    /// in a card-shaped box so the grid keeps one lattice whatever the type.
+    pub(crate) fn tile_aspect(self) -> (f32, f32) {
+        match self {
+            Self::Primary => (2.0, 3.0),
+            Self::Backdrop => (16.0, 9.0),
+            Self::Logo | Self::Thumb => (16.0, 9.0),
+        }
+    }
+
+    /// The index a tab press resolves to, from a tab's position.
+    pub(crate) fn at(index: usize) -> Self {
+        Self::ALL.get(index).copied().unwrap_or_default()
+    }
+
+    /// This kind's position in [`Self::ALL`], for the tab strip.
+    pub(crate) fn index(self) -> usize {
+        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
+    }
+}
 
 /// How many pictures one page asks for. A bound, not a preference: the picker draws them all at
 /// once in a fixed grid, and every tile is a decode of somebody else's JPEG. The server sorts the
@@ -99,15 +161,27 @@ pub(crate) struct RemoteImages {
 /// The pictures for one item's `Primary` image. `None` is a transport/auth/parse failure: the list
 /// and "the server did not answer" are different answers and the store keeps them apart.
 pub(crate) fn list(sid: ServerId, item_id: &str) -> Option<RemoteImages> {
+    list_kind(sid, item_id, ImageKind::Primary, 0)
+}
+
+/// The pictures of ONE type, from `start`, one page deep. Pagination is what lets the picker reach
+/// past the first twelve, which is the whole point of the "más de 12" half of the owner's pass.
+pub(crate) fn list_kind(
+    sid: ServerId,
+    item_id: &str,
+    kind: ImageKind,
+    start: i32,
+) -> Option<RemoteImages> {
     let client = super::client()?;
-    let page = client.remote_images(item_id, PRIMARY, 0, PAGE)?;
+    let page = client.remote_images(item_id, kind.wire(), start.max(0), PAGE)?;
     let images: Vec<RemoteImage> = page
         .images
         .into_iter()
         .filter_map(RemoteImage::from_dto)
         .collect();
     crate::log(&format!(
-        "images: rk={item_id} sid={sid:?} - {} picture(s) of {}",
+        "images: rk={item_id} sid={sid:?} kind={} start={start} - {} picture(s) of {}",
+        kind.wire(),
         images.len(),
         page.total_record_count
     ));
@@ -121,12 +195,20 @@ pub(crate) fn list(sid: ServerId, item_id: &str) -> Option<RemoteImages> {
 /// give: transport, a non-admin account (403), an item the server no longer has (404), and a
 /// provider URL the server will not fetch.
 pub(crate) fn apply(sid: ServerId, item_id: &str, img: &RemoteImage) -> bool {
+    apply_kind(sid, item_id, ImageKind::Primary, img)
+}
+
+/// Make one picture the item's image of that KIND. The type is a parameter because the picker now
+/// offers four: telling the server to fetch a backdrop "as Primary" would put a 16:9 still where
+/// the poster goes.
+pub(crate) fn apply_kind(sid: ServerId, item_id: &str, kind: ImageKind, img: &RemoteImage) -> bool {
     let Some(client) = super::client() else {
         return false;
     };
-    let ok = client.download_remote_image(item_id, PRIMARY, &img.url);
+    let ok = client.download_remote_image(item_id, kind.wire(), &img.url);
     crate::log(&format!(
-        "images: rk={item_id} sid={sid:?} provider={} download ok={ok}",
+        "images: rk={item_id} sid={sid:?} kind={} provider={} download ok={ok}",
+        kind.wire(),
         img.provider
     ));
     ok
