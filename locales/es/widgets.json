@@ -167,6 +167,7 @@
   "widgets.status.failed": "Error de reproducción",
   "widgets.status.preparing": "Preparando…",
   "widgets.status.seeking": "Buscando…",
+  "widgets.subs.plain_text": "Texto",
   "widgets.toggle.off": "Desactivado",
   "widgets.toggle.on": "Activado",
   "widgets.tracks.aspect": "Relación de aspecto",

@@ -705,6 +705,10 @@
     "value": "Seeking…",
     "description": "Short player status beside a spinner or terminal playback error."
   },
+  "widgets.subs.plain_text": {
+    "description": "A subtitle track that is plain text (restylable) rather than an image.",
+    "value": "Text"
+  },
   "widgets.toggle.off": {
     "value": "Off",
     "description": "Trailing value of an on/off settings switch."

@@ -399,6 +399,53 @@ pub(crate) fn language_name(raw: &str) -> String {
     name.to_string()
 }
 
+/// **The country/region a BCP-47 language tag names**, or `None` when it names none. "es-419" is
+/// Latin America, "en-GB" the United Kingdom, "pt-BR" Brazil. The region is what a viewer choosing
+/// between two tracks in their own language is actually choosing between.
+pub(crate) fn region_name(tag: &str) -> Option<String> {
+    let region = tag.split(['-', '_']).nth(1)?.trim();
+    if region.is_empty() || region.len() > 3 {
+        return None;
+    }
+    let named = match region.to_ascii_uppercase().as_str() {
+        "419" => "Latinoamérica",
+        "US" => "Estados Unidos",
+        "GB" | "UK" => "Reino Unido",
+        "ES" => "España",
+        "MX" => "México",
+        "AR" => "Argentina",
+        "CO" => "Colombia",
+        "CL" => "Chile",
+        "PE" => "Perú",
+        "BR" => "Brasil",
+        "PT" => "Portugal",
+        "FR" => "Francia",
+        "DE" => "Alemania",
+        "IT" => "Italia",
+        "CA" => "Canadá",
+        "AU" => "Australia",
+        "JP" => "Japón",
+        "CN" => "China",
+        "KR" => "Corea",
+        other => return Some(other.to_string()),
+    };
+    Some(named.to_string())
+}
+
+#[cfg(test)]
+mod region_tests {
+    use super::region_name;
+
+    #[test]
+    fn a_bcp47_tag_names_its_region() {
+        assert_eq!(region_name("es-419").as_deref(), Some("Latinoamérica"));
+        assert_eq!(region_name("es-ES").as_deref(), Some("España"));
+        assert_eq!(region_name("en-GB").as_deref(), Some("Reino Unido"));
+        assert_eq!(region_name("es"), None, "no region, no word");
+        assert_eq!(region_name(""), None);
+    }
+}
+
 /// One credit on the Cast & Crew shelf. Server ships crew (`Director[]`/`Writer[]`) in the SAME shape
 /// as the actors (`Role[]`) minus the `role` attribute, so a crew credit is this same struct with
 /// its JOB in `role` — see [`crew_credits`].
