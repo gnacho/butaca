@@ -292,7 +292,7 @@ pub enum Icon {
 pub(crate) const fn ink_x(id: Icon) -> (f32, f32) {
     match id {
         Icon::Pause => (7.0 / 24.0, 17.0 / 24.0),
-        Icon::Play => (6.0 / 24.0, 20.0 / 24.0),
+        Icon::Play => (7.0 / 24.0, 20.0 / 24.0),
         Icon::Rewind | Icon::FastForward => (2.6 / 24.0, 21.4 / 24.0),
         // One entry for the mirrored pair: the reflected path has the same ink bounds.
         Icon::Chevron | Icon::ChevronLeft => (7.5 / 24.0, 16.5 / 24.0),
@@ -707,5 +707,30 @@ mod ink_tests {
             let max_alpha = (0..size).flat_map(|y| (0..size).map(move |x| alpha(x, y))).max().unwrap();
             assert_eq!(max_alpha, 255, "WifiSlash never reaches full opacity at {size}px");
         }
+    }
+}
+
+#[cfg(test)]
+mod play_centring_tests {
+    use super::*;
+
+    /// **The play mark's INK centre sits on the disc's centre.** The asset was re-drawn to a
+    /// symmetric 13-unit run (x 7..20), so its own geometry no longer pulls it right; this pins
+    /// the arithmetic that places it, which is what the previous box-centred draw got wrong.
+    #[test]
+    fn the_play_ink_lands_on_the_disc_centre() {
+        let disc = Rect::new(0.0, 0.0, 64.0, 64.0);
+        let icon = Rect::new(16.0, 16.0, 32.0, 32.0);
+        let play = centred_on_ink(Icon::Play, icon, band(Icon::Pause));
+        let (l, r) = ink_x(Icon::Play);
+        let ink_cx = play.x + ((l + r) * 0.5) * play.w;
+        assert!(
+            (ink_cx - disc.cx()).abs() < 0.51,
+            "play ink centre {ink_cx} vs disc centre {}",
+            disc.cx()
+        );
+        // Vertically the INK run is centred, not the box.
+        let ink_top = play.y + (1.0 - band(Icon::Play)) * play.h * 0.5;
+        assert!((ink_top - play.y - (play.h - play.h * band(Icon::Play)) * 0.5).abs() < 1e-3);
     }
 }
