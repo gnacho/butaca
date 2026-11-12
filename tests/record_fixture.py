@@ -8,69 +8,61 @@ with a note saying its world went away with the Plex wire. Nothing else drove a 
 recorder, so a fixture that diverges has had no way back to green except hand-editing hashes, which
 is not a rebaseline, it is a lie.
 
-**What it does.** Boots the simulator in the recorder's controlled mode against `tests/mock_jf.py`
-in catalog mode, writes the typed synthetic initial the boot needs, drives the flow through the
-remote FIFO, and lets the app stop itself (`BUTACA_SHOT_SETTLE`/`BUTACA_SHOT_EXIT`) so the recorder
-flushes through its ordinary shutdown. Then it verifies the result with `tools/butaca-rec check`.
+**What it does.** Reads the committed fixture for the WORLD it was taken in and the FLOW it was
+taken of — its seed, its triggers, its initial content, and every key it recorded — then boots the
+simulator in the recorder's controlled mode against `tests/mock_jf.py` in that same world, writes
+the typed synthetic initial the boot needs, drives those presses through the remote FIFO, and lets
+the app stop itself (`BUTACA_SHOT_FRAME`/`BUTACA_SHOT_EXIT`) so the recorder flushes through its
+ordinary shutdown. Then it verifies the result with `tools/butaca-rec check`.
 
-**What it does NOT do.** It never rebaselines. Which fixture a new recording replaces, and why, is
-a judgement the tool cannot make, and `tools/butaca-rec rebaseline` already demands the replay's
-own divergence record plus a written reason for an anchor. This driver hands you a recording that
-passes `check` and the command line to act on it.
+The presses and the world come from the fixture, not from this script: a re-record is "the same
+flow in the same world on a new build", and anything this file invented would be a new test wearing
+an old name.
 
-**The world is the GENERATED one, never the demo catalog.** `tools/butaca-rec check` holds a
-committed recording to a closed alphabet (`tests/fixtures/replay/ALPHABET.json`), and the demo
-catalog would fail it on the first real film title. `tests/mock_jf.py`'s seeded world speaks that
-alphabet by construction (`sname`), which is what makes a re-recorded fixture committable at all.
+**What it does NOT do.** It never rebaselines. Which fixture a new recording replaces, and why, is a
+judgement the tool cannot make, and `tools/butaca-rec rebaseline` already demands the replay's own
+divergence record plus a written reason for an anchor (and `rerecord` for a shape bump). This driver
+hands you a recording that passes `check` and the command line to act on it.
 
-**The world is not the original world.** Fixture 12's item id (`57f4111...`) belongs to the
-synthetic server of the day, which no longer exists, so a re-record is the same FLOW SHAPE against
-today's generated world: boot flow 12 on a seeded film's id and press the same keys. The presses are
-the fixture's own (read out of its `in` records), not invented here.
+**The world is the GENERATED one, never the demo catalog.** `butaca-rec check` holds a committed
+recording to a closed alphabet (`tests/fixtures/replay/ALPHABET.json`), and the demo catalog would
+fail it on the first real film title. `tests/mock_jf.py`'s seeded world speaks that alphabet by
+construction (`sname`), which is what makes a re-recorded fixture committable at all.
 
 Usage:
 
-    python3 tests/record_fixture.py                      # the default flow
-    python3 tests/record_fixture.py --movie 3            # another film of the same seed
-    python3 tests/record_fixture.py --keys down,down,ok,back,back --keep
+    python3 tests/record_fixture.py                          # fixture 12, the default
+    python3 tests/record_fixture.py --fixture 6-settings-family
+    python3 tests/record_fixture.py --keys down,ok --keep     # drive your own presses
 
 The instance root is printed, with the recording under `<root>/butaca-recordings/latest` and the
-event log beside it. On success the exit code is 0 and the last line is the `rebaseline` command
-to run once the divergence has been read and accepted.
+event log beside it. On success the exit code is 0 and the last line is the `butaca-rec` command to
+run once the divergence has been read and accepted.
 """
 
 import argparse
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 import mock_jf  # noqa: E402  (the repo's own server, imported by path like tools/screenshots.py)
 
-DEFAULT_SEED = 1
-DEFAULT_MOVIE = 0
-# The fixture's own presses, in its own order: `down, down, ok, back, back`. Each key is a DOWN and
-# an UP edge on the wire; the FIFO token is the pair, so one token per press.
-DEFAULT_KEYS = "down,down,ok,back,back"
-FIXTURE = "12-filmography-detail-return"
-# **The fixture's OWN cadence**, read out of its `in` records (637, 1703, 2703, 3738, 4719 ms): the
-# first press lands just after the detail arm opens the page at 500 ms, and the presses are ~1 s
-# apart. It is not a copy for its own sake: a press that arrives before the page it acts on exists
-# is a press on a different screen, and on Home a SECOND Back at the root is a `BackAtRoot` request,
-# which a controlled world refuses.
+FIXTURES = ROOT / "tests" / "fixtures" / "replay"
+DEFAULT_FIXTURE = "12-filmography-detail-return"
+# The recorded cadence was one press roughly every second, the first at ~1.7 s. The fixture's own
+# times are used when it has them; these are only the fallback for `--keys`.
 FIRST_PRESS_S = 0.64
 PRESS_GAP_S = 1.03
 # **The app stops itself on a FRAME COUNT, not on idleness.** A recording boot presents every frame
 # (`rec=` in the heartbeat), so `ui::idle`'s "nothing changed" signal never arrives and a settle
 # trigger would run forever. A frame is a fact the boot controls; a wall clock is not.
-STOP_FRAME = 720
+STOP_FRAME = 900
 
 
 def fail(msg):
@@ -78,38 +70,114 @@ def fail(msg):
     sys.exit(1)
 
 
-def write_initial(binary, rt, port, item_id):
-    """The typed synthetic world, from the simulator's own encoder: it refuses to invent an id."""
+class Recipe:
+    """The world and the flow a committed fixture was taken in and of."""
+
+    def __init__(self, name):
+        self.name = name
+        folder = FIXTURES / name
+        if not (folder / "manifest.json").is_file():
+            fail(f"no fixture at {folder}")
+        manifest = json.loads((folder / "manifest.json").read_text())
+        data = manifest["init"]["data"]
+        entropy = data.get("entropy") or {}
+        self.seed = int(entropy.get("Seeded", 1))
+        self.settings = data.get("settings")
+        self.content = data.get("content")
+        self.item = (self.content or {}).get("detail")
+        self.presses = []
+        for segment in sorted(folder.glob("rec-*.jsonl")):
+            for line in segment.read_text().splitlines():
+                record = json.loads(line)
+                if record.get("t") != "in":
+                    continue
+                body = record["body"]
+                key = body.get("key") or ""
+                if not key:
+                    continue
+                # A key is two edges; the fixture records both, and the FIFO token is the press.
+                if self.presses and self.presses[-1][0] == key and self.presses[-1][1] == record["ms"]:
+                    continue
+                self.presses.append((key, record["ms"]))
+        if not self.presses:
+            fail(f"{name}: no recorded presses to re-drive")
+
+    def tokens(self):
+        """The FIFO tokens, in order, lower-cased the way the remote spells them."""
+        return [key.lower() for key, _ in self.presses]
+
+    def schedule(self):
+        """`(first_press_seconds, gap_seconds)` from the recording's own clock."""
+        first = self.presses[0][1] / 1000.0
+        if len(self.presses) < 2:
+            return first, PRESS_GAP_S
+        gaps = [b[1] - a[1] for a, b in zip(self.presses, self.presses[1:])]
+        gaps = [g for g in gaps if g > 0]
+        return first, (sum(gaps) / len(gaps) / 1000.0 if gaps else PRESS_GAP_S)
+
+
+def write_initial(binary, rt, seed, port, item, surface=None):
+    """The typed synthetic world, from the simulator's own encoder: it refuses to invent an id.
+
+    The two worlds are mutually exclusive in the encoder — a flow-12 content world, or a Settings
+    surface to boot on — and the fixture's own header says which one it was.
+    """
     path = rt / "butaca-app-init"
-    proc = subprocess.run(
-        [str(binary), "--write-synthetic-initial", str(path), "1", str(port), f"flow12={item_id}"],
-        capture_output=True, text=True,
-    )
+    world = f"flow12={item}" if item else (f"settings={surface}" if surface else None)
+    command = [str(binary), "--write-synthetic-initial", str(path), str(seed), str(port)]
+    if world:
+        command.append(world)
+    proc = subprocess.run(command, capture_output=True, text=True)
     if proc.returncode != 0:
         fail(f"the synthetic initial was refused: {proc.stderr.strip() or proc.stdout.strip()}")
     if not path.exists():
         fail("the synthetic initial was not written")
     return path
-    return path
 
 
-def send_keys(fifo, keys):
-    """One FIFO token per press, spaced. The app drains the FIFO once per frame."""
-    time.sleep(FIRST_PRESS_S)
-    for token in keys:
+def write_triggers(rt, recipe, item):
+    """The flow's own entry points, as files.
+
+    The synthetic initial seeds the content STORE; the route the app is on at frame 0 comes from the
+    same triggers a live boot reads, which is why the fixture's header lists them.
+
+    **`butaca-nowan` is deliberately NOT written.** That trigger refuses every name lookup, as a
+    dead resolver would, and a re-record has to REACH the mock for its detail and person results. The
+    committed fixture lists it because its world supplied those results at the store instead of over
+    the wire (replay's job, not a record's): armed here, the page logs "no metadata (server
+    unresolved, or it refused)" and never becomes readable.
+    """
+    (rt / "butaca-rec").write_text("")
+    (rt / "butaca-noidle").write_text("")
+    (rt / "butaca-focus").write_text("")
+    if recipe.settings:
+        (rt / "butaca-settings").write_text(recipe.settings)
+    if item:
+        (rt / "butaca-detail").write_text(item)
+        (rt / "butaca-detailsec").write_text("1")
+        (rt / "butaca-detailok").write_text("")
+        (rt / "butaca-filmography").write_text("")
+        (rt / "butaca-personcredits").write_text("9")
+
+
+def send_keys(fifo, tokens, first_s, gap_s):
+    """One FIFO token per press, at the recorded spacing. The app drains the FIFO once a frame."""
+    time.sleep(first_s)
+    for token in tokens:
         with open(fifo, "w") as f:
             f.write(token + "\n")
-        time.sleep(PRESS_GAP_S)
+        time.sleep(gap_s)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", type=pathlib.Path,
                     default=ROOT / "rust-modules" / "target-sim" / "release" / "butaca-sim")
-    ap.add_argument("--seed", type=int, default=DEFAULT_SEED, help="the generated world's seed")
-    ap.add_argument("--movie", type=int, default=DEFAULT_MOVIE, help="which film of it to open")
-    ap.add_argument("--keys", default=DEFAULT_KEYS, help="comma-separated FIFO tokens")
-    ap.add_argument("--timeout", type=float, default=60.0)
+    ap.add_argument("--fixture", default=DEFAULT_FIXTURE, help="the committed fixture to re-record")
+    ap.add_argument("--keys", help="override the presses (comma-separated FIFO tokens)")
+    ap.add_argument("--timeout", type=float, default=90.0)
+    ap.add_argument("--first", type=float, help="seconds before the first press (default: the fixture's own)")
+    ap.add_argument("--gap", type=float, help="seconds between presses (default: the fixture's own)")
     ap.add_argument("--keep", action="store_true", help="keep the instance root even on success")
     args = ap.parse_args()
 
@@ -118,38 +186,24 @@ def main():
         fail(f"no simulator at {binary} (build it: cargo build --release --manifest-path "
              f"rust-modules/Cargo.toml --target-dir rust-modules/target-sim --features hostsim "
              f"--bin butaca-sim)")
-    item_id = mock_jf.sid(args.seed, "movie", args.movie)
-    keys = [k.strip() for k in args.keys.split(",") if k.strip()]
+    recipe = Recipe(args.fixture)
+    tokens = [k.strip() for k in args.keys.split(",") if k.strip()] if args.keys else recipe.tokens()
+    first_s, gap_s = (FIRST_PRESS_S, PRESS_GAP_S) if args.keys else recipe.schedule()
+    first_s = args.first if args.first is not None else first_s
+    gap_s = args.gap if args.gap is not None else gap_s
 
-    srv, _ = mock_jf.serve(0, seed=args.seed)
-    threading.Thread(target=mock_jf.run, args=(srv,), daemon=True).start()
+    srv, world = mock_jf.serve(0, seed=recipe.seed)
     port = srv.server_address[1]
-    rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-record-s{args.seed}m{args.movie}-"))
-    print(f"record-fixture: {FIXTURE} on seed {args.seed} movie {args.movie} ({item_id})")
+    rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-record-{recipe.name}-"))
+    print(f"record-fixture: {recipe.name} on seed {recipe.seed}"
+          + (f", item {recipe.item}" if recipe.item else ""))
+    print(f"record-fixture: {len(tokens)} press(es) {tokens} at {first_s:.2f}s +{gap_s:.2f}s")
     print(f"record-fixture: mock on 127.0.0.1:{port}, instance root {rt}")
     try:
-        write_initial(binary, rt, port, item_id)
-        # The recorder's trigger file: EMPTY is the record mode (`Preflight::detect`). The other two
-        # are what make a controlled boot repeatable: no idle osc, and the focus fingerprints the
-        # fixture's own header lists.
-        (rt / "butaca-rec").write_text("")
-        (rt / "butaca-noidle").write_text("")
-        (rt / "butaca-focus").write_text("")
-        # **The flow's own entry points, as files.** The synthetic initial seeds the content STORE;
-        # the route the app is on at frame 0 comes from the same triggers a live boot reads, and the
-        # fixture's header lists exactly these (`bootstrap::ContentInitial` mirrors their values):
-        # `butaca-detail=<rk>` opens the page, and `detailsec`/`detailok`/`filmography` are the
-        # steps the scene then takes.
-        (rt / "butaca-detail").write_text(item_id)
-        (rt / "butaca-detailsec").write_text("1")
-        (rt / "butaca-detailok").write_text("")
-        (rt / "butaca-filmography").write_text("")
-        (rt / "butaca-personcredits").write_text("9")
-        # **NOT `butaca-nowan`.** That trigger refuses every name lookup, as a dead resolver would,
-        # and a re-record has to REACH the mock for its detail and person results. The committed
-        # fixture lists it because its world supplied those results at the store instead of over the
-        # wire (replay's job, not a record's): armed here, the page logs "no metadata (server
-        # unresolved)" and never becomes readable, which is what the first run of this harness did.
+        if recipe.item and recipe.item not in world.items:
+            fail(f"the fixture's item {recipe.item} is not in seed {recipe.seed}'s world")
+        write_initial(binary, rt, recipe.seed, port, recipe.item, recipe.settings)
+        write_triggers(rt, recipe, recipe.item)
         fifo = rt / "butaca-remote"
 
         env = {k: v for k, v in os.environ.items() if not k.startswith("BUTACA_")}
@@ -164,12 +218,12 @@ def main():
         proc = subprocess.Popen([str(binary), "127.0.0.1", str(port)], env=env,
                                 stdout=out, stderr=subprocess.STDOUT)
         try:
-            deadline = time.monotonic() + 10.0
+            deadline = time.monotonic() + 15.0
             while not fifo.exists():
                 if time.monotonic() > deadline:
                     fail("the remote FIFO never appeared (the app did not get past boot)")
                 time.sleep(0.05)
-            send_keys(fifo, keys)
+            send_keys(fifo, tokens, first_s, gap_s)
             rc = proc.wait(timeout=args.timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
@@ -177,24 +231,21 @@ def main():
         finally:
             out.close()
         log = (rt / "butaca-events.log").read_text(errors="replace")
-        # **The boundary this harness cannot cross, named.** A record boot is refused a live
-        # server ("unsupported replay bootstrap authority"), so it runs the synthetic DevJf world,
-        # and that world is `nowan: true` by contract (the app refuses `nowan: false` with
-        # "unsupported initial content input"). Its detail and person results therefore never
-        # arrive: the page logs the line below and every press lands on an empty page. Shipping a
-        # re-record past this needs the recorder's transport guard to allow the mock, which is a
-        # product decision, not a harness one. See issue #416.
+        # **The boundary that is worth naming when it moves.** A record boot may only run the
+        # synthetic world, and its detail and person results come from the mock over loopback; if
+        # the transport is ever refused again the page logs the line below and every press lands on
+        # an empty page. See issue #416.
         blind = [l for l in log.splitlines() if "no metadata" in l]
         if blind:
             fail("the world never read: the detail fetch answered \"no metadata (server "
-                 "unresolved, or it refused)\" because a record boot may not reach a server. "
-                 "The presses then act on an empty page. See issue #416; the log is "
+                 "unresolved, or it refused)\". The presses then act on an empty page. The log is "
                  f"{rt / 'butaca-events.log'}")
         if rc is None:
             fail(f"the run never reached frame {STOP_FRAME}; log tail:\n    "
                  + "\n    ".join(log.splitlines()[-12:]))
         if rc != 0:
-            fail(f"the simulator exited {rc}; log tail:\n    " + "\n    ".join(log.splitlines()[-12:]))
+            fail(f"the simulator exited {rc}; log tail:\n    "
+                 + "\n    ".join(log.splitlines()[-12:]))
         refused = [l for l in log.splitlines() if "REFUSED" in l or "BADTRIGGER" in l]
         if refused:
             fail("the boot refused a trigger: " + refused[0])
@@ -213,9 +264,10 @@ def main():
         if check.returncode != 0:
             fail(f"the recording does not pass `butaca-rec check`:\n{check.stdout}{check.stderr}")
         print(f"record-fixture: recording passes check: {recording}")
-        print(f"record-fixture: next, read the divergence, then:\n"
-              f"  tools/butaca-rec rebaseline {recording} {FIXTURE} "
-              f"--log {rt / 'butaca-events.log'} --reason '<why the behaviour moved>'")
+        print(f"record-fixture: next, read the divergence, then ONE of:\n"
+              f"  tools/butaca-rec rebaseline {recording} {recipe.name} "
+              f"--log {rt / 'butaca-events.log'} --reason '<why the behaviour moved>'\n"
+              f"  tools/butaca-rec rerecord {recording} {recipe.name}   # after a SHAPE bump")
         if args.keep:
             print(f"record-fixture: kept {rt}")
         return 0
