@@ -141,7 +141,13 @@ impl PrePlayWindowScreen {
     /// its hit box and its focus stop are the table's own arithmetic rather than a second layout.
     fn rebuild(&mut self, meta: crate::metadata::MetadataView<'_>) {
         let d = meta.current();
-        let (facts, action) = d.map_or((Vec::new(), None), |d| (file_block(d), Some(verb(d))));
+        let (facts, action) = d.map_or((Vec::new(), None), |d| {
+            let mut facts = file_block(d);
+            // The cast is part of what the press asked about the film, so it rides in the same
+            // block rather than becoming rows of its own: a name is a fact, not a choice.
+            facts.extend(cast_block(d));
+            (facts, Some(verb(d)))
+        });
         let (audio_label, sub_label) = d.map_or((String::new(), String::new()), |d| {
             (chosen_audio(d, self.audio_sid), chosen_sub(d, self.sub_sid))
         });
@@ -259,6 +265,29 @@ impl PrePlayWindowScreen {
             ),
         )));
     }
+}
+
+/// How many cast names the window states. Four is what reads at ten feet without the panel turning
+/// into the page's people column, which is behind it.
+pub(crate) const PREPLAY_CAST: usize = 4;
+
+/// **The two blocks the window states about the film itself**: the file, and who is in it.
+fn cast_block(d: &Detail) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    let names: Vec<&str> = d
+        .cast
+        .iter()
+        .map(|c| c.tag.as_str())
+        .filter(|t| !t.is_empty())
+        .take(PREPLAY_CAST)
+        .collect();
+    if !names.is_empty() {
+        rows.push((msg::browse_detail_starring().to_string(), names.join(", ")));
+    }
+    if !d.directors.is_empty() {
+        rows.push((msg::browse_detail_directed_by().to_string(), d.directors.join(", ")));
+    }
+    rows
 }
 
 /// **What the audio row says**: the track the window would play today, in the picker's own words
@@ -608,6 +637,33 @@ mod tests {
         // An EXPLICIT Off is `0`, which is not the same answer as "nothing chosen".
         s.apply_tracks(None, Some(0));
         assert_eq!(ids(s.verdict()), (1, 0));
+    }
+
+    /// **The cast rides in the file block, and only as many names as read at ten feet** (slice 3):
+    /// the row states the first four and the director, and an item whose server sent no people adds
+    /// no empty row.
+    #[test]
+    fn the_cast_states_a_few_names_and_the_director_or_nothing() {
+        let mut d = item(0, "eac3");
+        assert!(cast_block(&d).is_empty(), "no people, no rows");
+        d.cast = (0..6)
+            .map(|i| crate::metadata::Cast {
+                tag: format!("Person {i}"),
+                role: "role".into(),
+                thumb: String::new(),
+                id: 0,
+                tag_key: String::new(),
+            })
+            .collect();
+        d.directors = vec!["Someone".into()];
+        let rows = cast_block(&d);
+        let starring = rows
+            .iter()
+            .find(|(label, _)| label == &msg::browse_detail_starring().to_string())
+            .expect("the cast row");
+        assert_eq!(starring.1.matches(", ").count(), PREPLAY_CAST - 1, "four names, no more");
+        assert!(!starring.1.contains("Person 4"), "the fifth stays on the page behind it");
+        assert!(rows.iter().any(|(label, _)| label == &msg::browse_detail_directed_by().to_string()));
     }
 
     /// **The rows state the choice in the picker's own words**, so the window and the menu cannot
