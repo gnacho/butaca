@@ -23,6 +23,19 @@ pub(crate) const TEXT_TOP: f32 = crate::ui::widgets::TOP_BAR_BOTTOM
 /// The copy column's width. Wide enough for a three-line blurb at the hero's rung, and it stops
 /// well short of the panel's centre so the artwork keeps its side.
 pub(crate) const COL_W: f32 = 660.0;
+
+/// **The billboard's blurb runs the whole measure** (the owner, 2026-11-12: "en el hero la
+/// descripción aparece cortada, debería ocupar todo el ancho de la pantalla").
+///
+/// The TITLE and the identity line keep [`COL_W`]: a logo band and one line of facts belong on the
+/// artwork's left, and the picture's own side is theirs. The blurb does not, because it is the one
+/// run whose job is to be READ, and at 660 it elided a summary it could have shown. At the page's
+/// measure a long summary fits in two lines instead of eliding at three narrow ones, and the block
+/// it occupies is shorter, which moves the action row UP rather than down.
+///
+/// It is paid for in scrim, not in ink: past the wedge's reach the blurb is read through
+/// [`crate::ui::widgets::hero_text_band`], the same trade the detail hero made for its copy column.
+pub(crate) const SYN_W: f32 = crate::ui::consts::SCR_W - 2.0 * crate::ui::consts::MARGIN_X;
 pub(crate) const KNEE_Y: f32 = 0.65 * SCR_H;
 pub(crate) const MID_WEIGHT: f32 = 0.55;
 /// How much a bound preview multiplies the hero scrim curve. The shape stays the wedge, the

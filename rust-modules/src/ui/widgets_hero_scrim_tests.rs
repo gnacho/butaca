@@ -271,14 +271,23 @@ fn the_hero_text_reads_over_bright_artwork() {
     let det_col_r = crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W; // the copy column's RIGHT edge, wherever the poster leaves it: a very wide wordmark runs to this same edge.
     let people_r = SCR_W - MARGIN_X; // 1830 — the right-aligned people column's own edge
 
-    // (label, x, y, ink, right wedge?, floor over BRIGHT art, floor over BLOWN WHITE)
-    let rows: [(&str, f32, f32, [f32; 4], bool, f32, f32); 8] = [
+    // Which fields of the corner scrim a row is read through. The blurb on Home has no right wedge
+    // (that column does not exist there) but does have the text band, which is what pays for a
+    // summary that runs the page's measure (`landing_hero::SYN_W`).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Fields {
+        Wedge,
+        RightWedgeAndBand,
+        BlurbBand,
+    }
+    // (label, x, y, ink, fields, floor over BRIGHT art, floor over BLOWN WHITE)
+    let rows: [(&str, f32, f32, [f32; 4], Fields, f32, f32); 9] = [
         (
             "home title (right end)",
             home_col_r,
             home_title_cap_top(),
             theme::TEXT_PRIMARY,
-            false,
+            Fields::Wedge,
             3.0,
             2.5,
         ),
@@ -287,7 +296,7 @@ fn the_hero_text_reads_over_bright_artwork() {
             MARGIN_X,
             home_title_cap_top(),
             theme::TEXT_PRIMARY,
-            false,
+            Fields::Wedge,
             7.0,
             6.0,
         ),
@@ -296,18 +305,29 @@ fn the_hero_text_reads_over_bright_artwork() {
             500.0,
             home_title_band_top() + band + theme::space::MD,
             theme::TEXT_SECONDARY,
-            false,
+            Fields::Wedge,
             3.0,
             2.5,
         ),
         // the blurb's FIRST line, at the top of its block — the weakest ground the run sees.
         // Both its ink and its block height are read from the shared hero synopsis.
         (
-            "home synopsis",
-            home_col_r,
+            "home synopsis (left)",
+            MARGIN_X,
             crate::ui::widgets::test_support::home_synopsis_top(),
             theme::TEXT_READING,
-            false,
+            Fields::Wedge,
+            7.0,
+            6.0,
+        ),
+        // …and its LAST, at the page's own measure, which is where the wedge has given up and the
+        // text band takes over (the owner's "debería ocupar todo el ancho de la pantalla").
+        (
+            "home synopsis (right end)",
+            SCR_W - MARGIN_X,
+            crate::ui::widgets::test_support::home_synopsis_top(),
+            theme::TEXT_READING,
+            Fields::BlurbBand,
             3.0,
             2.5,
         ),
@@ -316,7 +336,7 @@ fn the_hero_text_reads_over_bright_artwork() {
             det_col_r,
             detail_title_cap_top(),
             theme::TEXT_PRIMARY,
-            true,
+            Fields::RightWedgeAndBand,
             3.0,
             2.5,
         ),
@@ -329,7 +349,7 @@ fn the_hero_text_reads_over_bright_artwork() {
             // 3:1 against 0.85 art; the 1.0-art case is graded a step lower (2.0) because the
             // wedge alone cannot carry white type at 660 and the band is what does it.
             theme::TEXT_SECONDARY,
-            true,
+            Fields::RightWedgeAndBand,
             3.0,
             2.0,
         ),
@@ -338,7 +358,7 @@ fn the_hero_text_reads_over_bright_artwork() {
             det_col_r,
             hc.syn_y,
             theme::TEXT_READING,
-            true,
+            Fields::RightWedgeAndBand,
             3.0,
             2.5,
         ),
@@ -357,20 +377,20 @@ fn the_hero_text_reads_over_bright_artwork() {
                 crate::ui::hero_syn_h(crate::ui::HERO_SYN_MAXLINES),
             ),
             crate::ui::detail_layout::PEOPLE_INK,
-            true,
+            Fields::RightWedgeAndBand,
             3.0,
             2.5,
         ),
     ];
 
-    for (label, x, y, ink, right, min_bright, min_white) in rows {
+    for (label, x, y, ink, fields, min_bright, min_white) in rows {
         let base = if label.starts_with("home") {
             crate::ui::landing_hero::base_scrim_a(y, 1.0)
         } else {
             crate::ui::detail_layout::base_scrim_a(y, 1.0)
         };
         let wedge = hero_scrim_a(x, 1.0);
-        let rw = if right {
+        let rw = if fields == Fields::RightWedgeAndBand {
             hero_scrim_right_a(x, y, 1.0)
         } else {
             0.0
@@ -379,8 +399,19 @@ fn the_hero_text_reads_over_bright_artwork() {
         // through, and since the copy column starts right of a 540px poster (x=660) it is the
         // field that CARRIES the detail title: the wedge has given up long before 660. Home has
         // none: it has no copy past the wedge's reach.
-        let tb = if right {
+        let tb = if fields == Fields::RightWedgeAndBand {
             hero_scrim_band_a(x, y, 1.0).max(crate::ui::detail_layout::base_scrim_a(y, 1.0))
+        } else if fields == Fields::BlurbBand {
+            // The same field the screen paints, over the copy's own edges: the blurb is the whole
+            // judged block there, so it sits at full alpha rather than inside a ramp.
+            hero_text_band_a(
+                x,
+                y,
+                crate::ui::widgets::test_support::home_synopsis_top(),
+                crate::ui::widgets::test_support::home_synopsis_top()
+                    + crate::ui::hero_syn_h(crate::ui::HERO_SYN_MAXLINES),
+                1.0,
+            )
         } else {
             0.0
         };

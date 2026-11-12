@@ -1984,6 +1984,9 @@ const HERO_SCRIM_R_A: f32 = 0.50;
 /// not get lighter at its last character.
 const HERO_SCRIM_BAND_X: f32 = 600.0;
 const HERO_SCRIM_BAND_FULL_X: f32 = 760.0;
+/// How far the blurb band's ends feather: long enough that neither end reads as a line over the
+/// artwork, short enough that a two-line blurb still has a flat core to be read on.
+const HERO_SCRIM_BAND_FEATHER: f32 = 64.0;
 /// The vertical band the band-scrim darkens: the detail hero's whole copy column, from the top of
 /// its text block (`TITLE_BOTTOM - 200`) to below the facts row, with a flat middle and a feather at
 /// each end. It is not the title alone: the synopsis and the facts row are the same column of text
@@ -2099,6 +2102,67 @@ pub(crate) fn hero_scrim_band_a(x: f32, y: f32, strength: f32) -> f32 {
     };
     HERO_SCRIM_BAND_A * strength.clamp(0.0, crate::ui::landing_hero::PREVIEW_FIELD) * across
         * down.clamp(0.0, 1.0)
+}
+
+/// **The blurb's text band, over the y range its copy occupies** — [`hero_scrim_band_a`]'s field,
+/// with the band's own geometry supplied by the caller instead of the detail hero's fixed title
+/// block.
+///
+/// Home needs it the moment its summary runs the full measure
+/// ([`crate::ui::landing_hero::SYN_W`]): the left wedge is a function of x and is spent long before
+/// the copy's right end, so the last third of a two-line blurb would sit on undimmed artwork.
+///
+/// The profile is a flat field over the TEXT, feathered INTO THE AIR AROUND IT: `f` above the first
+/// line and `f` below the last, never over a line. That is the difference from the detail hero's
+/// band, whose fixed block also holds a title and a facts row; here the copy is the only judged
+/// thing inside it, so it must sit at full alpha rather than inside a ramp.
+///
+/// Pure for the same reason the wedge is: the legibility contract is graded on this arithmetic, so
+/// the promise and the paint cannot come from two different curves.
+pub(crate) fn hero_text_band_a(x: f32, y: f32, top: f32, bot: f32, strength: f32) -> f32 {
+    if bot - top < 1.0 {
+        return 0.0;
+    }
+    let f = HERO_SCRIM_BAND_FEATHER.min((bot - top) * 0.5);
+    let across = ((x - HERO_SCRIM_BAND_X) / (HERO_SCRIM_BAND_FULL_X - HERO_SCRIM_BAND_X))
+        .clamp(0.0, 1.0);
+    let down = if y < top {
+        (y - (top - f)) / f
+    } else if y > bot {
+        ((bot + f) - y) / f
+    } else {
+        1.0
+    };
+    HERO_SCRIM_BAND_A
+        * strength.clamp(0.0, crate::ui::landing_hero::PREVIEW_FIELD)
+        * across
+        * down.clamp(0.0, 1.0)
+}
+
+/// Paint [`hero_text_band_a`]: three quads, because a single bilinear quad cannot feather BOTH of
+/// its horizontal edges — its corners interpolate straight from one edge to the other, which would
+/// draw a hard line exactly above the first line and below the last.
+///
+/// `top`/`bot` are the COPY's own edges, not the band's: the feather lives outside them.
+pub(crate) fn hero_text_band(p: Painter, top: f32, bot: f32, strength: f32) {
+    if strength <= 0.0 || bot - top < 1.0 {
+        return;
+    }
+    let sw = crate::ui::consts::SCR_W;
+    let x0 = HERO_SCRIM_BAND_X;
+    let w = sw - x0;
+    let f = HERO_SCRIM_BAND_FEATHER.min((bot - top) * 0.5);
+    let corner = |x: f32, y: f32| theme::scrim(hero_text_band_a(x, y, top, bot, strength));
+    let (el, er) = (corner(x0, top), corner(sw, top));
+    let (fl, fr) = (corner(x0, bot), corner(sw, bot));
+    let (gl, gr) = (corner(x0, top - f), corner(sw, top - f));
+    let (hl, hr) = (corner(x0, bot + f), corner(sw, bot + f));
+    // entry: nothing on its top edge, full on the copy's first line
+    p.grad4(Rect::new(x0, top - f, w, f), [gl, gr, er, el]);
+    // body: constant in y, over the copy itself
+    p.grad4(Rect::new(x0, top, w, bot - top), [el, er, fr, fl]);
+    // exit: full on the last line, nothing on its bottom edge
+    p.grad4(Rect::new(x0, bot, w, f), [fl, fr, hr, hl]);
 }
 
 pub(crate) fn hero_scrim_quads(strength: f32, right: bool) -> ([(Rect, [[f32; 4]; 4]); 6], usize) {
