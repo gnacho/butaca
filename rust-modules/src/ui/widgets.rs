@@ -1037,6 +1037,10 @@ impl<const N: usize> CtlPop<N> {
         c.option(*focused, |c, i| { c.u32(i as u32); });
     }
 
+    /// **At REST, not growing in.** Every control starts at its drawn scale, so a row that has just
+    /// mounted paints all its controls on its first frame instead of popping them in one after
+    /// another (the owner's 2026-11-10 pass: "deben renderizarse todos a la vez"). The pop belongs
+    /// to the FOCUSED control only, and this is the size everything else rests at.
     pub const fn new() -> Self {
         Self {
             sp: [Spring::at(1.0); N],
