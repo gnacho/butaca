@@ -964,6 +964,20 @@ pub(crate) fn draw_readout(
     now: u32,
     failure_focus: usize,
     measure: &dyn crate::ui::machine::Measure,
+    meta: crate::metadata::MetadataView<'_>,
+) {
+    draw_readout_with(ps, busy, now, failure_focus, measure, meta)
+}
+
+/// [`draw_readout`] with the metadata view passed in, so the failure ground can wear the item's own
+/// picture (a pure seam for the host suite as well).
+pub(crate) fn draw_readout_with(
+    ps: &crate::route::PlaybackSession,
+    busy: Busy,
+    now: u32,
+    failure_focus: usize,
+    measure: &dyn crate::ui::machine::Measure,
+    meta: crate::metadata::MetadataView<'_>,
 ) {
     let Busy::Readout(kind, caption) = busy else {
         return;
@@ -973,7 +987,7 @@ pub(crate) fn draw_readout(
         // constant verdict, one reason, a row of controls. The caption is not drawn here: the
         // verdict line is constant by design, so a viewer who has seen it once recognises it
         // before reading, and the caption's suffix is re-derived as the reason.
-        draw_failed_readout(ps, Painter::root(), failure_focus, measure);
+        draw_failed_readout(ps, Painter::root(), failure_focus, measure, meta);
         return;
     }
     StatusOverlay::new(readout_frame(), caption, kind)
@@ -1244,6 +1258,7 @@ fn draw_failed_readout(
     p: Painter,
     focus: usize,
     measure: &dyn crate::ui::machine::Measure,
+    meta: crate::metadata::MetadataView<'_>,
 ) {
     // The GROUND, first: a full-bleed opaque black, one quad. Without it the read-out stood on
     // whatever the video plane happened to be holding: `app.rs` clears the graphics plane to alpha
@@ -1251,7 +1266,28 @@ fn draw_failed_readout(
     // black by the time an error is up" is usually true and not always — `busy_surface` resolves
     // Error to Failed for BOTH values of `seen_frame`, i.e. a mid-playback failure over a held
     // frame is a state the code contemplates.
+    // **The item's own picture, blurred, instead of a flat black sheet** (the owner's 2026-11-10
+    // pass: "el error de reproducción lo vamos a hacer más bonito, con el fondo del archivo en
+    // background difuminado"). The still is drawn very dim and then covered by a softer black than
+    // before, so it reads as the film's own atmosphere rather than as a different screen. With no
+    // artwork known the flat black stands: a failure before the item was ever described is still
+    // a failure, not a hole.
     p.rrect(Rect::FULL, 0.0, 0.0, theme::scrim_black(1.0));
+    if let Some(d) = meta.current() {
+        let still = if d.art.is_empty() { &d.thumb } else { &d.art };
+        if !still.is_empty() && !d.thumb.is_empty() {
+            let (tex, w, h) = crate::ui::widgets::resolve_tex_wh_on(d.sid, still, 1920, 1080, 0);
+            if tex != 0 {
+                p.tex_uv(
+                    tex,
+                    crate::gfx::UV_FULL,
+                    Rect::FULL.cover(w, h),
+                    0.0,
+                    theme::with_a(theme::dim(theme::TINT_WHITE, 0.55), 0.55),
+                );
+            }
+        }
+    }
     FailureReadout::now(ps).draw(p, focus, measure);
 }
 

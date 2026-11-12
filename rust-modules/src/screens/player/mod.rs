@@ -1408,7 +1408,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
         // terminal `Error` (which is not `is_busy()`, so it does not pin the HUD) keeps its message
         // instead of vanishing with the 4.5 s linger. AFTER the transport, so it is never dimmed by
         // the scrim; BEFORE the overlay panels, which the container draws above this page.
-        crate::ui::player_hud::draw_readout(ps, self.busy, now, self.failure_sel, f.measure);
+        crate::ui::player_hud::draw_readout(ps, self.busy, now, self.failure_sel, f.measure, H::metadata(f.cx));
         if self.repair_alert.visible() {
             self.repair_alert.draw_scrim();
             self.repair_alert.draw(crate::i18n::msg::settings_cancel_c(), crate::i18n::msg::widgets_repair_action_c(), f.measure);
