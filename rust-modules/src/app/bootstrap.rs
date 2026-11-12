@@ -262,7 +262,15 @@ impl Initial {
         // construct it.
         let content_detail_ok = match &s.authority {
             BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
-                if !true { return Err("unsupported replay bootstrap authority"); }
+                // **Refused by the builds that cannot construct it, and only by those** — the rule
+                // this comment always stated, restored after the migration left a hard `true` in
+                // its place, which made the synthetic world unloadable everywhere and took the
+                // recordings' only road back with it (issue #416). The simulator builds it on
+                // purpose: it IS the recording harness's world, and the host suite constructs it to
+                // grade the contract, so both are the builds that may load one.
+                if !cfg!(any(feature = "hostsim", test)) {
+                    return Err("unsupported replay bootstrap authority");
+                }
                 // captured() carries the Account authority, so the reconstruction re-imposes
                 // the DevJf authority it names; everything AROUND it must still round-trip
                 // byte for byte.
@@ -300,8 +308,13 @@ impl Initial {
         }
         let content_triggers = ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"];
         if let Some(content) = &self.content {
+            // **`nowan` is a RECORDED FACT about the world, not a switch**, so a world that had the
+            // resolver alive validates the same as one that did not. It used to be pinned to
+            // `true`, which meant a re-recordable world could not exist at all: the fixture's own
+            // world refused name lookups, and every detail and person result had to come from a
+            // replay rather than from a server (issue #416).
             if !content_detail_ok(&content.detail) || content.detailsec != 1 || !content.detailok
-                || !content.filmography || content.personcredits != 9 || !content.nowan
+                || !content.filmography || content.personcredits != 9
                 || self.settings.is_some() {
                 return Err("unsupported initial content input");
             }
