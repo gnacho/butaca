@@ -177,6 +177,14 @@ pub(crate) unsafe fn activate_card(
         // The show is still one press away: it is the card menu's second navigation row, and the
         // episode page's own BACK returns to the shelf.
         super::bridge::open_detail(pages, bridge, mm.sid, &rk, None, ret.take());
+    } else if mm.kind == crate::catalog::KIND_MOVIE {
+        // **A press on a FILM's poster** (issue #355): the page it always opened, plus the
+        // pre-playback window the press asked for, opened over that page as soon as the item lands.
+        // The rule lives here, at the one seam where a card on a browsing surface becomes an
+        // intent, so Home's shelves, Home's grid and the Library's grid and shelves all say the
+        // same thing by construction, and no screen carries its own copy of it. Nothing starts: the
+        // window's own control is what plays, which is the whole of what the owner asked for.
+        super::bridge::open_detail_from_card(pages, bridge, mm.sid, &rk, None, ret.take());
     } else {
         super::bridge::open_detail(pages, bridge, mm.sid, &rk, None, ret.take());
     }

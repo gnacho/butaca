@@ -926,6 +926,10 @@ pub(crate) enum ContentPanel {
     /// today, and `anchor` is the disc's drawn rectangle, bit-preserving like every other anchored
     /// menu's.
     TrackPick { audio: bool, chosen: i64, anchor: [u32; 4] },
+    /// **The pre-playback window** (issue #355, `screens::preplay_window`): the film's own file,
+    /// opened by a poster press over the page that press opened, before anything plays. It carries
+    /// the host instance its verdict goes back to, and the drawn rect it opens against.
+    PrePlay { anchor: [u32; 4] },
     /// **Edit images** (`screens::images`): the pictures the metadata providers already hold for
     /// the item the page is standing on, anchored to the control that opened it. It came back with
     /// the artwork disc (the owner asked for "Cambiar imagen" and the pre-playback window that used
@@ -983,6 +987,10 @@ impl ContentPanel {
                     chosen,
                     anchor,
                 }),
+            ),
+            Self::PrePlay { anchor } => (
+                Style::Compact,
+                AppArg::PrePlayWindow(crate::screens::preplay_window::PrePlayArg { host, anchor }),
             ),
             Self::Images { anchor } => (
                 Style::Compact,
@@ -1113,6 +1121,10 @@ pub(crate) enum AppMsg {
     /// next Play starts with. `None` means "this half was not the one being chosen", so a picker
     /// for audio never clears a subtitle the viewer set from the other disc.
     DetailTracks { audio_sid: Option<i64>, sub_sid: Option<i64> },
+    /// **The pre-playback window committed its one control** (issue #355): the page starts the film
+    /// exactly as its own Play disc would, because the promise (Play or Resume) is the page's and
+    /// the window only states it.
+    PrePlayGo,
 }
 
 /// What an owned screen asks the LEGACY LOOP to do, because the owner of that decision is not on
@@ -1529,6 +1541,7 @@ pub(crate) enum AppArg {
     /// list, the stream id the page would play today (for the checkmark) and the disc's drawn rect;
     /// WHICH tracks it offers is read off `metadata::current()`, the item the page stands on.
     TrackPick(crate::screens::track_pick::TrackPickArg),
+    PrePlayWindow(crate::screens::preplay_window::PrePlayArg),
     /// **Edit images** (`screens::images`): the pictures the metadata providers already hold for
     /// the item the page stands on. It carries only where it hangs; the subject is
     /// `metadata::current()`, exactly as the Track-information sheet's and the hero's picker's are.
@@ -1570,6 +1583,7 @@ pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,S
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
      TrackPick{host:u32,audio:u8,chosen:i64,anchor:[u32;4]},\
+     PrePlayWindow{host:u32,anchor:[u32;4]},\
      Images{anchor:[u32;4]},\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
      host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
@@ -1591,6 +1605,9 @@ impl LogicalState for AppArg {
             // pre-playback window and its menu and are NOT reused: a canon tag is a surface's
             // identity in a recorded state, so a retired one is never handed to its replacement.
             Self::TrackPick(arg) => { c.u32(17); arg.write(c); }
+            // 18: the pre-playback window returned by #355, allocated forward like every other
+            // surface tag. 13 and 14 are the retired window's and are not reused.
+            Self::PrePlayWindow(arg) => { c.u32(18); arg.write(c); }
             // 16 again, deliberately: this is the SAME surface coming back (same argument, same
             // screen), not a replacement for a retired one, so its canon tag is unchanged and a
             // recording taken before the owner's pass still names the grid it named then.
@@ -1645,6 +1662,7 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::PersonBio
             | AppArg::CollectionAbout
             | AppArg::TrackPick(_)
+            | AppArg::PrePlayWindow(_)
             | AppArg::Images(_) => Chrome::None,
         }
     }
@@ -1665,6 +1683,9 @@ impl crate::ui::screen::ScreenArg for AppArg {
             // 29: the hero's track picker, allocated forward. 25 and 26 belonged to the retired
             // pre-playback window and its menu and are not reused.
             AppArg::TrackPick(_) => 29,
+            // 31: the pre-playback window, allocated forward for the same reason. 25 and 26 are
+            // the retired window's own and stay retired.
+            AppArg::PrePlayWindow(_) => 31,
             // 30: the Edit-images grid, allocated forward for the same reason.
             AppArg::Images(_) => 30,
             // 19 and 20, not the 5 and 6 `Route::Account`/`Route::ItemMenu` vacated when this
@@ -1742,6 +1763,18 @@ pub(crate) struct DetailSeed {
 #[derive(Default)]
 pub(crate) struct AppMounter {
     pub(crate) seed: Option<DetailSeed>,
+    /// **A press on a film's poster that has not landed yet** (issue #355): the `(sid, rk)` of a
+    /// page that must open the pre-playback window as soon as its item loads.
+    ///
+    /// A press on a card carries an item id, so the window's file block and its verb do not exist
+    /// until the page has fetched the item. The honest shape is therefore "the press opens the
+    /// page, and the page opens the window over itself the moment its item lands", and this is the
+    /// one place that says so: the card-activation seam arms it (`app::input::activate_card`,
+    /// where a Home or Library card becomes an intent), [`AppMounter::mount`] hands it to the page,
+    /// and the page spends it on the landing. Nothing is armed for a show, a season, an episode or
+    /// a collection, and nothing is armed for a page that already holds its item, so every other
+    /// road onto a page behaves exactly as it did.
+    pub(crate) poster_preplay: Option<(crate::registry::ServerId, String)>,
     /// **Where the NEXT player instance returns to** — the entry that was on top when the push was
     /// asked for, stamped at the press and consumed by the mount exactly as `player_hud_ms` is.
     ///
@@ -1811,6 +1844,9 @@ where
             AppArg::CollectionAbout => Box::new(
                 crate::screens::about_panel::AboutPanelScreen::collection(entry),
             ),
+            AppArg::PrePlayWindow(arg) => Box::new(
+                crate::screens::preplay_window::PrePlayWindowScreen::new(entry, *arg, H::metadata(cx)),
+            ),
             AppArg::TrackPick(arg) => Box::new(
                 crate::screens::track_pick::TrackPickScreen::new(entry, *arg, H::metadata(cx)),
             ),
@@ -1831,6 +1867,14 @@ where
                     page.restore_memory(spot, H::metadata(cx));
                 } else if let Some(seed) = self.seed.take() {
                     if seed.sid == *sid && seed.rk == *rk { page.restore(&seed.spot, H::metadata(cx)); }
+                }
+                // The arm is spent at the FIRST detail page that mounts, matching or not: one press
+                // asks for one page, and an arm that outlived its press would open a window over a
+                // page the viewer reached some other way.
+                if let Some((arm_sid, arm_rk)) = self.poster_preplay.take() {
+                    if arm_sid == *sid && arm_rk == *rk {
+                        page.open_preplay_when_loaded();
+                    }
                 }
                 Box::new(page)
             }
@@ -1991,6 +2035,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::PersonBio
             | AppArg::CollectionAbout
             | AppArg::TrackPick(_)
+            | AppArg::PrePlayWindow(_)
             | AppArg::Images(_)
             | AppArg::PlayerOverlay(_)
             | AppArg::Settings(_) => {}
@@ -2059,6 +2104,8 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::track_pick::SHAPE[0],
     crate::screens::track_pick::SHAPE[1],
     crate::screens::images::SHAPE,
+    crate::screens::preplay_window::SHAPE[0],
+    crate::screens::preplay_window::SHAPE[1],
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::screens::preferences::SHAPE,
 ];
@@ -2198,7 +2245,11 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // **`TrackPick` learns its host** (0xad7a_d673_797c_86bb before it): the picker's argument now
 // carries the page it reports to, because a commit addressed to its own instance died with the
 // surface. Additive for every recording here (none opens the picker), and the replay proves it.
-const SCREEN_SHAPES_PIN: u64 = 0x16df_9f5e_e595_f1be;
+//
+// **`PrePlayWindow` joins** (0x16df_9f5e_e595_f1be before it): the pre-playback window of #355, a new
+// surface and a new argument. Additive in the same way the picker's host was: no committed recording
+// opens it, and the replay proves that rather than the comment.
+const SCREEN_SHAPES_PIN: u64 = 0xc5a7_8989_3ded_9df3;
 
 #[cfg(test)]
 mod arg_tests {

@@ -624,6 +624,12 @@ impl Bridge {
         self.mounter.seed = Some(crate::screens::registry::DetailSeed { sid, rk: rk.to_string(), spot });
     }
 
+    /// Arm the next matching detail mount to open the pre-playback window once its item lands
+    /// (issue #355) — see [`crate::screens::registry::AppMounter::poster_preplay`].
+    pub(crate) fn seed_poster_preplay(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.mounter.poster_preplay = Some((sid, rk.to_string()));
+    }
+
     /// Where the next player instance returns to — see `AppMounter::player_origin`.
     pub(crate) fn seed_player_origin(&mut self, origin: crate::screens::player::Origin) {
         self.mounter.player_origin = Some(origin);
@@ -2633,6 +2639,30 @@ pub(crate) fn open_detail(
     sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
     ret: Option<ReturnState<u32, PageMemory>>,
 ) {
+    open_detail_from(d, rig, sid, rk, season, ret, false);
+}
+
+/// **A press on a FILM's poster**: the same push, plus the arm that makes the page open the
+/// pre-playback window as soon as its item loads (issue #355).
+///
+/// Nothing here plays: the film still starts only from the window's own control, which is the whole
+/// of what the owner asked the press to stop doing. The caller is the CARD-ACTIVATION seam
+/// ([`super::input::activate_card`]), where a press on a Home shelf or a Library grid becomes an
+/// intent; presses that travel from one page to another and every non-press way onto a page keep
+/// the plain [`open_detail`], so their recorded flows stay byte-identical.
+pub(crate) fn open_detail_from_card(
+    d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    ret: Option<ReturnState<u32, PageMemory>>,
+) {
+    open_detail_from(d, rig, sid, rk, season, ret, true);
+}
+
+fn open_detail_from(
+    d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    ret: Option<ReturnState<u32, PageMemory>>, preplay: bool,
+) {
     use crate::ui::screen::ScreenArg;
     let arg = AppArg::Content(ContentArg::Detail { sid, rk: rk.to_string() });
     // The page is already on its way (a second press inside the push's dip-out): the pending push
@@ -2647,6 +2677,9 @@ pub(crate) fn open_detail(
         ..Default::default()
     };
     rig.seed_detail(sid, rk, spot);
+    if preplay {
+        rig.seed_poster_preplay(sid, rk);
+    }
     match ret {
         Some(ret) => nav_push_with_return(d, arg, ret),
         None => nav_push(d, arg),

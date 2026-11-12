@@ -56,6 +56,11 @@ pub(crate) const MAX_SHELVES: usize = 16;
 /// data and the two can never disagree.
 pub(crate) const MAX_SHELF_ITEMS: usize = 24;
 
+/// **A leaf the page can hold in full**: a film, or a video the library files as one. Named for the
+/// one rule that turns on it: a press on this kind of card asks for the pre-playback window
+/// (`app::input::activate_card`), because the page it opens is the item whose Play the window is.
+pub(crate) const KIND_MOVIE: c_int = 0;
+
 pub(crate) const KIND_COLLECTION: c_int = 4;
 
 /// Items asked of each hub endpoint, per source. `/hubs?count=` is items-per-hub, so this bounds

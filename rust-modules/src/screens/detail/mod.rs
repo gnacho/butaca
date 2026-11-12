@@ -201,6 +201,11 @@ pub(crate) struct DetailScreen {
     /// (`screens/person.rs`'s `PersonCmd::Close` has the identical un-latched shape; reported
     /// separately rather than fixed here.)
     teardown_cleared: bool,
+    /// **A poster press is waiting for this page's item to land** (issue #355): armed at mount by
+    /// `AppMounter::poster_preplay`, spent once on the first landing that actually IS this page's
+    /// item, and cleared whether or not a window could be opened. Never hashed: it is one-shot
+    /// mount bookkeeping, not a decision the viewer made.
+    preplay_on_land: bool,
 
     // Render state.
     scroll: Spring,
@@ -454,6 +459,7 @@ impl DetailScreen {
             refresh_gen: 0,
             restore_intent: None,
             teardown_cleared: false,
+            preplay_on_land: false,
             scroll: Spring::at(0.0),
             scroll_target: 0.0,
             episode_scroll: Spring::at(0.0),
@@ -1719,6 +1725,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                     }
                 }
                 self.pump_restore(meta, fx);
+                self.land_preplay(fx, cx, meta);
                 self.reveal_focus(cx.focus.current, cx.measure, meta);
                 fx.invalidate(Provenance::Landing(fx.from()));
                 Handled::Yes
@@ -1929,6 +1936,13 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                     self.sub_sid = Some(sid);
                 }
                 fx.invalidate(Provenance::Input);
+                Handled::Yes
+            }
+            // **The pre-playback window committed its one control** (issue #355): start the film
+            // exactly as this page's own Play disc does, so the window cannot promise a start the
+            // page would not give.
+            ScreenEvent::App(AppMsg::PrePlayGo) => {
+                self.play_hero(false, fx, meta);
                 Handled::Yes
             }
             ScreenEvent::App(AppMsg::AltSourceOpen(arg)) => {
@@ -3960,6 +3974,57 @@ impl DetailScreen {
                 }
             }
         }
+    }
+
+    /// **Arm the pre-playback window for a press that lands on this page** (issue #355): a film's
+    /// poster asks for the page, the page fetches the item, and the window opens over it the moment
+    /// that item lands, instead of the viewer having to find Play and then a second Play.
+    ///
+    /// What arms it is the PRESS, not the page (`AppMounter::poster_preplay`), so a press that
+    /// already plays, a resume tile that promises to resume, a show, a season, an episode and a page
+    /// that already holds its item all keep behaving exactly as they did.
+    pub(crate) fn open_preplay_when_loaded(&mut self) {
+        self.preplay_on_land = true;
+    }
+
+    /// Spend the arm: open the window over this page once its item is in the store.
+    ///
+    /// It stays armed while the store holds nothing for this item — a press that lands on a page
+    /// whose fetch has not returned yet is still the press that asked for the window. It is spent
+    /// on the FIRST item that arrives, whether or not a window can be opened for it, because an arm
+    /// that outlived its press would open a window over a page the viewer reached another way.
+    fn land_preplay<H: ContentLike + crate::screens::registry::MetadataLike>(
+        &mut self,
+        fx: &mut Effects<'_, H>,
+        cx: &Cx<'_, H>,
+        meta: crate::metadata::MetadataView<'_>,
+    ) {
+        if !self.preplay_on_land {
+            return;
+        }
+        let Some(d) = self.detail(meta) else { return };
+        // The store can be holding another item while this page waits (a neighbour's fetch landed
+        // first): the arm is about THIS page's film, so it waits for its own.
+        if d.sid != self.sid || d.rk != self.rk {
+            return;
+        }
+        self.preplay_on_land = false;
+        // A show's page plays its on-deck episode, which is not the item the page holds, so there is
+        // no file to describe and no window to open.
+        if d.is_show {
+            return;
+        }
+        let set = self.hero_set(meta);
+        let Some(i) = hero::index_of(set, hero::HeroCtl::Play) else { return };
+        let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
+        let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(cx.measure, meta).btn_y, widths);
+        rect.y -= self.scroll.pos;
+        self.content(
+            fx,
+            ContentReq::Panel(ContentPanel::PrePlay {
+                anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
+            }),
+        );
     }
 
     fn play_hero<H: ContentLike>(&mut self, from_start: bool, fx: &mut Effects<'_, H>, meta: crate::metadata::MetadataView<'_>) -> bool {

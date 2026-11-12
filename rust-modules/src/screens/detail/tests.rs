@@ -112,6 +112,7 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         refresh_gen: 0,
         restore_intent: None,
         teardown_cleared: false,
+            preplay_on_land: false,
         scroll: Spring::at(0.0),
         scroll_target: 0.0,
         episode_scroll: Spring::at(0.0),
@@ -607,6 +608,74 @@ fn the_filmstrips_text_row_opens_that_episodes_own_page() {
         &effect.fx,
         Fx::App(AppFx::Content(ContentReq::Push(ContentArg::Detail { rk, .. }))) if rk == "e2"
     )));
+    clear();
+}
+
+/// **A film's poster opens the pre-playback window over the page it opened** (issue #355).
+///
+/// The press arms it, the landing spends it: the window's file block and its verb do not exist
+/// until the item has arrived, so this is the one shape that can be honest about both — the page
+/// it was always going to open, plus the window in front of it. What must NOT happen is a window
+/// over a show (its page plays an on-deck episode, so the file on the page is not the file that
+/// plays) and a second window for a page whose item already landed.
+#[test]
+fn a_poster_press_opens_the_pre_playback_window_when_the_item_lands() {
+    let mut film = detail(ServerId::UNSET, "film");
+    film.is_show = false;
+    film.kind = "movie".into();
+    film.seasons.clear();
+    film.episodes.clear();
+    let _guard = install(film);
+    let mut screen = bare(&_guard, ServerId::UNSET, "film");
+    screen.open_preplay_when_loaded();
+    let (handled, effects) = step(
+        &mut screen,
+        &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1),
+        None,
+    );
+    assert!(matches!(handled, Handled::Yes));
+    assert!(
+        effects.iter().any(|effect| matches!(
+            &effect.fx,
+            Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlay { .. })))
+        )),
+        "the landing presents the one window"
+    );
+    // …and it is spent: the next landing does not present a second one.
+    let (_, again) = step(
+        &mut screen,
+        &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 2),
+        None,
+    );
+    assert!(
+        !again.iter().any(|effect| matches!(
+            &effect.fx,
+            Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlay { .. })))
+        )),
+        "one press asks for one window"
+    );
+    clear();
+}
+
+/// …and a SHOW's page never opens it: what that page plays is its on-deck episode, so the file the
+/// window would describe is not the file the picture comes from.
+#[test]
+fn a_shows_page_never_opens_the_pre_playback_window() {
+    let _guard = install(detail(ServerId::UNSET, "show"));
+    let mut screen = bare(&_guard, ServerId::UNSET, "show");
+    screen.open_preplay_when_loaded();
+    let (_, effects) = step(
+        &mut screen,
+        &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1),
+        None,
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            &effect.fx,
+            Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlay { .. })))
+        )),
+        "a show's page has no window"
+    );
     clear();
 }
 
