@@ -284,7 +284,7 @@ fn proven_candidate_transition_settlement_reopens_generation() {
     let _restore = Restore(stable.wrapping_add(2));
 
     HlsCandidateTransition::arm_unowned_for_test()
-        .expect("single transition")
+        .expect("a fence with no owner arms")
         .settle();
     assert_eq!(
         SHARED
@@ -314,7 +314,8 @@ fn unwind_after_candidate_media_publication_stays_fenced_until_teardown() {
 
     let unwind = std::panic::catch_unwind(|| {
         let _transition =
-            HlsCandidateTransition::arm_unowned_for_test().expect("single transition");
+            HlsCandidateTransition::arm_unowned_for_test()
+                .expect("a fence with no owner arms");
         panic!("candidate publication unwound before commit or cursor realignment");
     });
     assert!(unwind.is_err());
