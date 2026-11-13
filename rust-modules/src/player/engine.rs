@@ -2343,10 +2343,11 @@ pub(crate) fn stall_report(
     audio_ms: i64,
     runway_ms: i64,
     eos: bool,
-    start_pending: bool,
-    reload_target_ns: Option<i64>,
+    pending: super::readout::PendingStart,
 ) -> String {
-    let target = reload_target_ns.map_or_else(|| "-".to_string(), |ns| (ns / 1_000_000).to_string());
+    let target = pending
+        .target_ns
+        .map_or_else(|| "-".to_string(), |ns| (ns / 1_000_000).to_string());
     format!(
         "stall: class={} pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={} start_pending={} \
          reload_target={}ms",
@@ -2357,7 +2358,7 @@ pub(crate) fn stall_report(
         audio_ms,
         runway_ms,
         u8::from(eos),
-        u8::from(start_pending),
+        u8::from(pending.queued),
         target,
     )
 }
@@ -2427,8 +2428,7 @@ pub(crate) fn feed_both_lanes(mt: &MainThread, eng: &mut Engine) {
             // object to let go. Without it a dark picture under a pending reload and a dark
             // picture from a stuck pipeline read the same in a log, which is the difference the
             // report exists to settle. Its target says which reload it was.
-            super::readout::start_pending(),
-            super::readout::reload_target_ns(),
+            super::readout::PendingStart::now(),
         ));
     }
     feed_stream(mt, eng);
@@ -4984,15 +4984,22 @@ mod stall_watch_tests {
             750,
             40_000,
             false,
-            true,
-            Some(90_000_000_000),
+            crate::player::readout::PendingStart { queued: true, target_ns: Some(90_000_000_000) },
         );
         assert!(line.starts_with("stall: class=buffer_starvation "), "{line}");
         for field in ["pos=1234ms", "v=900ms", "a=750ms", "runway=40000ms", "eos=0", "start_pending=1"] {
             assert!(line.contains(field), "{field} missing from {line}");
         }
         assert!(line.contains("reload_target=90000ms"), "the queued reload's target: {line}");
-        let quiet = stall_report(StallClass::PipelineStuck, 0, 0, 0, 0, true, false, None);
+        let quiet = stall_report(
+            StallClass::PipelineStuck,
+            0,
+            0,
+            0,
+            0,
+            true,
+            crate::player::readout::PendingStart::default(),
+        );
         assert!(
             quiet.contains("eos=1") && quiet.contains("start_pending=0"),
             "{quiet}"

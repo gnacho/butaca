@@ -169,6 +169,18 @@ pub(crate) fn timeline_thread(
         } else {
             TimelineState::Playing
         };
-        super::log(&format!("timeline {} t={}s/{}s", state.as_str(), t, d));
+        // **A queued reload rides the reporter's own line.** The reporter is the one 10 s heartbeat
+        // that says what the pipeline is doing, and a seek's replacement start waiting on the
+        // previous object is exactly that — invisible everywhere else, and indistinguishable from a
+        // stuck pipeline without it (`player::readout::PendingStart`, the shape `9be7a43f6` asks
+        // for). Empty for the ordinary case, so the line every reader already parses is unchanged.
+        let pending = super::readout::PendingStart::now();
+        super::log(&format!(
+            "timeline {} t={}s/{}s{}",
+            state.as_str(),
+            t,
+            d,
+            pending.suffix()
+        ));
     }
 }

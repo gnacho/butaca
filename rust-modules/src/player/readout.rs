@@ -55,6 +55,44 @@ pub(crate) fn start_pending() -> bool {
     crate::route::pending_route_start().is_some()
 }
 
+/// **The reload that is queued, if any** — the typed shape upstream's `readout().start_queued()`
+/// grew for `9be7a43f6`, and the reason both facts live in ONE struct here: the fact and its target
+/// come from two sources (the route control's phase and the seek target), and two loose calls could
+/// answer about two different moments.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct PendingStart {
+    /// A route start is in flight: the seek's own reload, waiting on the previous object.
+    pub(crate) queued: bool,
+    /// Where it is headed. `None` when nothing is queued, and also for a queued start that names no
+    /// target (a fresh open rather than a seek).
+    pub(crate) target_ns: Option<i64>,
+}
+
+impl PendingStart {
+    pub(crate) fn now() -> Self {
+        let queued = start_pending();
+        Self {
+            queued,
+            // Only a queued start has a target: the seek target outlives the reload it was armed
+            // for by a frame or two, and reporting it as a destination after the fact would be a
+            // log line about a reload that already happened.
+            target_ns: queued.then(reload_target_ns).flatten(),
+        }
+    }
+
+    /// The suffix a log line wears for this state, empty when nothing is queued so the ordinary
+    /// line stays byte-identical for every reader that already parses it.
+    pub(crate) fn suffix(&self) -> String {
+        if !self.queued {
+            return String::new();
+        }
+        match self.target_ns {
+            Some(ns) => format!(" start_queued=1 target={}s", (ns / 1_000_000_000).max(0)),
+            None => " start_queued=1 target=-".to_string(),
+        }
+    }
+}
+
 /// Where the queued start is headed, when it has a target.
 ///
 /// `engine::arm_seek` publishes the target; the route control clears it to -1 when no reload is
@@ -111,6 +149,18 @@ mod tests {
             assert_eq!(t.position_s(), 0, "a negative playhead is not a position");
             assert!(t.paused);
         });
+    }
+
+    /// **The queued start and its target are ONE answer**, and the suffix that states it is empty
+    /// for the ordinary case so no existing reader of the line changes.
+    #[test]
+    fn a_pending_start_states_itself_or_says_nothing() {
+        let quiet = PendingStart { queued: false, target_ns: Some(90_000_000_000) };
+        assert_eq!(quiet.suffix(), "", "nothing queued: the line is unchanged");
+        let queued = PendingStart { queued: true, target_ns: Some(90_000_000_000) };
+        assert_eq!(queued.suffix(), " start_queued=1 target=90s");
+        let unnamed = PendingStart { queued: true, target_ns: None };
+        assert_eq!(unnamed.suffix(), " start_queued=1 target=-", "a fresh open names no target");
     }
 
     /// **The two questions the seam exists for**: whether a replacement start is queued, and where
