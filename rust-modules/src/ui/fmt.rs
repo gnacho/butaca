@@ -347,6 +347,25 @@ pub(crate) fn pretty_date(iso: &str, year: i64) -> String {
     }
 }
 
+/// The YEAR of an ISO date ("1976-11-12T00:00:00.0000000Z" or "1976-11-12"), or `None` when the
+/// string does not start with one. Used where only the year matters (an age, a birth span).
+pub(crate) fn year_of(iso: &str) -> Option<i64> {
+    let head = iso.split(['-', 'T']).next()?.trim();
+    let year = head.parse::<i64>().ok()?;
+    (1000..=9999).contains(&year).then_some(year)
+}
+
+/// The current calendar year, from the system clock. Display arithmetic only: a biography's age is
+/// not a domain date, so there is no injected clock to thread here.
+pub(crate) fn current_year() -> Option<i64> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
+    // 31556952 is the mean Gregorian year; good enough to land on the right January.
+    Some(1970 + secs / 31_556_952)
+}
+
 /// A review score, in the shape its own provider publishes it. The server normalises every provider
 /// onto one 0-10 scale, which is not how any of them are quoted: Rotten Tomatoes and TMDB are
 /// PERCENTAGES (9.1 → "91%") and IMDb is out of ten ("7.4"). Printing the raw 9.1 beside a tomato
@@ -437,4 +456,24 @@ fn the_wall_clock_wraps_and_pads_where_a_duration_would_not() {
     // A duration that is not a whole minute rounds DOWN: nobody plans around 40 seconds.
     assert_eq!(ends_at(0, 59_999), "00:00");
     assert_eq!(ends_at(0, -5), "00:00", "a negative length is not a time in the past");
+}
+
+#[cfg(test)]
+mod year_tests {
+    use super::*;
+
+    #[test]
+    fn year_of_reads_the_leading_year_of_both_server_shapes() {
+        assert_eq!(year_of("1976-11-12T00:00:00.0000000Z"), Some(1976));
+        assert_eq!(year_of("1976-11-12"), Some(1976));
+        assert_eq!(year_of(""), None);
+        assert_eq!(year_of("unknown"), None);
+        assert_eq!(year_of("0001-01-01"), None, "a sentinel year is not a birth date");
+    }
+
+    #[test]
+    fn current_year_is_this_century() {
+        let y = current_year().expect("a clock");
+        assert!(y >= 2020 && y <= 2100, "got {y}");
+    }
 }

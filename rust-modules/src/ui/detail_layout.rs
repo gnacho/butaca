@@ -7,24 +7,19 @@ use super::{consts::SCR_W, Rect};
 /// is the whole point: at 943 it stopped 481px short of the margin and the hero read as a column
 /// with a hole beside it. The poster keeps the left margin, so nothing is lost there, and the
 /// people column is no longer a second column beside this one (see `PEOPLE_W`).
-pub(crate) const HERO_TEXT_W: f32 = 1244.0;
-/// The hero's poster column: 364 wide at 2:3 — 30% up from the mockup's 280 (the owner's
-/// 2026-11-10 pass: "la carátula, al menos 30% más grande"). A second column is the whole point —
-/// the wide backdrop stays, and the poster is what makes the page read as an item rather than a
-/// still.
-/// The hero's poster column: 460 wide at 2:3 — the page's DOMINANT element (the owner's
-/// 2026-11-10 pass: "lo que manda es la carátula, tiene que cobrar protagonismo"). The copy column
-/// starts right of it and the action row lives IN that column, so the taller poster no longer
-/// collides with the controls below.
-pub(crate) const POSTER_W: f32 = 460.0;
-pub(crate) const POSTER_H: f32 = 690.0;
+pub(crate) const HERO_TEXT_W: f32 = 1164.0;
+/// The hero's poster column: 540 wide at 2:3, the page's DOMINANT element (the owner's
+/// 2026-11-10 pass: "la carátula... que ocupe el 75% de la pantalla (vertical - alineado abajo)").
+/// Bottom-aligned: HERO_TOP is solved from POSTER_H so the poster's foot sits on the bottom safe
+/// margin. The copy column starts right of it and the action row lives in that column.
+pub(crate) const POSTER_W: f32 = 540.0;
+pub(crate) const POSTER_H: f32 = 810.0;
 pub(crate) const POSTER_GAP: f32 = 24.0;
-/// **The hero's one top edge.** The poster's head and the title band's head are the same line
-/// (the owner's pass: "alinear el logo con la carátula"), and the poster rose 20% of its own
-/// height from the old `366` to get there — the space the removed `Película` kicker used to spend
-/// above the title. The whole column below it moved up with it, which is what pays for the fifth
-/// synopsis line.
-pub(crate) const HERO_TOP: f32 = 282.0;
+/// **The hero's one top edge, solved from the poster.** The poster is 75% of the screen and
+/// bottom-aligned, so its head lands at `SCR_H - MARGIN_Y - POSTER_H`; the title band and the copy
+/// column share that head. The whole column below it moved up with it, which is what pays for the
+/// poster's new height.
+pub(crate) const HERO_TOP: f32 = crate::ui::widgets::TOP_BAR_BOTTOM + theme::space::SM;
 /// The poster's top edge: the hero's own top, shared with the title band.
 pub(crate) const POSTER_Y: f32 = HERO_TOP;
 /// Where the hero's copy column begins, right of the poster. Every left-anchored row of the hero
@@ -35,17 +30,19 @@ pub(crate) const HERO_TEXT_X: f32 = MARGIN_X + POSTER_W + POSTER_GAP;
 /// the identity row hangs under.
 ///
 /// **The rung's ceiling, so the band's HEAD is the poster's head** (the owner's "alinear el logo
-/// con la carátula"): the two columns start on one line. The title's own ink stays at the band's
-/// foot rather than at its head, and that is not negotiable: the hero's scrim reaches full strength
-/// only at [`crate::ui::widgets`]' knee, and a `size::HERO` run moved up to 282 measured 1.41:1 over
-/// bright artwork against the design system's 3:1 floor. A clearLogo is placed by the same foot and
-/// spills upward as paint, which is what makes the alignment visible for the art case.
-pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + theme::logo::HERO_H_MAX;
+/// con la carátula"): the two columns start on one line.
+///
+/// **The title is PLAIN TYPE now, not a clearLogo** (the owner's 2026-11-10 pass, asked three
+/// times: "quita el nombre de la peli en logo y ponlo en negrita"). That removes the async logo
+/// band entirely — the height of the band no longer depends on whether a wordmark exists — so the
+/// band is exactly one `size::HERO` line and its HEAD is the poster's head.
+pub(crate) const TITLE_BAND_H: f32 = theme::size::HERO as f32;
+pub(crate) const TITLE_BOTTOM: f32 = HERO_TOP + TITLE_BAND_H;
 /// The cast and crew band, which is now a BAND under the facts row rather than a column beside the
 /// copy. A 560-wide column at the right edge was what capped the copy at 943: the two shared a
 /// horizontal strip, so widening the text meant running under the names. Stacked, each gets the
 /// full measure and the page has no dead corner.
-pub(crate) const PEOPLE_W: f32 = 1244.0;
+pub(crate) const PEOPLE_W: f32 = 1164.0;
 pub(crate) const PEOPLE_LEAD: f32 = 32.0;
 pub(crate) const PEOPLE_MAX_LINES: usize = 4;
 pub(crate) const PEOPLE_INK: [f32; 4] = theme::TEXT_SECONDARY;

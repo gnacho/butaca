@@ -34,7 +34,12 @@ use crate::ui::screen::{
     Placed, RenderStrategy, Screen, ScreenEvent, Scrim, Seat, Step, Stop,
 };
 use crate::ui::table::{Row, Section, TableView};
+// **The line a track wears lives in `ui::track_facts`**, with the rest of the vocabulary about a
+// stream: the pre-playback window states the same tracks and may not name this screen (the
+// `sibling` gate), so the words moved where both can reach them.
+use crate::ui::track_facts::{row_label, sub_row_label};
 use crate::ui::{theme, Rect};
+
 
 /// The panel's width. One column of language + codec lines.
 const PANEL_W: f32 = 520.0;
@@ -113,31 +118,6 @@ pub(crate) fn choices(d: &Detail, audio: bool) -> Vec<Choice> {
     }
 }
 
-/// A track's line: its language and its codec, plus the two flags a viewer chooses between.
-/// The same facts the About footer's Languages column printed, which is where the owner moved
-/// them from.
-pub(crate) fn row_label(stream: &crate::metadata::Stream) -> String {
-    let lang = if stream.lang.is_empty() {
-        crate::i18n::msg::browse_detail_unknown().to_string()
-    } else {
-        crate::metadata::language_name(&stream.lang)
-    };
-    let mut text = if stream.codec.is_empty() {
-        lang
-    } else {
-        format!("{lang} \u{b7} {}", crate::metadata::friendly_codec(&stream.codec))
-    };
-    for (on, tag) in [
-        (stream.forced, crate::i18n::msg::widgets_tracks_forced()),
-        (stream.sdh, crate::i18n::msg::widgets_badge_sdh()),
-    ] {
-        if on {
-            text = format!("{text} \u{b7} {tag}");
-        }
-    }
-    text
-}
-
 /// Under the disc when there is room, above it when there is not, never over it, so the control
 /// that opened the panel stays readable beside its own list.
 pub(crate) fn panel_at(a: Rect, content_h: f32) -> Rect {
@@ -172,7 +152,7 @@ impl TrackPickScreen {
         let next = d.map(|d| choices(d, self.arg.audio)).unwrap_or_default();
         let labels: Vec<String> = match d {
             Some(d) if self.arg.audio => d.audio.iter().map(row_label).collect(),
-            Some(d) => d.subs.iter().map(row_label).collect(),
+            Some(d) => d.subs.iter().map(sub_row_label).collect(),
             None => Vec::new(),
         };
         if next == self.choices && labels == self.labels && !self.choices.is_empty() {
@@ -462,11 +442,57 @@ mod tests {
 
     /// A row states the language and the codec — the two facts the About footer's Languages
     /// column printed, which is where the owner moved them from.
+
+    #[test]
+    fn an_audio_row_names_its_channel_count() {
+        let mut s = stream(1, "eng", "eac3");
+        s.layout = "5.1(side)".into();
+        s.channels = 6;
+        assert!(row_label(&s).ends_with("\u{b7} 5.1"), "got {}", row_label(&s));
+
+        let mut stereo = stream(2, "spa", "aac");
+        stereo.layout = "stereo".into();
+        assert!(row_label(&stereo).ends_with("\u{b7} Stereo"));
+
+        // A count with no layout still answers in the same vocabulary.
+        let mut bare = stream(3, "spa", "ac3");
+        bare.channels = 6;
+        assert!(row_label(&bare).ends_with("\u{b7} 5.1"));
+    }
+
+    #[test]
+    fn a_subtitle_row_says_plain_text_and_country() {
+        let mut text = stream(1, "es", "subrip");
+        text.language_tag = "es-419".into();
+        let line = sub_row_label(&text);
+        assert_eq!(
+            line.split(" \u{b7} ").last(),
+            Some("Latinoam\u{e9}rica"),
+            "got {line}"
+        );
+        // The host suite resolves the catalogue in the process language, so grade the row's own
+        // words rather than a re-read of the same message.
+        let plain = crate::i18n::msg::widgets_subs_plain_text();
+        assert!(
+            line.split(" \u{b7} ").any(|part| part == plain),
+            "a subrip track is plain text ({plain}): {line}"
+        );
+
+        // An image-based track says nothing about being text.
+        let mut image = stream(2, "es", "pgs");
+        image.language_tag = "es-ES".into();
+        let line = sub_row_label(&image);
+        assert!(!line.contains(crate::i18n::msg::widgets_subs_plain_text()), "got {line}");
+        assert!(line.contains("Espa\u{f1}a"), "got {line}");
+    }
+
     #[test]
     fn a_row_states_the_language_and_its_codec() {
         // The language is the human name (a Spanish UI still reads "English" here, the language's
         // own name), and the codec is `friendly_codec`'s — the owner's 2026-11-10 "lenguaje más
         // entendible": "eng · EAC3" reads "English · Dolby Digital Plus".
+        // No channel data on the fixture, so the row is language + codec (issue #411 adds the
+        // count when the stream carries one; the two tests below grade that).
         assert_eq!(row_label(&stream(1, "eng", "eac3")), "English \u{b7} Dolby Digital Plus");
         let mut flagged = stream(2, "spa", "srt");
         flagged.sdh = true;

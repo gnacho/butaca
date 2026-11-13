@@ -59,7 +59,10 @@ pub(crate) const ELEM_ARTWORK: u32 = 10;
 /// group.
 pub(crate) const HERO_GROUP: GroupId = GroupId(0);
 
-/// The Play/Resume pill's minimum width — a pathologically short label still gets a pill.
+/// The Play/Resume pill's minimum width — a pathologically short label still gets a pill. The
+/// detail row's Play is a disc now, so this is read only by the widest-row test that keeps the
+/// pill's old shape honest.
+#[cfg(test)]
 const PW: f32 = 168.0;
 
 /// The focused disc's verb caption fades in at the row's own pace - the profile chip's unfurl
@@ -74,13 +77,10 @@ pub(crate) const CD: f32 = crate::ui::widgets::StatusOverlay::CTRL_H;
 const PEOPLE_MAX_LINES: usize = 2;
 const PEOPLE_CAST: usize = 3;
 const PEOPLE_LABEL_INK: [f32; 4] = theme::TEXT_TERTIARY;
-/// The facts row now runs to the safe edge: the people band is BELOW it, not beside it, so the row
-/// no longer has a column to stop short of (issue #323). It survives as the BAR the row's own
-/// tests hold the widest control set to, which is why it is test-only since the discs stopped
-/// unfurling: nothing in the draw reads a right edge any more.
-#[cfg(test)]
-const FACTS_R: f32 =
-    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - theme::space::SM;
+/// The facts row runs to the safe edge: the people band is BELOW it, not beside it, so the row no
+/// longer has a column to stop short of (issue #323). The owner's 2026-11-10 pass justifies the
+/// whole action row to the RIGHT safe edge, so the two tests that hold the widest control set now
+/// measure against `SCR_W - MARGIN_X` directly.
 
 /// Duplicated from `widgets::Button`'s own PRIVATE `BTN_ICON_RATIO`/`BTN_ICON_GAP` (1.15, 12.0):
 /// those two constants are `widgets.rs`-internal, and this module may not reach past that file's
@@ -198,6 +198,13 @@ pub(crate) struct HeroSet {
 pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 9], usize) {
     let mut v = [HeroCtl::Play; 9];
     let mut n = 1;
+    // The owner's 2026-11-10 order: play, trailer, language, subtitles, mark-watched, favourite,
+    // image. The discs are reordered where the row is BUILT, so focus, hit-testing and drawing all
+    // read one list.
+    if set.trailer {
+        v[n] = HeroCtl::Trailer;
+        n += 1;
+    }
     if set.restart {
         v[n] = HeroCtl::Restart;
         n += 1;
@@ -222,12 +229,6 @@ pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 9], usize) {
     }
     if set.subs {
         v[n] = HeroCtl::Subtitles;
-        n += 1;
-    }
-    // The owner's 2026-11-10 pass: the trailer sits beside the language and subtitle discs, not up
-    // by the primary Play/Restart pair - it is the same kind of "what this file offers" control.
-    if set.trailer {
-        v[n] = HeroCtl::Trailer;
         n += 1;
     }
     if set.artwork {
@@ -397,14 +398,6 @@ pub(crate) fn trailer_play(d: &Detail) -> Option<(&Extra, &str)> {
     Some((extra, extra.hud_title(d.title.as_str())))
 }
 
-/// The Play pill's label — the word the press will actually perform.
-pub(crate) fn hero_pill_label(has_restart: bool) -> &'static CStr {
-    if has_restart {
-        crate::i18n::msg::browse_detail_resume_c()
-    } else {
-        crate::i18n::msg::browse_detail_play_c()
-    }
-}
 
 /// `widgets::Button::pill_w_full`, reproduced over [`Measure`] rather than `crate::text` directly
 /// — see [`HERO_ICON_RATIO`]'s doc for why the icon-box constants are duplicated, and
@@ -424,15 +417,25 @@ fn pill_w(measure: &dyn Measure, label: &CStr, sz: i32, icon: bool, trailing: bo
     isz + gap + measure.width(label, sz, true) + tgap + tsz + crate::ui::widgets::BTN_PILL_AIR
 }
 
-pub(crate) fn hero_pill_w(measure: &dyn Measure, has_restart: bool) -> f32 {
-    pill_w(
-        measure,
-        hero_pill_label(has_restart),
-        theme::size::BODY,
-        true,
-        false,
-    )
-    .max(PW)
+/// The PLAY control's width. With nothing watched it is a plain disc, the same diameter as the rest
+/// of the row ("el botón de play al mismo tamaño que el resto"). With a resume point it WIDENS into
+/// a capsule that carries the elapsed minutes INSIDE it ("46m"), so the primary control answers
+/// "how far in am I" without a second label anywhere (the owner's 2026-11-10 pass).
+pub(crate) fn hero_pill_w_for(measure: &dyn Measure, resume_ms: i64) -> f32 {
+    if resume_ms < 60_000 {
+        return CD;
+    }
+    let label = play_elapsed(resume_ms);
+    let text = measure.width_str(&label, theme::size::CAPTION, true);
+    // Icon box + gap + the run + the capsule's own air, never narrower than a plain disc.
+    (CD * 0.55 + 10.0 + text + CD * 0.45).max(CD)
+}
+
+/// The elapsed minutes a resume point has behind it, as the Play capsule prints them ("46m"). Sub
+/// minute reads as "1m": a capsule that says "0m" is a read-out saying nothing.
+pub(crate) fn play_elapsed(resume_ms: i64) -> String {
+    let mins = (resume_ms / 60_000).max(1);
+    crate::i18n::msg::core_duration_short_minutes(mins)
 }
 
 pub(crate) fn alt_pill_w(measure: &dyn Measure) -> f32 {
@@ -456,20 +459,25 @@ pub(crate) struct HeroWidths {
 /// it and no longer sit under the taller poster.
 pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -> Rect {
     let (v, n) = hero_ctls(set);
-    let mut x = crate::ui::detail_layout::HERO_TEXT_X;
+    let width_of = |c: HeroCtl| match c {
+        HeroCtl::Play => cw.pill,
+        HeroCtl::Alt => cw.alt,
+        HeroCtl::Restart => cw.disc[0],
+        HeroCtl::Trailer => cw.disc[1],
+        HeroCtl::MarkWatched | HeroCtl::MarkUnwatched => cw.disc[2],
+        HeroCtl::Favorite => cw.disc[3],
+        HeroCtl::Audio => cw.disc[4],
+        HeroCtl::Subtitles => cw.disc[5],
+        HeroCtl::Artwork => cw.disc[6],
+    };
+    // Justified to the RIGHT margin (the owner's 2026-11-10 pass: "justificados a derecha"): the
+    // row's own total width decides its left edge, so the last control ends on the safe edge.
+    let total: f32 = v[..n].iter().map(|&c| width_of(c)).sum::<f32>()
+        + CGAP * (n.saturating_sub(1)) as f32;
+    let mut x = crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - total;
     let mut w = cw.pill;
-    for (k, c) in v[..n].iter().enumerate() {
-        w = match c {
-            HeroCtl::Play => cw.pill,
-            HeroCtl::Alt => cw.alt,
-            HeroCtl::Restart => cw.disc[0],
-            HeroCtl::Trailer => cw.disc[1],
-            HeroCtl::MarkWatched | HeroCtl::MarkUnwatched => cw.disc[2],
-            HeroCtl::Favorite => cw.disc[3],
-            HeroCtl::Audio => cw.disc[4],
-            HeroCtl::Subtitles => cw.disc[5],
-            HeroCtl::Artwork => cw.disc[6],
-        };
+    for (k, &c) in v[..n].iter().enumerate() {
+        w = width_of(c);
         if k >= i {
             break;
         }
@@ -494,9 +502,9 @@ pub(crate) fn disc_caps() -> [f32; 7] {
 /// The live widths, combining [`hero_pill_w`]/[`alt_pill_w`]/[`disc_caps`] — the one function
 /// `DetailScreen`'s `Focusable` queries and `draw` both call, so they can never drift (mirrors
 /// `ui/detail.rs::hero_widths`, over `Measure` instead of `crate::text` directly).
-pub(crate) fn hero_widths(measure: &dyn Measure, has_restart: bool) -> HeroWidths {
+pub(crate) fn hero_widths(measure: &dyn Measure, resume_ms: i64) -> HeroWidths {
     HeroWidths {
-        pill: hero_pill_w(measure, has_restart),
+        pill: hero_pill_w_for(measure, resume_ms),
         alt: alt_pill_w(measure),
         disc: disc_caps(),
     }
@@ -520,26 +528,6 @@ pub(crate) fn has_people(d: &Detail) -> bool {
     !d.cast.is_empty() || hero_credit(d).is_some()
 }
 
-pub(crate) fn draw_people(p: Painter, d: &Detail, top: f32, measure: &dyn Measure) {
-    let mut y = top;
-    if !d.cast.is_empty() {
-        // **No `Starring` lead.** The owner's pass removed the word from the band: a run of names
-        // under a film's own title needs no caption saying they are the cast, and the label cost
-        // the width the third name uses. The crew line KEEPS `Directed by` — that one names a
-        // role the names do not.
-        let names: Vec<&str> = d
-            .cast
-            .iter()
-            .take(PEOPLE_CAST)
-            .map(|credit| credit.tag.as_str())
-            .collect();
-        y += people_line(p, "", &names, y, measure);
-    }
-    if let Some((label, names)) = hero_credit(d) {
-        people_line(p, label, &names, y, measure);
-    }
-}
-
 /// The height the cast and crew band will take, without painting it: the hero chain has to know it
 /// before the action row can be placed (issue #315/#323).
 pub(crate) fn people_h(d: &Detail, measure: &dyn Measure) -> f32 {
@@ -556,6 +544,37 @@ pub(crate) fn people_h(d: &Detail, measure: &dyn Measure) -> f32 {
     if let Some((label, names)) = hero_credit(d) {
         h += people_line_h(label, &names, measure);
     }
+    h
+}
+
+pub(crate) fn draw_people(p: Painter, d: &Detail, top: f32, measure: &dyn Measure) {
+    let mut y = top;
+    if !d.cast.is_empty() {
+        let names: Vec<&str> = d
+            .cast
+            .iter()
+            .take(PEOPLE_CAST)
+            .map(|credit| credit.tag.as_str())
+            .collect();
+        y += people_line(p, "", &names, y, measure);
+    }
+    if let Some((label, names)) = hero_credit(d) {
+        people_line(p, label, &names, y, measure);
+    }
+}
+
+fn people_line(
+    p: Painter,
+    label: &str,
+    names: &[&str],
+    top: f32,
+    measure: &dyn Measure,
+) -> f32 {
+    use crate::ui::detail_layout::{HERO_TEXT_W, HERO_TEXT_X};
+    let joined = people_join(names);
+    let view = people_view(&joined, label, measure);
+    let h = view.measure_h(HERO_TEXT_W);
+    view.draw(p, Rect::new(HERO_TEXT_X, top, HERO_TEXT_W, 0.0));
     h
 }
 
@@ -584,21 +603,6 @@ fn people_view<'a>(joined: &'a str, label: &'a str, measure: &'a dyn Measure) ->
 fn people_line_h(label: &str, names: &[&str], measure: &dyn Measure) -> f32 {
     let joined = people_join(names);
     people_view(&joined, label, measure).measure_h(crate::ui::detail_layout::HERO_TEXT_W)
-}
-
-fn people_line(
-    p: Painter,
-    label: &str,
-    names: &[&str],
-    top: f32,
-    measure: &dyn Measure,
-) -> f32 {
-    use crate::ui::detail_layout::{HERO_TEXT_W, HERO_TEXT_X};
-    let joined = people_join(names);
-    let view = people_view(&joined, label, measure);
-    let h = view.measure_h(HERO_TEXT_W);
-    view.draw(p, Rect::new(HERO_TEXT_X, top, HERO_TEXT_W, 0.0));
-    h
 }
 
 /// **The item's own date, as the identity line says it**: the year alone for a film or a show, and
@@ -1188,10 +1192,10 @@ mod tests {
                                 for artwork in [false, true] {
                                     let set = HeroSet { restart, trailer, alt, mark, favorite: Some(false), audio, subs, artwork };
                                     let (_, n) = hero_ctls(set);
-                                    let widths = hero_widths(&measure, restart);
+                                    let widths = hero_widths(&measure, if restart { 2_760_000 } else { 0 });
                                     let last = hero_btn_rect_at(set, n - 1, 0.0, widths);
                                     assert!(
-                                        last.x + last.w <= FACTS_R + 0.01,
+                                        last.x + last.w <= crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X + 0.01,
                                         "{set:?} ends at {}",
                                         last.x + last.w
                                     );
@@ -1250,7 +1254,7 @@ mod tests {
                 disc: [CD; 7],
             },
         );
-        assert!(last.x + last.w < FACTS_R);
+        assert!(last.x + last.w <= crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X + 0.01);
     }
 
     #[test]
@@ -1269,17 +1273,17 @@ mod tests {
     }
 
     #[test]
-    fn trailer_true_sits_beside_the_language_discs() {
+    fn trailer_true_follows_play() {
         let set = set_full(true, true, PosterMark::None, true);
         let (controls, n) = hero_ctls(set);
         assert_eq!(
             &controls[..n],
             &[
                 HeroCtl::Play,
+                HeroCtl::Trailer,
                 HeroCtl::Restart,
                 HeroCtl::Alt,
-                HeroCtl::MarkWatched,
-                HeroCtl::Trailer
+                HeroCtl::MarkWatched
             ]
         );
     }
@@ -1291,11 +1295,10 @@ mod tests {
         assert_eq!(index_of(before, HeroCtl::Play), Some(0));
         assert_eq!(index_of(after, HeroCtl::Play), Some(0));
         assert_eq!(index_of(before, HeroCtl::Trailer), None);
-        // The trailer now sits AFTER the watch toggle, beside the language discs, so it does not
-        // move the watch identity at all.
-        assert_eq!(index_of(after, HeroCtl::Trailer), Some(2));
+        // The trailer sits right after Play, ahead of the watch toggle.
+        assert_eq!(index_of(after, HeroCtl::Trailer), Some(1));
         let watch = index_of(after, HeroCtl::MarkWatched).unwrap();
-        assert_eq!(watch, index_of(before, HeroCtl::MarkWatched).unwrap());
+        assert_eq!(watch, index_of(before, HeroCtl::MarkWatched).unwrap() + 1);
         assert_eq!(ctl_at(after, watch).unwrap().elem(), ELEM_MARK_WATCHED);
     }
 
@@ -1303,7 +1306,7 @@ mod tests {
     fn losing_the_trailer_disc_drops_its_identity() {
         let with = set_full(true, false, PosterMark::None, true);
         let without = set(true, false, PosterMark::None);
-        assert_eq!(index_of(with, HeroCtl::Trailer), Some(3));
+        assert_eq!(index_of(with, HeroCtl::Trailer), Some(1));
         assert_eq!(index_of(without, HeroCtl::Trailer), None);
     }
 

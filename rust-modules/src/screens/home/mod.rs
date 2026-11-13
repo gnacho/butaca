@@ -23,7 +23,8 @@ use crate::ui::icons::Icon;
 use crate::ui::label::{Label, VAlign};
 
 use crate::ui::landing_hero::{
-    base_scrim_ramp, stack_bottom as hero_stack_bottom, COL_W as HERO_COL_W, TEXT_TOP as HERO_TEXT_TOP,
+    base_scrim_ramp, stack_bottom as hero_stack_bottom, COL_W as HERO_COL_W,
+    SYN_W as HERO_SYN_W, TEXT_TOP as HERO_TEXT_TOP,
 };
 use crate::ui::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputEvent,
@@ -2512,8 +2513,11 @@ fn hero_text_metrics(hero: &CatalogMovie) -> (f32, f32, f32) {
     let meta_h = TextView::new(&meta, theme::size::BODY, theme::TEXT_SECONDARY)
         .max_lines(1)
         .measure_h(HERO_COL_W);
+    // **The blurb is measured at the page's measure, not at the title's column** (see
+    // `landing_hero::SYN_W`): the width is what decides how many lines it takes, and with it where
+    // the action row lands.
     let synopsis_h = (!hero.summary.is_empty())
-        .then(|| theme::space::SM + crate::ui::hero_synopsis(&hero.summary, "").measure_h(HERO_COL_W))
+        .then(|| theme::space::SM + crate::ui::hero_synopsis(&hero.summary, "").measure_h(HERO_SYN_W))
         .unwrap_or(0.0);
     (title_h, meta_h, synopsis_h)
 }
@@ -2556,7 +2560,9 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
     if !on_axis(
         MARGIN_X + dx,
         if source.is_empty() {
-            HERO_COL_W
+            // The WIDEST thing in the block decides whether it is on the axis: the blurb runs the
+            // page's measure, so a flip that has carried the title off still has a blurb to draw.
+            HERO_SYN_W
         } else {
             META_FLOW_W
         },
@@ -2597,10 +2603,16 @@ fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure:
     }
     y += meta_h;
     if let Some(view) = synopsis {
-        view.draw(
-            p,
-            Rect::new(MARGIN_X, y + theme::space::SM, HERO_COL_W, 0.0),
-        );
+        // **The blurb runs the whole measure, and the band pays for it.** It is drawn here, before
+        // the copy and over the artwork the ground already laid down, because the left wedge is a
+        // function of x and is spent long before the copy's right end: past it the blurb would sit
+        // on undimmed art. Same trade the detail hero made for its copy column.
+        let top = y + theme::space::SM;
+        let band_h = view.measure_h(HERO_SYN_W);
+        // The copy's own edges: the band feathers OUTSIDE them, so no line of the blurb is ever
+        // read through a ramp.
+        crate::ui::widgets::hero_text_band(p, top, top + band_h, 1.0);
+        view.draw(p, Rect::new(MARGIN_X, top, HERO_SYN_W, 0.0));
     }
 }
 

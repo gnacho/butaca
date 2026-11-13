@@ -123,7 +123,11 @@ pub const TEXT_SECONDARY: [f32; 4] = WARM_500;
 /// hero's synopsis, which is the longest run of text on the page and sits over the backdrop scrim;
 /// at [`TEXT_SECONDARY`] it read as fine print rather than as the blurb. A one-line metadata VALUE
 /// stays secondary — the distinction is paragraph-vs-label, not importance.
-pub const TEXT_READING: [f32; 4] = WARM_300;
+/// **Reading copy, on the Jellyfin palette** (the owner's 2026-11-10 pass: "el texto del resumen
+/// debería ser misma gama cromática que el logo de jellyfin"). A pale violet that belongs to the
+/// page's own family rather than the warm ink it used to be, and still far enough from the ground
+/// to clear the 3:1 the synopsis is graded at over bright artwork.
+pub const TEXT_READING: [f32; 4] = rgb8(0xd8, 0xd4, 0xf0);
 /// Tertiary text: runtime, kickers, inactive tabs, About labels, dim/empty states.
 pub const TEXT_TERTIARY: [f32; 4] = WARM_700;
 /// The `·` between fine-print facts, and **only** that — a step below the words it separates.
@@ -301,6 +305,10 @@ pub mod logo {
 /// `#ffcea3`: a control lights up for exactly one reason, the remote is on it. Nothing is filled by
 /// rank, so there is no always-filled primary CTA: the hero Play pill sits idle like everything
 /// else until focus reaches it.
+/// The ONE hover/focus tone of the chromeless chrome (the owner's 2026-11-10 pass: "el tono del
+/// hover y del botón back los unificamos a #7373CB"). It is the Jellyfin violet, a step lighter than
+/// the page ground so a lit control separates from it without going white.
+pub const CHROME_LIT: [f32; 4] = rgb8(0x73, 0x73, 0xcb);
 pub const ACCENT: [f32; 4] = WARM_100;
 /// Near-black ink/glyphs drawn over [`ACCENT`].
 pub const ACCENT_INK: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
@@ -932,6 +940,14 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
 /// Section divider hairline.
 pub const HAIRLINE: [f32; 4] = with_a(WARM_100, 0.12);
+
+/// The settings grid's card plate (issue #415): a step ABOVE the panel rather than a colour, so a
+/// row reads as its own object over the page. Every other table keeps drawing rows on the panel.
+pub const TABLE_CARD_FILL: [f32; 4] = with_a(WHITE, 0.05);
+
+
+/// The focused card's edge, drawn as a ring on the same tone.
+pub const TABLE_CARD_RING: [f32; 4] = with_a(CHROME_LIT, 0.85);
 /// A glass container's **perimeter line** — the design system's `--glass-rim`, one notch under the
 /// tiles' own [`CARD_SHEEN`] (.22) because a sheet's edge is quieter than a card's.
 ///

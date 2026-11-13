@@ -2247,6 +2247,63 @@ pub(crate) struct StallWatch {
     reported: bool,
 }
 
+/// **Which of the four classes a stop belongs to** — the answer `#327` asks for, derived from what
+/// the transport can see when the picture stops advancing, so the owner's log answers the question
+/// instead of only recording that it happened.
+///
+/// The four are the issue's own. Each rests on evidence the engine really holds, and the doc on
+/// each says which, because a classification nobody can check is a guess wearing a label.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum StallClass {
+    /// The producer pushed EOS and the picture is still short of the end: **a transport that ended
+    /// early** — the class `ff: body stopped short` reports when a reopen fixes it. Reaching here
+    /// means the reopen budget is spent or the source is unsized, so nothing more is coming.
+    TransportEnded,
+    /// Nothing fed ahead AND nothing is arriving from the source (the prime runway is empty too):
+    /// **the server stopped delivering**, which is the class a library refresh, a dropped
+    /// connection or a throttled transcode produces. Distinguished from the next one by the
+    /// runway, not by the buffer: both read zero in the buffer.
+    ServerInterruption,
+    /// Nothing fed ahead but the source still HAS data ahead (the runway is non-zero): **the local
+    /// pipeline could not keep up** — the starvation class, where the picture stops because the
+    /// feeder is behind rather than because nobody can serve it.
+    BufferStarvation,
+    /// Data WAS fed ahead and the position does not move: **nothing is consuming it**, which is the
+    /// demux/decode class (a decode that stopped, a plane that is not presenting). The `ff:` lines
+    /// in the same log are what name the specific error; this line says where to look.
+    PipelineStuck,
+}
+
+impl StallClass {
+    /// The word the log carries. Short, stable and greppable: a support log is read by a person
+    /// scanning, not parsed.
+    pub(crate) const fn word(self) -> &'static str {
+        match self {
+            Self::TransportEnded => "transport_ended",
+            Self::ServerInterruption => "server_interruption",
+            Self::BufferStarvation => "buffer_starvation",
+            Self::PipelineStuck => "pipeline_stuck",
+        }
+    }
+}
+
+/// Classify a stall from three facts the transport holds: whether the producer pushed EOS, how much
+/// video is fed ahead of the playhead, and how much the source has in reserve. Pure, so all four
+/// classes are graded without a player.
+pub(crate) fn classify_stall(eos: bool, fed_ahead_ms: i64, runway_ms: i64) -> StallClass {
+    if eos {
+        return StallClass::TransportEnded;
+    }
+    if fed_ahead_ms > 0 {
+        return StallClass::PipelineStuck;
+    }
+    if runway_ms > 0 {
+        StallClass::BufferStarvation
+    } else {
+        StallClass::ServerInterruption
+    }
+}
+
 impl StallWatch {
     pub(crate) const fn new() -> Self {
         Self { at_ns: i64::MIN, since_ms: None, reported: false }
@@ -2283,13 +2340,18 @@ pub(crate) fn feed_both_lanes(mt: &MainThread, eng: &mut Engine) {
     if stalled {
         let vbuf = (eng.max_fed_video_pts - eng.seek_base_pts).max(0);
         let abuf = (eng.max_fed_audio_pts - eng.seek_base_pts).max(0);
+        let runway = SHARED.hls_prime_runway_ms.load(std::sync::atomic::Ordering::Relaxed);
+        let class = classify_stall(eng.eos_pushed, vbuf / 1_000_000, runway);
+        // `class=` FIRST, because that is the answer the report asks for; the numbers behind it
+        // follow, so the classification can be checked rather than trusted (#327).
         log(&format!(
-            "stall: pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={}",
+            "stall: class={} pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={}",
+            class.word(),
             pos_ns / 1_000_000,
             STALL_REPORT_MS / 1_000,
             vbuf / 1_000_000,
             abuf / 1_000_000,
-            SHARED.hls_prime_runway_ms.load(std::sync::atomic::Ordering::Relaxed),
+            runway,
             eng.eos_pushed,
         ));
     }
@@ -4665,6 +4727,49 @@ mod stall_watch_tests {
         assert!(w.observe(STALL_REPORT_MS, 1, false));
         assert!(!w.observe(STALL_REPORT_MS + 1, 2, false), "movement clears the report");
         assert!(w.observe(STALL_REPORT_MS * 2 + 1, 2, false), "a new stall reports again");
+    }
+
+    /// **The four classes, each from the evidence that names it** (#327's acceptance asks for the
+    /// stop to be classified, not just recorded). These are the four combinations the transport can
+    /// actually distinguish, so every report the watch writes can be read back into one of them.
+    #[test]
+    fn a_stall_is_classified_by_what_the_transport_can_see() {
+        use super::{classify_stall, StallClass};
+        assert_eq!(
+            classify_stall(true, 0, 0),
+            StallClass::TransportEnded,
+            "EOS pushed and the picture short: the body ended early"
+        );
+        assert_eq!(
+            classify_stall(false, 0, 0),
+            StallClass::ServerInterruption,
+            "nothing fed and nothing in reserve: nobody is serving"
+        );
+        assert_eq!(
+            classify_stall(false, 0, 40_000),
+            StallClass::BufferStarvation,
+            "nothing fed but the source has data: the feeder is behind"
+        );
+        assert_eq!(
+            classify_stall(false, 900, 0),
+            StallClass::PipelineStuck,
+            "fed ahead and still not moving: nothing is consuming it"
+        );
+        // EOS wins over the buffers: a drain at the end of a file feeds nothing either, and reading
+        // that as starvation would name the wrong fault.
+        assert_eq!(classify_stall(true, 0, 40_000), StallClass::TransportEnded);
+        // Every class has its own word, so a support log is greppable by fault.
+        let words: Vec<&str> = [
+            StallClass::TransportEnded,
+            StallClass::ServerInterruption,
+            StallClass::BufferStarvation,
+            StallClass::PipelineStuck,
+        ]
+        .iter()
+        .map(|c| c.word())
+        .collect();
+        let unique: std::collections::BTreeSet<&&str> = words.iter().collect();
+        assert_eq!(unique.len(), 4, "one word per class: {words:?}");
     }
 
     #[test]

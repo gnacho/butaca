@@ -62,6 +62,13 @@ const TAB_EP_GAP: f32 = theme::space::MD;
 /// title's band, which is the moment the owner asked for it to be gone. Pure, and separate from the
 /// draw, because the direction of this ramp is the whole rule and both wrong directions shipped to
 /// the panel once each.
+/// Does the poster column belong on screen this frame? It rides the page CHROME, not the backdrop
+/// fade: the poster is part of the hero's furniture and recedes with it when a trailer preview
+/// takes the frame.
+fn preview_art_visible(chrome: f32) -> bool {
+    chrome > 0.01
+}
+
 fn compact_title_alpha(scroll: f32, first_top: f32, hero_visible: f32) -> f32 {
     let hide_at = (first_top - crate::ui::detail_layout::TOP_MARGIN).max(0.0);
     let travelled = ((scroll - hide_at) / COMPACT_TITLE_FADE).clamp(0.0, 1.0);
@@ -76,6 +83,21 @@ const COMPACT_TITLE_FADE: f32 = 200.0;
 const EP_SCALE_MAX: usize = 40;
 const K_SCROLL: f32 = crate::ui::consts::K_SCROLL;
 const K_STRIP_SCROLL: f32 = 240.0;
+
+
+/// **The genre chips' elems** — one per chip, in a range of their own so the hero's identities,
+/// the sections' and these cannot collide. They are real focus stops: pressing one lands on the
+/// Library filtered by that genre.
+pub(crate) const GENRE_ELEM_BASE: u32 = 0x2000;
+pub(crate) fn genre_elem(i: usize) -> u32 {
+    GENRE_ELEM_BASE + i as u32
+}
+
+/// **The studio chips' elems** — same treatment, their own range.
+pub(crate) const STUDIO_ELEM_BASE: u32 = 0x2010;
+pub(crate) fn studio_elem(i: usize) -> u32 {
+    STUDIO_ELEM_BASE + i as u32
+}
 
 pub(crate) const SHAPE: &str = "DetailScreen{return_pending:bool,next_elem:u32,keys:[DetailKey{identity:DetailIdentity,elem:u32}],sid:u32,rk:str,pending_season:opt<u32>,season_settle:f32,refresh:u32,restore:opt<RestoreIntent{spot:Spot{section:u32,col:u32,ep_text:bool,saved_col:[u32;7],season:opt<u64>},episode:opt<str>,season_requested:bool}>}";
 
@@ -179,6 +201,11 @@ pub(crate) struct DetailScreen {
     /// (`screens/person.rs`'s `PersonCmd::Close` has the identical un-latched shape; reported
     /// separately rather than fixed here.)
     teardown_cleared: bool,
+    /// **A poster press is waiting for this page's item to land** (issue #355): armed at mount by
+    /// `AppMounter::poster_preplay`, spent once on the first landing that actually IS this page's
+    /// item, and cleared whether or not a window could be opened. Never hashed: it is one-shot
+    /// mount bookkeeping, not a decision the viewer made.
+    preplay_on_land: bool,
 
     // Render state.
     scroll: Spring,
@@ -379,7 +406,11 @@ impl Drop for LayoutPin<'_> {
 /// same role over a peeking shelf and has no accordion to open: past three lines it would walk its
 /// pinned row into that shelf. The detail page has the room (its hero top moved up to pay for
 /// exactly these two lines) and the mark that gives them back.
-const DETAIL_SYN_MAXLINES: usize = 5;
+/// The detail synopsis is shown in FULL (the owner's 2026-11-10 pass: "sinopsis completa,
+/// tenemos espacio"). The hero now has ~810px of copy height beside the 75% poster, which pays for
+/// most real synopses; the cap stays only as a guard against a pathological one, and the MÁS mark
+/// still exists for the rare item that exceeds it.
+const DETAIL_SYN_MAXLINES: usize = 14;
 
 /// The CLOSED synopsis view: one builder for the chain's measure, the paint and the mark's own
 /// rect, so the three cannot disagree about where the block ends.
@@ -428,6 +459,7 @@ impl DetailScreen {
             refresh_gen: 0,
             restore_intent: None,
             teardown_cleared: false,
+            preplay_on_land: false,
             scroll: Spring::at(0.0),
             scroll_target: 0.0,
             episode_scroll: Spring::at(0.0),
@@ -897,7 +929,15 @@ impl DetailScreen {
         stamp: LayoutStamp,
     ) -> LayoutCache {
         let chain = self.compute_hero_chain(Some(d), measure);
-        let content_top = chain.btn_y + hero::CD + theme::space::XL;
+        // The section flow starts UNDER the hero's own foot, not merely under the action row. With
+        // the 75% poster the row is a single line near the top of the column, so anchoring the
+        // flow to `btn_y` put the cast shelf INSIDE the hero (the owner's 2026-11-10 report: "el
+        // cast se monta encima de la carátula y de la landing"), and on a phone-shaped column it
+        // could even land above it. The hero owns everything down to the poster's foot, so that is
+        // where the page hands over.
+        let hero_foot = (crate::ui::detail_layout::POSTER_Y + crate::ui::detail_layout::POSTER_H)
+            .max(chain.btn_y + hero::CD);
+        let content_top = hero_foot + theme::space::XL;
         let (sections, n) = self.sections(Some(d));
         let live = &sections[..n];
         let mut top = [0.0f32; section::SLOTS];
@@ -931,7 +971,10 @@ impl DetailScreen {
         if let Some(d) = self.detail(meta) {
             self.ensure_layout(d, measure).content_top
         } else {
-            self.compute_hero_chain(None, measure).btn_y + hero::CD + theme::space::XL
+            // No item yet: nothing to anchor the flow to but the hero's own scaffolding.
+            let btn = self.compute_hero_chain(None, measure).btn_y + hero::CD;
+            (crate::ui::detail_layout::POSTER_Y + crate::ui::detail_layout::POSTER_H).max(btn)
+                + theme::space::XL
         }
     }
 
@@ -1126,7 +1169,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
         let meta = H::metadata(cx);
         let measure = cx.measure;
         let set = self.hero_set(meta);
-        let widths = hero::hero_widths(cx.measure, set.restart);
+        let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
         let (_, hero_n) = hero::visible_ctls(set, self.full_trailer());
         let hero_y = self.hero_chain(measure, meta).btn_y;
         let hero_last = hero::hero_btn_rect_at(set, hero_n.saturating_sub(1), hero_y, widths);
@@ -1336,7 +1379,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Focusable<H> for D
             Located::Hero(ctl) => {
                 let set = self.hero_set(meta);
                 let i = hero::index_of(set, ctl)?;
-                let widths = hero::hero_widths(cx.measure, set.restart);
+                let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                 let base =
                     hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y - vertical, widths);
                 (
@@ -1682,6 +1725,7 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                     }
                 }
                 self.pump_restore(meta, fx);
+                self.land_preplay(fx, cx, meta);
                 self.reveal_focus(cx.focus.current, cx.measure, meta);
                 fx.invalidate(Provenance::Landing(fx.from()));
                 Handled::Yes
@@ -1892,6 +1936,18 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                     self.sub_sid = Some(sid);
                 }
                 fx.invalidate(Provenance::Input);
+                Handled::Yes
+            }
+            // **The pre-playback window committed its one control** (issue #355): start the film
+            // exactly as this page's own Play disc does, so the window cannot promise a start the
+            // page would not give.
+            ScreenEvent::App(AppMsg::PrePlayGo { audio_sid, sub_sid }) => {
+                // The window's two answers become this page's, which is what `play_hero` hands to
+                // `StartTracks` — so the first `PlaybackInfo` carries them and nothing has to be
+                // re-selected on top of a running picture.
+                self.audio_sid = Some(*audio_sid);
+                self.sub_sid = Some(*sub_sid);
+                self.play_hero(false, fx, meta);
                 Handled::Yes
             }
             ScreenEvent::App(AppMsg::AltSourceOpen(arg)) => {
@@ -2133,9 +2189,10 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
             crate::ui::widgets::back_control_focused(f),
         );
         if !self.full_trailer() {
-            crate::ui::widgets::draw_back_control(
+            crate::ui::widgets::draw_back_control_at(
                 p.alpha(self.preview_chrome),
                 crate::ui::widgets::back_control_focused(f),
+                crate::ui::widgets::detail_back_frame(),
             );
         }
 
@@ -2294,9 +2351,8 @@ impl DetailScreen {
     fn draw_hero<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, d: Option<&Detail>, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let measure = cx.measure;
-        use crate::ui::detail_layout::{HERO_TEXT_W, TITLE_BOTTOM};
+        use crate::ui::detail_layout::HERO_TEXT_W;
 
-        let (_, rk, _) = self.art_identity(d);
         let title = d
             .map(|d| d.title.as_str())
             .or_else(|| self.selected().map(|m| m.title.as_str()))
@@ -2308,72 +2364,79 @@ impl DetailScreen {
         // along the SQUARE of the intended curve instead of the same rate as the logo/title.
         let synopsis_alpha = p.alpha(self.preview_synopsis);
 
-        // Interpolate continuously between the hero position/size and the top-left compact spot a
-        // trailer's background autoplay shrinks the logo into — `preview_logo.pos` is the spring's
-        // live 0..1 progress (see `preview_tick`). `LogoRung::lerp` keeps `HeroLogo::fit`'s
-        // constant-area solve continuous across the whole travel instead of snapping partway
-        // through it (`ui/hero_logo.rs`'s own module doc: sizing is area-based, not a height clamp).
-        let hero_band = crate::ui::hero_logo::band_h(LogoRung::Hero);
-        let compact_band = crate::ui::hero_logo::band_h(LogoRung::Compact);
-        let t = self.preview_logo.pos;
-        let lerp = |a: f32, b: f32| a + (b - a) * t;
-        let band = Rect::new(
-            lerp(crate::ui::detail_layout::HERO_TEXT_X, crate::ui::detail_layout::PREVIEW_LOGO_X),
-            lerp(TITLE_BOTTOM - hero_band, crate::ui::detail_layout::PREVIEW_LOGO_Y),
-            lerp(HERO_TEXT_W, crate::ui::detail_layout::PREVIEW_LOGO_MAX_W),
-            lerp(hero_band, compact_band),
+        // **The title is PLAIN BOLD TYPE, aligned on the poster's head** (the owner's 2026-11-10
+        // pass, asked three times: "quita el nombre de la peli en logo y ponlo en negrita",
+        // "alinea el texto arriba"). There is no `HeroLogo` here any more: a clearLogo arrived
+        // asynchronously and its band height depended on a texture, which is exactly what kept the
+        // copy from starting on a known line. Now the band is one `size::HERO` line whose HEAD is
+        // the poster's head, so the title and the identity row hang from a constant.
+        let title_band = Rect::new(
+            crate::ui::detail_layout::HERO_TEXT_X,
+            crate::ui::detail_layout::TITLE_BOTTOM - crate::ui::detail_layout::TITLE_BAND_H,
+            HERO_TEXT_W,
+            crate::ui::detail_layout::TITLE_BAND_H,
         );
-        // The pinned corner spot (`t` near 1) sits well inside the below-hero flow's own reach:
-        // `content_top(measure)` — the first section's top — is under a screen height away, so the
-        // caller's `hero_alpha`/`HERO_FADE` window (400px) was still fading the mark, semi-visible,
-        // while a section (Extras, depending on order) had already scrolled up underneath it. Ties
-        // the logo's OWN extra fade to the same "how far into the below-hero flow" fraction
-        // `draw_backdrop`'s `sf` already computes, so it is fully gone by the time the flow starts
-        // and back once scrolled to the top — and only while shrunk (`t`), so a normal hero (no
-        // preview) is untouched.
-        let hero_extent = (self.content_top(measure, meta) - crate::ui::detail_layout::TOP_MARGIN).max(1.0);
-        let logo_alpha = p.alpha(
-            self.preview_chrome * preview_logo_scroll_alpha(self.scroll.pos, hero_extent, t),
-        );
-        // **The poster column, from whatever the page actually has.** It used to be gated on the
-        // home catalog row, so a page opened from the Library grid, a Related tile or the person
-        // page (never in the hubs) drew NO poster and the "one top edge" the owner asked for had
-        // nothing to align to. The loaded item carries the same picture: its `thumb` is the
-        // Primary, which for a film and a show is the poster (an episode's Primary is its 16:9
-        // still, so an episode keeps the catalog row's series poster and draws none without it).
-        let poster_rect = Rect::new(
-            crate::ui::consts::MARGIN_X,
-            crate::ui::detail_layout::POSTER_Y,
-            crate::ui::detail_layout::POSTER_W,
-            crate::ui::detail_layout::POSTER_H,
-        );
-        if let Some(m) = self.selected() {
-            crate::ui::card_row::draw_tile(
-                logo_alpha,
-                crate::ui::widgets::Art::Poster(Some(m)),
-                poster_rect,
-                1.0,
-                &crate::ui::card_row::RowStyle::HOME,
-                None,
-            );
-        } else if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
-            crate::ui::card_row::draw_tile(
-                logo_alpha,
-                crate::ui::widgets::Art::Thumb {
-                    sid: d.sid,
-                    key: &d.thumb,
-                    res: crate::ui::widgets::POSTER_RES,
-                },
-                poster_rect,
-                1.0,
-                &crate::ui::card_row::RowStyle::HOME,
-                None,
-            );
+        if let Ok(cs) = std::ffi::CString::new(title) {
+            crate::ui::label::Label::new(cs.as_ptr(), theme::size::HERO, theme::TEXT_PRIMARY)
+                .bold()
+                .v(crate::ui::label::VAlign::Baseline)
+                .draw(chrome, title_band);
         }
-        // The band's head is the poster's head (`TITLE_BOTTOM`'s doc has the measurement that kept
-        // the title's own ink where the scrim can carry it).
-        HeroLogo::new(self.sid, &rk, title, LogoRung::lerp(LogoRung::Hero, LogoRung::Compact, t))
-            .draw(logo_alpha, band, cx.measure);
+
+        // **The poster column.** 540x810, bottom-aligned under the top bar (the owner's pass:
+        // "que ocupe el 75% de la pantalla"). It steps aside for a playing trailer preview, which
+        // owns the whole frame, and it draws from whatever the page actually has: the loaded
+        // item's Primary (the poster for a film and a show, a 16:9 still for an episode, so an
+        // episode falls back to the shelf's series poster), resolved at the tile's own size so a
+        // 4K library is not upscaled into it.
+        if preview_art_visible(self.preview_chrome) {
+            let poster_rect = Rect::new(
+                crate::ui::consts::MARGIN_X,
+                crate::ui::detail_layout::POSTER_Y,
+                crate::ui::detail_layout::POSTER_W,
+                crate::ui::detail_layout::POSTER_H,
+            );
+            if let Some(d) = d.filter(|d| d.kind != "episode" && !d.thumb.is_empty()) {
+                crate::ui::card_row::draw_tile(
+                    chrome,
+                    crate::ui::widgets::Art::Thumb {
+                        sid: d.sid,
+                        key: &d.thumb,
+                        res: (540, 810),
+                    },
+                    poster_rect,
+                    1.0,
+                    &crate::ui::card_row::RowStyle::HOME,
+                    None,
+                );
+            } else if let Some(m) = self.selected() {
+                crate::ui::card_row::draw_tile(
+                    chrome,
+                    crate::ui::widgets::Art::Thumb {
+                        sid: m.sid,
+                        key: &m.thumb,
+                        res: (540, 810),
+                    },
+                    poster_rect,
+                    1.0,
+                    &crate::ui::card_row::RowStyle::HOME,
+                    None,
+                );
+            } else if let Some(d) = d.filter(|d| d.kind == "episode" && !d.thumb.is_empty()) {
+                crate::ui::card_row::draw_tile(
+                    chrome,
+                    crate::ui::widgets::Art::Thumb {
+                        sid: d.sid,
+                        key: &d.thumb,
+                        res: (540, 810),
+                    },
+                    poster_rect,
+                    1.0,
+                    &crate::ui::card_row::RowStyle::HOME,
+                    None,
+                );
+            }
+        }
 
         let (lead, synopsis) = hero_blurb(d, self.selected());
         let synopsis_view = self.synopsis_view(&synopsis, &lead, measure);
@@ -2386,7 +2449,8 @@ impl DetailScreen {
         // nothing there vanish and come back under a playing preview.
         let prose = p.alpha(self.preview_chrome * self.preview_prose);
         if let Some(d) = d {
-            self.draw_identity_line(prose, d, chain.meta_y, cx.measure);
+            let focus_now = cx.focus.current.filter(|k| k.entry == self.entry).map(|k| k.elem);
+            self.draw_identity_line(prose, d, chain.meta_y, cx.measure, focus_now);
             self.draw_ratings(prose, d, chain.ratings_y, cx.measure);
         }
         if !synopsis.is_empty() {
@@ -2402,7 +2466,7 @@ impl DetailScreen {
                 let ink = if cx.focus.current.is_some_and(|k| {
                     k.entry == self.entry && k.elem == hero::ELEM_SYNOPSIS_MORE
                 }) {
-                    theme::ACCENT
+                    theme::CHROME_LIT
                 } else {
                     theme::TEXT_TERTIARY
                 };
@@ -2416,6 +2480,9 @@ impl DetailScreen {
             }
         }
         if let Some(d) = d {
+            // The cast/crew band stays in the hero: it is what carries `Directed by` (and, for a
+            // show, `Created by`) and the first names, which is the only place the page names a
+            // DIRECTOR. The photo shelf further down is the browsable one.
             hero::draw_people(chrome, d, chain.people_y, measure);
         }
         // Full-trailer mode takes the action row with the rest of the page: the viewer asked for
@@ -2433,12 +2500,15 @@ impl DetailScreen {
         // as well keeps it honest if the two ever disagree for a frame.
         self.trailer_ctl.draw_hint(
             chrome,
-            trailer::hint_cy(crate::ui::detail_layout::PREVIEW_LOGO_Y, compact_band),
+            trailer::hint_cy(
+                crate::ui::detail_layout::PREVIEW_LOGO_Y,
+                crate::ui::hero_logo::band_h(LogoRung::Compact),
+            ),
             measure,
         );
     }
 
-    fn draw_identity_line(&self, p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui::machine::Measure) {
+    fn draw_identity_line(&self, p: Painter, d: &Detail, y: f32, measure: &dyn crate::ui::machine::Measure, focus: Option<u32>) {
         let ordinal = (d.kind == "episode" && d.season > 0 && d.index > 0)
             .then(|| crate::ui::fmt::episode_ordinal(d.season, d.index))
             .unwrap_or_default();
@@ -2525,21 +2595,30 @@ impl DetailScreen {
         }
         // The mockup's genre chips: the same outlined capsule the state badges wear, so one row
         // says what the item is and how it plays in a single visual vocabulary.
-        for genre in d.genres.iter().take(3) {
-            if x + measure.width_str(genre, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
+        // **Genre chips are LINKS** (the owner's 2026-11-10 pass: "los tags deben ser enlazables"):
+        // each one lands on the Library filtered by that genre, so a chip reads as a way into the
+        // catalogue rather than as decoration. The chip's ink lifts while the remote is on it.
+        for (i, genre) in d.genres.iter().take(3).enumerate() {
+            // The server names genres in the metadata provider's English; a Spanish UI shows them
+            // in Spanish (an unknown, hand-added genre passes through untouched).
+            let label = crate::metadata::localized_genre(genre);
+            let w = measure.width_str(&label, theme::size::CAPTION, false);
+            if x + w > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
                 break;
             }
-            x += crate::ui::widgets::keyline_chip(p, x, cy, genre, theme::TEXT_SECONDARY, measure)
-                + theme::space::XS;
+            let lit = focus == Some(genre_elem(i));
+            let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
+            x += crate::ui::widgets::keyline_chip(p, x, cy, &label, ink, measure) + theme::space::XS;
         }
         // Studios, in the same chip vocabulary and after the genres: the production company the
         // item page names. Capped at two so a co-production list cannot push the row past the edge.
-        for studio in d.studios.iter().take(2) {
+        for (i, studio) in d.studios.iter().take(2).enumerate() {
             if x + measure.width_str(studio, theme::size::CAPTION, false) > crate::ui::detail_layout::HERO_TEXT_X + crate::ui::detail_layout::HERO_TEXT_W {
                 break;
             }
-            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, theme::TEXT_SECONDARY, measure)
-                + theme::space::XS;
+            let lit = focus == Some(studio_elem(i));
+            let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
+            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, ink, measure) + theme::space::XS;
         }
     }
 
@@ -2590,7 +2669,7 @@ impl DetailScreen {
     fn draw_buttons<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, y: f32, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let set = self.hero_set(meta);
-        let widths = hero::hero_widths(cx.measure, set.restart);
+        let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
         let current = cx.focus.current.map(|k| k.elem);
         // Deliberately `hero_ctls`, not `hero::visible_ctls`: the row's FOCUSABLE extent narrows
         // to Play the instant `full_trailer()` flips (that gate lives in `valid`/`focusable` and
@@ -2611,13 +2690,12 @@ impl DetailScreen {
         let may_read = !picture
             && !p.is_recording()
             && may_sample_control_ground(nav_page_alpha, hero_alpha(self.scroll.pos, HERO_FADE));
-        let palette = if picture {
-            ControlPalette::default()
-        } else {
-            crate::gfx::sample_control_ground(row, may_read)
-                .map(ControlPalette::ambient)
-                .unwrap_or_default()
-        };
+        // **The lit face is the ONE chrome tone, not an ambient derivation** (the owner's
+        // 2026-11-10 pass names it: "#7373CB"). Sampling the artwork used to tint the focused
+        // control with whatever poster was behind it, which is why the colour never matched the
+        // one that was asked for. The ground is still sampled for the idle/spent roles.
+        let _ = (row, may_read);
+        let palette = ControlPalette::lit();
         let ground = if picture {
             ControlGround::Unkeyed
         } else {
@@ -2627,18 +2705,26 @@ impl DetailScreen {
             let rect = hero::hero_btn_rect_at(set, i, y, widths);
             let focused = current == Some(ctl.elem());
             let scale = self.ctl_pop.scale(i);
+            // The owner's 2026-11-10 pass gives the whole row a resting translucency, lifted on
+            // focus so the row recedes into the artwork until the remote reaches for it.
+            let row_alpha = if focused { 1.0 } else { 0.82 };
             match ctl {
-                hero::HeroCtl::Play => Button::new(
-                    hero::hero_pill_label(set.restart).as_ptr(),
-                    theme::size::BODY,
-                    rect,
-                )
-                .icon(crate::ui::icons::Icon::Play)
-                .focused(focused)
-                .palette(palette)
-                .ground(ground)
-                .scale(scale)
-                .draw(&Env::inert(), p),
+                hero::HeroCtl::Play => {
+                    // With a resume point the capsule carries the ELAPSED MINUTES inside it
+                    // ("46m"), so the primary control answers "how far in am I" without a second
+                    // label. Without one it is a plain disc with only its icon ("quitamos el
+                    // texto reproducir"), and the row's caption still names the verb.
+                    let resume = self.resume_ms(meta);
+                    let elapsed = if resume > 0 { hero::play_elapsed(resume) } else { String::new() };
+                    let Ok(label) = std::ffi::CString::new(elapsed) else { return };
+                    Button::new(label.as_ptr(), theme::size::CAPTION, rect)
+                        .icon(crate::ui::icons::Icon::Play)
+                        .focused(focused)
+                        .palette(palette)
+                        .ground(ground)
+                        .scale(scale)
+                        .draw(&Env::inert(), p.alpha(row_alpha))
+                }
                 hero::HeroCtl::Alt => {
                     Button::new(hero::alt_label().as_ptr(), theme::size::BODY, rect)
                         .trailing_icon(crate::ui::icons::Icon::ChevronDown)
@@ -2646,7 +2732,7 @@ impl DetailScreen {
                         .palette(palette)
                         .ground(ground)
                         .scale(scale)
-                        .draw(&Env::inert(), p)
+                        .draw(&Env::inert(), p.alpha(row_alpha))
                 }
                 ctl => {
                     let icon = match ctl {
@@ -2680,7 +2766,7 @@ impl DetailScreen {
                         .palette(palette)
                         .ground(ground)
                         .scale(scale)
-                        .draw(&Env::inert(), p);
+                        .draw(&Env::inert(), p.alpha(row_alpha));
                 }
             }
         }
@@ -2765,6 +2851,15 @@ impl DetailScreen {
         if self.synopsis_more_rect(f.cx.measure, meta).is_some() {
             elems.push((hero::ELEM_SYNOPSIS_MORE, Activate::Press));
         }
+        // The genre chips are links to the Library filtered by that genre (the owner's pass).
+        if let Some(d) = self.detail(meta) {
+            for i in 0..d.genres.len().min(3) {
+                elems.push((genre_elem(i), Activate::Press));
+            }
+            for i in 0..d.studios.len().min(2) {
+                elems.push((studio_elem(i), Activate::Press));
+            }
+        }
         if let Some(d) = self.detail(meta) {
             elems.extend(
                 (0..d.seasons.len().min(64))
@@ -2814,7 +2909,12 @@ impl DetailScreen {
         // The union of the two sites that DRAW it: this page's own disc, and the full-trailer
         // transport's scrim (`player_hud::draw_scrim`, under `trailer_ctl`).
         if !self.full_trailer() || self.trailer_ctl.visible() {
-            crate::ui::widgets::back_control_stop(f, self.entry, crate::screens::registry::HEADER_CRUMB);
+            crate::ui::widgets::back_control_stop_at(
+                f,
+                self.entry,
+                crate::screens::registry::HEADER_CRUMB,
+                crate::ui::widgets::detail_back_frame(),
+            );
         }
     }
 }
@@ -2838,15 +2938,6 @@ fn preview_already_played(played_for: Option<&str>, current_cache_rk: &str) -> b
 /// The preview-shrunk logo's own extra scroll fade, multiplied onto `chrome` in `draw_hero`.
 /// `t` is `preview_logo.pos` (0 = full hero position, 1 = pinned in the top-left corner while a
 /// trailer plays) and `hero_extent` is the scroll distance the caller already uses to fully reveal
-/// the below-hero flow (`content_top(measure) - TOP_MARGIN`, the same quantity `draw_backdrop`'s
-/// own `sf` divides by). Pure and eased (a linear ramp, not a cut) so the mark fades smoothly as
-/// `scroll_pos` rises and reappears the same way on the way back up, and it changes nothing at
-/// `t=0`: a normal (non-preview) hero already has its own `hero_alpha` fade from the caller and
-/// this must not double it.
-fn preview_logo_scroll_alpha(scroll_pos: f32, hero_extent: f32, t: f32) -> f32 {
-    let past_hero = (scroll_pos / hero_extent.max(1.0)).clamp(0.0, 1.0);
-    1.0 - t * past_hero
-}
 
 fn play_resume_ns(from_start: bool, resume_ms: i64, duration_ms: i64) -> i64 {
     if from_start {
@@ -3609,6 +3700,12 @@ impl DetailScreen {
         true
     }
 
+    /// How far into the item the Play control's resume point is, in ms — 0 when there is none. The
+    /// Play disc widens to carry the elapsed minutes when there is.
+    fn resume_ms(&self, meta: crate::metadata::MetadataView<'_>) -> i64 {
+        self.detail(meta).map(hero::hero_resume_ns).unwrap_or(0) / 1_000_000
+    }
+
     fn hero_set(&self, meta: crate::metadata::MetadataView<'_>) -> hero::HeroSet {
         let (restart, mark) = self
             .detail(meta)
@@ -3675,6 +3772,14 @@ impl DetailScreen {
         let local = self.locate(elem, meta).and_then(Located::local_key).unwrap_or(elem);
         match self.locate(elem, meta) {
             Some(Located::Hero(ctl)) => self.activate_hero(ctl, cx, fx, meta),
+            _ if elem >= genre_elem(0) && elem < genre_elem(3) => {
+                if let Some(genre) = self
+                    .detail(meta)
+                    .and_then(|d| d.genres.get((elem - genre_elem(0)) as usize).cloned())
+                {
+                    fx.push(Fx::App(AppFx::Library(crate::screens::registry::LibraryReq::OpenGenre(genre))));
+                }
+            }
             // The accordion is one-way: the press opens the whole blurb and the mark leaves with
             // it, so there is no second state to word or to return to.
             Some(Located::Synopsis) => {
@@ -3782,7 +3887,7 @@ impl DetailScreen {
             hero::HeroCtl::Alt => {
                 let set = self.hero_set(meta);
                 if let Some(i) = hero::index_of(set, ctl) {
-                    let widths = hero::hero_widths(cx.measure, set.restart);
+                    let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                     let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                     rect.y -= self.scroll.pos;
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
@@ -3801,7 +3906,7 @@ impl DetailScreen {
                 let audio = ctl == hero::HeroCtl::Audio;
                 let set = self.hero_set(meta);
                 let Some(i) = hero::index_of(set, ctl) else { return };
-                let widths = hero::hero_widths(cx.measure, set.restart);
+                let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                 let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                 rect.y -= self.scroll.pos;
                 let chosen = if audio {
@@ -3824,7 +3929,7 @@ impl DetailScreen {
             hero::HeroCtl::Artwork => {
                 let set = self.hero_set(meta);
                 let Some(i) = hero::index_of(set, ctl) else { return };
-                let widths = hero::hero_widths(cx.measure, set.restart);
+                let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
                 let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(measure, meta).btn_y, widths);
                 rect.y -= self.scroll.pos;
                 self.content(
@@ -3874,6 +3979,61 @@ impl DetailScreen {
                 }
             }
         }
+    }
+
+    /// **Arm the pre-playback window for a press that lands on this page** (issue #355): a film's
+    /// poster asks for the page, the page fetches the item, and the window opens over it the moment
+    /// that item lands, instead of the viewer having to find Play and then a second Play.
+    ///
+    /// What arms it is the PRESS, not the page (`AppMounter::poster_preplay`), so a press that
+    /// already plays, a resume tile that promises to resume, a show, a season, an episode and a page
+    /// that already holds its item all keep behaving exactly as they did.
+    pub(crate) fn open_preplay_when_loaded(&mut self) {
+        self.preplay_on_land = true;
+    }
+
+    /// Spend the arm: open the window over this page once its item is in the store.
+    ///
+    /// It stays armed while the store holds nothing for this item — a press that lands on a page
+    /// whose fetch has not returned yet is still the press that asked for the window. It is spent
+    /// on the FIRST item that arrives, whether or not a window can be opened for it, because an arm
+    /// that outlived its press would open a window over a page the viewer reached another way.
+    fn land_preplay<H: ContentLike + crate::screens::registry::MetadataLike>(
+        &mut self,
+        fx: &mut Effects<'_, H>,
+        cx: &Cx<'_, H>,
+        meta: crate::metadata::MetadataView<'_>,
+    ) {
+        if !self.preplay_on_land {
+            return;
+        }
+        let Some(d) = self.detail(meta) else { return };
+        // The store can be holding another item while this page waits (a neighbour's fetch landed
+        // first): the arm is about THIS page's film, so it waits for its own.
+        if d.sid != self.sid || d.rk != self.rk {
+            return;
+        }
+        self.preplay_on_land = false;
+        // A show's page plays its on-deck episode, which is not the item the page holds, so there is
+        // no file to describe and no window to open.
+        if d.is_show {
+            return;
+        }
+        let set = self.hero_set(meta);
+        let Some(i) = hero::index_of(set, hero::HeroCtl::Play) else { return };
+        let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
+        let mut rect = hero::hero_btn_rect_at(set, i, self.hero_chain(cx.measure, meta).btn_y, widths);
+        rect.y -= self.scroll.pos;
+        self.content(
+            fx,
+            ContentReq::Panel(ContentPanel::PrePlay {
+                anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
+                // The page's own answers travel with the panel, so the window opens stating what
+                // this press would play instead of an empty choice.
+                audio_sid: self.audio_sid.unwrap_or(0),
+                sub_sid: self.sub_sid.unwrap_or(-1),
+            }),
+        );
     }
 
     fn play_hero<H: ContentLike>(&mut self, from_start: bool, fx: &mut Effects<'_, H>, meta: crate::metadata::MetadataView<'_>) -> bool {

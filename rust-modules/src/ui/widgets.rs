@@ -1037,6 +1037,10 @@ impl<const N: usize> CtlPop<N> {
         c.option(*focused, |c, i| { c.u32(i as u32); });
     }
 
+    /// **At REST, not growing in.** Every control starts at its drawn scale, so a row that has just
+    /// mounted paints all its controls on its first frame instead of popping them in one after
+    /// another (the owner's 2026-11-10 pass: "deben renderizarse todos a la vez"). The pop belongs
+    /// to the FOCUSED control only, and this is the size everything else rests at.
     pub const fn new() -> Self {
         Self {
             sp: [Spring::at(1.0); N],
@@ -1939,12 +1943,12 @@ pub(crate) fn art_scrim(p: Painter, card: Rect, rad: f32, h: f32, a: f32) {
 /// (`MARGIN_X` + its `HERO_TEXT_W`) and its facts line to ~1270. A tighter falloff strands exactly
 /// the ends of the lines a long title or blurb produces. The last fifth of the frame is left
 /// completely alone: that is the side of the picture the composition is usually about.
-const HERO_SCRIM_W: f32 = 0.80 * crate::ui::consts::SCR_W; // 1536
+const HERO_SCRIM_W: f32 = 0.98 * crate::ui::consts::SCR_W; // 1882 — the copy column now starts right of a 540px poster, so the wedge has to reach the right edge
 
 /// Where the wedge starts feathering in. Clears the tab track's own band ([`TOP_BAR_Y`] 62 +
 /// [`TAB_PILL_H`] 60 + [`TAB_TRACK_PAD`] 8 = 130) by 32px: the top chrome owns its legibility with
 /// its own dark capsule (`draw_tab_row`) and must not get a second treatment stacked under it.
-const HERO_SCRIM_TOP: f32 = 0.15 * crate::ui::consts::SCR_H; // 162
+const HERO_SCRIM_TOP: f32 = 0.13 * crate::ui::consts::SCR_H; // 140
 /// Where the wedge reaches full strength — and the seam between its two quads, named once so the
 /// pair is watertight by construction. It sits above every hero TEXT anchor, which is what lets
 /// [`hero_scrim_a`] be a function of x alone.
@@ -1961,7 +1965,7 @@ const HERO_SCRIM_TOP: f32 = 0.15 * crate::ui::consts::SCR_H; // 162
 /// still feathering in rather than absent, which is the reason nit 2's taller logos were sequenced
 /// AFTER this component; the clearance that binds them is the top chrome's
 /// ([`TOP_BAR_BOTTOM`]), asserted in `home.rs`, not this knee.
-pub(crate) const HERO_SCRIM_KNEE: f32 = 0.31 * crate::ui::consts::SCR_H; // 334.8
+pub(crate) const HERO_SCRIM_KNEE: f32 = crate::ui::widgets::TOP_BAR_BOTTOM + theme::space::SM; // 146 — the detail copy's first line sits on the top bar's foot
 
 /// The mirrored RIGHT wedge — for a hero with a right-aligned column, which today means detail's
 /// "Starring" block at x 1270..1830, the one piece of hero copy the left wedge by definition cannot
@@ -1978,20 +1982,23 @@ const HERO_SCRIM_R_A: f32 = 0.50;
 /// at zero without drawing a seam, and it reaches full weight exactly where a widened detail column
 /// ends its longest line. Past that it stays at full: the band is about the copy, and the copy does
 /// not get lighter at its last character.
-const HERO_SCRIM_BAND_X: f32 = 1344.0;
-const HERO_SCRIM_BAND_FULL_X: f32 = 1520.0;
+const HERO_SCRIM_BAND_X: f32 = 600.0;
+const HERO_SCRIM_BAND_FULL_X: f32 = 760.0;
+/// How far the blurb band's ends feather: long enough that neither end reads as a line over the
+/// artwork, short enough that a two-line blurb still has a flat core to be read on.
+const HERO_SCRIM_BAND_FEATHER: f32 = 64.0;
 /// The vertical band the band-scrim darkens: the detail hero's whole copy column, from the top of
 /// its text block (`TITLE_BOTTOM - 200`) to below the facts row, with a flat middle and a feather at
 /// each end. It is not the title alone: the synopsis and the facts row are the same column of text
 /// and are graded by the same contract, so a band that stopped at the title would just move the
 /// failure down the page.
-const HERO_SCRIM_BAND_TOP: f32 = 366.0;
-const HERO_SCRIM_BAND_FLAT_TOP: f32 = 456.0;
-const HERO_SCRIM_BAND_FLAT_BOT: f32 = 810.0;
-const HERO_SCRIM_BAND_BOT: f32 = 900.0;
+const HERO_SCRIM_BAND_TOP: f32 = 120.0;
+const HERO_SCRIM_BAND_FLAT_TOP: f32 = 146.0;
+const HERO_SCRIM_BAND_FLAT_BOT: f32 = 1080.0;
+const HERO_SCRIM_BAND_BOT: f32 = 1140.0;
 /// The band's alpha. Measured against the 3:1 floor: a widened column needs ~0.21 of extra alpha at
 /// (1520, 514) over 0.85 artwork, so 0.34 leaves margin without turning the band into a bar.
-const HERO_SCRIM_BAND_A: f32 = 0.34;
+const HERO_SCRIM_BAND_A: f32 = 0.46;
 
 /// Where the frame-wide ATMOSPHERIC ramp starts — the treatment's other half, which both heroes
 /// paint under this wedge (`screens::home`'s `Backdrop::draw` / `detail::draw_backdrop`): nothing above this
@@ -2009,7 +2016,7 @@ const HERO_SCRIM_BAND_A: f32 = 0.34;
 /// the bottom-up curve had less of itself left to give it. Graded over blown-white artwork that row
 /// came back 2.47:1 against a 2.5 floor; the earlier start is worth 0.04 of alpha there and leaves
 /// the foot where it was.
-pub(crate) const HERO_BASE_SCRIM_Y0: f32 = 0.30 * crate::ui::consts::SCR_H; // 324
+pub(crate) const HERO_BASE_SCRIM_Y0: f32 = crate::ui::widgets::TOP_BAR_BOTTOM + theme::space::SM; // 146 — the detail copy starts on the top bar's foot now
 
 /// The hero wedge's alpha at `x`, at or below [`HERO_SCRIM_KNEE`] — which is where every hero text
 /// anchor sits, by construction (see that const). Pure, because the legibility contract is graded
@@ -2095,6 +2102,67 @@ pub(crate) fn hero_scrim_band_a(x: f32, y: f32, strength: f32) -> f32 {
     };
     HERO_SCRIM_BAND_A * strength.clamp(0.0, crate::ui::landing_hero::PREVIEW_FIELD) * across
         * down.clamp(0.0, 1.0)
+}
+
+/// **The blurb's text band, over the y range its copy occupies** — [`hero_scrim_band_a`]'s field,
+/// with the band's own geometry supplied by the caller instead of the detail hero's fixed title
+/// block.
+///
+/// Home needs it the moment its summary runs the full measure
+/// ([`crate::ui::landing_hero::SYN_W`]): the left wedge is a function of x and is spent long before
+/// the copy's right end, so the last third of a two-line blurb would sit on undimmed artwork.
+///
+/// The profile is a flat field over the TEXT, feathered INTO THE AIR AROUND IT: `f` above the first
+/// line and `f` below the last, never over a line. That is the difference from the detail hero's
+/// band, whose fixed block also holds a title and a facts row; here the copy is the only judged
+/// thing inside it, so it must sit at full alpha rather than inside a ramp.
+///
+/// Pure for the same reason the wedge is: the legibility contract is graded on this arithmetic, so
+/// the promise and the paint cannot come from two different curves.
+pub(crate) fn hero_text_band_a(x: f32, y: f32, top: f32, bot: f32, strength: f32) -> f32 {
+    if bot - top < 1.0 {
+        return 0.0;
+    }
+    let f = HERO_SCRIM_BAND_FEATHER.min((bot - top) * 0.5);
+    let across = ((x - HERO_SCRIM_BAND_X) / (HERO_SCRIM_BAND_FULL_X - HERO_SCRIM_BAND_X))
+        .clamp(0.0, 1.0);
+    let down = if y < top {
+        (y - (top - f)) / f
+    } else if y > bot {
+        ((bot + f) - y) / f
+    } else {
+        1.0
+    };
+    HERO_SCRIM_BAND_A
+        * strength.clamp(0.0, crate::ui::landing_hero::PREVIEW_FIELD)
+        * across
+        * down.clamp(0.0, 1.0)
+}
+
+/// Paint [`hero_text_band_a`]: three quads, because a single bilinear quad cannot feather BOTH of
+/// its horizontal edges — its corners interpolate straight from one edge to the other, which would
+/// draw a hard line exactly above the first line and below the last.
+///
+/// `top`/`bot` are the COPY's own edges, not the band's: the feather lives outside them.
+pub(crate) fn hero_text_band(p: Painter, top: f32, bot: f32, strength: f32) {
+    if strength <= 0.0 || bot - top < 1.0 {
+        return;
+    }
+    let sw = crate::ui::consts::SCR_W;
+    let x0 = HERO_SCRIM_BAND_X;
+    let w = sw - x0;
+    let f = HERO_SCRIM_BAND_FEATHER.min((bot - top) * 0.5);
+    let corner = |x: f32, y: f32| theme::scrim(hero_text_band_a(x, y, top, bot, strength));
+    let (el, er) = (corner(x0, top), corner(sw, top));
+    let (fl, fr) = (corner(x0, bot), corner(sw, bot));
+    let (gl, gr) = (corner(x0, top - f), corner(sw, top - f));
+    let (hl, hr) = (corner(x0, bot + f), corner(sw, bot + f));
+    // entry: nothing on its top edge, full on the copy's first line
+    p.grad4(Rect::new(x0, top - f, w, f), [gl, gr, er, el]);
+    // body: constant in y, over the copy itself
+    p.grad4(Rect::new(x0, top, w, bot - top), [el, er, fr, fl]);
+    // exit: full on the last line, nothing on its bottom edge
+    p.grad4(Rect::new(x0, bot, w, f), [fl, fr, hr, hl]);
 }
 
 pub(crate) fn hero_scrim_quads(strength: f32, right: bool) -> ([(Rect, [[f32; 4]; 4]); 6], usize) {
@@ -2773,12 +2841,37 @@ impl View for CircleButton {
 /// group, `dispatch::BACK`), so a viewer whose remote's BACK key is broken can still leave the
 /// page with the arrows, and it lights up in the circle-button family's own focus face rather
 /// than in a treatment invented for it.
+/// The DETAIL page's Back disc sits at the very top of the safe area, level with the chrome's own
+/// row, since the poster now starts on the top bar's foot (the owner's 2026-11-10 pass). A pure
+/// geometry helper so the draw, the pointer stop and the focus ring share one box.
+pub(crate) fn detail_back_frame() -> Rect {
+    Rect::new(crate::ui::consts::MARGIN_X, crate::ui::consts::MARGIN_Y, CHIP_D, CHIP_D)
+}
+
 pub(crate) fn draw_back_control(p: Painter, focused: bool) {
+    draw_back_control_at(p, focused, CHIP_FRAME);
+}
+
+/// [`draw_back_control`] in an explicit box — the detail page's Back sits at the very top of the
+/// safe area (`detail_back_frame`), since the poster now starts on the top bar's foot.
+pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
+    // **The lit Back disc is a FILLED #7373CB plate** with a white chevron, the same treatment a
+    // focused control wears (the owner's 2026-11-10 pass: hover and Back share one tone). A ring
+    // under an unfilled disc did not read as "the same colour" at all.
+    let lit = focused;
     let button = CircleButton::new(std::ptr::null())
-        .frame(CHIP_FRAME)
+        .frame(frame)
         .icon(crate::ui::icons::Icon::ChevronLeft)
         .ground(ControlGround::Unkeyed)
-        .focused(focused);
+        .style(if lit {
+            ControlStyle::Custom {
+                fill: theme::CHROME_LIT,
+                ink: theme::TEXT_PRIMARY,
+            }
+        } else {
+            ControlStyle::Accent
+        })
+        .focused(lit);
     button.draw(&Env::inert(), p);
 }
 
@@ -4249,6 +4342,10 @@ impl View for TransportButton {
         });
         let s = (r.w * DISC_ICON_RATIO).round();
         let ir = Rect::new(r.x + (r.w - s) * 0.5, r.y + (r.h - s) * 0.5, s, s);
+        // **On its INK, in the transport family's band.** A box-centred `play.svg` is the one mark
+        // that sits off-centre in this disc (its ink is wider and taller than a pause's), which is
+        // what read as "el play del reproductor no está centrado".
+        let ir = crate::ui::icons::centred_on_ink(id, ir, crate::ui::icons::band(Icon::Pause));
         crate::ui::icons::draw(p, id, ir, ink);
     }
 }
@@ -5291,9 +5388,9 @@ impl TabStrip {
         // and it had the identical defect for the identical reason, so `cast: true` below.
         match ground {
             TabGround::Plated { pop } => {
-                cap(&self.foc, crate::ui::ACCENT, Some(theme::CARD_SHEEN), pop, true)
+                cap(&self.foc, theme::CHROME_LIT, Some(theme::CARD_SHEEN), pop, true)
             }
-            TabGround::Tracked { .. } => cap(&self.foc, crate::ui::ACCENT, None, 1.0, false),
+            TabGround::Tracked { .. } => cap(&self.foc, theme::CHROME_LIT, None, 1.0, false),
         }
     }
     /// The `(focus, selected)` mixes pill `pill` (content-space `(x, w)`) should ink itself with —
@@ -6808,6 +6905,32 @@ pub struct ControlPalette {
     spent: [f32; 4],
 }
 
+/// How much of the chrome tone an IDLE control carries: enough to read as the same family as the
+/// focused one, quiet enough that the focused control still leads.
+const IDLE_TINT: f32 = 0.62;
+/// The same, over a video plane: a touch more film, since the picture moves under it.
+const UNKEYED_IDLE_TINT: f32 = 0.55;
+
+
+impl ControlPalette {
+    /// **The chrome's one lit tone**, fixed rather than derived from artwork: the owner's
+    /// 2026-11-10 pass names the colour ("#7373CB"), so the focused face is that colour and the
+    /// renderer must not re-derive it from a poster's ambient key. Idle and spent keep the
+    /// palette's own roles — this changes the LIT state only.
+    pub fn lit() -> Self {
+        let mut p = Self::default();
+        p.focus_top = theme::CHROME_LIT;
+        p.focus_body = theme::with_a(theme::CHROME_LIT, 0.92);
+        // **Every button, not only the lit one** (the owner's 2026-11-10 pass: "de hecho todos los
+        // botones #7373CB"). The idle face is the same tone, quieter: a control at rest reads as
+        // the same family as the one under the cursor, which is what makes the whole row feel like
+        // one set. `spent` stays the palette's own, since it encodes a countdown rather than a
+        // colour choice.
+        p.idle = theme::with_a(theme::CHROME_LIT, IDLE_TINT);
+        p
+    }
+}
+
 impl Default for ControlPalette {
     fn default() -> Self {
         Self::ambient([
@@ -7103,14 +7226,19 @@ impl ControlStyle {
                 flat(theme::ACCENT, theme::ACCENT_INK, theme::CONTROL_SPENT_FILL)
             }
             ControlStyle::Accent if ground == ControlGround::Unkeyed => flat(
-                theme::CONTROL_IDLE_FILL_UNKEYED,
+                // The idle face over video is the chrome tone at a film's weight, so the transport
+                // and the hero's discs are the same colour family as everything else.
+                theme::with_a(theme::CHROME_LIT, UNKEYED_IDLE_TINT),
                 theme::CONTROL_IDLE_INK,
                 theme::CONTROL_SPENT_FILL,
             ),
             ControlStyle::Accent if focused => ControlFace {
                 top: palette.focus_top,
                 body: palette.focus_body,
-                ink: theme::ACCENT_INK,
+                // **White, not the accent plate's near-black.** That ink was tuned for a warm
+                // off-white plate; on the chrome's violet it measured ~2:1, which is what made the
+                // focused control look "wrong" rather than merely a different hue.
+                ink: theme::TEXT_PRIMARY,
                 spent: palette.spent,
             },
             ControlStyle::Accent => flat(palette.idle, theme::CONTROL_IDLE_INK, palette.spent),

@@ -163,6 +163,8 @@ pub(crate) struct LibraryScreen {
     scroll_target: f32,
     restore_scroll: Option<f32>,
     viewports: Vec<LibraryViewport>,
+    /// A genre a detail-page chip asked this library to open with; cleared once applied.
+    pub(crate) open_genre: Option<String>,
     pending: PendingTransactions,
     page_fade: Xfade,
     grid_fade: Xfade,
@@ -247,6 +249,7 @@ impl LibraryScreen {
             shelf_publication: None, layout, target_layout: layout,
             scroll: Spring::at(0.0), scroll_target: 0.0, restore_scroll: None,
             viewports: Vec::new(),
+            open_genre: None,
             pending: PendingTransactions::default(), page_fade: Xfade::new(), grid_fade: Xfade::new(),
             readout: Readout::Loading, live: true, initial: true, provisional: None, placed: Vec::new(), sweep_down: true,
             library_capsules: crate::ui::widgets::TabStrip::new(),
@@ -760,6 +763,31 @@ impl LibraryScreen {
         }
     }
 
+    /// Apply a detail chip's genre request once the listing can resolve it. Returns whether the
+    /// request was consumed. Resolved by NAME against the listing's own genres because the chip
+    /// carries the server's display name, not the library's genre id.
+    fn apply_open_genre<H: LibraryLike>(&mut self, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> bool {
+        let Some(wanted) = self.open_genre.clone() else { return false };
+        let Some(target) = GridTarget::from_view(H::listing(cx)) else { return false };
+        let id = H::listing(cx)
+            .genres()
+            .iter()
+            .find(|g| g.title.eq_ignore_ascii_case(&wanted))
+            .map(|g| g.id.clone());
+        let Some(id) = id else {
+            // The listing has genres but not this one: drop the request rather than retrying for
+            // ever (a chip for a genre the library does not carry has nowhere to go).
+            if !H::listing(cx).genres().is_empty() { self.open_genre = None; }
+            return true;
+        };
+        self.open_genre = None;
+        let address = SectionAddress { epoch: target.epoch, sid: target.sid, section: target.section };
+        self.step(&ScreenEvent::App(AppMsg::LibraryEdit {
+            target: address, edit: crate::stores::browse::QueryEdit::Genre(Some(id)),
+        }), cx, fx);
+        true
+    }
+
     fn command<H: LibraryLike>(&mut self, command: LibraryCmd, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
         match command {
             LibraryCmd::Enter(kind) => {
@@ -949,6 +977,7 @@ impl<H: LibraryLike> Machine<H> for LibraryScreen {
             }
             ScreenEvent::Tick(tick) => {
                 self.sync(cx);
+                self.apply_open_genre(cx, fx);
                 self.watch_plaintext(cx);
                 self.plaintext_alert.update(tick.dt());
                 if self.grid_reset_pending {

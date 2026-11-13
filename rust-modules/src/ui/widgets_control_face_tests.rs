@@ -48,13 +48,12 @@ fn an_unkeyed_control_never_samples_the_ambient_palette() {
         (focus.top, focus.body, focus.ink),
         (theme::ACCENT, theme::ACCENT, theme::ACCENT_INK)
     );
-    assert_eq!(
-        (idle.top, idle.body),
-        (
-            theme::CONTROL_IDLE_FILL_UNKEYED,
-            theme::CONTROL_IDLE_FILL_UNKEYED
-        )
-    );
+    // The idle face over video is the chrome tone at a film's weight (the owner's "todos los
+    // botones #7373CB" reaches the transport), not the old 10% white.
+    assert_eq!((idle.top, idle.body), (idle.top, idle.top));
+    assert_eq!(idle.top[0], theme::CHROME_LIT[0]);
+    assert_eq!(idle.top[2], theme::CHROME_LIT[2]);
+    assert!(idle.top[3] > 0.0 && idle.top[3] < 1.0, "a film, not a solid");
 }
 
 /// **A control row's pop animates BOTH ways**, which is the whole reason it is an array of
@@ -337,7 +336,11 @@ fn the_unkeyed_ground_drops_the_ambient_contract_whole() {
     let keyed_idle = ControlStyle::Accent.face(false, ControlGround::Keyed, palette);
     let video_idle = ControlStyle::Accent.face(false, ControlGround::Unkeyed, palette);
     assert_eq!(keyed_idle.top, palette.idle);
-    assert_eq!(video_idle.top, theme::CONTROL_IDLE_FILL_UNKEYED);
+    // Over video the idle face is the chrome tone at a film's weight, not the old 10% white: the
+    // owner's "todos los botones #7373CB" reaches the transport too.
+    assert_ne!(video_idle.top, theme::CONTROL_IDLE_FILL_UNKEYED);
+    assert_eq!(video_idle.top[0], theme::CHROME_LIT[0]);
+    assert_eq!(video_idle.top[2], theme::CHROME_LIT[2]);
     assert_ne!(keyed_idle.top, video_idle.top);
     assert_eq!(keyed_idle.ink, video_idle.ink, "one `--control-idle-ink`");
 
@@ -352,10 +355,12 @@ fn the_unkeyed_ground_drops_the_ambient_contract_whole() {
         (video_focus.top, video_focus.body),
         (theme::ACCENT, theme::ACCENT)
     );
-    assert_eq!(
-        keyed_focus.ink, video_focus.ink,
-        "focus ink keeps the same meaning on both grounds"
-    );
+    // The two grounds keep the same MEANING (an ink that reads on the lit face) but no longer the
+    // same token: the keyed face is the chrome's violet, so its ink is white, while the unkeyed
+    // face is still the warm accent plate and keeps its near-black. They briefly shared a token
+    // and the violet plate then measured ~2:1 against it.
+    assert_eq!(keyed_focus.ink, theme::TEXT_PRIMARY);
+    assert_eq!(video_focus.ink, theme::ACCENT_INK);
 }
 
 /// **Why the unkeyed idle face is a light FILM and not a darker plate** — the polarity argument,

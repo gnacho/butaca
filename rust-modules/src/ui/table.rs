@@ -292,6 +292,15 @@ const CHECK_W: f32 = 32.0; // leading check column
 const GAP: f32 = 16.0; // check→label gap
 /// Focused-row pill corner radius. `pub` for the [`ROW_H`] caller shape.
 pub const PILL_RAD: f32 = 18.0;
+/// Air above and below a card (issue #415): two cards must read as two plates, which a contiguous
+/// band of rows cannot.
+const CARD_GAP: f32 = 10.0;
+/// A card's corner radius, a touch rounder than the capsule since it now has its own edge.
+const CARD_RAD: f32 = 20.0;
+/// The card's own edge weight (idle and focused alike).
+const CARD_RING_W: f32 = 1.0;
+/// Weight of the focused card's wash: a tint of the chrome's tone, not the solid capsule.
+const CARD_FOCUS_A: f32 = 0.24;
 /// Pill inset from the row's top/bottom. `pub` for the [`ROW_H`] caller shape.
 pub const PILL_INSET: f32 = 3.0;
 const PANEL_BG: [f32; 4] = theme::SURFACE_PANEL; // opaque panel colour — fade masks + badge knockout
@@ -372,6 +381,10 @@ pub struct TableView {
     /// still row-major, so an owner's action vector, its focus keys and its pointer stops are the
     /// same list either way; only the geometry changes.
     cols: usize,
+    /// **Every row is its own card** (issue #415, the settings root): a plate lifted off the panel
+    /// with its own edge, and a focus wash instead of the solid capsule. Off by default — a menu,
+    /// a picker and a library list are one list on the panel, which is what a card would break.
+    cards: bool,
     /// Semantic ink for section labels. Ambient routes can raise this role for contrast without
     /// replacing the shared table header renderer or changing row/detail hierarchy.
     pub header_ink: [f32; 4],
@@ -387,7 +400,7 @@ impl TableView {
     /// The owner records its row data separately. These fields determine layout, the selected
     /// face and subsequent motion; no text/texture cache or renderer pointer is traversed.
     pub(crate) fn write_motion(&self, c: &mut crate::ui::machine::Canon) {
-        let Self { sections: _, sel, list_focused, compact, tall, cols: _, header_ink, hl_top, hl_bot, scroll } = self;
+        let Self { sections: _, sel, list_focused, compact, tall, cols: _, cards: _, header_ink, hl_top, hl_bot, scroll } = self;
         c.u32(*sel as u32).bool(*list_focused).bool(*compact).bool(*tall);
         for component in header_ink { c.f32(*component); }
         for spring in [hl_top, hl_bot, scroll] { c.f32(spring.pos).f32(spring.vel); }
@@ -417,6 +430,17 @@ impl TableView {
     /// read this one field. Section headers still span the full frame. `1` restores the list.
     pub fn grid(&mut self, cols: usize) {
         self.cols = cols.max(1);
+    }
+
+    /// **Draw every row as its own card** (issue #415: Ajustes like the redesign mockup). The plate
+    /// is lifted off the panel and rimmed, the focused one wears a wash of the chrome's tone, and
+    /// the label keeps reading ink instead of flipping to the near-black of the solid capsule.
+    ///
+    /// Opt-in per table, because the other tables here are lists: a popover's actions, a picker's
+    /// levels and a library's entries read as one column on one ground, and a plate per row would
+    /// turn each of them into a stack of unrelated boxes.
+    pub fn cards(&mut self, on: bool) {
+        self.cards = on;
     }
 
     pub(crate) fn cols(&self) -> usize {
@@ -491,6 +515,7 @@ impl TableView {
             compact: false,
             tall: false,
             cols: 1,
+            cards: false,
             header_ink: theme::TEXT_TERTIARY,
             hl_top: Spring::at(0.0),
             hl_bot: Spring::at(0.0),
@@ -946,7 +971,10 @@ impl TableView {
     }
 
     pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
-        self.draw_with_selection_fill(p, frame, measure, theme::ACCENT);
+        // **The lit row is the chrome's one tone.** It was `ACCENT` — the warm off-white of the old
+        // mockup — which is why every menu's hover still read #FFCEA3 after the palette moved
+        // (the owner's 2026-11-10 pass: "el hover del menú ... debería tener #7373CB").
+        self.draw_with_selection_fill(p, frame, measure, theme::CHROME_LIT);
     }
 
     /// Draw with an owner-supplied selected-row fill, keeping all other table states shared.
@@ -979,7 +1007,14 @@ impl TableView {
 
         let white = theme::TEXT_PRIMARY;
         let dimc = theme::TEXT_TERTIARY; // was #8a8a8e; unified onto the tertiary grey
-        let ink = crate::ui::ACCENT_INK; // text/glyph over the light pill
+        // Ink over the SOLID capsule is near-black; over a card's wash it is the reading ink,
+        // which is the whole point of the wash (the label stays legible on a dark plate).
+        let ink = if self.cards {
+            theme::TEXT_PRIMARY
+        } else {
+            crate::ui::ACCENT_INK
+        };
+        let cards = self.cards;
         let cell_w = self.cell_width(frame.w);
         let cell_text_w = self.cell_budget_w(frame.w);
 
@@ -997,13 +1032,30 @@ impl TableView {
             cell_w,
             (py1 - py0).max(1.0),
         );
+        // The mockup's focused CARD: a wash of the chrome's lit tone under the row plus a thin
+        // border on the same tone, not the near-white accent capsule the app used to paint. The
+        // caller's `selection_fill` still decides WHERE the pill is (and every non-settings table
+        // keeps its own), but a settings grid passes the lit tone and the ink stays readable.
         if self.list_focused && pill.y + pill.h > vis_top && pill.y < vis_bot {
-            self.group_painter(p, self.section_of_row(self.sel)).rrect(
-                pill,
-                PILL_RAD,
-                PILL_RAD,
-                selection_fill,
-            );
+            let gp = self.group_painter(p, self.section_of_row(self.sel));
+            if self.cards {
+                // The mockup's focused card: a wash of the chrome's tone plus a ring on the same
+                // tone, riding the SAME springs as the old capsule, so focus still travels between
+                // cells and morphs between row heights. The caller's `selection_fill` decides the
+                // wash's family, and the ink on top stays the reading ink.
+                let card = Rect::new(
+                    pill.x,
+                    pill.y + CARD_GAP * 0.5,
+                    pill.w,
+                    (pill.h - CARD_GAP).max(1.0),
+                );
+                // The caller's fill is the family's LIT tone; over a card it is worn as a tint,
+                // so the label on top keeps reading ink.
+                gp.rrect(card, CARD_RAD, CARD_RAD, theme::with_a(selection_fill, CARD_FOCUS_A));
+                gp.rring(card, CARD_RAD, CARD_RING_W, theme::TABLE_CARD_RING);
+            } else {
+                gp.rrect(pill, PILL_RAD, PILL_RAD, selection_fill);
+            }
         }
 
         // ---- headers + rows ----
@@ -1026,20 +1078,10 @@ impl TableView {
                     let sec = &self.sections[si];
                     let hair_x = frame.x + SIDE + CONTENT_PAD;
                     let hair_w = frame.w - 2.0 * (SIDE + CONTENT_PAD);
-                    if si > 0 {
-                        p.rect(
-                            Rect::new(
-                                hair_x,
-                                sy - DIV_H * 0.5,
-                                hair_w,
-                                2.0,
-                            ),
-                            0.0,
-                            theme::HAIRLINE,
-                            theme::HAIRLINE,
-                            0.0,
-                        );
-                    }
+                    // No hairline between groups: the mockup separates them with the spaced-caps
+                    // label and its own air, which is what keeps the settings grid reading as
+                    // cards rather than as a ruled form. (`hair_x`/`hair_w` stay because the
+                    // header band below is aligned to them.)
                     // **CAPS at CAPTION, one size in BOTH size classes.** The caps are what make a
                     // header read as a label rather than as a row, which is why the size stops
                     // varying: at HEADLINE — what the non-compact class used to draw — a header
@@ -1058,8 +1100,8 @@ impl TableView {
                         hair_w,
                         baseline - cap_top,
                     );
-                    if let Ok(cs) = CString::new(sec.header.to_uppercase()) {
-                        Label::new(cs.as_ptr(), hsz, self.header_ink)
+                    if let Ok(cs) = CString::new(spaced_caps(&sec.header)) {
+                        Label::new(cs.as_ptr(), hsz, theme::CHROME_LIT)
                             .v(VAlign::CapTop)
                             .draw(p, header_band);
                     }
@@ -1112,6 +1154,14 @@ impl TableView {
                 );
                 return;
             }
+            // **The card itself** (issue #415): one plate per cell, inset vertically so
+            // consecutive cards leave air between them — a contiguous band is what makes a list
+            // read as a form rather than as a grid of objects.
+            if self.cards {
+                let card = Rect::new(cell_x, sy + CARD_GAP * 0.5, cell_w, (h - CARD_GAP).max(1.0));
+                p.rrect(card, CARD_RAD, CARD_RAD, theme::TABLE_CARD_FILL);
+                p.rring(card, CARD_RAD, CARD_RING_W, theme::HAIRLINE);
+            }
             // **`list_focused` gates the INK, not just the pill.** `ink` is near-black and is only
             // legible ON the accent pill; suppressing the pill while still flipping the ink drew
             // black-on-panel rows, which is what the owner saw the moment focus moved to the
@@ -1124,7 +1174,14 @@ impl TableView {
             } else {
                 white
             };
-            let row_bg = if focused { crate::ui::ACCENT } else { PANEL_BG };
+            let row_bg = if !focused {
+                if cards { theme::TABLE_CARD_FILL } else { PANEL_BG }
+            } else if cards {
+                // a badge knocked out of the focused card gets the wash's flattened colour
+                theme::mix(theme::TABLE_CARD_FILL, theme::CHROME_LIT, 0.24)
+            } else {
+                theme::CHROME_LIT
+            };
             let cyc = sy + h * 0.5; // row vertical center
 
             // Leading column (SVG): the PICKER's tick, or an ACTION's glyph — one or the other, and
@@ -1191,7 +1248,7 @@ impl TableView {
             // step is the ink's ALONE — the run itself is bold (see [`VALUE_BOLD`], which all three
             // calls below take so the measure and the paint can never be two different faces).
             if let Some(v) = row.readout() {
-                let ink = row_value_ink(row, focused);
+                let ink = row_value_ink(row, focused, cards);
                 // the value gives way before the label (`row_columns`): elided to its column
                 let vsz = theme::size::LABEL;
                 let value_w = self.row_columns(row, cell_text_w, measure).value_w;
@@ -1260,7 +1317,7 @@ impl TableView {
             // while the badges sat on the title's line: right-aligned and row-centred, a chip now
             // occupies the sub-line's band too, and an unbounded sub-line would run under it.
             if !row.detail.is_empty() {
-                let sub = if focused {
+                let sub = if focused && !cards {
                     theme::scrim_black(0.6)
                 } else {
                     dimc
@@ -1338,7 +1395,16 @@ impl TableView {
 /// that; drawn at the live row's ink, a step that cannot be taken (the Timing section's Earlier at
 /// its floor) still announced itself at the trailing edge. Over the focused pill a dim row's
 /// read-out takes the quiet rung.
-fn row_value_ink(row: &Row, focused: bool) -> [f32; 4] {
+fn row_value_ink(row: &Row, focused: bool, cards: bool) -> [f32; 4] {
+    if cards {
+        // Over a card's wash the value is a step behind the label, not knocked out of a bright
+        // plate: `ROW_VALUE_INK_ON` is near-black and would vanish here.
+        return match (row.dim, row.value_dim) {
+            (true, _) => theme::TEXT_TERTIARY,
+            (false, false) => theme::TEXT_SECONDARY,
+            (false, true) => theme::TEXT_TERTIARY,
+        };
+    }
     match (focused, row.dim, row.value_dim) {
         (true, false, false) => theme::ROW_VALUE_INK_ON,
         (true, _, _) => theme::ROW_VALUE_INK_ON_DIM,
@@ -1348,8 +1414,84 @@ fn row_value_ink(row: &Row, focused: bool) -> [f32; 4] {
     }
 }
 
+
+/// A section header in the mockup's voice: upper-case with one thin space between characters, so a
+/// two-word group reads as a label rather than as a row of text. Non-ASCII scripts are left alone
+/// (spacing a Cyrillic or CJK run letter by letter is noise, not emphasis).
+fn spaced_caps(text: &str) -> String {
+    if !text.is_ascii() {
+        return text.to_uppercase();
+    }
+    text.to_uppercase()
+        .chars()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join("\u{2009}")
+}
+
+#[cfg(test)]
+mod selection_tone_tests {
+    use super::*;
+
+    /// **Every list and menu lights its row with the chrome's one tone** (issue: the menu hover
+    /// still drew #FFCEA3 after the palette moved). The table's public `draw` is the path every
+    /// popover takes, so pinning its fill is what keeps them from drifting back.
+    #[test]
+    fn the_selected_row_fill_is_the_chrome_tone() {
+        assert_eq!(theme::CHROME_LIT[0], 0x73 as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT[1], 0x73 as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT[2], 0xcb as f32 / 255.0);
+        // The old warm plate must not come back as the default fill.
+        assert_ne!(theme::CHROME_LIT, theme::ACCENT);
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// **A carded table paints one plate per row, and a plain one paints none** (issue #415).
+    ///
+    /// The flag alone is not the gate: what makes the settings root read as a grid of objects is
+    /// a rounded plate under each CELL. This counts them off the draw census, so a change that
+    /// keeps the flag and drops the paint fails here.
+    #[test]
+    fn a_carded_table_paints_one_plate_per_row_and_a_plain_one_does_not() {
+        struct Fixed;
+        impl crate::ui::machine::Measure for Fixed {
+            fn width(&self, text: &std::ffi::CStr, _size: i32, _bold: bool) -> f32 {
+                text.to_string_lossy().chars().count() as f32 * 10.0
+            }
+            fn cap_h(&self, size: i32) -> f32 { size as f32 * 0.7 }
+            fn line_h(&self, size: i32) -> f32 { size as f32 * 1.2 }
+        }
+        let frame = Rect::new(0.0, 0.0, 1400.0, 700.0);
+        let mut table = TableView::new();
+        table.grid(2);
+        table.set_sections(
+            vec![
+                Section::new("A").row(Row::new("One")).row(Row::new("Two")),
+                Section::new("B").row(Row::new("Three")),
+            ],
+            0,
+            false,
+        );
+        // Tag 2 is `Painter::rrect`: the one primitive a plate or the focus capsule is drawn with.
+        let plates = |t: &TableView| {
+            crate::ui::draw_census::capture(|| {
+                t.draw(crate::ui::Painter::recording(), frame, &Fixed);
+            })
+            .into_iter()
+            .filter(|(tag, _)| *tag == 2)
+            .count()
+        };
+        let list = plates(&table);
+        table.cards(true);
+        assert_eq!(
+            plates(&table),
+            list + 3,
+            "one plate per row cell, on top of the focus capsule's own"
+        );
+    }
+
     /// **A dimmed row's read-out dims with it.** The Timing section's Earlier row at the
     /// selected kind's floor is `dim`, and its "−0.1 s" read-out was drawn at the SAME ink as the
     /// live Later row's — so the step that could not be taken still announced itself at the
@@ -1360,21 +1502,21 @@ mod tests {
         let live = Row::new("Later").value("+0.1 s").value_dim(true);
         let dimmed = Row::new("Earlier").value("\u{2212}0.1 s").value_dim(true).dim(true);
         assert_ne!(
-            row_value_ink(&dimmed, false),
-            row_value_ink(&live, false),
+            row_value_ink(&dimmed, false, false),
+            row_value_ink(&live, false, false),
             "a dim row's read-out must not keep the live row's ink",
         );
         assert!(
-            row_value_ink(&dimmed, false)[3] < theme::TEXT_TERTIARY[3],
+            row_value_ink(&dimmed, false, false)[3] < theme::TEXT_TERTIARY[3],
             "a dim row's read-out sits a step behind its dim label",
         );
         // an undimmed, unquietened read-out is unchanged
         let plain = Row::new("Audio").value("English");
-        assert_eq!(row_value_ink(&plain, false), theme::TEXT_SECONDARY);
-        assert_eq!(row_value_ink(&plain, true), theme::ROW_VALUE_INK_ON);
+        assert_eq!(row_value_ink(&plain, false, false), theme::TEXT_SECONDARY);
+        assert_eq!(row_value_ink(&plain, true, false), theme::ROW_VALUE_INK_ON);
         // over the focused pill a dim row's read-out takes the quiet rung
         let dim_plain = Row::new("Audio").value("English").dim(true);
-        assert_eq!(row_value_ink(&dim_plain, true), theme::ROW_VALUE_INK_ON_DIM);
+        assert_eq!(row_value_ink(&dim_plain, true, false), theme::ROW_VALUE_INK_ON_DIM);
     }
 
     #[test]

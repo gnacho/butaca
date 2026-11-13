@@ -870,7 +870,9 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
         let root = Painter::root();
         // `super::family` here matches this file's own `use super::family::{inner_cx, table_focus,
         // InnerHost, SettingsPage};` above — `family` is shared vocabulary, not a sibling screen.
-        super::family::set_palette(self.ground.palette());
+        // The family's lit face is the chrome's one tone, not an ambient derivation: the settings
+        // hover kept the old warm plate while every other list had moved (the owner's pass).
+        super::family::set_palette(crate::ui::widgets::ControlPalette::lit());
         match self.kind {
             Family::Settings => {
                 // the scrim over the live host while the modal fades in; invisible under the
@@ -1070,6 +1072,10 @@ impl RootPage {
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
         self.table.grid(2);
+        // **The root is the mockup's grid of cards** (issue #415): each row its own plate, the
+        // focused one washed in the chrome's tone. The sub-pages stay lists until they are
+        // designed the same way.
+        self.table.cards(true);
         self.table.set_sections(vec![servers, preferences, sign_out], sel, false);
         self.table.list_focused = true;
     }

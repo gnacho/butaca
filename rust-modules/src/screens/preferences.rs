@@ -375,6 +375,9 @@ impl PreferencesPage {
         for table in [&mut self.table, &mut self.picker_table] {
             table.compact = false; table.header_ink = theme::TEXT_READING; table.list_focused = true;
         }
+        // The page is the same family as the Settings root: one card per row (issue #415). The
+        // PICKER stays a list, because a popover of options is one column on one ground.
+        self.table.cards(true);
         self.table.set_sections(vec![section, subtitles], list_sel, false);
         if let Some(field) = self.state.picker {
             let current = self.current_value(field);

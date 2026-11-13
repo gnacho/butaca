@@ -1,9 +1,0 @@
-{
-  "expected": "0x43276a70a7deb5de",
-  "first_frame": 7,
-  "from_state_fp": 16138183083481204964,
-  "got": "0xdb9493821871ae4f",
-  "preceding_event_kinds": [],
-  "reason": "poster",
-  "to_state_fp": 16138183083481204964
-}

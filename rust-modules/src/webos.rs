@@ -608,7 +608,42 @@ fn storage_activation_reply(reply: &str) -> crate::storage::wire::failure::Detai
 /// The helper publishes readiness from its startup path, so neither a successful method reply nor
 /// delivery of `/wake` is required; the result is retained only as diagnostics and the authenticated
 /// Unix-socket `Hello` is the sole readiness proof.
+/// **Turn the television's own screen saver off for as long as this app is foreground** (the
+/// owner's 2026-11-10 pass: "desactivamos el salvapantallas de la app"). Butaca draws its own idle
+/// screen, so two savers fight: the panel blanks under a UI that is still painting.
+///
+/// Measured dead ends, so nobody retries them: the SDL 2.0.4 fork on this family advertises the
+/// `SDL_VIDEO_ALLOW_SCREENSAVER` hint but implements no wayland idle-inhibit, so `SDL_SetHint` and
+/// `SDL_EnableScreenSaver` are no-ops (see `boot.rs`'s own note), and `libwayland-client` here
+/// exposes only the marshaller, not the constructor that binding an `idle_inhibit` interface would
+/// need. The lever that DOES exist on webOS is the platform's own setting, driven over LS2 through
+/// configd — the same service the settings menu writes.
+///
+/// Best effort by design: this is a preference, and a firmware that refuses it must not affect
+/// boot or playback. The result is logged and nothing is retried.
+#[cfg(all(not(feature = "hostsim"), not(test)))]
+pub(crate) fn suppress_platform_screensaver() {
+    // `activitymanager` owns the idle/blank policy on webOS 4+. Writing it is a call, not a file
+    // edit, so a refusal comes back as a reply rather than as a silent difference.
+    let payload = "{\"settings\":{\"screenSaverEnabled\":false}}";
+    match ls2::call_once("luna://com.webos.settingsservice/setSystemSettings", payload) {
+        Ok(reply) => crate::log(&format!("screensaver: platform saver off -> {reply}")),
+        Err(ls2::Fail::Timeout) => crate::log("screensaver: platform saver call timed out"),
+        Err(ls2::Fail::Setup { stage, code, .. }) => {
+            crate::log(&format!("screensaver: platform saver call failed stage={stage} code={code:?}"))
+        }
+    }
+}
+
+#[cfg(any(feature = "hostsim", test))]
+pub(crate) fn suppress_platform_screensaver() {}
+
 #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)))]
+/// Best-effort dynamic-service activation hint for the storage helper.
+///
+/// The helper publishes readiness from its startup path, so neither a successful method reply nor
+/// delivery of `/wake` is required; the result is retained only as diagnostics and the authenticated
+/// Unix-socket `Hello` is the sole readiness proof.
 pub(crate) fn activate_storage_helper(service: &str) -> crate::storage::wire::failure::Detail {
     use crate::storage::wire::failure::{Detail, Stage};
     let uri = format!("luna://{service}/wake");

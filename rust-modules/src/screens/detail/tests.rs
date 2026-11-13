@@ -112,6 +112,7 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         refresh_gen: 0,
         restore_intent: None,
         teardown_cleared: false,
+            preplay_on_land: false,
         scroll: Spring::at(0.0),
         scroll_target: 0.0,
         episode_scroll: Spring::at(0.0),
@@ -610,6 +611,105 @@ fn the_filmstrips_text_row_opens_that_episodes_own_page() {
     clear();
 }
 
+/// **The track chosen in the window is the track that plays** (issue #355, slice 2).
+///
+/// The window does not start anything itself: it hands its two answers to the page, the page makes
+/// them its own, and its ordinary Play passes them to `ContentReq::Play`'s `StartTracks` — which is
+/// what the first `PlaybackInfo` POST carries. This grades the joint, end to end on the page's own
+/// effect, rather than the window's message alone.
+#[test]
+fn the_track_chosen_in_the_window_is_the_track_the_play_asks_for() {
+    let mut film = detail(ServerId::UNSET, "film");
+    film.is_show = false;
+    film.kind = "movie".into();
+    film.seasons.clear();
+    film.episodes.clear();
+    film.part = "/library/parts/film".into();
+    let _guard = install(film);
+    let mut screen = bare(&_guard, ServerId::UNSET, "film");
+    let (_, effects) = step(
+        &mut screen,
+        &ScreenEvent::App(AppMsg::PrePlayGo { audio_sid: 2, sub_sid: 4 }),
+        None,
+    );
+    let tracks = effects.iter().find_map(|effect| match &effect.fx {
+        Fx::App(AppFx::Content(ContentReq::Play { tracks, .. })) => Some(*tracks),
+        _ => None,
+    });
+    let tracks = tracks.expect("the window's verdict starts the film");
+    assert_eq!(tracks.audio_sid, 2, "the audio the viewer chose is the one asked for");
+    assert_eq!(tracks.sub_sid, 4, "…and so is the subtitle");
+    clear();
+}
+
+/// **A film's poster opens the pre-playback window over the page it opened** (issue #355).
+///
+/// The press arms it, the landing spends it: the window's file block and its verb do not exist
+/// until the item has arrived, so this is the one shape that can be honest about both — the page
+/// it was always going to open, plus the window in front of it. What must NOT happen is a window
+/// over a show (its page plays an on-deck episode, so the file on the page is not the file that
+/// plays) and a second window for a page whose item already landed.
+#[test]
+fn a_poster_press_opens_the_pre_playback_window_when_the_item_lands() {
+    let mut film = detail(ServerId::UNSET, "film");
+    film.is_show = false;
+    film.kind = "movie".into();
+    film.seasons.clear();
+    film.episodes.clear();
+    let _guard = install(film);
+    let mut screen = bare(&_guard, ServerId::UNSET, "film");
+    screen.open_preplay_when_loaded();
+    let (handled, effects) = step(
+        &mut screen,
+        &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1),
+        None,
+    );
+    assert!(matches!(handled, Handled::Yes));
+    assert!(
+        effects.iter().any(|effect| matches!(
+            &effect.fx,
+            Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlay { .. })))
+        )),
+        "the landing presents the one window"
+    );
+    // …and it is spent: the next landing does not present a second one.
+    let (_, again) = step(
+        &mut screen,
+        &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 2),
+        None,
+    );
+    assert!(
+        !again.iter().any(|effect| matches!(
+            &effect.fx,
+            Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlay { .. })))
+        )),
+        "one press asks for one window"
+    );
+    clear();
+}
+
+/// …and a SHOW's page never opens it: what that page plays is its on-deck episode, so the file the
+/// window would describe is not the file the picture comes from.
+#[test]
+fn a_shows_page_never_opens_the_pre_playback_window() {
+    let _guard = install(detail(ServerId::UNSET, "show"));
+    let mut screen = bare(&_guard, ServerId::UNSET, "show");
+    screen.open_preplay_when_loaded();
+    let (_, effects) = step(
+        &mut screen,
+        &ScreenEvent::StoreChanged(StoreId::Metadata.ord(), 1),
+        None,
+    );
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            &effect.fx,
+            Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::PrePlay { .. })))
+        )),
+        "a show's page has no window"
+    );
+    clear();
+}
+
 #[test]
 fn the_related_shelf_raises_the_same_open_request() {
     let mut empty = detail(ServerId::UNSET, "show");
@@ -1035,7 +1135,10 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
                     sizes.insert(n);
                     for scroll in [0.0, 48.0] {
                         screen.scroll = Spring::at(scroll);
-                        let widths = hero::hero_widths(&measure, restart);
+                        // The Play capsule's width follows the STORE's own resume point, which is
+                        // what `place` and `draw_buttons` both read — the fixture must agree with
+                        // it rather than assume a restart implies a resume.
+                        let widths = hero::hero_widths(&measure, screen.resume_ms(test_store().view()));
                         let mut stops = Vec::new();
                         let mut drawn = Vec::new();
                         for (i, control) in controls[..n].iter().enumerate() {
@@ -1362,9 +1465,14 @@ fn a_long_synopsis_keeps_the_first_section_one_region_gap_below_the_buttons() {
     let screen = bare(&_guard, sid, "show");
     let detail = screen.detail(test_store().view()).unwrap();
     let chain = screen.hero_chain(&crate::ui::fixture::FixtureMeasure, test_store().view());
+    // The flow starts at the hero's FOOT (the poster's bottom, or the row's, whichever is lower) —
+    // not at the action row, which would put the shelves inside the hero now that the poster is
+    // 75% of the screen.
     assert_eq!(
         screen.section_top(1, detail, &crate::ui::fixture::FixtureMeasure),
-        chain.btn_y + hero::CD + theme::space::XL
+        (crate::ui::detail_layout::POSTER_Y + crate::ui::detail_layout::POSTER_H)
+            .max(chain.btn_y + hero::CD)
+            + theme::space::XL
     );
     assert_eq!(screen.content_top(&crate::ui::fixture::FixtureMeasure, test_store().view()), screen.section_top(1, detail, &crate::ui::fixture::FixtureMeasure));
     clear();
@@ -1801,7 +1909,8 @@ fn the_visible_back_control_registers_and_navigates() {
     let context = cx(&crate::ui::fixture::FixtureMeasure, None);
     let mut frame = crate::ui::screen::DrawFrame::new(&context, crate::ui::Painter::root());
     screen.record_stops(&mut frame);
-    let frame_origin = crate::ui::widgets::CHIP_FRAME;
+    // The detail page draws its Back at the top of the safe area, not in the shared chip box.
+    let frame_origin = crate::ui::widgets::detail_back_frame();
     let stop = frame.stops().iter().find(|stop| stop.key.elem == crate::screens::registry::HEADER_CRUMB)
         .expect("Detail publishes its visible Back control");
     assert_eq!([stop.rect.x, stop.rect.y, stop.rect.w, stop.rect.h],
@@ -1853,61 +1962,6 @@ fn preview_already_played_is_a_plain_key_match() {
 /// while shrunk (`t=1`, `scroll_pos=0`), eased down as `scroll_pos` climbs toward `hero_extent`
 /// (where the below-hero flow starts), pinned at 0 once past it, and — because it is a pure
 /// function of the CURRENT `scroll_pos` with no memory — back to full the moment scroll returns
-/// to 0, exactly the "come back when scrolled back up" the owner asked for.
-#[test]
-fn preview_logo_scroll_alpha_only_fades_the_shrunk_logo_past_the_hero() {
-    let extent = 800.0_f32;
-
-    // t=0: a normal hero position is untouched by this factor at any scroll.
-    for scroll in [0.0, 400.0, 800.0, 2000.0] {
-        assert_eq!(
-            super::preview_logo_scroll_alpha(scroll, extent, 0.0),
-            1.0,
-            "t=0 (no preview) must not be touched by this fade at scroll={scroll}"
-        );
-    }
-
-    // t=1: full at the very top, and monotonically non-increasing as scroll rises.
-    assert_eq!(super::preview_logo_scroll_alpha(0.0, extent, 1.0), 1.0);
-    let mut prev = 1.0;
-    let mut s = 0.0;
-    while s <= extent * 1.5 {
-        let a = super::preview_logo_scroll_alpha(s, extent, 1.0);
-        assert!((0.0..=1.0).contains(&a), "scroll={s}: alpha {a} outside 0..=1");
-        assert!(a <= prev + 1e-6, "scroll={s}: alpha rose from {prev} to {a}");
-        prev = a;
-        s += extent / 16.0;
-    }
-    assert_eq!(
-        super::preview_logo_scroll_alpha(extent, extent, 1.0),
-        0.0,
-        "fully hidden once scrolled exactly to the below-hero flow's own start"
-    );
-    assert_eq!(
-        super::preview_logo_scroll_alpha(extent * 2.0, extent, 1.0),
-        0.0,
-        "clamped, not negative, once scrolled well past it"
-    );
-
-    // Scrolling back up restores it — a pure function of the current position, no hysteresis.
-    assert_eq!(
-        super::preview_logo_scroll_alpha(extent, extent, 1.0),
-        0.0
-    );
-    assert_eq!(
-        super::preview_logo_scroll_alpha(0.0, extent, 1.0),
-        1.0,
-        "back to full the instant scroll returns to the top"
-    );
-
-    // Partway through `t` (the spring mid-travel) blends the two: half-shrunk halves the fade.
-    assert_eq!(
-        super::preview_logo_scroll_alpha(extent, extent, 0.5),
-        0.5,
-        "at t=0.5 the fully-past-hero case should only be half faded"
-    );
-}
-
 /// Closes the outside-voice-found gap: `preview_played_for`/`preview_started_for` must reset on
 /// leave, matching the existing `preview_dwell`/`preview_promoted` convention at the same call
 /// site, or §8.2's own "resets whenever you leave and re-enter" decision silently does not hold.

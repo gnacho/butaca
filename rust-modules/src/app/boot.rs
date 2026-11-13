@@ -771,6 +771,10 @@ pub(crate) unsafe fn construct(
     // Relaunch-while-running deep links are lost until there is a conflict-free way to subscribe
     // to registerApp.
     crate::webos::lifecycle::start();
+    // The platform's own saver would blank the panel under a UI that is still painting, and Butaca
+    // draws its own idle screen — so the platform's is turned off for as long as this app is up.
+    // Best effort: a firmware that refuses the setting changes nothing else (issue #413).
+    crate::webos::suppress_platform_screensaver();
     // vsync on → the frame rate locks to the panel refresh. `/tmp/butaca-novsync` uncaps it so
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
     // blocking, so the software budget in `run` follows the same switch.

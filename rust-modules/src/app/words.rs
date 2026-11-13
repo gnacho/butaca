@@ -52,6 +52,7 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
         | AppArg::PersonBio
         | AppArg::CollectionAbout
         | AppArg::TrackPick(_)
+        | AppArg::PrePlayWindow(_)
         | AppArg::Images(_) => "",
     }
 }

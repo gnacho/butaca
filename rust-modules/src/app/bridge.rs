@@ -587,6 +587,13 @@ impl Bridge {
         matches!(page.probe_viewport(d.input.engine.current(InputOwner::Entry(entry.id))).0, "grid" | "shelf")
     }
 
+    /// Open the Library filtered by one genre — a detail page's genre chip. The name travels on
+    /// the mounter and the Library resolves it against its own genre list once the listing is up.
+    pub(crate) fn open_library_genre(&mut self, genre: &str) {
+        self.mounter.pending_genre = Some(genre.to_string());
+        self.mounter.library_kind = None;
+    }
+
     pub(crate) fn enter_library(&mut self, kind: crate::browse::SecKind) {
         self.mounter.library_kind = Some(kind);
         self.library_commands.clear();
@@ -615,6 +622,12 @@ impl Bridge {
     /// [`crate::screens::registry::DetailSeed`].
     pub(crate) fn seed_detail(&mut self, sid: crate::registry::ServerId, rk: &str, spot: crate::metadata::Spot) {
         self.mounter.seed = Some(crate::screens::registry::DetailSeed { sid, rk: rk.to_string(), spot });
+    }
+
+    /// Arm the next matching detail mount to open the pre-playback window once its item lands
+    /// (issue #355) — see [`crate::screens::registry::AppMounter::poster_preplay`].
+    pub(crate) fn seed_poster_preplay(&mut self, sid: crate::registry::ServerId, rk: &str) {
+        self.mounter.poster_preplay = Some((sid, rk.to_string()));
     }
 
     /// Where the next player instance returns to — see `AppMounter::player_origin`.
@@ -1275,7 +1288,10 @@ impl Rig<AppHost> for Bridge {
             .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
             .icon(crate::ui::icons::Icon::Settings)
             .focused(self.strip.gear_focused());
-        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p);
+        // Idle gear sits back at a partial alpha (the owner's 2026-11-10 pass: "transparencia al
+        // icono de ajustes"); focused, it comes fully forward.
+        let gear_alpha = if self.strip.gear_focused() { 1.0 } else { 0.55 };
+        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p.alpha(gear_alpha));
     }
     /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — a scrim lift borrows the SAME
     /// captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher adds this
@@ -2623,6 +2639,30 @@ pub(crate) fn open_detail(
     sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
     ret: Option<ReturnState<u32, PageMemory>>,
 ) {
+    open_detail_from(d, rig, sid, rk, season, ret, false);
+}
+
+/// **A press on a FILM's poster**: the same push, plus the arm that makes the page open the
+/// pre-playback window as soon as its item loads (issue #355).
+///
+/// Nothing here plays: the film still starts only from the window's own control, which is the whole
+/// of what the owner asked the press to stop doing. The caller is the CARD-ACTIVATION seam
+/// ([`super::input::activate_card`]), where a press on a Home shelf or a Library grid becomes an
+/// intent; presses that travel from one page to another and every non-press way onto a page keep
+/// the plain [`open_detail`], so their recorded flows stay byte-identical.
+pub(crate) fn open_detail_from_card(
+    d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    ret: Option<ReturnState<u32, PageMemory>>,
+) {
+    open_detail_from(d, rig, sid, rk, season, ret, true);
+}
+
+fn open_detail_from(
+    d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    ret: Option<ReturnState<u32, PageMemory>>, preplay: bool,
+) {
     use crate::ui::screen::ScreenArg;
     let arg = AppArg::Content(ContentArg::Detail { sid, rk: rk.to_string() });
     // The page is already on its way (a second press inside the push's dip-out): the pending push
@@ -2637,6 +2677,9 @@ pub(crate) fn open_detail(
         ..Default::default()
     };
     rig.seed_detail(sid, rk, spot);
+    if preplay {
+        rig.seed_poster_preplay(sid, rk);
+    }
     match ret {
         Some(ret) => nav_push_with_return(d, arg, ret),
         None => nav_push(d, arg),
