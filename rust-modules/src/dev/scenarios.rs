@@ -926,7 +926,9 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
                 "legal" => crate::screens::family::SettingsPage::Legal,
                 "language" => crate::screens::family::SettingsPage::Language,
                 "contribute" => crate::screens::family::SettingsPage::Contribute,
-                "playback" => crate::screens::family::SettingsPage::Playback,
+                // The playback knobs moved onto the Settings root itself, so the old
+                // `settings-boot=playback` target opens that page rather than a page of its own.
+                "playback" => crate::screens::family::SettingsPage::Root,
                 _other => {
                     #[cfg(feature = "devtriggers")]
                     crate::log(&format!("BADTRIGGER settings-boot target {_other:?} unknown; opened root instead"));

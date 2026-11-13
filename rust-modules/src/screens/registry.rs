@@ -2114,7 +2114,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::preplay_window::SHAPE[0],
     crate::screens::preplay_window::SHAPE[1],
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
-    crate::screens::preferences::SHAPE,
+    crate::screens::settings::SHAPE,
 ];
 
 /// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.
@@ -2260,7 +2260,14 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // **`PrePlayWindow` learns its choice** (0xc5a7_8989_3ded_9df3 before it, slice 2 of #355): the
 // window carries the page's two answers in and hands its own two back, so the shape records them.
 // Additive again: no committed recording opens the window.
-const SCREEN_SHAPES_PIN: u64 = 0x85c1_d268_7fd9_a355;
+//
+// **The Settings root becomes the whole page** (0x85c1_d268_7fd9_a355 before it): the playback
+// knobs, the server rows and the interface rows are ONE page now (the owner's redesign mockup), so
+// `screens::preferences::SHAPE` retires and `screens::settings::SHAPE` — `SettingsHomeV1` — takes
+// its place in the inventory. A schema transition, not a rebaseline: a recording taken before it
+// hashed the root as a selection over four door-cards, and nothing about the page's pickers, its
+// confirmed values or its switches was in it. Re-record the replay fixtures.
+const SCREEN_SHAPES_PIN: u64 = 0xdba0_45fe_5fa2_8532;
 
 #[cfg(test)]
 mod arg_tests {

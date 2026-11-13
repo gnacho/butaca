@@ -44,7 +44,7 @@ fn every_root_row_fits_its_grid_cell_in_every_language() {
     let mut out = Vec::new();
     for language in LANGUAGES {
         let _guard = language_on_this_thread_for_test(language);
-        let root = RootPage::new(EntryId(0), crate::stores::browse::DirectoryView::empty_for_test());
+        let root = RootPage::new(EntryId(0));
         out.extend(
             root.table
                 .elided_rows(frame_w, &ShippedMeasure, HEADROOM)
@@ -55,8 +55,7 @@ fn every_root_row_fits_its_grid_cell_in_every_language() {
     assert!(out.is_empty(), "root rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
 }
 
-/// Owner report (Belarusian UI): a long VALUE squeezed the primary label of the Video Playback
-/// page's Direct Play row — the label column was whatever the unelided value left over. The row's
+/// Owner report (Belarusian UI): a long VALUE squeezed the primary label of the Direct Play row — the label column was whatever the unelided value left over. The row's
 /// label is the primary read and keeps its natural width; the value gives way first, ending in
 /// an ellipsis. Built exactly as `preferences::PreferencesPage::rebuild` builds its field rows,
 /// with every Direct Play value the picker can set.
@@ -90,16 +89,17 @@ fn a_long_value_elides_before_the_settings_label_it_trails() {
     assert!(squeezed_values > 0, "the premise: Belarusian's Force value does not fit beside its label");
 }
 
-/// **#297: the Recently Added switch lives on *Video & playback*, not on the root.** Its rows use
-/// the route content column, so its translated label and detail must fit there.
+/// **#297: the Recently Added switch is one of the page's own rows.** It sits in the two-column
+/// grid like every other row, so its translated label and detail must fit a CELL.
 #[test]
 fn the_recently_added_row_fits_the_playback_column_in_every_language() {
-    let frame_w = RouteLayout::screen().sectioned_table().w;
+    let frame_w = RootPage::layout().content.w;
     let mut out = Vec::new();
     for language in LANGUAGES {
         let _guard = language_on_this_thread_for_test(language);
         let mut table = TableView::new();
         table.compact = false;
+        table.grid(2);
         table.set_sections(
             vec![Section::new("").row(
                 Row::new(msg::settings_library_recently_added())

@@ -214,10 +214,6 @@ fn seat(d: &mut Dispatcher<InnerHost>, id: EntryId, elem: u32) {
     d.set_focus(Some(FocusKey { entry: id, elem }));
 }
 
-fn consent_opened(page: SettingsPage) -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
-    consent_opened_on(page, SurfaceRig::new())
-}
-
 fn consent_opened_on(
     page: SettingsPage,
     mut rig: SurfaceRig,
@@ -331,6 +327,18 @@ fn left_at_the_surfaces_own_root_dismisses_it() {
     );
 }
 
+/// The drawn row index of the page row carrying `label` — the page's own row order is its
+/// business, so a test names a row by what it says.
+fn row_of(label: &str) -> u32 {
+    RootPage::new(EntryId(0))
+        .table
+        .sections
+        .iter()
+        .flat_map(|s| s.rows.iter())
+        .position(|r| r.label == label)
+        .unwrap_or_else(|| panic!("no row labelled {label}")) as u32
+}
+
 /// Parent and picker share the surface entry and table group. A remembered parent row must not
 /// replace the saved option when entering, and a remembered option must not replace the parent
 /// row on return. Drive the real engine: checking TableView::sel before its Enter effect runs
@@ -343,20 +351,26 @@ fn playback_picker_seats_the_saved_option_and_restores_its_parent_row() {
     let previous_mode = crate::route::direct_play_mode();
     crate::route::restore_quality(crate::route::Quality::P480);
     crate::route::restore_direct_play_mode(crate::route::DirectPlayMode::Auto);
+    let quality = row_of(crate::i18n::msg::settings_playback_quality());
+    let saved = crate::route::available_quality_ladder()
+        .iter()
+        .position(|q| *q == crate::route::Quality::P480)
+        .expect("the ladder offers P480") as u32;
     for back in [Key::Back, Key::Left] {
-        let (mut d, mut rig, id) = consent_opened(SettingsPage::Playback);
-        // A real DOWN/UP gives the engine an explicit parent cursor at Default quality.
+        let (mut d, mut rig, id) = opened();
+        // A real DOWN/UP gives the engine an explicit parent cursor on the quality row.
+        seat(&mut d, id, quality);
         frame(&mut d, &mut rig, 32, vec![key(Key::Down, tick(32))]);
         frame(&mut d, &mut rig, 48, vec![key(Key::Up, tick(48))]);
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 0 }));
+        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: quality }));
         frame(&mut d, &mut rig, 64, vec![key(Key::Ok, tick(64))]);
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 6 }),
-            "the quality picker opens at saved P480, not the parent's remembered row 0");
+        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: saved }),
+            "the quality picker opens at saved P480, not the parent's remembered row");
         frame(&mut d, &mut rig, 80, vec![]);
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 6 }));
+        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: saved }));
         frame(&mut d, &mut rig, 96, vec![key(back, tick(96))]);
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 0 }),
-            "{back:?} restores Default quality, not the picker's remembered row 6");
+        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: quality }),
+            "{back:?} restores the quality row, not the picker's remembered option");
         assert_eq!(d.nav.input_owner(), Some(InputOwner::Entry(id)));
         assert_eq!(crate::route::quality(), crate::route::Quality::P480,
             "leaving the picker does not change the saved preference");
@@ -381,10 +395,13 @@ fn force_warning_engine_focus_confirms_only_the_chosen_answer() {
         if let InputKind::Key { edge, .. } = &mut up.kind { *edge = Edge::Up; }
         vec![down, up]
     };
+    let direct = row_of(crate::i18n::msg::settings_playback_direct_play());
     for confirm in [false, true] {
-        let (mut d, mut rig, id) = consent_opened(SettingsPage::Playback);
+        let (mut d, mut rig, id) = opened();
+        seat(&mut d, id, direct);
         frame(&mut d, &mut rig, 32, vec![key(Key::Down, tick(32))]);
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 1 }));
+        frame(&mut d, &mut rig, 40, vec![key(Key::Up, tick(40))]);
+        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: direct }));
         frame(&mut d, &mut rig, 48, ok(48));
         assert!(path(&d, id).contains("picker=Some(DirectPlay)"));
         frame(&mut d, &mut rig, 64, vec![key(Key::Down, tick(64))]);
@@ -399,7 +416,10 @@ fn force_warning_engine_focus_confirms_only_the_chosen_answer() {
         frame(&mut d, &mut rig, 112, ok(112));
         // A Control's pressed animation may defer its commit until it has reached its dip.
         for ms in (128..=448).step_by(16) { frame(&mut d, &mut rig, ms, vec![]); }
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 1 }));
+        // Cancel leaves the picker open on the option that asked, which is the row the engine
+        // re-seats; confirming closes it back onto the page's Direct Play row.
+        let landed = if confirm { direct } else { 1 };
+        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: landed }));
         assert!(!path(&d, id).contains("confirm=true"), "the chosen answer closes the warning");
         if confirm {
             assert!(matches!(rig.preference_commands.pop(), Some(registry::PreferenceCmd::DirectPlay {

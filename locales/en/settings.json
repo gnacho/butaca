@@ -545,8 +545,8 @@
     "description": "Settings, consent or sign-in UI: the switch that lets the OLED idle screen appear when nothing is playing."
   },
   "settings.playback.idle_screen.detail": {
-    "value": "Dim the panel with a clock when the room is idle.",
-    "description": "Settings, consent or sign-in UI: the screensaver switch's detail line."
+    "value": "Dim clock when nothing plays.",
+    "description": "Settings, consent or sign-in UI: the screensaver row's detail line."
   },
   "settings.playback.title": {
     "value": "Video & playback",
@@ -1051,7 +1051,7 @@
     "description": "Settings, account, onboarding or privacy UI: the row that opens the server picker."
   },
   "settings.servers.select.detail": {
-    "value": "Choose which configured server this television uses.",
+    "value": "Choose which server this TV uses.",
     "description": "Settings, account, onboarding or privacy UI: the server picker row's detail line."
   },
   "settings.servers.quick": {
@@ -1113,5 +1113,57 @@
   "settings.playback.skip_markers_auto": {
     "value": "Skip automatically",
     "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_auto"
+  },
+  "settings.interface.section": {
+    "value": "Interface",
+    "description": "Settings root: the group header for the interface rows (language, legal, about)."
+  },
+  "settings.servers.current": {
+    "value": "Jellyfin server",
+    "description": "Settings root: the row naming the server this television is signed in to, with its account as the value and its address underneath."
+  },
+  "settings.servers.add": {
+    "value": "Add another server",
+    "description": "Settings root: the row that opens Quick Connect to sign in to a second server."
+  },
+  "settings.servers.add.detail": {
+    "value": "Keep several and switch here.",
+    "description": "Settings root: the add-another-server row's detail line."
+  },
+  "settings.playback.quality.detail": {
+    "value": "Bitrate limit for playback.",
+    "description": "Settings root: the quality row's detail line."
+  },
+  "settings.playback.direct_play.detail": {
+    "value": "Play untranscoded when the TV allows.",
+    "description": "Settings root: the Direct Play row's detail line."
+  },
+  "settings.playback.lip_sync.detail": {
+    "value": "Audio delay against the picture.",
+    "description": "Settings root: the audio-sync row's detail line."
+  },
+  "settings.playback.up_next.detail": {
+    "value": "What to do when it ends.",
+    "description": "Settings root: the next-episode row's detail line."
+  },
+  "settings.playback.up_next_window.detail": {
+    "value": "How long before the card appears.",
+    "description": "Settings root: the up-next-window row's detail line."
+  },
+  "settings.playback.skip_markers.detail": {
+    "value": "Intros and credits the server marks.",
+    "description": "Settings root: the skip-markers row's detail line."
+  },
+  "settings.playback.subtitle_size.detail": {
+    "value": "Size of the subtitle text.",
+    "description": "Settings root: the subtitle-size row's detail line."
+  },
+  "settings.playback.subtitle_position.detail": {
+    "value": "How high they appear.",
+    "description": "Settings root: the subtitle-position row's detail line."
+  },
+  "settings.playback.subtitle_background.detail": {
+    "value": "Box behind the text.",
+    "description": "Settings root: the subtitle-background row's detail line."
   }
 }

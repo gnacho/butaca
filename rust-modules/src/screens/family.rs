@@ -66,14 +66,11 @@ pub(crate) enum SettingsPage {
     Language,
     /// Translation contribution guide with an offline QR link.
     Contribute,
-    /// Install-wide playback defaults.
-    Playback,
     /// Favorite libraries — the onboard screen in Settings mode.
     Favourites,
     /// The Legal index.
     Legal,
     /// About Butaca, a document pushed straight from the root.
-    #[cfg(test)]
     About,
     /// One Legal document, by index into `screens::legal`'s page list.
     Document(u8),
@@ -88,12 +85,10 @@ impl ScreenArg for SettingsPage {
     fn id(&self) -> ScreenId {
         ScreenId(match self {
             SettingsPage::Root => 100,
-            SettingsPage::Playback => 108,
             SettingsPage::Language => 110,
             SettingsPage::Contribute => 111,
             SettingsPage::Favourites => 101,
             SettingsPage::Legal => 103,
-            #[cfg(test)]
             SettingsPage::About => 104,
             SettingsPage::Document(_) => 105,
             SettingsPage::Servers => 112,
@@ -127,10 +122,8 @@ impl LogicalState for SettingsPage {
             SettingsPage::Root
             | SettingsPage::Language
             | SettingsPage::Contribute
-            | SettingsPage::Playback
             | SettingsPage::Favourites
             | SettingsPage::Legal => 0,
-            #[cfg(test)]
             SettingsPage::About => 0,
             SettingsPage::Servers => 0,
             SettingsPage::Document(i) => *i,
@@ -141,10 +134,8 @@ impl LogicalState for SettingsPage {
             SettingsPage::Root => "root",
             SettingsPage::Language => "language",
             SettingsPage::Contribute => "contribute",
-            SettingsPage::Playback => "playback",
             SettingsPage::Favourites => "favourites",
             SettingsPage::Legal => "legal",
-            #[cfg(test)]
             SettingsPage::About => "about",
             SettingsPage::Servers => "servers",
             SettingsPage::Document(_) => "document",
@@ -303,10 +294,8 @@ mod tests {
             SettingsPage::Root,
             SettingsPage::Language,
             SettingsPage::Contribute,
-            SettingsPage::Playback,
             SettingsPage::Favourites,
             SettingsPage::Legal,
-            #[cfg(test)]
             SettingsPage::About,
             SettingsPage::Document(0),
             SettingsPage::Servers,

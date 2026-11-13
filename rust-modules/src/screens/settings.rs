@@ -53,6 +53,9 @@ use crate::ui::{theme, Painter, Rect};
 use super::family::{inner_cx, table_focus, InnerHost, SettingsPage};
 use super::registry::{word, AppFx, DirectoryLike};
 
+mod page;
+pub(crate) use self::page::{RootPage, SHAPE};
+
 /// Which ceremony the surface carries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Family {
@@ -456,12 +459,10 @@ fn mount_page(
     _fx: &mut Effects<'_, InnerHost>,
 ) -> Box<dyn Screen<InnerHost>> {
     match arg {
-        SettingsPage::Root => Box::new(RootPage::new(entry, cx.views)),
+        SettingsPage::Root => Box::new(RootPage::new(entry)),
         SettingsPage::Language => Box::new(LanguagePage::new(entry)),
         SettingsPage::Contribute => Box::new(super::legal::DocumentPage::contribute(entry)),
-        SettingsPage::Playback => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::Playback)),
         SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
-        #[cfg(test)]
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
         SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
@@ -497,9 +498,9 @@ fn mount_page(
 /// census, as of 2026-09-07, one line per page kind, so the next reader can check it instead of
 /// trusting it:
 ///
-///  * `RootPage` → `RootState`: the selected row, Automatically Sign In, and trailer autoplay.
-///  * `PreferencesPage`: page/picker identity, confirmed values, pending/error presentation and
-///    the Force acknowledgement state. See `screens::preferences::SHAPE`.
+///  * `RootPage` (the one Settings page: server, playback, audio, interface) → `State`: which
+///    picker is open, the selected row, the confirmed values, the switch faces and the Force
+///    acknowledgement state. See `screens::settings::page::SHAPE`.
 ///  * `ConsentPage` (Privacy & data, and each first-run stage) → `ConsentState`: the mode, both
 ///    halves of the draft decision, and whether the delete alert is up.
 ///  * `OnboardScreen` (Favorite libraries) → `OnboardState`: whether it is the Settings or the
@@ -974,226 +975,6 @@ impl Mounter<InnerHost> for RouteSurface {
         mount_page(self.entry, *arg, cx, fx)
     }
 }
-
-// ---------------------------------------------------------------------------------------------
-// the root page
-// ---------------------------------------------------------------------------------------------
-
-/// The Settings root's centred column width (#297). Wide enough for two comfortable rows side by
-/// side at the shared `HEADLINE`/`CAPTION` pair, narrow enough that the block still reads as one
-/// column rather than as a page-wide table with a hole in the middle (the owner's report on the
-/// mockup's single left column).
-
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Action {
-    SelectServer,
-    QuickConnect,
-    Playback,
-    SignOut,
-}
-
-/// The Settings root: the server doors, the playback controls and the way out, as a centred
-/// two-column grid. Language, legal notices and credits are still deliberately absent: this
-/// surface is about the media and the account, not the app's legal copy. The viewer's own
-/// preferences (the Recently Added switch) live one level in, on *Video & playback*.
-pub(crate) struct RootPage {
-    entry: EntryId,
-    table: TableView,
-    rows: Vec<Action>,
-    state: RootState,
-}
-
-/// The root's LOGICAL state: the selected row. The Recently Added switch is not here because it
-/// is not on this page (it lives on *Video & playback*), and adding a byte here would change the
-/// state hash of every frame in the committed `6-settings-family` replay.
-struct RootState {
-    sel: i32,
-}
-
-impl LogicalState for RootState {
-    fn write(&self, w: &mut Canon) {
-        w.u32(self.sel as u32);
-    }
-    fn probe(&self, out: &mut String) {
-        out.push_str(&format!("root sel={}", self.sel));
-    }
-}
-
-impl RootPage {
-    fn new(entry: EntryId, directory: crate::stores::browse::DirectoryView<'_>) -> Self {
-        let mut s = Self {
-            entry,
-            table: TableView::new(),
-            rows: Vec::new(),
-            state: RootState { sel: 0 },
-        };
-        s.rebuild(0, directory);
-        s
-    }
-
-    /// The root's one layout: a centred column, title block and cards in the same measure. Focus,
-    /// paint and the tick's frame height all read it, so they cannot drift apart.
-    fn layout() -> RouteLayout {
-        RouteLayout::settings()
-    }
-
-    fn rebuild(&mut self, sel: i32, _directory: crate::stores::browse::DirectoryView<'_>) {
-        let servers = Section::new(crate::i18n::msg::settings_servers_section())
-            .row(
-                Row::new(crate::i18n::msg::settings_servers_select())
-                    .detail(crate::i18n::msg::settings_servers_select_detail())
-                    .chevron(true),
-            )
-            .row(
-                Row::new(crate::i18n::msg::settings_servers_quick())
-                    .detail(crate::i18n::msg::settings_servers_quick_detail())
-                    .chevron(true),
-            );
-        let preferences = Section::new(crate::i18n::msg::settings_preferences_section())
-            .row(
-                Row::new(crate::i18n::msg::settings_playback_title())
-                    .detail(crate::i18n::msg::settings_playback_detail())
-                    .chevron(true),
-            );
-        let sign_out = Section::new("").row(
-            Row::new(crate::i18n::msg::settings_servers_disconnect())
-                .detail(crate::i18n::msg::settings_servers_disconnect_detail())
-                .destructive(true),
-        );
-        // **The READING order is the element order** — row-major, section by section — so the
-        // owner's action vector, the focus keys and the pointer stops stay one list whichever way
-        // the grid lays the cells out. "Select server" is cell 0 of band 0 (top-left), which is
-        // where the replay's first press lands.
-        self.rows = vec![
-            Action::SelectServer, Action::QuickConnect,
-            Action::Playback, Action::SignOut,
-        ];
-        self.table.compact = false;
-        self.table.header_ink = theme::TEXT_READING;
-        self.table.grid(2);
-        // **The root is the mockup's grid of cards** (issue #415): each row its own plate, the
-        // focused one washed in the chrome's tone. The sub-pages stay lists until they are
-        // designed the same way.
-        self.table.cards(true);
-        self.table.set_sections(vec![servers, preferences, sign_out], sel, false);
-        self.table.list_focused = true;
-    }
-
-    fn view(&self) -> TableScreen<'_> {
-        let layout = Self::layout();
-        TableScreen::new(
-            Header::new(
-                layout,
-                Some(crate::i18n::msg::browse_chrome_home()),
-                crate::i18n::msg::settings_title(),
-                crate::i18n::msg::settings_root_jellyfin_copy(),
-            )
-            .with_back_disc(),
-            &self.table,
-            GroupId(0),
-            self.entry,
-        )
-        .with_frame(layout.content)
-    }
-
-    fn activate(&mut self, row: i32, _directory: crate::stores::browse::DirectoryView<'_>,
-        fx: &mut Effects<'_, InnerHost>) {
-        let Some(&action) = usize::try_from(row).ok().and_then(|i| self.rows.get(i)) else {
-            return;
-        };
-        match action {
-            Action::SelectServer => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
-            Action::QuickConnect => {
-                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
-            }
-            Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
-            Action::SignOut => {
-                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
-            }
-        }
-    }
-}
-
-impl Machine<InnerHost> for RootPage {
-    type Ev = ScreenEvent<InnerHost>;
-    fn step(
-        &mut self,
-        ev: &Self::Ev,
-        cx: &Cx<'_, InnerHost>,
-        fx: &mut Effects<'_, InnerHost>,
-    ) -> Handled {
-        match ev {
-            ScreenEvent::Enter(_) => {
-                let sel = self.table.sel;
-                self.rebuild(sel, cx.views);
-                Handled::Yes
-            }
-            ScreenEvent::Tick(t) => {
-                self.table.update(t.dt(), Self::layout().content.h);
-                Handled::Yes
-            }
-            ScreenEvent::FocusMoved { to, .. } => {
-                table_focus(&mut self.table, to.elem);
-                self.state.sel = self.table.sel;
-                Handled::Yes
-            }
-            ScreenEvent::Activate(e) => {
-                self.activate(*e as i32, cx.views, fx);
-                Handled::Yes
-            }
-            ScreenEvent::Input(crate::ui::machine::InputEvent {
-                kind: crate::ui::machine::InputKind::Key {
-                    key: Key::Right,
-                    at_edge: true,
-                    ..
-                },
-                ..
-            }) => {
-                if let Some(k) = cx.focus.current {
-                    if self.table.row_opens(k.elem as i32) {
-                        self.activate(k.elem as i32, cx.views, fx);
-                    }
-                }
-                Handled::Yes
-            }
-            _ => Handled::No,
-        }
-    }
-}
-
-crate::focusable_via_view!(RootPage, InnerHost, view);
-
-impl Screen<InnerHost> for RootPage {
-    fn name(&self) -> &'static str {
-        word::SETTINGS
-    }
-    fn state(&self) -> &dyn LogicalState {
-        &self.state
-    }
-    fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
-        None
-    }
-    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
-        // the root's crumb reads "Home" - the place BACK goes, which is the app's top
-        self.view().crumb_rect(cx.measure)
-    }
-    fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
-    fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
-        let mut v = self.view();
-        crate::ui::screen::Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
-    }
-    fn render(&self) -> RenderStrategy {
-        RenderStrategy::Page
-    }
-    fn focus_source(&self) -> FocusSource {
-        FocusSource::Engine
-    }
-    fn hit_source(&self) -> HitSource {
-        HitSource::Engine
-    }
-}
-
 #[cfg(test)]
 #[path = "settings_test_support.rs"]
 mod test_support;

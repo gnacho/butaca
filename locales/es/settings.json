@@ -135,7 +135,7 @@
   "settings.library.recently_added": "Mostrar añadidos recientemente",
   "settings.library.recently_added.detail": "Encabeza Películas y Series con lo nuevo.",
   "settings.playback.idle_screen": "Salvapantallas",
-  "settings.playback.idle_screen.detail": "Atenúa la pantalla con un reloj cuando no hay nada en reproducción.",
+  "settings.playback.idle_screen.detail": "Reloj atenuado cuando no hay nada.",
   "settings.playback.title": "Vídeo y reproducción",
   "settings.playback.detail": "Calidad predeterminada y reproducción directa.",
   "settings.audio.title": "Audio y subtítulos",
@@ -275,5 +275,18 @@
   "settings.root.jellyfin_copy": "Gestiona este televisor y tus servidores Jellyfin. Todo se queda en tu red local: sin cuenta, sin telemetría, nada sale de ella.",
   "settings.playback.skip_markers": "Saltar intro y créditos",
   "settings.playback.skip_markers_ask": "Preguntar",
-  "settings.playback.skip_markers_auto": "Saltar automáticamente"
+  "settings.playback.skip_markers_auto": "Saltar automáticamente",
+  "settings.interface.section": "Interfaz",
+  "settings.servers.current": "Servidor Jellyfin",
+  "settings.servers.add": "Añadir otro servidor",
+  "settings.servers.add.detail": "Puedes tener varios y cambiar aquí.",
+  "settings.playback.quality.detail": "Límite de bitrate al reproducir.",
+  "settings.playback.direct_play.detail": "Sin transcodificar si se puede.",
+  "settings.playback.lip_sync.detail": "Retardo del audio respecto a la imagen.",
+  "settings.playback.up_next.detail": "Qué hacer al terminar.",
+  "settings.playback.up_next_window.detail": "Cuánto antes aparece la tarjeta.",
+  "settings.playback.skip_markers.detail": "Intros y créditos del servidor.",
+  "settings.playback.subtitle_size.detail": "Tamaño del texto de los subtítulos.",
+  "settings.playback.subtitle_position.detail": "Altura a la que aparecen.",
+  "settings.playback.subtitle_background.detail": "Recuadro detrás del texto."
 }
