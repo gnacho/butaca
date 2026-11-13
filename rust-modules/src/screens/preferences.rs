@@ -149,8 +149,19 @@ impl PreferencesPage {
             Some(field) => (self.kind_title(), field.title(), &self.picker_table),
             None => (crate::i18n::msg::settings_title(), self.kind_title(), &self.table),
         };
-        TableScreen::new(Header::new(RouteLayout::screen(), Some(crumb), title, &self.copy).with_back_disc(),
-            table, GroupId(0), self.entry).with_home()
+        // **The same centred column as the Settings root** (issue #415): title and subtitle on the
+        // page's measure, then the cards in two columns. It used to be the two-column
+        // narrative|list split every other route wears, which is what the owner saw as "no están
+        // los ajustes como el mockup" on a sub-page.
+        let layout = RouteLayout::centered(crate::screens::settings::SETTINGS_CENTER_W);
+        TableScreen::new(
+            Header::new(layout, Some(crumb), title, &self.copy).with_back_disc(),
+            table,
+            GroupId(0),
+            self.entry,
+        )
+        .with_frame(layout.content)
+        .with_home()
     }
     /// Draw one level through `p` and hand back the focus stops it registered.
     fn draw_level(&self, f: &DrawFrame<'_, '_, InnerHost>, level: Option<Field>, p: Painter) -> Vec<crate::ui::screen::Stop<u32>> {
@@ -375,6 +386,11 @@ impl PreferencesPage {
         for table in [&mut self.table, &mut self.picker_table] {
             table.compact = false; table.header_ink = theme::TEXT_READING; table.list_focused = true;
         }
+        // **One column of cards on the root's own measure.** The root pairs its rows because each
+        // card carries a title and one short line; this page's rows carry a full sentence of
+        // explanation, and halving the width would elide exactly the text that makes them
+        // readable. The language is the mockup's (cards, group labels, the page's own measure),
+        // the arrangement is what the content allows.
         // The page is the same family as the Settings root: one card per row (issue #415). The
         // PICKER stays a list, because a popover of options is one column on one ground.
         self.table.cards(true);

@@ -983,7 +983,11 @@ impl Mounter<InnerHost> for RouteSurface {
 /// side at the shared `HEADLINE`/`CAPTION` pair, narrow enough that the block still reads as one
 /// column rather than as a page-wide table with a hole in the middle (the owner's report on the
 /// mockup's single left column).
-const SETTINGS_CENTER_W: f32 = 1616.0;
+/// The Settings family's one measure: the root AND its sub-pages, so a card in *Vídeo y
+/// reproducción* is the same width as a card on the root instead of a second column of a
+/// different layout. (The owner's report was about the sub-pages: "no están los ajustes como el
+/// mockup", and they were still the two-column narrative|list split.)
+pub(crate) const SETTINGS_CENTER_W: f32 = 1616.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Action {
