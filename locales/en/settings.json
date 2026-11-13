@@ -577,7 +577,7 @@
     "description": "Settings, consent or sign-in UI: settings.playback.up_next"
   },
   "settings.playback.up_next_auto": {
-    "value": "Automatic",
+    "value": "Play automatically",
     "description": "Settings, consent or sign-in UI: settings.playback.up_next_auto"
   },
   "settings.playback.up_next_ask": {
