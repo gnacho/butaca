@@ -655,12 +655,23 @@ fn parse_sinkmax(spec: &str) -> Option<SinkEnvelope> {
 /// LG's buffer-feed vocabulary. libpf CustomPipeline::parseOptionStringSpi accepts DTS;
 /// getAudioCaps selects audio/x-dts and setAdecSinkInfo_ES configures dts-seamless (issue #221).
 /// Unsupported formats must never be mislabeled as AC3: that can stall the audio master clock.
+///
+/// **Every spelling of a family declares the family's one name** — ported from upstream
+/// plx-native `62354d903`, whose report is the reason this is not cosmetic: a server that names an
+/// audio track `dca` (DTS core), `dca-ma`, `dca_ma`, `dts_ma` or `dtshd` matched none of the arms
+/// below, so the Load declared no audio codec at all and the play was refused or misconfigured;
+/// mislabelled audio misconfigures the audio ES, and with audioSync the video sink slaves to a dead
+/// audio clock and the picture stalls — the "one title stops mid-film" class issue #327 sits in.
+///
+/// The declaration is safe in the other direction too: the demuxer feeds DTS **core** bytes for
+/// every spelling of the family (the extension is stripped before the elementary stream leaves), so
+/// `dts` is what the pipeline actually receives.
 fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
-    match codec {
+    match codec.to_ascii_lowercase().as_str() {
         "ac3" => Some(("AC3", 1)),
-        "eac3" => Some(("AC3 PLUS", 2)),
+        "eac3" | "ec-3" => Some(("AC3 PLUS", 2)),
         "aac" => Some(("AAC", 3)),
-        "dts" => Some(("DTS", 4)),
+        "dts" | "dca" | "dca-ma" | "dca_ma" | "dts_ma" | "dtshd" | "dts-hd" => Some(("DTS", 4)),
         _ => None,
     }
 }
@@ -4608,6 +4619,16 @@ mod sink_envelope_tests {
         for codec in ["truehd", "flac", "", "unknown"] {
             assert_eq!(audio_payload_codec(codec), None);
         }
+        // **Every spelling of a family declares the family's name** (upstream `62354d903`): a
+        // server naming a DTS track `dca` used to declare no audio codec at all, and an undeclared
+        // or mislabelled audio ES stalls the picture through a dead audio master clock.
+        for dts in ["dca", "DCA", "dca-ma", "dca_ma", "dts_ma", "dtshd", "dts-hd", "DTS"] {
+            assert_eq!(audio_payload_codec(dts), Some(("DTS", 4)), "the DTS family: {dts}");
+        }
+        for plus in ["eac3", "EAC3", "ec-3"] {
+            assert_eq!(audio_payload_codec(plus), Some(("AC3 PLUS", 2)), "DD+: {plus}");
+        }
+        assert_eq!(audio_payload_codec("AC3"), Some(("AC3", 1)), "case is normalised");
         let ps = crate::route::PlaybackSession::IDLE;
         let payload = build_av_payload(&ps, "H264", "DTS", ENVELOPE_FHD60);
         assert!(payload.contains(r#""audio":"DTS""#));
