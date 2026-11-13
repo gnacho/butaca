@@ -264,7 +264,9 @@ impl RootPage {
         }
     }
 
-    fn copy_text(&self) -> Cow<'_, str> {
+    /// The line under the title when it is saying something about a save: the in-flight or failed
+    /// status, with the Force note appended while Force is on. Empty when there is nothing to say.
+    fn note_text(&self) -> Cow<'_, str> {
         if !self.state.status.is_empty() {
             return if self.state.direct_play == DirectPlayMode::Forced {
                 Cow::Owned(format!(
@@ -279,7 +281,20 @@ impl RootPage {
         if self.state.direct_play == DirectPlayMode::Forced {
             Cow::Borrowed(crate::i18n::msg::settings_playback_force_note())
         } else {
-            Cow::Borrowed(crate::i18n::msg::settings_root_jellyfin_copy())
+            Cow::Borrowed("")
+        }
+    }
+
+    /// The header's second line for one level: the note when there is one, else the page's own
+    /// blurb on the page and nothing on a picker — the options ARE that level, and the page's
+    /// sentence under the name of one knob reads as a caption of the wrong thing.
+    fn header_copy(&self, level: Option<Field>) -> &str {
+        if !self.copy.is_empty() {
+            return &self.copy;
+        }
+        match level {
+            Some(_) => "",
+            None => crate::i18n::msg::settings_root_jellyfin_copy(),
         }
     }
 
@@ -296,7 +311,7 @@ impl RootPage {
         };
         let layout = Self::layout();
         TableScreen::new(
-            Header::new(layout, None, title, &self.copy).with_back_disc(),
+            Header::new(layout, None, title, self.header_copy(level)).with_back_disc(),
             table,
             GroupId(0),
             self.entry,
@@ -493,7 +508,7 @@ impl RootPage {
     fn rebuild(&mut self, selected: i32) {
         self.state.quality = crate::route::quality();
         self.state.direct_play = crate::route::direct_play_mode();
-        self.copy = self.copy_text().into_owned();
+        self.copy = self.note_text().into_owned();
         self.state.confirming = self.alert.is_open();
         self.state.affirmative = self.alert.choice();
         self.state.alert_scroll = self.alert.scroll_target_bits();
