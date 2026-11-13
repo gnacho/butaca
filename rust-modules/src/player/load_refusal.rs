@@ -61,6 +61,42 @@ pub(crate) fn classify(payload: &str) -> Refusal {
     Refusal::Unnamed
 }
 
+/// **The correction a refused axis licenses**: declare the OTHER source of truth for that axis.
+///
+/// Two truths exist for every play — what the server says about the track being fed (the
+/// declaration) and what the file's own record says (`src_acodec` / `src_vcodec`). When they
+/// disagree, a refusal that names the axis is exactly the evidence that the declaration did not
+/// match the bytes, and the file's record is the one that names what the demuxer feeds.
+///
+/// `None` when they already agree: re-declaring the same codec is a reload that cannot change the
+/// outcome, and spending the session's one attempt on it would burn the only correction there is.
+pub(crate) fn correction(declared: &str, src: &str) -> Option<String> {
+    let declared = declared.trim();
+    let src = src.trim();
+    if src.is_empty() || declared.eq_ignore_ascii_case(src) {
+        return None;
+    }
+    Some(src.to_ascii_lowercase())
+}
+
+/// **The one attempt, gated**: `None` when nothing was named, when the attempt is spent, or when
+/// the two truths agree. `Some(codec)` is the codec to declare before the single reload.
+///
+/// Pure so the whole rule is graded without a pipeline: a refusal that names an axis, with a
+/// declaration that disagrees with the file, licenses exactly one attempt per session.
+pub(crate) fn corrective_codec(
+    axis: Option<Axis>,
+    spent: bool,
+    declared: &str,
+    src: &str,
+) -> Option<String> {
+    axis?;
+    if spent {
+        return None;
+    }
+    correction(declared, src)
+}
+
 /// Does the payload mention this codec as a TOKEN? Plain `contains` is wrong in both directions: it
 /// would find `h264` inside a longer hex run, and it would match `ac3` inside `eac3` — so a refusal
 /// naming `eac3` would be read as AC-3, the one confusion that has a device history here (declaring
@@ -123,6 +159,29 @@ mod tests {
         assert_eq!(classify("eac3 decoder refused"), Refusal::Named(Axis::Audio));
         assert_eq!(classify("0a264c1b failure"), Refusal::Unnamed, "a hex digest is not a codec");
         assert_eq!(classify("x264 refused"), Refusal::Unnamed, "x264 is not the h264 we declare");
+    }
+
+    /// **The correction rule**: the file's own record wins over a declaration it disagrees with,
+    /// and agreement licenses nothing.
+    #[test]
+    fn a_refused_axis_is_corrected_from_the_files_own_record_once() {
+        // The upstream case: the server reported `eac3`, the file's bytes are AAC.
+        assert_eq!(
+            corrective_codec(Some(Axis::Audio), false, "eac3", "aac").as_deref(),
+            Some("aac")
+        );
+        // Agreement: re-declaring it would be a reload that cannot change the answer.
+        assert_eq!(corrective_codec(Some(Axis::Audio), false, "aac", "AAC"), None);
+        // An UNNAMED refusal licenses nothing, which is the lab's own case.
+        assert_eq!(corrective_codec(None, false, "eac3", "aac"), None);
+        // …and the session's one attempt is spent after the first correction.
+        assert_eq!(corrective_codec(Some(Axis::Audio), true, "eac3", "aac"), None);
+        // A file that states no codec is not a source of truth.
+        assert_eq!(corrective_codec(Some(Axis::Video), false, "hevc", ""), None);
+        assert_eq!(
+            corrective_codec(Some(Axis::Video), false, "h264", "HEVC").as_deref(),
+            Some("hevc")
+        );
     }
 
     /// Video outranks audio when a payload names both: a picture the set cannot decode costs the

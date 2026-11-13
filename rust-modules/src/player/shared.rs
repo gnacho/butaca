@@ -602,6 +602,17 @@ pub(crate) struct Shared {
     /// shape of a webOS-5-specific failure (a key the newer pipeline will not accept), which makes
     /// this exactly the case that must be visible.
     pub load_failed: AtomicBool,
+    /// **Which axis the last Load refusal NAMED** (`player::load_refusal`): 0 unnamed, 1 video,
+    /// 2 audio. Published by the callback that sees the payload, read by the pump's failure path —
+    /// the two are different threads and the payload exists only in the first one.
+    pub refusal_axis: AtomicU8,
+    /// **The one corrective reload a session gets.** A refused declaration licenses exactly one
+    /// attempt from the OTHER source of truth; a second refusal is the answer, and a retry loop on
+    /// a pipeline that says no would be a play that never starts and never fails.
+    ///
+    /// Deliberately NOT cleared by [`Shared::reset_session_for_reload`]: the corrective attempt IS
+    /// a reload, and re-arming the budget there would let it retry forever. A new session clears it.
+    pub correction_spent: AtomicBool,
     /// issue #74 D.1.4: set alongside `load_failed` ONLY by the two `NATIVE_LOAD_BUDGET` expiry
     /// arms in `pump.rs` — never by a synchronous Load refusal (`sf_load` returning 0) or a
     /// `type=18` pipeline refusal, both of which set `load_failed` alone. This is what lets
@@ -947,6 +958,8 @@ impl Shared {
             demux_io_failed: AtomicBool::new(false),
             demux_no_video: AtomicBool::new(false),
             load_failed: AtomicBool::new(false),
+            refusal_axis: AtomicU8::new(0),
+            correction_spent: AtomicBool::new(false),
             load_timed_out: AtomicBool::new(false),
             native_load_deferred_logged_epoch: AtomicU32::new(0),
             native_load_elapsed_ms: AtomicU64::new(0),
@@ -1544,6 +1557,13 @@ impl Shared {
         self.demux_no_video.store(false, Ordering::Relaxed);
         self.load_failed.store(false, Ordering::Relaxed);
         self.load_timed_out.store(false, Ordering::Relaxed);
+        // The refusal's axis describes the engine that just went away, so it always goes. The
+        // correction BUDGET does not: a corrective reload is itself a reload, and clearing it here
+        // would let the same refusal be corrected again and again.
+        self.refusal_axis.store(0, Ordering::Relaxed);
+        if !for_reload {
+            self.correction_spent.store(false, Ordering::Relaxed);
+        }
         // NB: desired_sub_idx is NOT reset here — like desired_audio_idx it persists across
         // seeks/reloads so a reload-based seek keeps the chosen subtitle. It is reset on a new
         // item (player::reset_subtitle). ASS packets are immutable file facts, not

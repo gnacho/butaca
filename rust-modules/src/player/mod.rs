@@ -2130,11 +2130,22 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
             // lab's own payload (`"Resource Allocation Error"`) names none, and then this log is
             // exactly what it was; a payload that names a codec is the one shape a corrective
             // reload could act on, so the axis is worth naming while the refusal is fresh.
-            let axis = match load_refusal::classify(&preview) {
+            let classified = load_refusal::classify(&preview);
+            let axis = match classified {
                 load_refusal::Refusal::Named(load_refusal::Axis::Video) => " declared_axis=video",
                 load_refusal::Refusal::Named(load_refusal::Axis::Audio) => " declared_axis=audio",
                 load_refusal::Refusal::Unnamed => "",
             };
+            // Publish what the payload said for the pump's failure path, which is a different
+            // thread and never sees this string: 0 unnamed, 1 video, 2 audio.
+            SHARED.refusal_axis.store(
+                match classified {
+                    load_refusal::Refusal::Named(load_refusal::Axis::Video) => 1,
+                    load_refusal::Refusal::Named(load_refusal::Axis::Audio) => 2,
+                    load_refusal::Refusal::Unnamed => 0,
+                },
+                std::sync::atomic::Ordering::Release,
+            );
             log(&format!(
                 "smp: Load refused by the pipeline before any picture (type=18 num={num}){axis} — \
                  failing the source"
