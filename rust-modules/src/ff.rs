@@ -5622,28 +5622,21 @@ struct HlsCandidateTransition {
 }
 
 impl HlsCandidateTransition {
-    fn arm(automatic_token: u64) -> Result<Self, HlsExit> {
+    /// `Err(None)` is the viewer's own action superseding this candidate: nothing was published
+    /// and the round keeps running. `Err(Some(exit))` ends the segment.
+    fn arm(automatic_token: u64) -> Result<Self, Option<HlsExit>> {
         Self::arm_for(Some(automatic_token))
     }
 
     #[cfg(test)]
-    fn arm_unowned_for_test() -> Result<Self, HlsExit> {
+    fn arm_unowned_for_test() -> Result<Self, Option<HlsExit>> {
         Self::arm_for(None)
     }
 
-    fn arm_for(automatic_token: Option<u64>) -> Result<Self, HlsExit> {
+    fn arm_for(automatic_token: Option<u64>) -> Result<Self, Option<HlsExit>> {
         match SHARED.begin_hls_candidate_transition(automatic_token) {
             Ok(generation) => Ok(Self { generation }),
-            Err(crate::player::HlsClockFenceError::Stopping) => Err(HlsExit::Aborted),
-            Err(crate::player::HlsClockFenceError::Overlap) => {
-                Err(HlsExit::Failed("overlapping HLS candidate publication"))
-            }
-            Err(crate::player::HlsClockFenceError::Exhausted) => {
-                Err(HlsExit::Failed("HLS candidate generation exhausted"))
-            }
-            Err(crate::player::HlsClockFenceError::Superseded) => Err(HlsExit::Failed(
-                "HLS candidate automatic lease was superseded",
-            )),
+            Err(error) => Err(candidate_fence_outcome(error)),
         }
     }
 
@@ -5653,6 +5646,69 @@ impl HlsCandidateTransition {
             settled,
             "candidate generation changed inside its sole writer"
         );
+    }
+}
+
+/// **What a candidate fence refusal MEANS** — ported from upstream plx-native `7f2dc2f2d`
+/// (#1326), whose device report is the argument: a viewer's own pause superseded an automatic
+/// candidate before it entered the queue, and this tree answered with
+/// `HlsExit::Failed("HLS candidate automatic lease was superseded")`, which tears the segment down
+/// and takes HLS with it. Nothing had been published, the active source was untouched, and the
+/// round was killed by the viewer's own action.
+///
+/// So `Superseded` is not a failure and not a teardown (upstream's `AdaptiveProgress::Continue`):
+/// the arm site rejects the proposal as a circumstance, and the current round keeps running. The
+/// other three are what this enum already meant — `Stopping` is the session's own teardown, and
+/// `Overlap`/`Exhausted` are real publication faults that end the segment.
+/// `None` when the viewer cancelled the candidate: the round keeps running. `Some(exit)` when the
+/// refusal ends the segment, and then WHICH end matters — `Stopping` is the session's own teardown,
+/// `Overlap` and `Exhausted` are real publication faults.
+fn candidate_fence_outcome(error: crate::player::HlsClockFenceError) -> Option<HlsExit> {
+    use crate::player::HlsClockFenceError;
+    match error {
+        HlsClockFenceError::Superseded => None,
+        HlsClockFenceError::Stopping => Some(HlsExit::Aborted),
+        HlsClockFenceError::Overlap => {
+            Some(HlsExit::Failed("overlapping HLS candidate publication"))
+        }
+        HlsClockFenceError::Exhausted => {
+            Some(HlsExit::Failed("HLS candidate generation exhausted"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod candidate_fence_outcome_tests {
+    use super::{candidate_fence_outcome, HlsExit};
+    use crate::player::HlsClockFenceError;
+
+    /// **A candidate the viewer cancelled is not a failure and not a teardown** (upstream
+    /// `7f2dc2f2d`). It used to map to `HlsExit::Failed("…lease was superseded")`, and a failure
+    /// ends the segment — so the viewer's own pause killed HLS. `None` says what the arm site must
+    /// do: reject the proposal and keep the round running.
+    #[test]
+    fn a_superseded_candidate_keeps_the_round_alive() {
+        assert!(
+            candidate_fence_outcome(HlsClockFenceError::Superseded).is_none(),
+            "a cancellation has no exit: the caller rejects and continues"
+        );
+    }
+
+    /// The other three refusals still end the segment, and `Stopping` is the session's own teardown
+    /// rather than a publication fault: conflating them would have the ABR ladder believe the server
+    /// refused something the viewer did.
+    #[test]
+    fn the_other_refusals_still_end_the_segment() {
+        assert!(matches!(
+            candidate_fence_outcome(HlsClockFenceError::Stopping),
+            Some(HlsExit::Aborted)
+        ));
+        for fault in [HlsClockFenceError::Overlap, HlsClockFenceError::Exhausted] {
+            assert!(
+                matches!(candidate_fence_outcome(fault), Some(HlsExit::Failed(_))),
+                "{fault:?} is a publication fault, not a cancellation"
+            );
+        }
     }
 }
 
@@ -7722,7 +7778,25 @@ fn hls_demux(
                 .expect("every HLS candidate transaction owns one automatic actuator lease");
             candidate_transition = match HlsCandidateTransition::arm(automatic_token) {
                 Ok(transition) => Some(transition),
-                Err(error) => {
+                // **The viewer's own action superseded this candidate** (upstream `7f2dc2f2d`):
+                // nothing was published, the active source is untouched, and this round keeps
+                // running. It used to come back as a failure, which tore the segment down and took
+                // HLS with it — a pause ending the stream.
+                Err(None) => {
+                    reject_hls_abr_after_transaction(
+                        controller,
+                        proposal,
+                        crate::abr::RejectCause::Circumstance,
+                        &mut tx,
+                        now_ms(),
+                    );
+                    tx.finish("candidate_superseded");
+                    crate::player::log(
+                        "abr: candidate superseded before publication; current source untouched",
+                    );
+                    continue;
+                }
+                Err(Some(error)) => {
                     control.abandon(&primed.encoder_session);
                     tx.finish("publication_overlap");
                     return Err(error);
