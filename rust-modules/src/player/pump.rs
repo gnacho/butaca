@@ -1160,20 +1160,31 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             return;
         }
     }
-    // ---------- pending seek: flush, drop queued AUs, re-point the demux ----------
+    
+
+
+
+// ---------- pending seek: flush, drop queued AUs, re-point the demux ----------
     let t = TX.seek_to_ns.load(Relaxed);
     // A live transcode has NO Content-Length (file_size stays -1), so gate it on duration
     // only and seek by RESTARTING the transcode at a time &offset (below). Direct-play
     // seeks in place via av_seek.
     let is_transcode = crate::route::is_transcoding(ps);
-    if stream
-        && t >= 0
-        && !crate::route::original_recovery_pending()
-        && !(eng.flushed && eng.rebase_pending) // coalesce: don't stack in-place seeks
-        && eng.stage >= Stage::Playing
-        && SHARED.duration_ns.load(Relaxed) > 0
-        && (is_transcode || SHARED.file_size.load(Relaxed) > 0)
-    {
+    // **The decision is a type** (`SeekMode`): the seven facts it reads are named, so two of them
+    // cannot be confused for one another at the call site.
+    let mode = seek_mode(SeekFacts {
+        streaming: stream,
+        target_ns: t,
+        original_recovery_pending: crate::route::original_recovery_pending(),
+        // coalesce: don't stack in-place seeks
+        rebase_in_flight: eng.flushed && eng.rebase_pending,
+        stage_playing: eng.stage >= Stage::Playing,
+        duration_known: SHARED.duration_ns.load(Relaxed) > 0,
+        transcoding: is_transcode,
+        in_place_ok: super::INPLACE_SEEK_OK.load(Relaxed),
+        size_known: SHARED.file_size.load(Relaxed) > 0,
+    });
+    if let Some(mode) = mode {
         TX.seek_to_ns.store(-1, Relaxed);
         let coalesced = take_coalesced(); // read here so BOTH branches consume this seek's requests
         let t = t.max(0);
@@ -1183,7 +1194,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         // use the in-place path — the stream content itself changes at the new offset). A fresh Load
         // rebuilds the segment by construction. reload_transcode REPLACES the ENGINE, so `eng`
         // dangles after it — return immediately and let the next pump() tick drive the fresh engine.
-        if is_transcode {
+        if mode == SeekMode::TranscodeReload {
             let secs = t / 1_000_000_000;
             if crate::route::transcode_seek(ps, secs).is_some() {
                 crate::route::commit_user_seek();
@@ -1209,7 +1220,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         // back to reload-per-seek if the pipeline isn't reachable (INPLACE_SEEK_OK cleared by
         // feed_stream when sendSegmentEvent can't find it). reload_at REPLACES the ENGINE, so
         // `eng` dangles after it: return immediately.
-        if !super::INPLACE_SEEK_OK.load(Relaxed) {
+        if mode == SeekMode::Reload {
             crate::route::commit_user_seek();
             settle_reload(super::engine::reload_at(ps, pa, t), "direct seek reload");
             return;
@@ -1751,5 +1762,138 @@ mod tests {
             "a completed and feedable segment removed the underflow the old request described",
         );
         assert!(!rebuffer_request_is_current(false, 10_000, 10_000));
+    }
+}
+
+/// **How a pending seek will be carried out** — upstream plx-native's `SeekMode`, in this tree's
+/// terms, and the seven booleans that used to be spelled inline at the arm's head.
+///
+/// It is a type rather than a comment because the combination is what the whole seek path depends
+/// on: a transcode CANNOT be sought in place (the stream's content changes at the new offset), a
+/// direct play must not reload per seek (the reload's A/V re-sync is the glitch the in-place path
+/// cures), and the in-place path is only available while the pipeline can re-anchor its segment.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SeekMode {
+    /// Restart the transcode at the new offset with a FRESH Load: a flush-and-refeed of the new
+    /// `start.mkv` leaves a stale GStreamer segment, which shows as artifacts on the jump.
+    TranscodeReload,
+    /// Flush, drop the queued AUs and re-point the demuxer, re-anchoring the segment on the first
+    /// post-flush keyframe. No reload, no decoder re-init, no A/V re-sync.
+    InPlace,
+    /// A fresh Load at the target, because this pipeline cannot re-anchor its own segment.
+    Reload,
+}
+
+/// The facts the decision reads. A struct rather than seven arguments so a caller cannot pass two
+/// of them in the wrong order — every field here is a boolean with a different meaning, which is
+/// exactly the shape that makes positional arguments dangerous.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SeekFacts {
+    /// A pipeline is running and this arm may act on it (`stream` at the call site).
+    pub streaming: bool,
+    /// The mailbox's target; negative means no pending seek.
+    pub target_ns: i64,
+    /// An Original handoff owns the source: seeks wait for it.
+    pub original_recovery_pending: bool,
+    /// An in-place seek is already in flight: coalesce rather than stack.
+    pub rebase_in_flight: bool,
+    pub stage_playing: bool,
+    pub duration_known: bool,
+    /// The bytes are a live transcode, which has no Content-Length.
+    pub transcoding: bool,
+    /// The pipeline can take `sendSegmentEvent` (`INPLACE_SEEK_OK`).
+    pub in_place_ok: bool,
+    /// The direct-play file's length is known (`file_size > 0`).
+    pub size_known: bool,
+}
+
+/// **The decision, pure.** `None` when this is not a seek this arm can take at all; otherwise the
+/// mode, with the precedence the arm has always had: transcode beats in-place, in-place beats a
+/// reload, and a pipeline that cannot re-anchor falls back to one.
+pub(crate) fn seek_mode(f: SeekFacts) -> Option<SeekMode> {
+    if !f.streaming
+        || f.target_ns < 0
+        || f.original_recovery_pending
+        || f.rebase_in_flight
+        || !f.stage_playing
+        || !f.duration_known
+    {
+        return None;
+    }
+    // A transcode has no Content-Length, so its gate is the duration alone; a direct play needs a
+    // known file size to seek the demuxer within.
+    if !f.transcoding && !f.size_known {
+        return None;
+    }
+    Some(if f.transcoding {
+        SeekMode::TranscodeReload
+    } else if f.in_place_ok {
+        SeekMode::InPlace
+    } else {
+        SeekMode::Reload
+    })
+}
+
+#[cfg(test)]
+mod seek_mode_tests {
+    use super::{seek_mode, SeekFacts, SeekMode};
+
+    /// A direct play with a known size and a healthy pipeline: the ordinary case.
+    fn direct() -> SeekFacts {
+        SeekFacts {
+            streaming: true,
+            target_ns: 90_000_000_000,
+            original_recovery_pending: false,
+            rebase_in_flight: false,
+            stage_playing: true,
+            duration_known: true,
+            transcoding: false,
+            in_place_ok: true,
+            size_known: true,
+        }
+    }
+
+    /// **The precedence the seek path has always had, now graded**: a transcode restarts (its
+    /// stream's content changes at the new offset, so the in-place path cannot describe it), a
+    /// direct play seeks in place, and a pipeline that cannot re-anchor its segment falls back to a
+    /// full reload.
+    #[test]
+    fn the_mode_follows_the_source_and_the_pipelines_ability() {
+        assert_eq!(seek_mode(direct()), Some(SeekMode::InPlace));
+        assert_eq!(
+            seek_mode(SeekFacts { in_place_ok: false, ..direct() }),
+            Some(SeekMode::Reload),
+            "a pipeline that cannot re-anchor its segment reloads instead"
+        );
+        assert_eq!(
+            seek_mode(SeekFacts { transcoding: true, in_place_ok: true, ..direct() }),
+            Some(SeekMode::TranscodeReload),
+            "a transcode ALWAYS restarts, whatever the pipeline could do in place"
+        );
+        assert_eq!(
+            seek_mode(SeekFacts { transcoding: true, size_known: false, ..direct() }),
+            Some(SeekMode::TranscodeReload),
+            "a transcode has no Content-Length, so its gate is the duration alone"
+        );
+    }
+
+    /// **The facts that make a seek untakeable**, each on its own: a negative target (no pending
+    /// seek), an Original handoff owning the source, a rebase already in flight (coalesce), a
+    /// pipeline that is not playing yet, no duration, and a direct play whose file length is
+    /// unknown (nothing to seek within).
+    #[test]
+    fn an_untakeable_seek_has_no_mode() {
+        let cases = [
+            ("not streaming", SeekFacts { streaming: false, ..direct() }),
+            ("no pending seek", SeekFacts { target_ns: -1, ..direct() }),
+            ("an Original handoff owns it", SeekFacts { original_recovery_pending: true, ..direct() }),
+            ("a rebase is already in flight", SeekFacts { rebase_in_flight: true, ..direct() }),
+            ("not playing yet", SeekFacts { stage_playing: false, ..direct() }),
+            ("no duration", SeekFacts { duration_known: false, ..direct() }),
+            ("no file size on a direct play", SeekFacts { size_known: false, ..direct() }),
+        ];
+        for (why, facts) in cases {
+            assert_eq!(seek_mode(facts), None, "{why}");
+        }
     }
 }
