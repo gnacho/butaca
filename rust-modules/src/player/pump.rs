@@ -535,6 +535,72 @@ fn finish_preview_open_failure(
 /// Recover either kind of failed Original open and return the reload position in nanoseconds.
 /// Pending HLS rollback has priority; a failed rollback is terminal rather than silently starting
 /// a third transaction on route state whose encoder restore already failed.
+/// **The one corrective reload a session gets** — see the call site for the rule.
+///
+/// The two truths: the DECLARATION (what the pipeline was told the codecs are, which is the picked
+/// track's for audio) and the FILE's own record (`route::source_acodec` / `source_vcodec`, which is
+/// what the demuxer actually feeds on a direct play). A refusal that names an axis, with those two
+/// disagreeing, is the one shape where re-loading can change the answer.
+///
+/// Returns `true` when it fired; the caller then leaves the failure path entirely, because a reload
+/// starts a new Load whose own outcome will come back through this same arm.
+fn corrective_reload(
+    ps: &mut crate::route::PlaybackSession,
+    pa: &mut crate::player::adapter::PlayerAdapter,
+) -> bool {
+    let axis = match super::SHARED.refusal_axis.load(std::sync::atomic::Ordering::Acquire) {
+        1 => Some(super::load_refusal::Axis::Video),
+        2 => Some(super::load_refusal::Axis::Audio),
+        _ => None,
+    };
+    let (declared, src, audio) = match axis {
+        Some(super::load_refusal::Axis::Audio) => (
+            crate::route::stream_acodec(ps),
+            crate::route::source_acodec(ps),
+            true,
+        ),
+        Some(super::load_refusal::Axis::Video) => (
+            crate::route::stream_vcodec(ps),
+            crate::route::source_vcodec(ps),
+            false,
+        ),
+        None => return false,
+    };
+    let Some(codec) = super::load_refusal::corrective_codec(
+        axis,
+        super::SHARED
+            .correction_spent
+            .load(std::sync::atomic::Ordering::Acquire),
+        &declared,
+        &src,
+    ) else {
+        return false;
+    };
+    // Spent BEFORE the reload: the reload's own refusal comes back through this same arm, and a
+    // budget stored afterwards would let that one correct again.
+    super::SHARED
+        .correction_spent
+        .store(true, std::sync::atomic::Ordering::Release);
+    if audio {
+        crate::route::set_stream_acodec(ps, &codec);
+    } else {
+        crate::route::set_stream_vcodec(ps, &codec);
+    }
+    crate::player::log(&format!(
+        "load: refusal named the {} axis and the declaration was `{}` while the file feeds `{}` — \
+         re-declaring and loading once more (the session's one correction)",
+        if audio { "audio" } else { "video" },
+        declared,
+        codec,
+    ));
+    let target = super::SHARED.playpos_ns.load(std::sync::atomic::Ordering::Relaxed).max(0);
+    settle_reload(
+        super::engine::reload_at(ps, pa, target),
+        "corrective reload after a refused codec",
+    );
+    true
+}
+
 fn recover_failed_source_route(ps: &mut crate::route::PlaybackSession) -> Option<crate::route::OriginalRollback> {
     let action = open_failure_action(
         crate::route::original_recovery_pending(),
@@ -760,6 +826,14 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
                 "HLS rollback after native Load failure",
             );
             let _ = started;
+            return;
+        }
+        // **The one corrective reload** (upstream plx-native `62354d903`'s repair half): a refusal
+        // that NAMED an axis, whose declaration disagrees with the file's own record, re-declares
+        // that axis from the record and loads once more. Anything else — an unnamed refusal like
+        // the lab's `Resource Allocation Error`, a declaration that already agrees, or a second
+        // refusal in the same session — ends the source exactly as before.
+        if corrective_reload(ps, pa) {
             return;
         }
         crate::route::fail_current_engine();

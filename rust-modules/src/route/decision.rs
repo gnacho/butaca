@@ -3682,6 +3682,10 @@ pub(crate) fn stream_immersive(ps: &PlaybackSession) -> bool {
 pub(crate) fn set_stream_acodec(ps: &mut PlaybackSession, codec: &str) {
     { let s = &mut *ps; s.stream_acodec = codec.to_owned() }
 }
+/// The video twin: the corrective reload's video axis re-declares from the file's own record.
+pub(crate) fn set_stream_vcodec(ps: &mut PlaybackSession, codec: &str) {
+    { let s = &mut *ps; s.stream_vcodec = codec.to_owned() }
+}
 
 /// **The widest raster this session can put through the decoder**, for the Starfish Load's
 /// `adaptiveStreaming` ceiling — `(0, 0)` when nobody said. Three routes, three answers:
