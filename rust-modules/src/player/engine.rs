@@ -4746,6 +4746,63 @@ mod load_refusal_tests {
 }
 
 #[cfg(test)]
+mod seek_target_readout_tests {
+    use super::*;
+
+    /// **A seek that reloads keeps its target on the clock until the first frame** — the property
+    /// upstream plx-native fixed in `93697adcf` (#1303), reached here by a different road.
+    ///
+    /// Their bug: the HUD read `0:00` between a reload and its first frame, because the attempt
+    /// read-out reported a position only once a frame had been presented. In this tree the displayed
+    /// playhead is `SHARED.playpos_ns`, and [`arm_seek`] seeds it with the target — which is what
+    /// [`reload_at`] calls before the fresh Load. This grades that seed, so a future change cannot
+    /// take the target off the clock and quietly reintroduce the 0:00 the upstream fix removed.
+    ///
+    /// The CALLER cannot be driven from here: `reload_at` returns `NoRoute` before it arms anything
+    /// when the session has no url, and a session with one needs the route stack. What is graded is
+    /// the only line that matters once it does run — that arming puts the target on the displayed
+    /// clock — and `reload_at` is the sole armer on every reload path.
+    #[test]
+    fn arming_a_seek_puts_its_target_on_the_displayed_clock() {
+        let _serial = crate::testlock::serial();
+        let was = (
+            SHARED.playpos_ns.load(Ordering::Relaxed),
+            SHARED.seek_to_ns.load(Ordering::Relaxed),
+            SHARED.disp_base.load(Ordering::Relaxed),
+        );
+        struct Restore((i64, i64, i64));
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                SHARED.playpos_ns.store(self.0 .0, Ordering::Relaxed);
+                SHARED.seek_to_ns.store(self.0 .1, Ordering::Relaxed);
+                SHARED.disp_base.store(self.0 .2, Ordering::Relaxed);
+            }
+        }
+        let _restore = Restore(was);
+
+        // A reload's own shape: the session resets the playhead to zero, then arms the seek.
+        SHARED.playpos_ns.store(0, Ordering::Relaxed);
+        arm_seek(120_000_000_000);
+        assert_eq!(
+            SHARED.playpos_ns.load(Ordering::Relaxed),
+            120_000_000_000,
+            "the HUD reads the target from the moment the reload is armed"
+        );
+        assert_eq!(SHARED.seek_to_ns.load(Ordering::Relaxed), 120_000_000_000);
+        assert_eq!(
+            SHARED.disp_base.load(Ordering::Relaxed),
+            0,
+            "and the presented timeline rebases to the landed keyframe"
+        );
+
+        // A negative target is clamped, never published: a seek to before zero is zero.
+        arm_seek(-5);
+        assert_eq!(SHARED.playpos_ns.load(Ordering::Relaxed), 0);
+    }
+
+}
+
+#[cfg(test)]
 mod audio_stale_ahead_tests {
     use super::{audio_stale_ahead, AUDIO_STALE_AHEAD_NS};
 
