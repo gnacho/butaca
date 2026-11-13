@@ -890,6 +890,31 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
 
 
 
+/// **The Load declares the codec of the bytes the demuxer will actually feed** — the rule upstream
+/// plx-native states in `62354d903`, whose failure is worth carrying: a server that reports a track
+/// as `eac3` over a file whose bytes are AAC (a remux of a different codec) made the app declare
+/// `eac3`, the audio ES was configured for the wrong decoder, and with audioSync the video sink
+/// slaved to a dead audio clock and **stalled**. A picture that stops on one title, with no error.
+///
+/// * **A pick** (`aidx >= 0`): the demuxer is told to feed THAT stream, so the codec to declare is
+///   that track's.
+/// * **No pick** (`aidx < 0`): the file's own DEFAULT is fed, and its ground truth is the media's
+///   `src_acodec` — not any track the server lists, which can describe the source rather than the
+///   bytes.
+///
+/// On this backend the no-pick branch cannot be reached today: a direct play requires a decodable
+/// audio pick ([`directplay`]'s gate includes `audio_sel.is_some()`), and anything else is a
+/// transcode, whose declaration is the profile's pinned `aac` ([`build_stream_jellyfin`]). The
+/// fallback is written down anyway, because it is the branch that is WRONG if that gate ever
+/// widens, and a wrong declaration here is a stalled picture rather than a cosmetic error.
+pub(super) fn audio_declaration(aidx: i32, picked: &str, src_acodec: &str) -> String {
+    if aidx >= 0 {
+        picked.to_string()
+    } else {
+        src_acodec.to_string()
+    }
+}
+
 /// The language preferences an audio pick honours: the SHOW's `audioLanguage` (its
 /// Advanced dialog, #160). There is deliberately no built-in language: one used to sit here as a
 /// hard-coded English, and it opened a French user's French-default MKVs in English whenever an
@@ -1484,7 +1509,7 @@ fn build_stream_jellyfin(
         let (aidx, achosen, asid) = audio_sel.unwrap_or((-1, acodec.to_string(), 0));
         plan.fps = plan.playing.as_ref().map(|p| p.video_fps).unwrap_or(0.0);
         plan.vcodec = vcodec.to_string();
-        plan.acodec = achosen;
+        plan.acodec = audio_declaration(aidx, &achosen, acodec);
         plan.dovi = dovi;
         plan.immersive = plan
             .playing
@@ -1678,3 +1703,7 @@ mod mde_decision_tests;
 #[cfg(test)]
 #[path = "plan_up_next_tests.rs"]
 mod up_next_tests;
+
+#[cfg(test)]
+#[path = "plan_audio_declaration_tests.rs"]
+mod audio_declaration_tests;
