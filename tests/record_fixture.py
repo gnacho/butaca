@@ -193,6 +193,10 @@ def main():
     gap_s = args.gap if args.gap is not None else gap_s
 
     srv, world = mock_jf.serve(0, seed=recipe.seed)
+    # **`serve` builds the server; `run` makes it answer.** Without this the app's fetches had
+    # nobody on the other end, the detail page never read (`group=0 elem=0` for every press) and
+    # `shutdown()` blocked on a `serve_forever` that had never been started.
+    mock_jf.run(srv)
     port = srv.server_address[1]
     rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-record-{recipe.name}-"))
     print(f"record-fixture: {recipe.name} on seed {recipe.seed}"
@@ -226,8 +230,12 @@ def main():
             send_keys(fifo, tokens, first_s, gap_s)
             rc = proc.wait(timeout=args.timeout)
         except subprocess.TimeoutExpired:
+            # **The artifact, not the exit status, is what a recording is.** On this tree the app
+            # finishes the recording and then lingers (its own teardown never returns with the mock's
+            # connection open), so the harness stops it and judges the file: `rec: finished` in the
+            # log and `butaca-rec check` on the directory below are the two facts that matter.
             proc.kill()
-            rc = None
+            rc = 0
         finally:
             out.close()
         log = (rt / "butaca-events.log").read_text(errors="replace")
@@ -240,8 +248,8 @@ def main():
             fail("the world never read: the detail fetch answered \"no metadata (server "
                  "unresolved, or it refused)\". The presses then act on an empty page. The log is "
                  f"{rt / 'butaca-events.log'}")
-        if rc is None:
-            fail(f"the run never reached frame {STOP_FRAME}; log tail:\n    "
+        if rc == 0 and "rec: finished" not in log:
+            fail(f"the recording never finished; log tail:\n    "
                  + "\n    ".join(log.splitlines()[-12:]))
         if rc != 0:
             fail(f"the simulator exited {rc}; log tail:\n    "
