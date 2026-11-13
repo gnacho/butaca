@@ -2318,6 +2318,35 @@ impl StallClass {
     }
 }
 
+/// **The stall report, as one line.** Pure, so every field is graded without a player and the
+/// caller cannot drop one by editing a `format!` in passing.
+///
+/// `class=` leads because that is the answer the report asks for; the numbers behind it follow so
+/// the classification can be checked rather than trusted, and `start_pending` separates a picture
+/// that is dark because a replacement start is queued (the seek's own reload) from one that is dark
+/// because the pipeline is stuck.
+pub(crate) fn stall_report(
+    class: StallClass,
+    pos_ms: i64,
+    video_ms: i64,
+    audio_ms: i64,
+    runway_ms: i64,
+    eos: bool,
+    start_pending: bool,
+) -> String {
+    format!(
+        "stall: class={} pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={} start_pending={}",
+        class.word(),
+        pos_ms,
+        STALL_REPORT_MS / 1_000,
+        video_ms,
+        audio_ms,
+        runway_ms,
+        u8::from(eos),
+        u8::from(start_pending),
+    )
+}
+
 /// Classify a stall from three facts the transport holds: whether the producer pushed EOS, how much
 /// video is fed ahead of the playhead, and how much the source has in reserve. Pure, so all four
 /// classes are graded without a player.
@@ -2372,18 +2401,18 @@ pub(crate) fn feed_both_lanes(mt: &MainThread, eng: &mut Engine) {
         let vbuf = (eng.max_fed_video_pts - eng.seek_base_pts).max(0);
         let abuf = (eng.max_fed_audio_pts - eng.seek_base_pts).max(0);
         let runway = SHARED.hls_prime_runway_ms.load(std::sync::atomic::Ordering::Relaxed);
-        let class = classify_stall(eng.eos_pushed, vbuf / 1_000_000, runway);
-        // `class=` FIRST, because that is the answer the report asks for; the numbers behind it
-        // follow, so the classification can be checked rather than trusted (#327).
-        log(&format!(
-            "stall: class={} pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={}",
-            class.word(),
+        log(&stall_report(
+            classify_stall(eng.eos_pushed, vbuf / 1_000_000, runway),
             pos_ns / 1_000_000,
-            STALL_REPORT_MS / 1_000,
             vbuf / 1_000_000,
             abuf / 1_000_000,
             runway,
             eng.eos_pushed,
+            // **A replacement start is queued**: the seek's own reload, waiting on the previous
+            // object to let go. Without it a dark picture under a pending reload and a dark
+            // picture from a stuck pipeline read the same in a log, which is the difference the
+            // report exists to settle.
+            crate::route::pending_route_start().is_some(),
         ));
     }
     feed_stream(mt, eng);
@@ -4915,6 +4944,20 @@ mod stall_watch_tests {
         .collect();
         let unique: std::collections::BTreeSet<&&str> = words.iter().collect();
         assert_eq!(unique.len(), 4, "one word per class: {words:?}");
+    }
+
+    /// **Every field the report exists for is on the line**, and the one that separates the two
+    /// dark pictures is `start_pending`: a queued replacement start is not a stuck pipeline.
+    #[test]
+    fn the_report_states_every_fact_including_a_queued_start() {
+        use super::{stall_report, StallClass};
+        let line = stall_report(StallClass::BufferStarvation, 1_234, 900, 750, 40_000, false, true);
+        assert!(line.starts_with("stall: class=buffer_starvation "), "{line}");
+        for field in ["pos=1234ms", "v=900ms", "a=750ms", "runway=40000ms", "eos=0", "start_pending=1"] {
+            assert!(line.contains(field), "{field} missing from {line}");
+        }
+        let quiet = stall_report(StallClass::PipelineStuck, 0, 0, 0, 0, true, false);
+        assert!(quiet.contains("eos=1") && quiet.contains("start_pending=0"), "{quiet}");
     }
 
     #[test]
