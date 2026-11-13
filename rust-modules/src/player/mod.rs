@@ -27,6 +27,7 @@ mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
+pub(crate) mod seek_landing;
 pub(crate) mod release;
 
 /// **The one release tracker for the process** (`player::release`): a native epoch is never reused,

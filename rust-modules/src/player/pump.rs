@@ -626,9 +626,17 @@ fn recover_failed_source_route(ps: &mut crate::route::PlaybackSession) -> Option
     }
 }
 
+// The pump has one calling thread, so the watcher lives beside the frame entry rather than inside
+// the engine — whose construction sites are many and none of which is this module's business.
+thread_local! {
+    static SEEK_LANDING: std::cell::RefCell<super::seek_landing::SeekLanding> =
+        std::cell::RefCell::new(super::seek_landing::SeekLanding::new());
+}
+
 /// Settle a synchronous native reload effect.  A failed `start_bufferfeed` used to be only a log:
 /// callers had already advanced the route reducer and then returned, leaving no Engine to publish
 /// the failure and (for Original) an `OriginalTrial` which could never receive its first frame.
+
 fn settle_reload(outcome: super::engine::ReloadOutcome, operation: &str) -> bool {
     if outcome == super::engine::ReloadOutcome::Started {
         return true;
@@ -1119,6 +1127,36 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
     // the demux socket, so a premature watchdog KILLS an open that was about to succeed and
     // restarts it — at 500ms a rapid tap-burst self-DoS'd into the reload fallback every time
     // (caught by the seek_rapid harness cases).
+    // ---------- a seek that landed on the clock but not on the picture ----------
+    // The arm below recovers the demux that never RE-ANCHORS. This one covers upstream
+    // `9be7a43f6`'s shape: re-anchored, `Play` accepted, `seeking` down — and the presented
+    // position never comes to the target (`player::seek_landing`). One reload per session: a seek
+    // the sink refuses twice is the answer, and a loop here would be a picture that never settles.
+    let landed_lost = SEEK_LANDING.with(|w| {
+        w.borrow_mut().observe(
+            u64::from(now),
+            super::SHARED.seeking.load(Relaxed),
+            super::TX.paused.load(Relaxed),
+            super::SHARED.seek_target_ns.load(Relaxed),
+            super::SHARED.playpos_ns.load(Relaxed),
+        )
+    });
+    if landed_lost
+        && !super::SHARED
+            .seek_landing_spent
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+    {
+        let target = super::SHARED.seek_target_ns.load(Relaxed).max(0);
+        super::log(&format!(
+            "seek: landed on the clock but the picture never came to {}s — reloading once",
+            target / 1_000_000_000,
+        ));
+        settle_reload(
+            super::engine::reload_at(ps, pa, target),
+            "seek did not reach the sink",
+        ); // REPLACES the engine — eng dangles, return
+        return;
+    }
     const SEEK_STUCK_MS: u32 = 1200;
     if eng.flushed && eng.rebase_pending && now.wrapping_sub(eng.seek_armed_at) > SEEK_STUCK_MS {
         // Adopt the NEWEST coalesced target if later taps landed while this seek was resolving

@@ -613,6 +613,10 @@ pub(crate) struct Shared {
     /// Deliberately NOT cleared by [`Shared::reset_session_for_reload`]: the corrective attempt IS
     /// a reload, and re-arming the budget there would let it retry forever. A new session clears it.
     pub correction_spent: AtomicBool,
+    /// **The one reload a lost seek gets** (`player::seek_landing`): a seek the sink refused twice
+    /// is the answer, and a loop here would be a picture that never settles. Per session, like the
+    /// codec correction above, and for the same reason: the recovery IS a reload.
+    pub seek_landing_spent: AtomicBool,
     /// issue #74 D.1.4: set alongside `load_failed` ONLY by the two `NATIVE_LOAD_BUDGET` expiry
     /// arms in `pump.rs` — never by a synchronous Load refusal (`sf_load` returning 0) or a
     /// `type=18` pipeline refusal, both of which set `load_failed` alone. This is what lets
@@ -960,6 +964,7 @@ impl Shared {
             load_failed: AtomicBool::new(false),
             refusal_axis: AtomicU8::new(0),
             correction_spent: AtomicBool::new(false),
+            seek_landing_spent: AtomicBool::new(false),
             load_timed_out: AtomicBool::new(false),
             native_load_deferred_logged_epoch: AtomicU32::new(0),
             native_load_elapsed_ms: AtomicU64::new(0),
@@ -1563,6 +1568,7 @@ impl Shared {
         self.refusal_axis.store(0, Ordering::Relaxed);
         if !for_reload {
             self.correction_spent.store(false, Ordering::Relaxed);
+            self.seek_landing_spent.store(false, Ordering::Relaxed);
         }
         // NB: desired_sub_idx is NOT reset here — like desired_audio_idx it persists across
         // seeks/reloads so a reload-based seek keeps the chosen subtitle. It is reset on a new
