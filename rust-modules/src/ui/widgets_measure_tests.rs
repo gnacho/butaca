@@ -408,3 +408,80 @@ fn translated_glyph_hint_keeps_the_physical_arrow_and_catalog_punctuation() {
     assert_eq!(hint.post.to_str().unwrap(), ", адкрыць");
     assert_eq!(layout.width, layout.post_x + measure.width_str(", адкрыць", theme::size::CAPTION, false));
 }
+
+// ---- the pill's content run -------------------------------------------------------------
+//
+// These grade `content_run`, which is where a pill's `[icon] [label] [trailing]` row is
+// described. The owner-visible bug they exist for: the run awarded the icon→label gap to every
+// pill that had an icon, so the icon-only Play disc on the detail hero centred a run 12px wider
+// than the thing it drew and put its triangle 6px left of the disc's centre.
+
+/// **An icon-only pill puts its glyph on the pill's own centre.** `sz * BTN_ICON_RATIO` wide, no
+/// phantom gap, so `draw`'s `frame.cx() - run.w * 0.5 + icon.0` lands the box's middle on the
+/// frame's middle.
+#[test]
+fn an_icon_only_pill_draws_its_glyph_on_the_pill_centre() {
+    let sz = theme::size::CAPTION;
+    let run = content_run(sz, true, 0.0, false);
+    let box_sz = sz as f32 * BTN_ICON_RATIO;
+    assert_eq!(run.w, box_sz, "an empty label earns no gap");
+    let (at, size) = run.icon.expect("the icon slot exists");
+    assert_eq!((at, size), (0.0, box_sz));
+    let frame = Rect::new(100.0, 40.0, 64.0, 64.0);
+    let gl = frame.cx() - run.w * 0.5;
+    let drawn = Rect::new(gl + at, frame.y + (frame.h - size) * 0.5, size, size);
+    assert!((drawn.cx() - frame.cx()).abs() < 1e-3, "glyph centre {} vs {}", drawn.cx(), frame.cx());
+    assert!((drawn.cy() - frame.cy()).abs() < 1e-3);
+    // The measured width agrees with the drawn run, which is the drift this shape exists to stop.
+    assert!((Button::pill_w(c"".as_ptr(), sz, true) - run.w - BTN_PILL_AIR).abs() < 1e-3);
+}
+
+/// **A gap is earned by two things on both of its sides**, in every combination the row can take.
+#[test]
+fn a_gap_only_sits_between_two_things() {
+    let sz = 24;
+    let box_sz = sz as f32 * BTN_ICON_RATIO;
+    let adv = 50.0;
+    let word = content_run(sz, true, adv, false);
+    let (iat, isz) = word.icon.unwrap();
+    assert_eq!((iat, isz), (0.0, box_sz));
+    assert_eq!(word.label, box_sz + BTN_ICON_GAP, "icon, gap, word");
+    assert_eq!(word.w, box_sz + BTN_ICON_GAP + adv);
+
+    let both = content_run(sz, true, adv, true);
+    assert_eq!(both.label, box_sz + BTN_ICON_GAP);
+    assert_eq!(both.trailing.unwrap(), (box_sz + BTN_ICON_GAP + adv + BTN_ICON_GAP, box_sz));
+    assert_eq!(both.w, 2.0 * (box_sz + BTN_ICON_GAP) + adv);
+
+    let trailing_only = content_run(sz, false, adv, true);
+    assert!(trailing_only.icon.is_none());
+    assert_eq!(trailing_only.label, 0.0);
+    assert_eq!(trailing_only.trailing.unwrap(), (adv + BTN_ICON_GAP, box_sz));
+
+    let two_icons = content_run(sz, true, 0.0, true);
+    assert_eq!(two_icons.label, box_sz + BTN_ICON_GAP);
+    assert_eq!(two_icons.trailing.unwrap(), (box_sz + BTN_ICON_GAP, box_sz));
+    assert_eq!(two_icons.w, 2.0 * box_sz + BTN_ICON_GAP, "two icons keep their air");
+
+    let plain = content_run(sz, false, adv, false);
+    assert_eq!((plain.label, plain.w), (0.0, adv));
+}
+
+/// **A non-transport mark drawn in a disc keeps its box.** The pill's layout knows nothing about
+/// which icon it is carrying: every mark gets one square box of `sz * BTN_ICON_RATIO` and the
+/// disc's full inner height, so no band rule can shrink a Settings gear or a subtitles box into a
+/// squashed glyph. (The band arithmetic lives in `icons::centred_on_ink`, which only ever scales a
+/// DECLARED transport band — `icons::centre_tests` pins that half.)
+#[test]
+fn a_non_transport_mark_keeps_its_full_box() {
+    let sz = theme::size::BODY;
+    let box_sz = sz as f32 * BTN_ICON_RATIO;
+    for label in [c"Reproducir", c""] {
+        let run = content_run(sz, true, if label.to_bytes().is_empty() { 0.0 } else { 120.0 }, false);
+        let (_, size) = run.icon.expect("one icon box");
+        assert_eq!(size, box_sz, "the icon box is square and unshrunk, label or not");
+    }
+    // And the disc family's own glyph box is untouched by any of this: a centring fix that shrank
+    // the box would "centre" a glyph by making it smaller, which is not the same claim.
+    assert_eq!(DISC_ICON_RATIO, 0.54);
+}

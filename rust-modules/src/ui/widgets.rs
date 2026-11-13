@@ -4342,9 +4342,12 @@ impl View for TransportButton {
         });
         let s = (r.w * DISC_ICON_RATIO).round();
         let ir = Rect::new(r.x + (r.w - s) * 0.5, r.y + (r.h - s) * 0.5, s, s);
-        // **On its INK, in the transport family's band.** A box-centred `play.svg` is the one mark
-        // that sits off-centre in this disc (its ink is wider and taller than a pause's), which is
-        // what read as "el play del reproductor no está centrado".
+        // **On its OPTICAL centre, in the transport family's band.** Two things the plain box
+        // centring gets wrong for this row: `play.svg` stands taller than a pause (16 units to the
+        // family's 14, so it is scaled into that band and the state does not shift weight as it
+        // flips), and a mark whose optical centre is not its ink's middle is placed by
+        // [`centred_on_ink`]'s own table rather than by this disc. Everything that is not a
+        // transport mark comes back from the helper exactly as it went in.
         let ir = crate::ui::icons::centred_on_ink(id, ir, crate::ui::icons::band(Icon::Pause));
         crate::ui::icons::draw(p, id, ir, ink);
     }
@@ -7319,6 +7322,54 @@ pub(crate) const BTN_PILL_AIR: f32 = 68.0;
 /// [`ControlStyle::Keyline`]'s stroke width (the design's 1.5 — same weight as [`keyline_chip`]'s).
 const BTN_KEYLINE_W: f32 = 1.5;
 
+/// **A pill's content run**: where each present slot of its `[icon] [label] [trailing]` row sits,
+/// measured from the run's own left edge, plus the run's total width. The ONE description of that
+/// row — `draw` places by it, and both width formulas measure by it.
+///
+/// **A gap is earned by two things standing on BOTH sides of it.** That rule is the fix for the
+/// owner's "el triángulo de play no está centrado": this row used to award the icon→label gap to
+/// every pill that had an icon, label or not, so the icon-only Play disc on the detail hero — the
+/// one control whose label is empty unless the item has a resume point — centred a run 12px wider
+/// than the thing it drew and sat its glyph **6px left of the disc's centre** (measured on the
+/// simulator: glyph box centre 5.4px left of the disc's, centroid 7.4px). Nothing else moved: an
+/// icon beside a word, two icons with no word, a word with a trailing chevron all keep exactly the
+/// spacing they had.
+pub(crate) struct ContentRun {
+    /// `(offset from the run's left edge, box size)` of the leading icon.
+    pub(crate) icon: Option<(f32, f32)>,
+    /// Offset of the label's own left edge.
+    pub(crate) label: f32,
+    /// `(offset from the run's left edge, box size)` of the trailing accessory.
+    pub(crate) trailing: Option<(f32, f32)>,
+    /// The run's total width — what [`Button::pill_w`] adds [`BTN_PILL_AIR`] to.
+    pub(crate) w: f32,
+}
+
+pub(crate) fn content_run(sz: c_int, icon: bool, advance: f32, trailing: bool) -> ContentRun {
+    let box_sz = sz as f32 * BTN_ICON_RATIO;
+    let has_label = advance > 0.0;
+    let mut x = 0.0;
+    let icon = icon.then(|| {
+        let at = x;
+        x += box_sz;
+        if has_label || trailing {
+            x += BTN_ICON_GAP;
+        }
+        (at, box_sz)
+    });
+    let label = x;
+    x += advance;
+    let trailing = trailing.then(|| {
+        if has_label {
+            x += BTN_ICON_GAP;
+        }
+        let at = x;
+        x += box_sz;
+        (at, box_sz)
+    });
+    ContentRun { icon, label, trailing, w: x }
+}
+
 impl Button {
     pub fn new(label: *const c_char, sz: c_int, frame: Rect) -> Self {
         Self {
@@ -7418,17 +7469,7 @@ impl Button {
     }
 
     fn pill_w_from_advance(advance: f32, sz: c_int, icon: bool, trailing: bool) -> f32 {
-        let (isz, gap) = if icon {
-            (sz as f32 * BTN_ICON_RATIO, BTN_ICON_GAP)
-        } else {
-            (0.0, 0.0)
-        };
-        let (tsz, tgap) = if trailing {
-            (sz as f32 * BTN_ICON_RATIO, BTN_ICON_GAP)
-        } else {
-            (0.0, 0.0)
-        };
-        isz + gap + advance + tgap + tsz + BTN_PILL_AIR
+        content_run(sz, icon, advance, trailing).w + BTN_PILL_AIR
     }
 
     /// Turn the pill into its own countdown: `frac` of its width is filled with
@@ -7559,34 +7600,24 @@ impl View for Button {
                 true,
             )
         };
-        let (isz, gap) = if self.icon.is_some() {
-            (self.sz as f32 * BTN_ICON_RATIO, BTN_ICON_GAP)
-        } else {
-            (0.0, 0.0)
-        };
-        let (asz, agap) = if self.trailing.is_some() {
-            (self.sz as f32 * BTN_ICON_RATIO, BTN_ICON_GAP)
-        } else {
-            (0.0, 0.0)
-        };
         // the WHOLE run is centred — accessory included — which is why `pill_w_full` measures it:
         // sizing the pill without the chevron and then drawing one would push the label off-centre
-        let gl = r.cx() - (isz + gap + tw + agap + asz) * 0.5;
-        if let Some(icon) = self.icon {
+        let run = content_run(self.sz, self.icon.is_some(), tw, self.trailing.is_some());
+        let gl = r.cx() - run.w * 0.5;
+        if let (Some(icon), Some((at, sz))) = (self.icon, run.icon) {
             crate::ui::icons::draw(
                 p,
                 icon,
-                Rect::new(gl, r.y + (r.h - isz) * 0.5, isz, isz),
+                Rect::new(gl + at, r.y + (r.h - sz) * 0.5, sz, sz),
                 ink,
             );
         }
-        p.text(self.label, gl + isz + gap, ty, self.sz, ink, 0, 1); // left-aligned after the icon
-        if let Some(acc) = self.trailing {
-            let ax = gl + isz + gap + tw + agap;
+        p.text(self.label, gl + run.label, ty, self.sz, ink, 0, 1); // left-aligned after the icon
+        if let (Some(acc), Some((at, sz))) = (self.trailing, run.trailing) {
             crate::ui::icons::draw(
                 p,
                 acc,
-                Rect::new(ax, r.y + (r.h - asz) * 0.5, asz, asz),
+                Rect::new(gl + at, r.y + (r.h - sz) * 0.5, sz, sz),
                 ink,
             );
         }
