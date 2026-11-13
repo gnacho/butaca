@@ -18,7 +18,8 @@
     "session_persistence": "rust-modules/src/plex/session.rs: SaveAuthority::Routine (also PublicOnly, FreshReauthentication — already covered/unused in controlled recordings); rust-modules/src/plex/session/async_persistence.rs: PersistencePurpose::Background; rust-modules/src/auth/owner.rs: CommitAdmission::RegistryOnly. These serialize into every controlled session commit/plan once a store owns its own persistence (cleanup/ownership), so a synthetic recording now always carries them.",
     "shape_history": "tests/replay_fixtures.py --rebase-shape writes state_fp as the 16-lowercase-hex spelling rust-modules/src/ui/rec.rs prints in its refusal, plus a reason token naming what moved: screens/preplay_panel.rs PrePlaybackScreen::name() supplies preplay, which is also the overlay word that screen prints.",
     "owner_language_discs": "tests/mock_jf.py `_media_source`: every second item carries a Spanish AAC track (Spa - AAC - Stereo; codec aac, Language spa, ChannelLayout stereo) and subrip subtitles (Eng - SUBRIP, Spa - SUBRIP) beside the Eng audio, so the detail hero's language discs and the picker have something to choose between. metadata.rs RatingArt::Community serializes as Community and is the audience-score entry of every rated item; screens::registry PersonCmd carries the close word the filmography route echoes.",
-    "resume_labels": "ui/widgets.rs and the resume rows that use it: the remaining-time label a card states while an item is in progress, 'N hr M min left' / 'N min left'. These three are the values the demo catalog's in-progress items produce now that every card in a row carries its caption, so the closed alphabet has to know them by name."
+    "resume_labels": "ui/widgets.rs and the resume rows that use it: the remaining-time label a card states while an item is in progress, 'N hr M min left' / 'N min left'. These three are the values the demo catalog's in-progress items produce now that every card in a row carries its caption, so the closed alphabet has to know them by name.",
+    "settings_one_page": "locales/en/settings.json names the one Settings page of the owner's redesign mockup: its four group headers, the server row's value when nothing is signed in (settings.audio.not_set), the add-another-server row and its detail, and one short detail line per playback knob, plus the two playback values the old root never drew (skip intro and credits, Ask me). Each is the label or the detail line the table MEASURES through the Width metric records, so they join the alphabet by source-backed name rather than by harvesting the recording."
   },
   "patterns": [
     "/library/metadata/people/[0-9]+/thumb/1",
@@ -449,6 +450,19 @@
     "yellow",
     "z",
     "·",
-    "—"
+    "—",
+    "Not set",
+    "Jellyfin server",
+    "Choose which server this TV uses.",
+    "Add another server",
+    "Keep several and switch here.",
+    "Bitrate limit for playback.",
+    "Play untranscoded when the TV allows.",
+    "Audio delay against the picture.",
+    "What to do when it ends.",
+    "How long before the card appears.",
+    "Ask me",
+    "Skip intro and credits",
+    "Intros and credits the server marks."
   ]
 }
