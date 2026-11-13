@@ -292,7 +292,9 @@ pub enum Icon {
 pub(crate) const fn ink_x(id: Icon) -> (f32, f32) {
     match id {
         Icon::Pause => (7.0 / 24.0, 17.0 / 24.0),
-        Icon::Play => (7.0 / 24.0, 20.0 / 24.0),
+        // 7.667..20.667: `play.svg`'s own run, which is 2/3 of a unit right of where it used to sit
+        // so that the triangle's AREA CENTROID lands on the viewBox's x=12 — see [`optical_x`].
+        Icon::Play => (7.667 / 24.0, 20.667 / 24.0),
         Icon::Rewind | Icon::FastForward => (2.6 / 24.0, 21.4 / 24.0),
         // One entry for the mirrored pair: the reflected path has the same ink bounds.
         Icon::Chevron | Icon::ChevronLeft => (7.5 / 24.0, 16.5 / 24.0),
@@ -306,6 +308,10 @@ pub(crate) const fn ink_x(id: Icon) -> (f32, f32) {
 /// 16 units, because it predates that slot and is worn elsewhere at its own size. A caller drawing
 /// the family in one slot scales by `band(Pause) / band(id)` and the odd one out stops being the
 /// player HUD's private problem.
+///
+/// **`1.0` means "this mark declares no band of its own"**, which is every icon outside the
+/// transport family — not "its ink happens to fill the box". [`centred_on_ink`] reads it that way,
+/// and that reading is load-bearing: see the guard there.
 pub(crate) const fn band(id: Icon) -> f32 {
     match id {
         Icon::Pause | Icon::Rewind | Icon::FastForward | Icon::Stop | Icon::SkipNext => {
@@ -316,29 +322,62 @@ pub(crate) const fn band(id: Icon) -> f32 {
     }
 }
 
-/// **A mark centred on its INK, not on its box.** `play.svg` is the off-band member
-/// ([`band`]'s doc): drawn box-centred it sits visibly right of and above where a pause, a stop or
-/// a skip sits in the same disc, which is the "el play no está centrado" the owner saw. The fix is
-/// arithmetic on the asset's own bounds, so it holds for every caller and every size:
+/// **The point of a mark's viewBox that belongs on the centre of the box it is drawn in** —
+/// horizontally, as a fraction of the viewBox. For most marks that is the middle of their ink,
+/// which is what box-centred drawing already puts there. It is NOT for a right-pointing triangle.
 ///
-/// * horizontally, the box is shifted by the difference between the ink's centre and the box's;
-/// * vertically, the box is shrunk to the family's band and centred in the disc, so the mark's INK
-///   occupies the same 14-unit band the other transport marks do.
+/// A play triangle's ink is a broad base on the left and a point on the right, so the mass the eye
+/// reads as "the middle of it" is the **area centroid**, `(2·left + right) / 3` — a third of the
+/// way in from the base, and 2/6 of the ink's own width left of the ink's box centre. Centred on
+/// that ink box a 13-unit triangle sits visibly left: the owner's words were "el triángulo de play
+/// no está centrado", and they were right. The asset was therefore re-drawn to put its centroid on
+/// x=12 (`play.svg` 7.667..20.667), so this table's answer for it IS the viewBox middle and every
+/// box-centred caller — [`draw`], `Button`, `CircleButton`, the card overlays — inherits the fix
+/// without one line of arithmetic at any of them.
+///
+/// So the two facts are one fact: `optical_x(Play) == 0.5` is only true while the asset's centroid
+/// is at 12, which `play_carries_its_own_optical_centre` measures out of the rasterized mask.
+pub(crate) const fn optical_x(id: Icon) -> f32 {
+    match id {
+        // A right-pointing triangle: centroid from its ink run, (`2·left + right) / 3`, over the
+        // viewBox — 0.5 for the shipped asset, and recomputed rather than restated so a re-draw
+        // that shifts the triangle without shifting `ink_x` cannot silently reintroduce the bias.
+        Icon::Play => (2.0 * 7.667 + 20.667) / 3.0 / 24.0,
+        // Everything else is symmetric about its ink's centre, or close enough that the ink's own
+        // centre is the honest answer (the stroked marks, the discs, the mirrored chevron pair).
+        _ => {
+            let (l, r) = ink_x(id);
+            (l + r) * 0.5
+        }
+    }
+}
+
+/// **A mark centred on its OPTICAL centre, not on its box.** Two independent corrections, both
+/// arithmetic on the asset's own declared bounds so they hold for every caller and every size:
+///
+/// * horizontally, the box is shifted so [`optical_x`] lands on the box's centre;
+/// * vertically, a mark of the transport family that stands TALLER than the family's ink band is
+///   shrunk to it, so the family does not shift weight as a player HUD's state flips.
+///
+/// **The vertical half only ever applies to a declared transport band.** A mark that declares none
+/// (`band == 1.0`: Settings, ChevronLeft, Cc, Heart, every non-transport icon) is left at its box's
+/// full height, whatever band the caller asks for. That is a guard against a real regression rather
+/// than a nicety: a caller once routed every disc icon through this helper with the transport band,
+/// the unconditional shrink scaled all of them to 14/24 of their box, and the detail hero's
+/// Settings/ChevronLeft/Cc/Heart discs came out visibly squashed. `a_mark_outside_the_transport_
+/// family_keeps_its_box` pins it.
 pub(crate) fn centred_on_ink(id: Icon, box_rect: Rect, family_band: f32) -> Rect {
-    let (l, r) = ink_x(id);
-    let ink_center = (l + r) * 0.5;
-    let dx = -(ink_center - 0.5) * box_rect.w;
+    let dx = -(optical_x(id) - 0.5) * box_rect.w;
     let b = band(id);
-    let (w, h) = if (b - family_band).abs() > 1e-6 && b > 0.0 {
-        let scaled = box_rect.h * (family_band / b);
-        (box_rect.w, scaled)
+    let h = if b < 1.0 && b > family_band + 1e-6 {
+        box_rect.h * (family_band / b)
     } else {
-        (box_rect.w, box_rect.h)
+        box_rect.h
     };
     Rect::new(
         box_rect.x + dx,
         box_rect.y + (box_rect.h - h) * 0.5,
-        w,
+        box_rect.w,
         h,
     )
 }
@@ -519,9 +558,9 @@ pub(crate) fn draw(p: Painter, id: Icon, r: Rect, tint: [f32; 4]) {
 mod centre_tests {
     use super::*;
 
-    /// **`play.svg` lands on the same band as its family.** Drawn box-centred it is taller and
-    /// wider than a pause, which is the off-centre mark the owner reported; centred on its ink it
-    /// occupies pause's band vertically and its ink's centre horizontally.
+    /// **`play.svg` lands on the same band as its family.** Drawn box-centred it is taller than a
+    /// pause, which is the off-band mark the owner reported; through the helper it occupies
+    /// pause's band vertically.
     #[test]
     fn play_sits_in_the_transport_band_and_centres_its_ink() {
         let disc = Rect::new(0.0, 0.0, 64.0, 64.0);
@@ -539,12 +578,13 @@ mod centre_tests {
         );
         assert!((play.cy() - disc.cy()).abs() < 0.51, "vertically centred: {}", play.cy());
 
-        // Horizontally the ink's own centre is what sits on the disc's centre: play's ink runs
-        // 6..20 of 24, so its centre is 0.5417 of the box and the box shifts LEFT by that excess.
+        // Horizontally the box is NOT moved while the asset carries its own optical centre: the
+        // triangle's centroid is on x=12 of its viewBox, so a box-centred draw is the correction.
+        assert!((play.x - icon.x).abs() < 1e-3, "the box stays put: {} vs {}", play.x, icon.x);
+        assert!((optical_x(Icon::Play) - 0.5).abs() < 1e-4);
         let (l, r) = ink_x(Icon::Play);
-        let want = disc.cx() - ((l + r) * 0.5) * play.w;
-        assert!(play.x < icon.x, "the box moves left to centre the ink");
-        assert!((play.x - want).abs() < 0.51, "ink centre at {} vs {}", play.x, want);
+        let centroid = disc.cx() - play.w * 0.5 + ((2.0 * l + r) / 3.0) * play.w;
+        assert!((centroid - disc.cx()).abs() < 0.51, "centroid at {centroid}");
     }
 
     /// A symmetrical mark is left where it is: the helper must not nudge what was already centred.
@@ -554,6 +594,34 @@ mod centre_tests {
         let stop = centred_on_ink(Icon::Stop, icon, band(Icon::Pause));
         assert!((stop.x - icon.x).abs() < 1e-4);
         assert!((stop.h - icon.h).abs() < 1e-4);
+    }
+
+    /// **A mark outside the transport family keeps its box, whatever band the caller asks for.**
+    /// This is the regression the detail hero ate: routing every disc icon through this helper with
+    /// the transport band scaled Settings, ChevronLeft, Cc, Heart and Image to 14/24 of their box,
+    /// so five discs of a row came out visibly squashed while every test stayed green. `band`'s
+    /// `1.0` is "declares no band", not "fills the box", and only a declared band may be scaled.
+    #[test]
+    fn a_mark_outside_the_transport_family_keeps_its_box() {
+        let icon = Rect::new(16.0, 16.0, 28.0, 28.0);
+        for id in [
+            Icon::Settings,
+            Icon::ChevronLeft,
+            Icon::Cc,
+            Icon::Heart,
+            Icon::Image,
+            Icon::Check,
+        ] {
+            let r = centred_on_ink(id, icon, band(Icon::Pause));
+            assert_eq!(band(id), 1.0, "{id:?} must declare no band of its own");
+            assert!(
+                (r.x - icon.x).abs() < 1e-4
+                    && (r.y - icon.y).abs() < 1e-4
+                    && (r.w - icon.w).abs() < 1e-4
+                    && (r.h - icon.h).abs() < 1e-4,
+                "{id:?} was resized: {r:?} vs {icon:?}"
+            );
+        }
     }
 }
 
@@ -714,23 +782,83 @@ mod ink_tests {
 mod play_centring_tests {
     use super::*;
 
-    /// **The play mark's INK centre sits on the disc's centre.** The asset was re-drawn to a
-    /// symmetric 13-unit run (x 7..20), so its own geometry no longer pulls it right; this pins
-    /// the arithmetic that places it, which is what the previous box-centred draw got wrong.
+    /// **The play triangle's AREA CENTROID lands on the centre of the box it is drawn in.** This is
+    /// the whole of `optical_x`'s claim for it, measured out of the rasterized mask instead of
+    /// restated from `ink_x`: alpha-weighted centroid of `play.svg` at a real draw size, against the
+    /// middle of the same raster. A re-draw that moves the triangle without moving `ink_x` fails
+    /// here, which is the failure the whole owner-visible bug was.
+    ///
+    /// Measured at 112px (the largest size this codebase ever rasterizes an icon at) because the
+    /// quantity being graded is a fraction of the ink: at the detail hero's 28px box the centroid is
+    /// 0.8px off when it is wrong, and a test that cannot tell 0.8px from rounding tests nothing.
+    #[test]
+    fn play_carries_its_own_optical_centre() {
+        let px = icon_raster_px(112);
+        let rgba = crate::svg::rasterize(src(Icon::Play), px, px).expect("play.svg rasterized");
+        let alpha = |x: i32, y: i32| rgba[((y * px + x) * 4 + 3) as usize] as f64;
+        let (mut sum, mut sx, mut sy) = (0.0f64, 0.0f64, 0.0f64);
+        let (mut l, mut r) = (px, -1i32);
+        for y in 0..px {
+            for x in 0..px {
+                let a = alpha(x, y);
+                if a <= 0.0 {
+                    continue;
+                }
+                l = l.min(x);
+                r = r.max(x);
+                sum += a;
+                sx += a * x as f64;
+                sy += a * y as f64;
+            }
+        }
+        assert!(sum > 0.0, "no ink");
+        let mid = (px as f64 - 1.0) * 0.5;
+        let cx = sx / sum;
+        let cy = sy / sum;
+        assert!((cx - mid).abs() < 0.5, "ink centroid x {cx} vs box middle {mid}");
+        // Vertically the triangle IS symmetric about the box's middle (y 4..20), and that half of
+        // the placement is box-centred arithmetic nobody has to correct.
+        assert!((cy - mid).abs() < 0.5, "ink centroid y {cy} vs box middle {mid}");
+        // The ink box is NOT centred, and must not be: a right-pointing triangle whose box centre
+        // sat on the disc's centre is the left-heavy reading the owner reported. The gap between
+        // the two measures is the triangle's own width/6 — 2.17 units here, 13/6.
+        let box_middle = ((l + r) as f64) * 0.5;
+        assert!(
+            box_middle > mid + 0.5,
+            "the ink box rides RIGHT of the box centre ({box_middle} vs {mid})"
+        );
+        let want_gap = (r - l + 1) as f64 / 6.0;
+        assert!(
+            (box_middle - cx - want_gap).abs() < 1.0,
+            "ink-box/centroid gap {} vs triangle width/6 {want_gap}",
+            box_middle - cx
+        );
+        // And the declaration the drawing paths read agrees with the measurement.
+        assert!((optical_x(Icon::Play) - 0.5).abs() < 1e-3);
+    }
+
+    /// **The play mark's optical centre sits on the disc's centre, through either path.** The two
+    /// ways a glyph reaches a disc are `Button`/`CircleButton` (box-centred, asset as-is) and
+    /// `TransportButton` ([`centred_on_ink`], band-scaled). Both must leave the triangle's centroid
+    /// on the disc's centre; only the second shrinks the box.
     #[test]
     fn the_play_ink_lands_on_the_disc_centre() {
         let disc = Rect::new(0.0, 0.0, 64.0, 64.0);
         let icon = Rect::new(16.0, 16.0, 32.0, 32.0);
         let play = centred_on_ink(Icon::Play, icon, band(Icon::Pause));
         let (l, r) = ink_x(Icon::Play);
-        let ink_cx = play.x + ((l + r) * 0.5) * play.w;
+        let centroid = |b: Rect| b.x + ((2.0 * l + r) / 3.0) * b.w;
         assert!(
-            (ink_cx - disc.cx()).abs() < 0.51,
-            "play ink centre {ink_cx} vs disc centre {}",
+            (centroid(play) - disc.cx()).abs() < 0.51,
+            "play centroid {} vs disc centre {}",
+            centroid(play),
             disc.cx()
         );
-        // Vertically the INK run is centred, not the box.
-        let ink_top = play.y + (1.0 - band(Icon::Play)) * play.h * 0.5;
-        assert!((ink_top - play.y - (play.h - play.h * band(Icon::Play)) * 0.5).abs() < 1e-3);
+        assert!(
+            (centroid(icon) - disc.cx()).abs() < 0.51,
+            "box-centred play centroid {} vs disc centre {}",
+            centroid(icon),
+            disc.cx()
+        );
     }
 }
