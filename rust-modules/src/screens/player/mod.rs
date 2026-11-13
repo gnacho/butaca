@@ -377,7 +377,10 @@ impl PlayerScreen {
     ///   the HUD auto-hidden, where nothing else in the frame moves at all.
     pub(crate) fn clock_fingerprint(&self, ps: &crate::route::PlaybackSession, now: u32) -> u64 {
         use std::sync::atomic::Ordering::Relaxed;
-        let pos = crate::player::playpos_ns();
+        // **One snapshot for the playhead and the pause state**, which the fingerprint folds in
+        // together: two loads could straddle the very tick this fingerprint exists to notice.
+        let transport = crate::player::readout::Transport::now();
+        let pos = transport.position_ns;
         let hud_up = self.hud_up(ps, now);
         let mut h: u64 = 0;
         let mut mix = |v: u64| {
@@ -394,7 +397,7 @@ impl PlayerScreen {
             mix(crate::player::seek_display_ns() as u64);
             mix(crate::player::TX.scrub_ns.load(Relaxed) as u64);
         }
-        mix(u64::from(crate::player::TX.paused.load(Relaxed)));
+        mix(u64::from(transport.paused));
         // …subtitles are NOT conditional: they are drawn on every frame of the route, HUD or no
         // HUD, which is exactly why a cue appearing had to become a report.
         mix(self.render.ass.fingerprint());

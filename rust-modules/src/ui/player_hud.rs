@@ -1515,10 +1515,15 @@ impl Playbar {
         // while a seek is loading, freeze the playhead at the target (no wobble through the reopen);
         // else follow the live scrub preview, else the real playhead.
         let loading = crate::player::loading(ps);
-        // Hoisted so the display position and the PUBLISHED one are one sample: the state read-out
-        // takes its travel direction from the difference between them, and two loads of a live
-        // atomic can straddle a tick.
-        let livepos = crate::player::playpos_ns();
+        // **One snapshot for the three fields the clock states together** (`player::readout`):
+        // the position, the duration and the pause state. Before, they were three separate loads of
+        // three live atomics and could straddle a tick — a clock reading a fresh position against a
+        // stale duration shows a bar nobody can explain.
+        //
+        // Hoisted as well so the display position and the PUBLISHED one are one sample: the state
+        // read-out takes its travel direction from the difference between them.
+        let transport = crate::player::readout::Transport::now();
+        let livepos = transport.position_ns;
         // ONE sample of the seek target too, for the reason the line above hoists the playhead: the
         // condition and the value were two loads of the same live atomic and could straddle a tick.
         let seekdisp = crate::player::seek_display_ns();
@@ -1538,10 +1543,10 @@ impl Playbar {
         };
         // Gated on `busy`, not on `loading()`: with `loading()` the transport lit the same spinner
         // the centred read-out was already showing, for the whole of every load AND every seek.
-        let paused = crate::player::TX.paused.load(Relaxed);
+        let paused = transport.paused;
         Self {
             pos_ns: dispos,
-            dur_ns: crate::player::duration_ns(),
+            dur_ns: transport.duration_ns,
             knob,
             mark: transport_mark(paused, busy, scrub >= 0, dispos, livepos, since_play_ms),
             now,
@@ -1916,6 +1921,51 @@ mod tests {
     use super::*;
     use crate::metadata::{Marker, MarkerKind};
     use crate::screens::player::skip_pill::SkipAction;
+
+    /// **The playbar's clocks come from ONE snapshot of the transport** (`player::readout`): the
+    /// position, the duration and the pause state are read together, so a clock cannot state a
+    /// fresh position against a stale duration — which is what three separate loads of three live
+    /// atomics could do inside one frame.
+    #[test]
+    fn the_playbar_states_its_clocks_from_one_transport_snapshot() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let _serial = crate::testlock::serial();
+        let shared = &crate::player::SHARED;
+        let was = (
+            shared.playpos_ns.load(Relaxed),
+            shared.duration_ns.load(Relaxed),
+            shared.seek_target_ns.load(Relaxed),
+            crate::player::TX.paused.load(Relaxed),
+            crate::player::TX.scrub_ns.load(Relaxed),
+        );
+        struct Restore((i64, i64, i64, bool, i64));
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let shared = &crate::player::SHARED;
+                shared.playpos_ns.store(self.0 .0, Relaxed);
+                shared.duration_ns.store(self.0 .1, Relaxed);
+                shared.seek_target_ns.store(self.0 .2, Relaxed);
+                crate::player::TX.paused.store(self.0 .3, Relaxed);
+                crate::player::TX.scrub_ns.store(self.0 .4, Relaxed);
+            }
+        }
+        let _restore = Restore(was);
+
+        shared.playpos_ns.store(120_000_000_000, Relaxed);
+        shared.duration_ns.store(7_200_000_000_000, Relaxed);
+        shared.seek_target_ns.store(-1, Relaxed); // nothing loading: the bar follows the playhead
+        crate::player::TX.scrub_ns.store(-1, Relaxed);
+        crate::player::TX.paused.store(true, Relaxed);
+
+        let ps = crate::route::PlaybackSession::default();
+        let bar = super::Playbar::live(&ps, super::Busy::None, 1, None, 0);
+        assert_eq!(bar.pos_ns, 120_000_000_000, "the elapsed clock states the snapshot's playhead");
+        assert_eq!(bar.dur_ns, 7_200_000_000_000, "…and the snapshot's duration beside it");
+        assert!(
+            matches!(bar.mark, super::TransportMark::Pause),
+            "…and the pause state from the same instant, not a second read"
+        );
+    }
 
     /// **The image-subtitle display set is a render, and it says how much of one** (§8.3 rule (c)):
     /// one texture per rect, the SOURCE pixels behind them, and nothing left claimed once the set
