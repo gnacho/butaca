@@ -27,6 +27,7 @@ mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
+pub(crate) mod load_refusal;
 pub(crate) mod readout;
 pub(crate) mod threads;
 pub(crate) mod video_geometry;
@@ -2125,8 +2126,18 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         // it means mid-play, is unmeasured, and the lab could not say whether 18 is the only
         // refusal type either — so the `num` is logged rather than filtered on.
         if ty == 18 && !SHARED.seen_frame.load(Relaxed) {
+            // **Which axis the pipeline refused, when it says so** (`player::load_refusal`). The
+            // lab's own payload (`"Resource Allocation Error"`) names none, and then this log is
+            // exactly what it was; a payload that names a codec is the one shape a corrective
+            // reload could act on, so the axis is worth naming while the refusal is fresh.
+            let axis = match load_refusal::classify(&preview) {
+                load_refusal::Refusal::Named(load_refusal::Axis::Video) => " declared_axis=video",
+                load_refusal::Refusal::Named(load_refusal::Axis::Audio) => " declared_axis=audio",
+                load_refusal::Refusal::Unnamed => "",
+            };
             log(&format!(
-                "smp: Load refused by the pipeline before any picture (type=18 num={num}) — failing the source"
+                "smp: Load refused by the pipeline before any picture (type=18 num={num}){axis} — \
+                 failing the source"
             ));
             SHARED.load_failed.store(true, std::sync::atomic::Ordering::Release);
         }
