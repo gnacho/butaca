@@ -55,10 +55,10 @@ fn every_root_row_fits_its_grid_cell_in_every_language() {
     assert!(out.is_empty(), "root rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
 }
 
-/// Owner report (Belarusian UI): a long VALUE squeezed the primary label of the Direct Play row — the label column was whatever the unelided value left over. The row's
-/// label is the primary read and keeps its natural width; the value gives way first, ending in
-/// an ellipsis. Built exactly as `preferences::PreferencesPage::rebuild` builds its field rows,
-/// with every Direct Play value the picker can set.
+/// Owner report (Belarusian UI): a long VALUE squeezed the primary label of the Direct Play row.
+/// The row's label is the primary read and keeps its natural width; the value gives way first,
+/// ending in an ellipsis. Built exactly as `settings::page`'s `field_row` builds them, with every
+/// Direct Play value the picker can set.
 #[test]
 fn a_long_value_elides_before_the_settings_label_it_trails() {
     use crate::fontcov::advances::ShippedMeasure as M;

@@ -299,8 +299,8 @@ const SURFACE_APP_RGB: [f32; 3] = [
 ];
 
 /// The one nested-route transition of the Settings family: the surface's page push
-/// (`screens::settings::RouteSurface`) and a page's own in-place submenu (the preference
-/// pickers, `screens::preferences`) both drive this, so every Settings submenu slides the same.
+/// (`screens::settings::RouteSurface`) and a page's own in-place submenu (the Settings page's
+/// pickers, `screens::settings::page`) both drive this, so every Settings submenu slides the same.
 ///
 /// Only content moves: the host ground is drawn outside these painters and therefore remains
 /// fixed. The parent exits left while fading; the child leads from the right while appearing.
