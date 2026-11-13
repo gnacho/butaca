@@ -2333,9 +2333,12 @@ pub(crate) fn stall_report(
     runway_ms: i64,
     eos: bool,
     start_pending: bool,
+    reload_target_ns: Option<i64>,
 ) -> String {
+    let target = reload_target_ns.map_or_else(|| "-".to_string(), |ns| (ns / 1_000_000).to_string());
     format!(
-        "stall: class={} pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={} start_pending={}",
+        "stall: class={} pos={}ms unchanged for {}s v={}ms a={}ms runway={}ms eos={} start_pending={} \
+         reload_target={}ms",
         class.word(),
         pos_ms,
         STALL_REPORT_MS / 1_000,
@@ -2344,6 +2347,7 @@ pub(crate) fn stall_report(
         runway_ms,
         u8::from(eos),
         u8::from(start_pending),
+        target,
     )
 }
 
@@ -2411,8 +2415,9 @@ pub(crate) fn feed_both_lanes(mt: &MainThread, eng: &mut Engine) {
             // **A replacement start is queued**: the seek's own reload, waiting on the previous
             // object to let go. Without it a dark picture under a pending reload and a dark
             // picture from a stuck pipeline read the same in a log, which is the difference the
-            // report exists to settle.
-            crate::route::pending_route_start().is_some(),
+            // report exists to settle. Its target says which reload it was.
+            super::readout::start_pending(),
+            super::readout::reload_target_ns(),
         ));
     }
     feed_stream(mt, eng);
@@ -4951,13 +4956,30 @@ mod stall_watch_tests {
     #[test]
     fn the_report_states_every_fact_including_a_queued_start() {
         use super::{stall_report, StallClass};
-        let line = stall_report(StallClass::BufferStarvation, 1_234, 900, 750, 40_000, false, true);
+        let line = stall_report(
+            StallClass::BufferStarvation,
+            1_234,
+            900,
+            750,
+            40_000,
+            false,
+            true,
+            Some(90_000_000_000),
+        );
         assert!(line.starts_with("stall: class=buffer_starvation "), "{line}");
         for field in ["pos=1234ms", "v=900ms", "a=750ms", "runway=40000ms", "eos=0", "start_pending=1"] {
             assert!(line.contains(field), "{field} missing from {line}");
         }
-        let quiet = stall_report(StallClass::PipelineStuck, 0, 0, 0, 0, true, false);
-        assert!(quiet.contains("eos=1") && quiet.contains("start_pending=0"), "{quiet}");
+        assert!(line.contains("reload_target=90000ms"), "the queued reload's target: {line}");
+        let quiet = stall_report(StallClass::PipelineStuck, 0, 0, 0, 0, true, false, None);
+        assert!(
+            quiet.contains("eos=1") && quiet.contains("start_pending=0"),
+            "{quiet}"
+        );
+        assert!(
+            quiet.contains("reload_target=-ms"),
+            "no queued reload reads as absent, not as zero: {quiet}"
+        );
     }
 
     #[test]

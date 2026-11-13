@@ -27,6 +27,7 @@ mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
+pub(crate) mod readout;
 pub(crate) mod threads;
 pub(crate) mod video_geometry;
 
