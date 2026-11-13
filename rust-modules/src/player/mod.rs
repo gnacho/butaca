@@ -27,6 +27,19 @@ mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
+pub(crate) mod release;
+
+/// **The one release tracker for the process** (`player::release`): a native epoch is never reused,
+/// so a second release of the same one is a defect rather than a retry, and this is where that is
+/// noticed instead of trusted.
+pub(crate) fn note_epoch_release(event: release::Release) -> bool {
+    use std::cell::RefCell;
+    thread_local! {
+        static RELEASES: RefCell<release::ReleaseTracker> =
+            RefCell::new(release::ReleaseTracker::default());
+    }
+    RELEASES.with(|t| t.borrow_mut().note(event))
+}
 pub(crate) mod load_refusal;
 pub(crate) mod readout;
 pub(crate) mod threads;
