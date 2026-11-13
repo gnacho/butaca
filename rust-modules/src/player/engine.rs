@@ -299,12 +299,10 @@ enum NativeObjectDisposition {
 /// D1 frees private state which a late firmware hook dereferences before it reaches our Rust
 /// callback. Every independent proof is therefore mandatory; this deliberately has no
 /// best-effort or timeout branch.
-fn native_object_disposition(
-    unload_completed: bool,
-    callback_gate_proven: bool,
-    rust_epoch_retired: bool,
-) -> NativeObjectDisposition {
-    if unload_completed && callback_gate_proven && rust_epoch_retired {
+fn native_object_disposition(release: super::release::Release) -> NativeObjectDisposition {
+    // **One definition of D1** (`player::release`): every proof, no partial credit. The conjunction
+    // lives on the event so a caller and this decision cannot disagree about what "released" means.
+    if release.destroyable() {
         NativeObjectDisposition::Destroy
     } else {
         NativeObjectDisposition::Quarantine
@@ -357,7 +355,7 @@ pub(crate) fn reap_abandoned_load(pa: &mut super::adapter::PlayerAdapter) -> boo
 /// Unload and retire the native object of `epoch`, then destroy it only with complete evidence.
 /// The engine's own teardown and the abandoned-Load release share this so the order below is one
 /// definition.
-fn release_native_object(mt: &MainThread, epoch: u32) {
+fn release_native_object(mt: &MainThread, epoch: u32) -> super::release::Release {
     // Stop the pipeline, close native callback admission, then drain the Rust epoch.
     //
     // `Unload` waits for the GStreamer state transition, but neither libpf's raw callback fields nor
@@ -372,12 +370,20 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
     // runtime evidence that this firmware followed the audited path. If any proof is missing, C
     // retains the constructed object forever and permanently refuses another Load. Leaking one
     // object is preferable to letting D1 turn a late producer callback into a use-after-free.
+    // **The evidence, in the order the contract requires** (`player::release`): unload, gate, epoch.
+    let release;
     if unsafe { ffi::sf_ready(mt) } != 0 {
         unsafe { ffi::sf_unload(mt) };
         let callback_gate_proven = unsafe { ffi::sf_callback_gate_retire(mt) } != 0;
         let callback_intercepts = unsafe { ffi::sf_callback_intercepts(mt) };
         let unload_completed = SHARED.native_unload_completed(epoch);
         let rust_epoch_retired = SHARED.retire_native_session(epoch);
+        release = super::release::Release::new(
+            epoch,
+            unload_completed,
+            callback_gate_proven,
+            rust_epoch_retired,
+        );
         if !unload_completed {
             log(&format!(
                 "native lifecycle: Unload returned without type=23 epoch={epoch}",
@@ -396,8 +402,7 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
         if ACB_OK.load(Ordering::Relaxed) {
             unsafe { ffi::acb_unload(mt) };
         }
-        match native_object_disposition(unload_completed, callback_gate_proven, rust_epoch_retired)
-        {
+        match native_object_disposition(release) {
             NativeObjectDisposition::Destroy => {
                 if unsafe { ffi::sf_destroy(mt) } == 0 {
                     log("native lifecycle: C seam rejected D1 and quarantined the object");
@@ -405,9 +410,25 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
             }
             NativeObjectDisposition::Quarantine => unsafe { ffi::sf_quarantine(mt) },
         }
-    } else if !SHARED.retire_native_session(epoch) {
+    } else {
+        // No dispatchable object: there was nothing to unload, only an epoch to retire.
+        let retired = SHARED.retire_native_session(epoch);
+        if !retired {
+            log(&format!(
+                "native lifecycle: no dispatchable object and epoch={epoch} was already retired",
+            ));
+        }
+        release = super::release::Release::new(epoch, true, true, true);
+    }
+    log(&release.describe());
+    // **Once per epoch** (`player::release`): the native epoch is never reused, so a second release
+    // of one is a caller releasing the same object twice — the shape that would let D1 free state a
+    // live hook still points at. It is logged rather than asserted because the release has already
+    // happened by now: refusing it here would leave the object alive and unreferenced.
+    if !super::note_epoch_release(release) {
         log(&format!(
-            "native lifecycle: no dispatchable object and epoch={epoch} was already retired",
+            "native lifecycle: epoch={} released TWICE — a second release of one object",
+            release.epoch,
         ));
     }
     // The webOS 5+ counterpart of acb_unload, and the other half of `with_window_id`'s create.
@@ -416,6 +437,7 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
     // otherwise leak it, and the next Load would ask for another. Unguarded because the seam
     // already no-ops in the other modes (see starfish.h).
     unsafe { ffi::vp_destroy_window(mt) };
+    release
 }
 
 /// Bind the decoded video sink to the display plane, whichever way this television does it.
@@ -2769,22 +2791,19 @@ mod native_lifecycle_proof_tests {
 
     #[test]
     fn destructor_requires_every_independent_runtime_proof() {
+        let release = |unloaded, gate, retired| crate::player::release::Release::new(1, unloaded, gate, retired);
         assert_eq!(
-            native_object_disposition(true, true, true),
+            native_object_disposition(release(true, true, true)),
             NativeObjectDisposition::Destroy,
         );
-        for (unload_completed, callback_gate_proven, rust_epoch_retired) in [
+        for (unloaded, gate, retired) in [
             (false, true, true),
             (true, false, true),
             (true, true, false),
             (false, false, false),
         ] {
             assert_eq!(
-                native_object_disposition(
-                    unload_completed,
-                    callback_gate_proven,
-                    rust_epoch_retired,
-                ),
+                native_object_disposition(release(unloaded, gate, retired)),
                 NativeObjectDisposition::Quarantine,
             );
         }
