@@ -159,19 +159,16 @@ pub(crate) fn timeline_thread(
         // The state/position line stays as the reporter's own heartbeat: the wire POST that used
         // to ride beside it (the `/:/timeline` report) is gone, and the log is where "the reporter
         // is alive and sampling" remains visible.
-        let dur = SHARED.duration_ns.load(Ordering::Relaxed);
-        let t = SHARED.playpos_ns.load(Ordering::Relaxed) / 1_000_000;
-        let d = dur / 1_000_000;
-        let state = if super::TX.paused.load(Ordering::Relaxed) {
+        // **One snapshot, so the three fields cannot come from three instants** — the reporter's
+        // whole job is to say what the pipeline was doing at one moment (`player::readout`).
+        let transport = super::readout::Transport::now();
+        let t = transport.position_s();
+        let d = (transport.duration_ns / 1_000_000_000).max(0);
+        let state = if transport.paused {
             TimelineState::Paused
         } else {
             TimelineState::Playing
         };
-        super::log(&format!(
-            "timeline {} t={}s/{}s",
-            state.as_str(),
-            t / 1000,
-            d / 1000
-        ));
+        super::log(&format!("timeline {} t={}s/{}s", state.as_str(), t, d));
     }
 }
