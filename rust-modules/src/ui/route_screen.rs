@@ -773,6 +773,17 @@ impl RouteLayout {
         }
     }
 
+    /// **The Settings family's one measure** — the root AND its sub-pages. It lives here rather than
+    /// in the screen that first needed it so both can ask the layout instead of naming a sibling
+    /// (the `sibling` gate), and so a card in *Vídeo y reproducción* is the width of a card on the
+    /// root rather than the second column of a different layout.
+    pub(crate) const SETTINGS_MEASURE: f32 = 1616.0;
+
+    /// The Settings family's centred column, at its own measure.
+    pub(crate) fn settings() -> Self {
+        Self::centered(Self::SETTINGS_MEASURE)
+    }
+
     /// **A CENTRED content column** — the Settings root's shape (#297): the title block and the
     /// cards under it share ONE column, horizontally centred in the safe frame, instead of the
     /// two-column narrative|content split every other route uses. That split left a single

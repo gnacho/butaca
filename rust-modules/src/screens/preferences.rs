@@ -153,7 +153,7 @@ impl PreferencesPage {
         // page's measure, then the cards in two columns. It used to be the two-column
         // narrative|list split every other route wears, which is what the owner saw as "no están
         // los ajustes como el mockup" on a sub-page.
-        let layout = RouteLayout::centered(crate::screens::settings::SETTINGS_CENTER_W);
+        let layout = RouteLayout::settings();
         TableScreen::new(
             Header::new(layout, Some(crumb), title, &self.copy).with_back_disc(),
             table,
