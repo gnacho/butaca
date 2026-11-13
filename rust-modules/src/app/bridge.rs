@@ -630,6 +630,17 @@ impl Bridge {
         self.mounter.poster_preplay = Some((sid, rk.to_string()));
     }
 
+    /// What the press armed, for the seam's own grader: the arm is spent by the mount, so nothing
+    /// downstream can see whether the press asked for a window or not. Read-only and empty in
+    /// every build that never arms one.
+    #[cfg(all(test, feature = "hostsim"))] // the seam's own grader, which needs the player seam
+    pub(crate) fn poster_preplay_armed(&self) -> Option<(crate::registry::ServerId, &str)> {
+        self.mounter
+            .poster_preplay
+            .as_ref()
+            .map(|(sid, rk)| (*sid, rk.as_str()))
+    }
+
     /// Where the next player instance returns to — see `AppMounter::player_origin`.
     pub(crate) fn seed_player_origin(&mut self, origin: crate::screens::player::Origin) {
         self.mounter.player_origin = Some(origin);

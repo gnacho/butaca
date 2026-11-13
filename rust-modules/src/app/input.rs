@@ -354,6 +354,61 @@ mod activate_card_tests {
             "…and land on the page rather than leaving the press with no effect at all");
     }
 
+    /// **A film's poster arms the pre-playback window; a show's does not** (issue #355). The arm is
+    /// spent by the first detail page that mounts, so this seam is the only place the decision is
+    /// still visible: without the grader, a press that forgot to arm it would look exactly like one
+    /// whose window nobody had opened yet.
+    #[test]
+    fn a_film_card_arms_the_pre_playback_window_and_a_show_does_not() {
+        let _guard = crate::testlock::serial();
+        let mut ps = crate::route::PlaybackSession::default();
+        let mt = unsafe { crate::task::MainThread::assume() };
+        let mut pa = crate::player::adapter::PlayerAdapter::new(mt);
+        let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
+        let mut bridge = super::bridge::Bridge::for_test(|| 0);
+        let mut menu_play_await = None;
+
+        struct Cleanup(*mut super::bridge::Bridge);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                // SAFETY: captured from `bridge` just above, which outlives this guard.
+                unsafe { &mut *self.0 }.metadata_mut().run(crate::stores::metadata::MetadataCmd::Clear);
+                crate::registry::reset_for_test();
+            }
+        }
+        let _cleanup = Cleanup(&mut bridge as *mut _);
+        crate::registry::reset_for_test();
+        let sid = crate::registry::ServerId::from_raw(0);
+
+        // `want_play: false` is the CARD press ("show me this"): a Play row passes `true` and is
+        // the path that starts the film, which is not the seam that asks for a window.
+        let film = crate::catalog::CatalogMovie { sid, rk: "film-1".into(), kind: 0, ..Default::default() };
+        unsafe {
+            activate_card(&mut ps, &mut pa, &film, false, 1000, None,
+                &mut pages, &mut bridge, &mut menu_play_await, 0);
+        }
+        assert_eq!(
+            bridge.poster_preplay_armed().map(|(sid, rk)| (sid, rk.to_string())),
+            Some((sid, "film-1".to_string())),
+            "a film's poster asks for the page AND the window"
+        );
+
+        let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
+        let show = crate::catalog::CatalogMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
+        unsafe {
+            activate_card(&mut ps, &mut pa, &show, false, 1000, None,
+                &mut pages, &mut bridge, &mut menu_play_await, 0);
+        }
+        // The arm from the film press is still there (nothing has mounted to spend it), and the
+        // show's press must not have replaced it: a show's page plays its on-deck episode, so there
+        // is no file for a window to describe.
+        assert_eq!(
+            bridge.poster_preplay_armed().map(|(sid, rk)| (sid, rk.to_string())),
+            Some((sid, "film-1".to_string())),
+            "a show's card asks for its page and nothing else"
+        );
+    }
+
     #[test]
     fn a_collection_card_opens_the_collection_page() {
         let _guard = crate::testlock::serial();
