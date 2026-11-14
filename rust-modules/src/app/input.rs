@@ -177,7 +177,12 @@ pub(crate) unsafe fn activate_card(
         // The show is still one press away: it is the card menu's second navigation row, and the
         // episode page's own BACK returns to the shelf.
         super::bridge::open_detail(pages, bridge, mm.sid, &rk, None, ret.take());
-    } else if mm.kind == crate::catalog::KIND_MOVIE {
+    } else if mm.kind == crate::catalog::KIND_MOVIE && mm.resume_frac().is_none() {
+        // **A FRESH film only.** A card that is already in progress is a resume tile: the decision
+        // to watch was taken the last time it was opened, which is what the tile's own progress bar
+        // and its "Reanudar" state say. Putting the window in front of it asks the viewer to decide
+        // again what the tile already answered, and it is what the owner saw as a pop-up "que no
+        // tiene sentido" on the Continue Watching shelf.
         // **A press on a FILM's poster** (issue #355): the page it always opened, plus the
         // pre-playback window the press asked for, opened over that page as soon as the item lands.
         // The rule lives here, at the one seam where a card on a browsing surface becomes an
@@ -391,6 +396,24 @@ mod activate_card_tests {
             bridge.poster_preplay_armed().map(|(sid, rk)| (sid, rk.to_string())),
             Some((sid, "film-1".to_string())),
             "a film's poster asks for the page AND the window"
+        );
+
+        // **A resume tile arms nothing**: it is already in progress, so the decision to watch was
+        // taken last time. This is the pop-up the owner saw "a veces" on Continue Watching.
+        let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
+        let resumed = crate::catalog::CatalogMovie {
+            sid, rk: "film-2".into(), kind: 0, resume_ms: 600_000, dur_ns: 7_200_000_000_000,
+            ..Default::default()
+        };
+        assert!(resumed.resume_frac().is_some(), "the fixture is in progress");
+        unsafe {
+            activate_card(&mut ps, &mut pa, &resumed, false, 1000, None,
+                &mut pages, &mut bridge, &mut menu_play_await, 0);
+        }
+        assert_eq!(
+            bridge.poster_preplay_armed().map(|(sid, rk)| (sid, rk.to_string())),
+            Some((sid, "film-1".to_string())),
+            "an in-progress film asks for its page and nothing else"
         );
 
         let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
