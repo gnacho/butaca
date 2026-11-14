@@ -1046,6 +1046,10 @@
     "value": "Servers",
     "description": "Settings, account, onboarding or privacy UI: the Jellyfin server section header."
   },
+  "settings.servers.group": {
+   "value": "Server",
+   "description": "Settings: the server group label on the one-page settings screen."
+  },
   "settings.servers.select": {
     "value": "Select server",
     "description": "Settings, account, onboarding or privacy UI: the row that opens the server picker."

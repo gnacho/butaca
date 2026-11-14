@@ -261,6 +261,7 @@
   "settings.consent.placeholder.app_version": "версія праграмы",
   "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS",
   "settings.servers.section": "Серверы",
+  "settings.servers.group": "Сервер",
   "settings.servers.select": "Выбраць сервер",
   "settings.servers.select.detail": "Выберыце сервер для тэлевізара.",
   "settings.servers.quick": "Хуткае падключэнне",
