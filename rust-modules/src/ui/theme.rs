@@ -926,6 +926,10 @@ pub const CONTROL_DANGER_IDLE_INK: [f32; 4] = DANGER;
 /// Stats-for-Nerds delivery budget that covers the current media demand. This is not a generic
 /// success colour: the diagnostic plot uses it only for the literal `budget >= demand` state.
 pub const DIAG_LINK_SUSTAINS: [f32; 4] = GREEN_400;
+/// **The status dot**: a connection that is up. The mockup's settings page puts one beside the
+/// server's name, and it is state rather than decoration, which is what the semantic ladder is for
+/// (amber / red / green, never ornament). Same green as the rest of that ladder.
+pub const STATUS_DOT: [f32; 4] = GREEN_400;
 /// The same plot when its conservative delivery budget is below current media demand.
 pub const DIAG_LINK_DEFICIT: [f32; 4] = RED_400;
 /// Bytes delivered during one diagnostics sampling cell. Kept independent of the budget colour:

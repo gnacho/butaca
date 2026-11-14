@@ -259,6 +259,7 @@
   "settings.consent.placeholder.app_version": "versión de la app",
   "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS",
   "settings.servers.section": "Servidores",
+  "settings.servers.group": "Servidor",
   "settings.servers.select": "Seleccionar servidor",
   "settings.servers.select.detail": "Elige entre los servidores configurados.",
   "settings.servers.quick": "Conexión rápida",

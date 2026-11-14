@@ -484,7 +484,9 @@ impl RootPage {
         let mut row = Row::new(field.title())
             .detail(field.detail())
             .value(&value)
-            .chevron(true)
+            // The mockup puts `▾` on a row whose value opens IN PLACE and `›` on one that leads
+            // somewhere; this page is the first with both kinds on it.
+            .opens_in_place()
             .dim(self.state.busy);
         if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
             row = row.detail(crate::i18n::msg::settings_playback_overridden());
@@ -517,7 +519,9 @@ impl RootPage {
 
         // The rows, group by group, in the order they are painted: `Section` by `Section`, and
         // row-major inside each one, which is exactly the flattened index `activate` reads.
-        let mut server = Section::new(crate::i18n::msg::settings_servers_section());
+        // **SERVIDOR, singular**, as the mockup labels this group: it holds this server, the door to
+        // another and the way out, not a list of servers.
+        let mut server = Section::new(crate::i18n::msg::settings_servers_group());
         let mut playback = Section::new(crate::i18n::msg::settings_playback_section());
         let mut audio = Section::new(crate::i18n::msg::settings_audio_title());
         let mut interface = Section::new(crate::i18n::msg::settings_interface_section());
@@ -525,6 +529,7 @@ impl RootPage {
 
         // Servidor: the account this television uses, the door to another one, and the way out.
         let (user, url) = Self::server_line();
+        let connected = !user.is_empty();
         let value = if user.is_empty() {
             crate::i18n::msg::settings_audio_not_set().to_string()
         } else {
@@ -538,6 +543,9 @@ impl RootPage {
         triples.push((
             Row::new(crate::i18n::msg::settings_servers_current())
                 .detail(detail)
+                // **A connected server wears the dot** (the mockup's own mark): its value is a
+                // STATE, not a choice, and the dot is what says so before the words are read.
+                .status(connected)
                 .value(&value)
                 .chevron(true)
                 .dim(self.state.busy),
@@ -1383,7 +1391,12 @@ mod tests {
                         "row {i} shows a value that is not the field's own"
                     );
                     assert_eq!(row.detail, field.detail(), "row {i} shows another field's line");
-                    assert!(row.ticon == Some(crate::ui::icons::Icon::Chevron));
+                    // **A value row opens in place**: the mockup's caret, not the leading chevron,
+                    // because OK opens its picker while RIGHT must not navigate into one.
+                    assert!(
+                        row.ticon == Some(crate::ui::icons::Icon::ChevronDown),
+                        "row {i} does not say it opens its own value"
+                    );
                 }
                 Action::ToggleRecentlyAdded => assert_eq!(
                     row.label,
@@ -1464,7 +1477,7 @@ mod tests {
         assert_eq!(
             headers,
             vec![
-                crate::i18n::msg::settings_servers_section(),
+                crate::i18n::msg::settings_servers_group(),
                 crate::i18n::msg::settings_playback_section(),
                 crate::i18n::msg::settings_audio_title(),
                 crate::i18n::msg::settings_interface_section(),

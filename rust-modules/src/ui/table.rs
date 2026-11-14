@@ -53,6 +53,8 @@ pub struct Row {
     pub ticon: Option<crate::ui::icons::Icon>,
     /// Reserve [`Self::ticon`]'s column even when this row draws no icon — see [`Row::ticon_slot`].
     pub ticon_slot: bool,
+    /// See [`Row::status`]: a semantic dot drawn before the read-out.
+    pub status: bool,
     /// THE leading accessory icon — the SAME column the [`Row::checked`] checkmark occupies, for
     /// lists whose rows are ACTIONS rather than a picker's options (the item context menu's
     /// `[icon] [label]` rows). `checked` wins the slot when both are set: a picker's active mark is
@@ -84,6 +86,7 @@ impl Row {
             value_dim: false,
             ticon: None,
             ticon_slot: false,
+            status: false,
             licon: None,
             dim: false,
             sep: false,
@@ -138,6 +141,20 @@ impl Row {
         if v {
             self.ticon = Some(crate::ui::icons::Icon::Chevron);
         }
+        self
+    }
+    /// **This row opens its own value in place** rather than leading somewhere: a picker's row,
+    /// drawn with the mockup's `▾`. `ChevronDown` is deliberately not `Chevron`, so
+    /// [`TableView::row_opens`] keeps saying `false` for it: RIGHT must not navigate into a picker
+    /// that OK is what opens.
+    pub fn opens_in_place(mut self) -> Self {
+        self.ticon = Some(crate::ui::icons::Icon::ChevronDown);
+        self
+    }
+    /// **A status dot before the read-out**, for a value that states a state rather than a choice
+    /// (the mockup puts one beside a connected server's name).
+    pub fn status(mut self, on: bool) -> Self {
+        self.status = on;
         self
     }
     /// **Hold the trailing accessory's column open on a row that draws none.**
@@ -299,6 +316,9 @@ const CARD_GAP: f32 = 10.0;
 const CARD_RAD: f32 = 20.0;
 /// The card's own edge weight (idle and focused alike).
 const CARD_RING_W: f32 = 1.0;
+/// The status dot's diameter and its gap to the read-out, the mockup's 9px at this ramp.
+const STATUS_DOT_W: f32 = 10.0;
+const STATUS_DOT_GAP: f32 = 10.0;
 /// Weight of the focused card's wash: a tint of the chrome's tone, not the solid capsule.
 const CARD_FOCUS_A: f32 = 0.24;
 /// Pill inset from the row's top/bottom. `pub` for the [`ROW_H`] caller shape.
@@ -1247,6 +1267,19 @@ impl TableView {
             // an alpha of the pill's own ink rather than a grey, which would go muddy on it. That
             // step is the ink's ALONE — the run itself is bold (see [`VALUE_BOLD`], which all three
             // calls below take so the measure and the paint can never be two different faces).
+            // **The status dot**, before the read-out: state, not a choice (see `Row::status`).
+            let dot = if row.status { STATUS_DOT_W + STATUS_DOT_GAP } else { 0.0 };
+            if row.status {
+                let cy = cyc;
+                p.rect(
+                    Rect::new(text_right - trailing - dot + STATUS_DOT_GAP * 0.5, cy - STATUS_DOT_W * 0.5, STATUS_DOT_W, STATUS_DOT_W),
+                    0.0,
+                    theme::STATUS_DOT,
+                    theme::STATUS_DOT,
+                    0.0,
+                );
+            }
+            trailing += dot;
             if let Some(v) = row.readout() {
                 let ink = row_value_ink(row, focused, cards);
                 // the value gives way before the label (`row_columns`): elided to its column
