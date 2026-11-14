@@ -4,7 +4,6 @@
 use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
-use crate::ui::machine::Measure as _;
 
 /// Spec §14 phase 8: `Family::Settings`'s scrim/entrance composition reads
 /// `DrawFrame::nav_page_alpha` rather than the `ui::nav` statics — these two pin the
@@ -133,52 +132,33 @@ fn opening_settings_never_writes_the_session_file() {
     assert_eq!(before.len(), after.len(), "and nothing about its contents moved either");
 }
 
-/// **Every detail sub-line the root Settings page draws must fit the width its own row gives
-/// it.** `ui/table.rs`'s row draw elides `row.detail` against `text_w = text_right - label_x -
-/// trailing`, and `trailing` is NOT one number: a `.toggle` row spends it on the "On"/"Off" word
-/// plus a gap, a `.chevron` row spends it on the chevron glyph alone, so a toggle row's budget is
-/// tighter than a chevron row's. `CHECK_W`, `GAP` and `CONTENT_PAD`, the constants that would let
-/// this test replay `text_w` exactly, are private to `ui::table` (by design — see that module's
-/// doc on why the geometry is not a public surface), so plumbing the true per-row budget from
-/// here is impractical; this is the documented fallback the task asked for instead.
+/// **Every row of the one Settings page draws its second line, and that line fits its cell.**
 ///
-/// So: this measures every detail line the root page draws (`MEASURE`, the same `Measure`
-/// capability the real draw uses, at `theme::size::CAPTION`, the same rung `ui/table.rs` elides
-/// the sub-line at) and asserts none of them is wider than "Privacy, licences, source code,
-/// trademarks and contact." — the Legal notices row's detail, which is already on screen today
-/// and known to fit. It is a DIRECTIONAL check, not a simulation of the table's own arithmetic:
-/// the Legal notices row is a `.chevron` row, so its budget is the more GENEROUS of the two kinds
-/// this table draws, and a `.toggle` row (Automatically Sign In, Play trailers automatically)
-/// passing this bound is evidence its line got shorter, not proof it clears the tighter toggle
-/// budget specifically. The device capture is still what finally settles a real elide.
+/// The mockup's row is a title over one short sentence, so a row that carries no detail is a
+/// card half the height of its neighbours in the same grid band — the ragged layout this guards.
+/// The width check is `TableView::elided_rows`' own: the shipped faces, the page's real frame,
+/// the same grid cell the draw measures against. The per-language sweep lives in
+/// `settings_text_fit_tests`.
 #[test]
-fn every_root_detail_line_fits_a_known_good_width() {
+fn every_settings_row_carries_a_detail_that_fits_its_cell() {
+    use crate::fontcov::advances::{ShippedMeasure, HEADROOM};
     let _g = crate::testlock::serial();
     let _sess = scratch_session("root-detail-widths");
-    let page = RootPage::new(EntryId(0), crate::stores::browse::DirectoryView::empty_for_test());
-    let sz = theme::size::CAPTION;
-    let known_good = "Privacy, licences, source code, trademarks and contact.";
-    let budget = MEASURE.width_str(known_good, sz, false);
-
+    let page = RootPage::new(EntryId(0));
     let mut checked = 0;
     for sec in &page.table.sections {
         for row in &sec.rows {
-            if row.detail.is_empty() {
-                continue;
-            }
-            checked += 1;
-            let w = MEASURE.width_str(&row.detail, sz, false);
             assert!(
-                w <= budget,
-                "{:?}'s detail {:?} measures {w} — wider than {known_good:?} at {budget}, the \
-                 known-fitting line it is being held to",
-                row.label,
-                row.detail,
+                !row.detail.is_empty(),
+                "{:?} has no second line, so its card is shorter than its band",
+                row.label
             );
+            checked += 1;
         }
     }
-    assert_eq!(
-        checked, 4,
-        "expected detail lines on the two server doors, the playback row and Sign out, got {checked}"
-    );
+    assert!(checked >= 15, "expected the mockup's whole row set, got {checked}");
+    let over = page
+        .table
+        .elided_rows(RootPage::layout().content.w, &ShippedMeasure, HEADROOM);
+    assert!(over.is_empty(), "rows the television would elide:\n  {}", over.join("\n  "));
 }

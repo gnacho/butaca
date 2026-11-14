@@ -309,12 +309,12 @@ fn the_back_disc_at_the_surface_root_dismisses_it() {
     );
 }
 
-/// …and on a page that owns an inner level, the disc is that page's BACK: *Video & playback* has
+/// …and on a page that owns an inner level, the disc is that page's BACK: the Settings page has
 /// its own picker submenu, and the disc on the picker's header must close the picker before the
-/// surface pops the page. Before the fix the surface popped the page straight out from under an
+/// surface walks its stack. Before the fix the surface popped the page straight out from under an
 /// open picker.
 #[test]
-fn the_back_disc_closes_the_playback_pages_picker_before_leaving_it() {
+fn the_back_disc_closes_the_pages_picker_before_leaving_it() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("surface-crumb-picker");
     let mut s = RouteSurface::new(
@@ -325,9 +325,14 @@ fn the_back_disc_closes_the_playback_pages_picker_before_leaving_it() {
         crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
-    forwarded(&mut s, Fx::Nav(NavOp::Push(SettingsPage::Playback)));
-    assert_eq!(s.inner.depth(), 2, "the playback page is up");
-    let first = FocusKey { entry: EntryId(7), elem: 0 };
+    let quality = RootPage::new(EntryId(7))
+        .table
+        .sections
+        .iter()
+        .flat_map(|sec| sec.rows.iter())
+        .position(|r| r.label == crate::i18n::msg::settings_playback_quality())
+        .expect("the quality row is on the page") as u32;
+    let first = FocusKey { entry: EntryId(7), elem: quality };
     step(&mut s, ScreenEvent::FocusMoved { from: None, to: first, by: By::Dir }, Some(first));
     step(&mut s, ScreenEvent::Activate(first.elem), Some(first));
     let mut probe = String::new();
@@ -341,7 +346,7 @@ fn the_back_disc_closes_the_playback_pages_picker_before_leaving_it() {
     );
     let mut probe = String::new();
     <RouteSurface as Screen<InnerHost>>::state(&s).probe(&mut probe);
-    assert_eq!(s.inner.depth(), 2, "the page stays: the disc closed its picker, it did not leave");
+    assert_eq!(s.inner.depth(), 1, "the page stays: the disc closed its picker, it did not leave");
     assert!(probe.contains("picker=None"), "the picker is closed: {probe}");
     assert!(
         !out.iter().any(|st| matches!(&st.fx, Fx::Nav(NavOp::Dismiss(_)))),
