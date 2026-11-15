@@ -398,6 +398,9 @@ crate::dynlib! {
     fn av_packet_alloc() -> *mut AVPacket;
     fn av_packet_free(pkt: *mut *mut AVPacket);
     fn av_packet_unref(pkt: *mut AVPacket);
+    /// A packet whose payload libav owns, for decoding bytes this module held (the image-subtitle
+    /// hold): `av_packet_unref` frees exactly what this allocated.
+    fn av_new_packet(pkt: *mut AVPacket, size: c_int) -> c_int;
     fn avcodec_get_name(id: c_int) -> *const c_char;
     fn av_bsf_get_by_name(name: *const c_char) -> *const AVBitStreamFilter;
     // Image-subtitle software decode (PGS/VobSub/DVB → paletted bitmap). The classic 3.x
@@ -1131,6 +1134,86 @@ impl Drop for Venc {
     }
 }
 
+/// **Image subtitle packets read while subtitles are OFF** (upstream plx-native `5570be823`).
+///
+/// The demuxer runs 10 to 20 s ahead of the playhead, so decoding image cues only once a track is
+/// selected leaves the read-ahead window cue-less: the viewer turns subtitles on and waits for the
+/// playhead to catch up. Holding the packets instead costs the memory bounded here and makes the
+/// selection show the cue that is already on screen.
+///
+/// Bounded twice: by BYTES (a 4K PGS display set is hundreds of kilobytes) and by a TIME window
+/// around the read position, so a long run with subtitles off cannot grow this without limit. The
+/// oldest go first, which is the end nobody is about to look at.
+struct HeldImagePackets {
+    queue: std::collections::VecDeque<HeldImage>,
+    bytes: usize,
+}
+
+struct HeldImage {
+    /// Container ordinal of the image track this packet belongs to (`desired_sub_idx`'s domain).
+    sub_pos: c_int,
+    /// Its presentation time, for the time window and for file order.
+    pts_ns: i64,
+    /// The packet's bytes, copied: libav owns the original and unrefs it after this loop.
+    data: Vec<u8>,
+}
+
+/// The hold's ceilings: a byte budget a 4K display set cannot exhaust in one cue, a count that
+/// keeps the drain loop short, and the window behind the read position beyond which a packet could
+/// not describe anything still on screen.
+const HELD_IMAGE_BYTES: usize = 8 << 20;
+const HELD_IMAGE_MAX: usize = 64;
+const HELD_IMAGE_BEHIND_NS: i64 = 5_000_000_000;
+
+impl HeldImagePackets {
+    fn new() -> Self {
+        Self { queue: std::collections::VecDeque::new(), bytes: 0 }
+    }
+
+    /// Keep a packet, dropping what no longer fits. `None` when the packet alone exceeds the budget,
+    /// which is honest: a cue that cannot be held is simply not held.
+    fn push(&mut self, packet: HeldImage) {
+        if packet.data.len() > HELD_IMAGE_BYTES {
+            return;
+        }
+        self.bytes += packet.data.len();
+        self.queue.push_back(packet);
+        while self.bytes > HELD_IMAGE_BYTES || self.queue.len() > HELD_IMAGE_MAX {
+            if let Some(dropped) = self.queue.pop_front() {
+                self.bytes = self.bytes.saturating_sub(dropped.data.len());
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Drop everything older than the window behind `read_ns`: those cues are behind the playhead
+    /// nobody is looking at, which is also what keeps a seek from replaying them.
+    fn retire(&mut self, read_ns: i64) {
+        while let Some(front) = self.queue.front() {
+            if front.pts_ns < read_ns - HELD_IMAGE_BEHIND_NS {
+                let dropped = self.queue.pop_front().expect("front");
+                self.bytes = self.bytes.saturating_sub(dropped.data.len());
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// The held packets in FILE ORDER, oldest first, and the hold is emptied: the drain decodes what
+    /// was read before the selection, so a cue cannot arrive after one that belongs later.
+    fn drain(&mut self) -> Vec<HeldImage> {
+        self.bytes = 0;
+        let mut out: Vec<HeldImage> = self.queue.drain(..).collect();
+        out.sort_by_key(|p| p.pts_ns);
+        out
+    }
+
+    fn len(&self) -> usize {
+        self.queue.len()
+    }
+}
+
 /// How a subtitle stream's payload turns into displayable text — classified by the codec's
 /// name (avcodec_get_name is already linked, so we avoid hardcoding the n3.3 subtitle codec-id
 /// block, which the ABI probe never verified). Bitmap subs (PGS/VobSub/DVB/teletext) carry no
@@ -1337,6 +1420,38 @@ unsafe fn rect_to_indexed(r: *const AVSubtitleRect) -> Option<crate::player::Sub
 /// set later by the next CLEAR or superseding set). Two-line dialogue and sign-plus-dialogue are
 /// authored as separate rects of the SAME display set, so dropping all but rect 0 (what this did
 /// before) silently lost half the line. The set's canvas comes from `sub_canvas`.
+/// Decode one HELD image packet, whose bytes this module copied out of libav's (see
+/// [`HeldImagePackets`]): the same decode as [`decode_bitmap_cue`], on a packet built here so the
+/// selection edge can replay the read-ahead window in file order.
+unsafe fn decode_bitmap_bytes(
+    dec: *mut AVCodecContext,
+    data: &[u8],
+    track: c_int,
+    pts_ns: i64,
+    st: *mut AVStream,
+) {
+    if data.is_empty() {
+        return;
+    }
+    let pkt = av_packet_alloc();
+    if pkt.is_null() {
+        return;
+    }
+    if av_new_packet(pkt, data.len() as c_int) < 0 {
+        av_packet_free(&mut { pkt });
+        return;
+    }
+    std::ptr::copy_nonoverlapping(data.as_ptr(), (*pkt).data, data.len());
+    // The hold stores the PRESENTATION time, so the packet is re-stamped in the stream's own base
+    // and `decode_bitmap_cue` reads it back through `pts_ns` exactly as it reads a live packet.
+    let pts = av_rescale_q(pts_ns, NS_TB, stream_time_base(st));
+    (*pkt).pts = pts;
+    (*pkt).dts = pts;
+    decode_bitmap_cue(dec, pkt, track, st);
+    av_packet_unref(pkt);
+    av_packet_free(&mut { pkt });
+}
+
 unsafe fn decode_bitmap_cue(
     dec: *mut AVCodecContext,
     pkt: *mut AVPacket,
@@ -3367,6 +3482,53 @@ fn dts_core_packet(packet: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
         Cow::Borrowed(bytes) => Cow::Borrowed(&bytes[..size]),
         Cow::Owned(mut bytes) => { bytes.truncate(size); Cow::Owned(bytes) }
     })
+}
+
+#[cfg(test)]
+mod held_image_packets_tests {
+    use super::{HeldImage, HeldImagePackets, HELD_IMAGE_MAX};
+
+    fn packet(sub: i32, pts_ns: i64, bytes: usize) -> HeldImage {
+        HeldImage { sub_pos: sub, pts_ns, data: vec![0u8; bytes] }
+    }
+
+    /// **What the selection edge replays**: the packet read before the selection cannot arrive after
+    /// one that belongs later, so the drain is in file (presentation) order whatever order they were
+    /// read in.
+    #[test]
+    fn the_drain_is_in_file_order_and_empties_the_hold() {
+        let mut held = HeldImagePackets::new();
+        held.push(packet(1, 30_000_000_000, 10));
+        held.push(packet(1, 10_000_000_000, 10));
+        held.push(packet(1, 20_000_000_000, 10));
+        let out = held.drain();
+        assert_eq!(out.iter().map(|p| p.pts_ns).collect::<Vec<_>>(), vec![10_000_000_000, 20_000_000_000, 30_000_000_000]);
+        assert_eq!(held.len(), 0, "the hold is emptied by the drain");
+    }
+
+    /// **Bounded twice**, and the OLDEST goes first: that is the end nobody is about to look at.
+    #[test]
+    fn the_hold_never_grows_without_a_ceiling() {
+        let mut held = HeldImagePackets::new();
+        for i in 0..(HELD_IMAGE_MAX + 10) as i64 {
+            held.push(packet(1, i * 1_000_000_000, 8));
+        }
+        assert_eq!(held.len(), HELD_IMAGE_MAX, "the count ceiling holds");
+        let out = held.drain();
+        assert_eq!(out.first().map(|p| p.pts_ns), Some(10_000_000_000), "the ten oldest went");
+    }
+
+    /// A packet behind the read position by more than the window describes nothing still on screen:
+    /// retiring it is also what keeps a seek from replaying the window.
+    #[test]
+    fn packets_behind_the_window_are_retired() {
+        let mut held = HeldImagePackets::new();
+        held.push(packet(1, 0, 8));
+        held.push(packet(1, 60_000_000_000, 8));
+        held.retire(60_000_000_000);
+        assert_eq!(held.len(), 1, "the cue from the start of the film is gone");
+        assert_eq!(held.drain().pop().map(|p| p.pts_ns), Some(60_000_000_000));
+    }
 }
 
 #[cfg(test)]
@@ -8527,6 +8689,10 @@ pub(crate) fn demux(
                     }
                 }
                 let ass_generation = begin_ass_sources(&url, fmt, streams, &sub_streams);
+                // The image packets read while subtitles are off, and whether the last packet saw
+                // them ON: the edge is what releases the hold (see `HeldImagePackets`).
+                let mut held_images = HeldImagePackets::new();
+                let mut subs_were_on = crate::player::desired_sub_idx() >= 0;
                 if !sub_streams.is_empty() {
                     let desc: Vec<String> = sub_streams
                         .iter()
@@ -8793,8 +8959,31 @@ pub(crate) fn demux(
                             // pure waste on the demux core during 4K playback. Turning subs on starts
                             // decoding from the current read position — a switch between two IMAGE
                             // tracks stays instant; only the off→on moment can wait for the next cue.
-                            if crate::player::desired_sub_idx() >= 0 {
-                                let dec = sub_streams[sub_pos].2;
+                            let subs_on = crate::player::desired_sub_idx() >= 0;
+                            if subs_on && !subs_were_on {
+                                // **The selection edge**: decode what was read ahead while they were
+                                // off, in file order, before this packet, so the viewer sees the cue
+                                // that is on screen instead of waiting for the playhead to catch up.
+                                for held in held_images.drain() {
+                                    let dec = sub_streams
+                                        .get(held.sub_pos as usize)
+                                        .map(|s| s.2)
+                                        .unwrap_or(std::ptr::null_mut());
+                                    if dec.is_null() {
+                                        continue;
+                                    }
+                                    decode_bitmap_bytes(
+                                        dec,
+                                        &held.data,
+                                        held.sub_pos,
+                                        held.pts_ns,
+                                        *streams.add(si as usize),
+                                    );
+                                }
+                            }
+                            subs_were_on = subs_on;
+                            let dec = sub_streams[sub_pos].2;
+                            if subs_on {
                                 if !dec.is_null() {
                                     decode_bitmap_cue(
                                         dec,
@@ -8802,6 +8991,17 @@ pub(crate) fn demux(
                                         sub_pos as c_int,
                                         *streams.add(si as usize),
                                     );
+                                }
+                            } else if !dec.is_null() {
+                                // Subtitles are off: keep the packet for the edge above, bounded.
+                                let sz = (*pkt).size.max(0) as usize;
+                                if !(*pkt).data.is_null() && sz > 0 {
+                                    held_images.retire(pts_ns(pkt, *streams.add(si as usize)));
+                                    held_images.push(HeldImage {
+                                        sub_pos: sub_pos as c_int,
+                                        pts_ns: pts_ns(pkt, *streams.add(si as usize)),
+                                        data: std::slice::from_raw_parts((*pkt).data, sz).to_vec(),
+                                    });
                                 }
                             }
                         } else {

@@ -41,6 +41,14 @@ pub(crate) mod caps;
 
 const OS_INFO: &str = "/var/run/nyx/os_info.json";
 
+/// **The platform's own release file, for when nyx's is not there.** A set whose first boot of the
+/// app found `os_info.json` missing logged its version as unknown (upstream plx-native #1376, a
+/// 6.5.3 set) — and with it went the one line a support report needs to be diagnosable. The
+/// platform publishes `/usr/lib/os-release` the same way and mounts it read-only in the
+/// developer-mode jail; it carries `VERSION_ID`, which is the RELEASE and nothing else, so the
+/// codename, the API version, the set name and the build stay empty rather than being invented.
+const OS_RELEASE: &str = "/usr/lib/os-release";
+
 /// What the set said about itself. Owned strings rather than borrows into the file, because the
 /// file is read once and dropped; `OnceLock` because this is written exactly once, at boot, and
 /// read from the render thread every frame the diagnostics panel is up.
@@ -96,15 +104,54 @@ fn parse(s: &str) -> Info {
     }
 }
 
+/// **`VERSION_ID` out of an os-release file** — the one key that is the firmware release. The file
+/// is shell-style `KEY="value"`, so the value's quotes come off; anything else in it (NAME,
+/// ID, PRETTY_NAME) is the platform's marketing and is deliberately not read, because
+/// [`Info`] answers "which firmware" and only the release is a firmware fact here.
+fn os_release_release(s: &str) -> Option<String> {
+    for line in s.lines() {
+        let line = line.trim();
+        let Some(value) = line.strip_prefix("VERSION_ID=") else { continue };
+        let value = value.trim().trim_matches('"').trim_matches('\'').trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
 /// Read it once and log it. Called at boot; safe to call when the file does not exist.
 pub(crate) fn probe() {
     let info = match std::fs::read_to_string(OS_INFO) {
         Ok(s) => parse(&s),
         Err(e) => {
-            crate::log(&format!(
-                "webos: {OS_INFO} unreadable ({e}) — version unknown"
-            ));
-            Info::default()
+            // **The fallback, and only for the release.** A missing nyx file is a known shape on
+            // some firmwares' first boot (see [`OS_RELEASE`]), and "webOS unknown" loses the one
+            // fact a report is filed by.
+            match std::fs::read_to_string(OS_RELEASE)
+                .ok()
+                .and_then(|s| os_release_release(&s))
+            {
+                Some(release) => {
+                    crate::log(&format!(
+                        "webos: {OS_INFO} unreadable ({e}) — release {release} from {OS_RELEASE}, \
+                         nothing else known"
+                    ));
+                    let major = release
+                        .split('.')
+                        .next()
+                        .and_then(|m| m.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    Info { release, major, ..Info::default() }
+                }
+                None => {
+                    crate::log(&format!(
+                        "webos: {OS_INFO} unreadable ({e}) and {OS_RELEASE} named no release — \
+                         version unknown"
+                    ));
+                    Info::default()
+                }
+            }
         }
     };
     if info.major > 0 {
@@ -1595,6 +1642,33 @@ pub(crate) mod lifecycle {
             assert_eq!(event_line("not json"), "unparseable 8 bytes");
             assert!(event_line(r#"{"returnValue":true}"#).starts_with("reply without an event"));
         }
+    }
+}
+
+#[cfg(test)]
+mod os_release_tests {
+    use super::os_release_release;
+
+    /// **The release and nothing else.** `VERSION_ID` is the firmware; the file's other keys are the
+    /// platform's marketing and are not a firmware fact, so they are not read.
+    #[test]
+    fn version_id_is_the_release() {
+        let file = "NAME=\"webOS\"\nID=webos\nVERSION_ID=\"6.5.3\"\nVERSION=\"6.5.3-47\"\n";
+        assert_eq!(os_release_release(file).as_deref(), Some("6.5.3"));
+        assert_eq!(
+            os_release_release("VERSION_ID=4.10.2\n").as_deref(),
+            Some("4.10.2"),
+            "unquoted values are legal in the format"
+        );
+    }
+
+    /// **A file that names no release is no answer.** An empty `VERSION_ID` and a file without the
+    /// key both fall through to "unknown" rather than to an empty release that would log as one.
+    #[test]
+    fn a_file_without_a_release_answers_nothing() {
+        assert_eq!(os_release_release("VERSION_ID=\"\"\n"), None);
+        assert_eq!(os_release_release("NAME=webOS\nID=webos\n"), None);
+        assert_eq!(os_release_release(""), None);
     }
 }
 
