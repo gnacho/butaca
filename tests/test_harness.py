@@ -1599,6 +1599,13 @@ class PipelineTier(unittest.TestCase):
         self.assertFalse(run.a_stream_path(stale, "pipe_h264_aac_mp4.mp4", hls_entry=True)[0],
                          "a stale butaca-play library item is what this assertion is FOR")
 
+    def test_video_bound_accepts_acb_or_a_successful_exported_window(self):
+        self.assertTrue(run.a_video_bound(["setMediaVideoData sent -> window+PLAYING"])[0])
+        exported = ["vplane: exported window placed src=1920x1080 rv=1"]
+        self.assertTrue(run.a_video_bound(exported)[0])
+        self.assertFalse(run.a_video_bound(["vplane: exported window placed src=1920x1080 rv=0"])[0])
+        self.assertFalse(run.a_video_bound([])[0])
+
     def test_the_audio_lane_assertion_reads_the_fed_index(self):
         ln = ["ff: v=#0 codec=h264 codec_id=27 1920x1080 trc=1 pri=1 spc=1 a=#2 dur_ns=60000000000"]
         self.assertTrue(run.a_audio_lane(ln, 2)[0])

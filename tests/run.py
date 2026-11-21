@@ -1075,7 +1075,12 @@ def a_no_error(lines):
 
 def a_video_bound(lines):
     ln = find(lines, "setMediaVideoData sent")
-    return (ln is not None), (ln.strip() if ln else "no `setMediaVideoData sent` (video plane never bound)")
+    if ln is not None:
+        return True, ln.strip()
+    for ln in lines:
+        if "vplane: exported window placed" in ln and re.search(r"\brv=1(?:\s|$)", ln):
+            return True, ln.strip()
+    return False, "no `setMediaVideoData sent` or successful exported-window placement"
 
 
 def a_timeline_climb(lines, min_climb, dense_only=False):
