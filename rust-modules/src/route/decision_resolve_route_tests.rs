@@ -5,6 +5,26 @@ use super::test_support::apply_plan;
 #[allow(unused_imports)]
 use super::test_support::*;
 use super::*;
+#[test]
+fn progressive_hold_eligibility_reads_the_live_route() {
+    let mut ps = crate::route::PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    assert!(progressive_original_hold_eligible(&ps));
+
+    restore_quality(Quality::Auto);
+    ps.cur_auto_original_watched = true;
+    assert!(!progressive_original_hold_eligible(&ps));
+
+    restore_quality(Quality::Original);
+    ps.cur_auto_original_watched = false;
+    ps.tsession = "encode".into();
+    assert!(!progressive_original_hold_eligible(&ps));
+
+    ps.tsession.clear();
+    ps.preview = true;
+    assert!(!progressive_original_hold_eligible(&ps));
+}
+
 #[allow(unused_imports)]
 #[test]
 #[cfg(feature = "devtriggers")]

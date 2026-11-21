@@ -21,6 +21,7 @@ pub(crate) mod ass_source; // bounded embedded scripts and subtitle presentation
 pub(crate) mod engine;
 pub(crate) mod machine;
 pub(crate) mod preview;
+pub(crate) mod progressive_rebuffer;
 mod ffi;
 mod pump;
 mod shared;
@@ -118,7 +119,10 @@ pub(crate) fn seed_dev_track_names() {
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
+use std::sync::atomic::{
+    AtomicBool, AtomicI32,
+    Ordering::{Relaxed, Release},
+};
 
 pub(crate) static SHARED: Shared = Shared::new();
 pub(crate) static TX: Transport = Transport::new();
@@ -2187,7 +2191,13 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         // `pres_fed` below is still sound — the feed-ahead throttle wants a position, and a 200 ms
         // granularity against a 1.6 s budget is ample. Only the TIMING half was wrong.
         let t = vclock_ms();
-        let prev = SHARED.dg_vpres_at.swap(t, Relaxed);
+        SHARED.playpos_ns.store(
+            num - SHARED.pts_shift.load(Relaxed) + SHARED.disp_base.load(Relaxed),
+            Relaxed,
+        );
+        // Publish the timestamp last: the progressive debt sampler treats it as the sequence that
+        // makes the position above visible as one native-position sample.
+        let prev = SHARED.dg_vpres_at.swap(t, Release);
         SHARED.dg_vpres_ct.fetch_add(1, Relaxed);
         if prev != 0 {
             let gap = t.saturating_sub(prev);
@@ -2196,10 +2206,6 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         SHARED.frames.fetch_add(1, Relaxed);
         SHARED.seen_frame.store(true, Relaxed); // session-scoped: unlike `frames`, a seek won't clear it
         SHARED.pres_fed.store(num, Relaxed); // raw fed pts, for the feed-ahead throttle
-        SHARED.playpos_ns.store(
-            num - SHARED.pts_shift.load(Relaxed) + SHARED.disp_base.load(Relaxed),
-            Relaxed,
-        );
     }
     if s.is_null() {
         return;

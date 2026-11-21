@@ -471,6 +471,23 @@ pub(crate) fn aq_cap(q: *mut AuQueue) -> c_long {
     }
 }
 
+/// Target-independent queue counters: C `long` is 32-bit on ARM and 64-bit on desktop hosts.
+pub(crate) fn aq_status(q: *mut AuQueue) -> (i64, i64, bool) {
+    if q.is_null() {
+        return (0, 0, false);
+    }
+    unsafe {
+        libc::pthread_mutex_lock(ptr::addr_of_mut!((*q).m));
+        let status = (
+            i64::from((*q).queued_bytes),
+            i64::from((*q).max_bytes),
+            (*q).eof != 0,
+        );
+        libc::pthread_mutex_unlock(ptr::addr_of_mut!((*q).m));
+        status
+    }
+}
+
 /// How much media the queue holds, as the pts span from its head AU to its tail AU (0 when it
 /// holds fewer than two). A producer's measure of whether the consumer is starved of this lane:
 /// producers append in order, so the span is what is queued, not what has ever passed through.
@@ -732,5 +749,14 @@ mod tests {
         assert_eq!(waiting.join().unwrap(), -1);
         aq_destroy(ap);
         aq_destroy(vp);
+    }
+
+    #[test]
+    fn status_reports_the_cap_and_producer_eof_under_one_snapshot() {
+        let mut queue = aq_new(100);
+        let qp = &mut *queue as *mut AuQueue;
+        aq_set_eof(qp);
+        assert_eq!(aq_status(qp), (0, 100, true));
+        aq_destroy(qp);
     }
 }

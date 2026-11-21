@@ -218,6 +218,8 @@ pub(crate) struct Engine {
     pub report_stop: Option<std::sync::Arc<threads::ReportStop>>, // ITS stop signal, not SHARED's
     /// Preview Load that must land unbound. The media join waits until the thread has returned.
     pub preview_abandon: bool,
+    pub progressive_debt: super::progressive_rebuffer::ClockDebt,
+    pub progressive_sample_at: u32,
 }
 
 impl Engine {
@@ -1420,6 +1422,8 @@ fn start_bufferfeed_inner(
         report_th,
         report_stop: Some(report_stop),
         preview_abandon: false,
+        progressive_debt: super::progressive_rebuffer::ClockDebt::Ineligible,
+        progressive_sample_at: 0,
     };
     // Re-arm the in-place-seek probe for this session. `feed_stream` clears it when
     // `sf_send_segment` can't reach the pipeline, and that is a fact about the StarfishMediaAPIs
@@ -2116,6 +2120,33 @@ pub(crate) fn arm_live_clock_prime(eng: &mut Engine) {
     eng.prime_play = true;
 }
 
+fn progressive_queue_status(
+    eng: &Engine,
+) -> (
+    super::progressive_rebuffer::QueueStatus,
+    super::progressive_rebuffer::QueueStatus,
+) {
+    let status = |q: Option<&Box<AuQueue>>| {
+        let (bytes, cap, eof) = q.map_or((0, 0, false), |q| {
+            crate::aq::aq_status(&**q as *const _ as *mut _)
+        });
+        super::progressive_rebuffer::QueueStatus { bytes, cap, eof }
+    };
+    (status(eng.aq_video.as_ref()), status(eng.aq_audio.as_ref()))
+}
+
+pub(crate) fn progressive_resume_reason(
+    eng: &Engine,
+) -> Option<super::progressive_rebuffer::ResumeReason> {
+    let (video, audio) = progressive_queue_status(eng);
+    super::progressive_rebuffer::resume_reason(video, audio)
+}
+
+pub(crate) fn progressive_reserve_ready(eng: &Engine) -> bool {
+    let (video, audio) = progressive_queue_status(eng);
+    super::progressive_rebuffer::reserve_ready(video, audio)
+}
+
 /// **Start the clock once both lanes are buffered past the seek base** — video to [`PRIME_NS`]
 /// AND audio to [`PRIME_AUDIO_NS`], with a video-only escape at [`PRIME_VIDEO_MAX_NS`] so an
 /// audioless or briefly-starved stream still starts.
@@ -2217,6 +2248,11 @@ pub(crate) fn try_prime(mt: &MainThread, eng: &mut Engine) {
     } else {
         playable_vbuf >= observed_runway_ns
     };
+    let progressive_reason = if prime_kind == HlsPrimeKind::ProgressiveRebuffer {
+        progressive_resume_reason(eng)
+    } else {
+        None
+    };
     let boundary_ready = match prime_kind {
         HlsPrimeKind::Rebuffer => {
             let playable = if audio_expected {
@@ -2226,6 +2262,7 @@ pub(crate) fn try_prime(mt: &MainThread, eng: &mut Engine) {
             };
             recovery.ready(playable)
         }
+        HlsPrimeKind::ProgressiveRebuffer => progressive_reason.is_some(),
         HlsPrimeKind::Fresh | HlsPrimeKind::Resume => balanced_runway_ready,
     };
     if decoder_ready && boundary_ready && TX.feed_allowed() {
@@ -2242,7 +2279,14 @@ pub(crate) fn try_prime(mt: &MainThread, eng: &mut Engine) {
                 }
                 eng.prime_play = false;
                 SHARED.seeking.store(false, Ordering::Relaxed); // playback resumed at the new position → HUD spinner off
-                if prime_kind == HlsPrimeKind::Rebuffer {
+                if prime_kind == HlsPrimeKind::ProgressiveRebuffer {
+                    log(&format!(
+                        "feed: progressive rebuffer resume reason={} v={}ms a={}ms",
+                        progressive_reason.map_or("reserve", |reason| reason.word()),
+                        playable_vbuf / 1_000_000,
+                        playable_abuf / 1_000_000,
+                    ));
+                } else if prime_kind == HlsPrimeKind::Rebuffer {
                     log(&format!(
                         "primed: v={}ms a={}ms recovery_n={} debt={}ms runway={}ms -> Play",
                         playable_vbuf / 1_000_000,
@@ -3229,7 +3273,7 @@ mod payload_tests {
 /// seam** — it is not a restatement of the predicate, which is correct and would pass on the
 /// broken build. What it grades is WHERE the predicate is evaluated.
 #[cfg(all(test, feature = "hostsim"))]
-mod prime_livelock_tests {
+pub(super) mod prime_livelock_tests {
     use super::*;
 
     /// One 2-second HLS segment, as the device delivered it: 48 video AUs at 24 fps and 93 AAC
@@ -3241,7 +3285,7 @@ mod prime_livelock_tests {
 
     /// An engine in the state a fresh `Load` leaves behind: streaming, nothing fed yet, and
     /// `prime_play` armed so the next sufficient buffer starts the clock.
-    pub(super) fn engine_after_reload() -> Engine {
+    pub(in crate::player) fn engine_after_reload() -> Engine {
         SHARED.ensure_initial_clock_hold_for_test();
         Engine {
             route_start: crate::route::RouteStartAttempt::fixture(),
@@ -3273,6 +3317,8 @@ mod prime_livelock_tests {
             report_th: None,
             report_stop: None,
             preview_abandon: false,
+            progressive_debt: super::super::progressive_rebuffer::ClockDebt::Ineligible,
+            progressive_sample_at: 0,
         }
     }
 
@@ -3317,6 +3363,46 @@ mod prime_livelock_tests {
     /// The test pins the BEHAVIOUR; the visibility pins the dispatch.
     fn tick(mt: &crate::task::MainThread, eng: &mut Engine) {
         feed_both_lanes(mt, eng);
+    }
+
+    #[test]
+    fn progressive_rebuffer_releases_when_an_application_queue_reaches_its_cap() {
+        let _serial = crate::testlock::serial();
+        SHARED.reset_session();
+        SHARED.reset_hls_clock_for_test();
+        TX.reset();
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                ffi::force_play_result_for_test(None);
+                SHARED.reset_session();
+                TX.reset();
+            }
+        }
+        let _cleanup = Cleanup;
+        ffi::force_play_result_for_test(Some(1));
+        let pause = SHARED.prepare_progressive_rebuffer_pause().unwrap();
+        assert_eq!(
+            SHARED.complete_progressive_rebuffer_pause(pause, true),
+            super::super::shared::HlsPauseCompletion::Accepted
+        );
+        let mut eng = engine_after_reload();
+        eng.stage = Stage::Playing;
+        eng.seek_base_pts = 0;
+        eng.max_fed_video_pts = PRIME_NS;
+        eng.max_fed_audio_pts = PRIME_AUDIO_NS;
+        SHARED.hls_audio_expected.store(true, Ordering::Relaxed);
+        let audio = vec![0u8; AQ_AUDIO_BYTES as usize];
+        let qa = &mut **eng.aq_audio.as_mut().unwrap() as *mut crate::aq::AuQueue;
+        assert_eq!(
+            crate::aq::aq_push(qa, audio.as_ptr(), audio.len() as c_int, PRIME_AUDIO_NS, 1, 2),
+            0
+        );
+
+        try_prime(unsafe { &crate::task::MainThread::assume() }, &mut eng);
+
+        assert!(!eng.prime_play, "a full application queue must release the progressive hold");
+        assert!(!SHARED.hls_rebuffering.load(Ordering::Acquire));
     }
 
     #[test]

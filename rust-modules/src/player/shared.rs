@@ -119,6 +119,8 @@ enum ClockHold {
     Seek,
     /// ABR stopped the clock at a measured starvation boundary.
     Rebuffer,
+    /// Progressive Original stopped the clock to refill either application queue.
+    ProgressiveRebuffer,
     /// The viewer explicitly paused a running clock.
     User,
     /// The viewer resumed a queued stream; feeding is open, but the physical clock remains held
@@ -130,6 +132,7 @@ enum ClockHold {
 pub(crate) enum HlsPrimeKind {
     Fresh,
     Rebuffer,
+    ProgressiveRebuffer,
     Resume,
 }
 
@@ -138,6 +141,7 @@ impl ClockHold {
         match self {
             Self::Initial | Self::Seek => Some(HlsPrimeKind::Fresh),
             Self::Rebuffer => Some(HlsPrimeKind::Rebuffer),
+            Self::ProgressiveRebuffer => Some(HlsPrimeKind::ProgressiveRebuffer),
             Self::ResumePrime => Some(HlsPrimeKind::Resume),
             Self::User => None,
         }
@@ -1706,21 +1710,7 @@ impl Shared {
     /// segment committed in the call window is retained if Pause succeeds and discarded if it is
     /// refused, so the first useful recovery object can no longer disappear between two flags.
     pub(crate) fn prepare_hls_rebuffer_pause(&self) -> Option<u64> {
-        let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
-        // Trial and Pause spend the same reserve. Whichever reserves this mutex first owns it; the
-        // loser retries after the transaction settles instead of creating two physical clocks.
-        if clock.phase != HlsClockPhase::Running
-            || self.hls_trial_reserve_ms.load(Ordering::Acquire) >= 0
-        {
-            return None;
-        }
-        let token = clock.token();
-        clock.recovery.begin();
-        clock.phase = HlsClockPhase::PauseIssuing {
-            token,
-            hold: ClockHold::Rebuffer,
-        };
-        Some(token)
+        self.prepare_rebuffer_pause(ClockHold::Rebuffer)
     }
 
     pub(crate) fn complete_hls_rebuffer_pause(
@@ -1728,19 +1718,50 @@ impl Shared {
         token: u64,
         accepted: bool,
     ) -> HlsPauseCompletion {
+        self.complete_rebuffer_pause(token, ClockHold::Rebuffer, accepted)
+    }
+
+    pub(crate) fn prepare_progressive_rebuffer_pause(&self) -> Option<u64> {
+        self.prepare_rebuffer_pause(ClockHold::ProgressiveRebuffer)
+    }
+
+    pub(crate) fn complete_progressive_rebuffer_pause(
+        &self,
+        token: u64,
+        accepted: bool,
+    ) -> HlsPauseCompletion {
+        self.complete_rebuffer_pause(token, ClockHold::ProgressiveRebuffer, accepted)
+    }
+
+    fn prepare_rebuffer_pause(&self, hold: ClockHold) -> Option<u64> {
         let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
-        if clock.phase
-            != (HlsClockPhase::PauseIssuing {
-                token,
-                hold: ClockHold::Rebuffer,
-            })
+        // Trial and Pause spend the same reserve. Whichever reserves this mutex first owns it. The
+        // loser retries after the transaction settles instead of creating two physical clocks.
+        if clock.phase != HlsClockPhase::Running
+            || self.hls_trial_reserve_ms.load(Ordering::Acquire) >= 0
         {
+            return None;
+        }
+        let token = clock.token();
+        if hold == ClockHold::Rebuffer {
+            clock.recovery.begin();
+        }
+        clock.phase = HlsClockPhase::PauseIssuing { token, hold };
+        Some(token)
+    }
+
+    fn complete_rebuffer_pause(
+        &self,
+        token: u64,
+        hold: ClockHold,
+        accepted: bool,
+    ) -> HlsPauseCompletion {
+        let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
+        if clock.phase != (HlsClockPhase::PauseIssuing { token, hold }) {
             return HlsPauseCompletion::Stale;
         }
         if accepted {
-            clock.phase = HlsClockPhase::Held {
-                hold: ClockHold::Rebuffer,
-            };
+            clock.phase = HlsClockPhase::Held { hold };
             self.hls_rebuffering.store(true, Ordering::Release);
             self.hls_internal_hold_epoch.fetch_add(1, Ordering::AcqRel);
         } else {
@@ -1826,9 +1847,15 @@ impl Shared {
                 Some(HlsSeekPause::Issue(token))
             }
             HlsClockPhase::Held {
-                hold:
-                    ClockHold::User | ClockHold::Initial | ClockHold::Seek | ClockHold::ResumePrime,
+                hold: hold @ (ClockHold::User
+                | ClockHold::Initial
+                | ClockHold::Seek
+                | ClockHold::ResumePrime
+                | ClockHold::ProgressiveRebuffer),
             } => {
+                if hold == ClockHold::ProgressiveRebuffer {
+                    self.hls_rebuffering.store(false, Ordering::Release);
+                }
                 if clock.user_held {
                     clock.user_held = false;
                     clock.resume_acb_pending = true;
@@ -1975,7 +2002,7 @@ impl Shared {
             if hold == ClockHold::User {
                 clock.advance_user_sequence();
             }
-            if hold == ClockHold::Rebuffer {
+            if matches!(hold, ClockHold::Rebuffer | ClockHold::ProgressiveRebuffer) {
                 self.hls_rebuffering.store(false, Ordering::Release);
             }
         } else {
@@ -2657,6 +2684,61 @@ mod tests {
             .expect("only the current actuator may enter publication");
         assert!(shared.settle_hls_candidate_transition(candidate));
         assert!(shared.finish_hls_automatic_transition(current));
+    }
+
+    #[test]
+    fn viewer_pause_resume_preserves_a_progressive_internal_hold() {
+        let shared = Shared::new();
+        let pause = shared.prepare_progressive_rebuffer_pause().unwrap();
+        assert_eq!(
+            shared.complete_progressive_rebuffer_pause(pause, true),
+            HlsPauseCompletion::Accepted
+        );
+        assert_eq!(shared.prepare_hls_user_pause(), Some(HlsUserPause::AlreadyHeld));
+        assert_eq!(shared.prepare_hls_user_resume(true), Some(HlsUserResume::Deferred));
+        assert_eq!(
+            shared.hls_prime_kind(),
+            Some(HlsPrimeKind::ProgressiveRebuffer)
+        );
+        assert!(shared.hls_rebuffering.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_seek_takes_a_progressive_hold_without_a_second_native_pause() {
+        let shared = Shared::new();
+        let pause = shared.prepare_progressive_rebuffer_pause().unwrap();
+        assert_eq!(
+            shared.complete_progressive_rebuffer_pause(pause, true),
+            HlsPauseCompletion::Accepted
+        );
+        assert!(shared.hls_rebuffering.load(Ordering::Acquire));
+        assert_eq!(shared.prepare_seek_pause(), Some(HlsSeekPause::AlreadyHeld));
+        assert_eq!(shared.hls_prime_kind(), Some(HlsPrimeKind::Fresh));
+        assert!(!shared.hls_rebuffering.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_progressive_hold_primes_without_an_hls_recovery_segment() {
+        let shared = Shared::new();
+        let pause = shared
+            .prepare_progressive_rebuffer_pause()
+            .expect("running clock accepts the progressive hold");
+        assert_eq!(
+            shared.complete_progressive_rebuffer_pause(pause, true),
+            HlsPauseCompletion::Accepted
+        );
+        assert_eq!(
+            shared.hls_prime_kind(),
+            Some(HlsPrimeKind::ProgressiveRebuffer)
+        );
+        let generation = shared.hls_candidate_generation.load(Ordering::Acquire);
+        assert!(shared
+            .reserve_hls_prime_play(
+                HlsPrimeKind::ProgressiveRebuffer,
+                generation,
+                HlsRecoveryEpoch::idle(),
+            )
+            .is_some());
     }
 
     #[test]

@@ -3535,6 +3535,15 @@ fn retire_hls_encoder_keep_source(_ps: &PlaybackSession, _encoder: String) {
     // The physical-only stop went with the retired transcoder, without the wire there is no
     // encoder identity this side could retire.
 }
+pub(crate) fn progressive_original_hold_eligible(ps: &PlaybackSession) -> bool {
+    crate::player::progressive_rebuffer::route_eligible(
+        quality(),
+        is_transcoding(ps),
+        preview_request(ps),
+        ps.cur_auto_original_watched,
+    )
+}
+
 /// true while this playback is a server transcode (a live transcode session exists). Cheap
 /// in-place check — the pump polls it every tick, so no String clone here.
 pub(crate) fn is_transcoding(ps: &PlaybackSession) -> bool {

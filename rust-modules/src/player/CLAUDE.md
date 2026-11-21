@@ -198,6 +198,32 @@ something.
   failure without repeating route preparation, and applies the saved clock only after `Started`.
   Preserve the suspend/reload pairing if you touch playback.
 
+## Progressive Original rebuffer (issue #440)
+
+- **Only explicit or legacy `Quality=Original` progressive direct play is eligible.** Auto Original
+  keeps its existing Original-to-HLS exit, while previews, fixed-quality routes, transcodes, and the
+  local sample source never acquire this hold. Eligibility is derived from the installed route, not
+  inferred from its URL.
+- **Two starvation arms share the existing clock hold.** `progressive_rebuffer::ClockDebt` is a pure
+  Page CUSUM stepped once per new native position timestamp. It ignores the first two seconds and any
+  sample with more than 1 MiB queued, forgives 5% clock drift, and fires at 100 ms of accumulated
+  debt. If position callbacks stop instead, the existing 1005 ms native-clock silence test compares
+  the unconsumed reserve with the silence and supplies the dead-link arm.
+- **The accepted Pause becomes `ClockHold::ProgressiveRebuffer`, not a second state machine.** The
+  pump leaves demux and feeding alive, publishes Buffering through the existing mirror, and arms the
+  ordinary live-clock prime. A seek transfers that physical hold to the seek prime. Viewer Pause and
+  Play preserve the internal certificate through the same paths used by HLS.
+- **Release means either application queue reached its byte cap or the producer marked EOF.** Queue
+  sizes are unchanged. `aq_status` reads bytes, cap, and EOF under one queue lock. Entry uses the same
+  predicate so a reserve that is already full cannot Pause and Play in one tick. HLS recovery keeps
+  its separate completed-segment certificate.
+- **Logs name the transition.** `feed: progressive rebuffer hold arm=debt|silence` carries debt,
+  silence, and reserve. `feed: progressive rebuffer resume reason=full|eof` names the release.
+- **Evidence boundary:** host and hostsim tests cover the pure detector, real state transitions, the
+  host Pause/Play seam, queue-full recovery, and healthy drift. They do not prove Starfish timing or
+  the Buffering UI on a television. The constants come from upstream measurements and still require
+  a throttled Original run plus a healthy control on Butaca.
+
 ## Verifying playback changes
 
 **Start with `make check`** — the host unit suite (`cargo test --lib`, ~28 s for 3,639 tests,
