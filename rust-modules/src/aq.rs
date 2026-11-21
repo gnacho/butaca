@@ -471,13 +471,18 @@ pub(crate) fn aq_cap(q: *mut AuQueue) -> c_long {
     }
 }
 
-pub(crate) fn aq_status(q: *mut AuQueue) -> (c_long, c_long, bool) {
+/// Target-independent queue counters: C `long` is 32-bit on ARM and 64-bit on desktop hosts.
+pub(crate) fn aq_status(q: *mut AuQueue) -> (i64, i64, bool) {
     if q.is_null() {
         return (0, 0, false);
     }
     unsafe {
         libc::pthread_mutex_lock(ptr::addr_of_mut!((*q).m));
-        let status = ((*q).queued_bytes, (*q).max_bytes, (*q).eof != 0);
+        let status = (
+            i64::from((*q).queued_bytes),
+            i64::from((*q).max_bytes),
+            (*q).eof != 0,
+        );
         libc::pthread_mutex_unlock(ptr::addr_of_mut!((*q).m));
         status
     }
