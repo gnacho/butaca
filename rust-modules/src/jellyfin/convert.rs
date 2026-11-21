@@ -26,6 +26,26 @@ use std::os::raw::c_int;
 /// `ParentId` at QUERY time, so the per-row pin the retired layer needed (`/hubs` answers mixed
 /// every library into one response) has no counterpart here. `0` is "not pinned", not a bug.
 pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Option<CatalogMovie> {
+    movie_from_dto_source(it, sid, sec, None)
+}
+
+pub(crate) fn movie_from_dto_source(
+    it: &BaseItemDto,
+    sid: ServerId,
+    sec: i64,
+    source_id: Option<&str>,
+) -> Option<CatalogMovie> {
+    let selected_source = source_id.map(|id| {
+        it.media_sources
+            .as_ref()?
+            .iter()
+            .find(|source| source.id == id)
+    });
+    let selected_source = match selected_source {
+        Some(Some(source)) => Some(source),
+        Some(None) => return None,
+        None => None,
+    };
     let kind: c_int = match it.kind.as_str() {
         "Movie" => 0,
         "Series" => 1,
@@ -67,7 +87,9 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
         format!("/Items/{art_owner}/Images/Backdrop/0")
     };
 
-    let (vcodec, acodec) = codecs(it);
+    let (vcodec, acodec) = selected_source
+        .map(|source| codecs_in_source(source))
+        .unwrap_or_else(|| codecs(it));
     let blur = blur_corners(it);
 
     Some(CatalogMovie {
@@ -80,11 +102,14 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
         dur_ns,
         // The MediaSource id is what phase 3's PlaybackInfo is addressed by; with no sources in
         // the payload the item id itself is the right fallback — Jellyfin addresses both.
-        part: it
-            .media_sources
-            .as_ref()
-            .and_then(|s| s.first())
-            .map(|s| s.id.clone())
+        part: selected_source
+            .map(|source| source.id.clone())
+            .or_else(|| {
+                it.media_sources
+                    .as_ref()
+                    .and_then(|sources| sources.first())
+                    .map(|source| source.id.clone())
+            })
             .unwrap_or_else(|| it.id.clone()),
         thumb,
         still,
@@ -168,6 +193,22 @@ pub(crate) fn codecs(it: &BaseItemDto) -> (String, String) {
         }
     }
     (v, a)
+}
+
+fn codecs_in_source(source: &super::dto::MediaSourceDto) -> (String, String) {
+    let mut video = String::new();
+    let mut audio = String::new();
+    for stream in &source.streams {
+        let Some(codec) = stream.codec.as_ref() else {
+            continue;
+        };
+        if stream.kind == "Video" && video.is_empty() {
+            video = codec.clone();
+        } else if stream.kind == "Audio" && audio.is_empty() {
+            audio = codec.clone();
+        }
+    }
+    (video, audio)
 }
 
 /// The ambient ground's four corners, decoded from the item's BlurHash strings. The backdrop's

@@ -7,11 +7,10 @@
 //! **It is no longer one service's transport alone**, and this line stood here while it was
 //! becoming untrue. A server reached over the public internet is an origin keyed to a NAME,
 //! because that is what the certificate is issued for, so the whole control plane comes through
-//! here too whenever the origin is TLS. `crate::http` is the door that decides which of the two
-//! transports a request takes, and this module is only ever the https half of it. The live caller
-//! is `crate::http`, and the lab control plane calls [`post_pinned`] directly. It goes through
-//! [`post_ca`]: CA-verified, unpinned, bounded sink. **This list has stood here while becoming
-//! untrue before**, which is why it is worth checking rather than trusting. That is twice.
+//! here too whenever the origin is TLS. `crate::http` is the request dispatcher and the lab control
+//! plane calls [`post_pinned`] directly. It goes through [`post_ca`]: CA-verified, unpinned,
+//! bounded sink. The Play On session uses the `websocket` child for a persistent connect-only
+//! socket after the same process init and credential policy.
 //!
 //! Only the curl *easy* API is used here; [`crate::curlio`] binds the multi API separately for the
 //! media plane. This module owns their shared process init, including the mutex callbacks required
@@ -19,6 +18,9 @@
 //! public ABI values (kept here so we do not need the header). TLS peer+host verification is ON,
 //! and `NOSIGNAL` is set because we call from threads. Response bodies never carry into a log here.
 #![allow(non_camel_case_types)]
+
+pub(crate) mod websocket;
+
 use std::cell::UnsafeCell;
 use std::time::Duration;
 use std::ffi::CString;
@@ -64,6 +66,8 @@ crate::dynlib! {
     fn curl_version_info(age: c_int) -> *const CurlVersionInfo;
     fn curl_easy_init() -> *mut CURL;
     fn curl_easy_perform(handle: *mut CURL) -> c_int;
+    fn curl_easy_send(handle: *mut CURL, buffer: *const c_void, buflen: usize, n: *mut usize) -> c_int;
+    fn curl_easy_recv(handle: *mut CURL, buffer: *mut c_void, buflen: usize, n: *mut usize) -> c_int;
     fn curl_easy_cleanup(handle: *mut CURL);
     fn curl_slist_append(list: *mut curl_slist, s: *const c_char) -> *mut curl_slist;
     fn curl_slist_free_all(list: *mut curl_slist);
@@ -76,6 +80,7 @@ crate::dynlib! {
     fn curl_easy_setopt_ptr = "curl_easy_setopt"(handle: *mut CURL, option: c_int, ..., v: *const c_void) -> c_int;
     fn curl_easy_setopt_long = "curl_easy_setopt"(handle: *mut CURL, option: c_int, ..., v: c_long) -> c_int;
     fn curl_easy_getinfo_long = "curl_easy_getinfo"(handle: *mut CURL, info: c_int, ..., out: *mut c_long) -> c_int;
+    fn curl_easy_getinfo_socket = "curl_easy_getinfo"(handle: *mut CURL, info: c_int, ..., out: *mut c_int) -> c_int;
 }}
 
 // curl.h option ids (CURLOPTTYPE_LONG=0, OBJECTPOINT=10000, FUNCTIONPOINT=20000).
@@ -95,6 +100,8 @@ const CURLOPT_SSL_VERIFYPEER: c_int = 64;
 const CURLOPT_SSL_VERIFYHOST: c_int = 81;
 const CURLOPT_NOSIGNAL: c_int = 99;
 const CURLOPT_CONNECTTIMEOUT: c_int = 78;
+const CURLOPT_CONNECTTIMEOUT_MS: c_int = 156;
+const CURLOPT_CONNECT_ONLY: c_int = 141;
 const CURLOPT_TIMEOUT: c_int = 13;
 const CURLOPT_TIMEOUT_MS: c_int = 155;
 /// The numeric protocol allow-list options are the compatibility surface for this project's curl
@@ -143,6 +150,9 @@ const CURLOPT_RESOLVE: c_int = 10203;
 const CURLE_UNKNOWN_OPTION: c_int = 48;
 // curl.h info ids (CURLINFO_LONG = 0x200000).
 const CURLINFO_RESPONSE_CODE: c_int = 0x20_0002;
+// CURLINFO_ACTIVESOCKET uses the CURLINFO_SOCKET type class, not CURLINFO_LONG.
+// curl_socket_t is c_int on Linux and webOS, so net.rs binds a separate variadic getter.
+const CURLINFO_ACTIVESOCKET: c_int = 0x50_002C;
 /// `CURLINFO_SSL_VERIFYRESULT` (LONG + 13) — the X509 verify result of the peer certificate, as
 /// libcurl's TLS backend recorded it: `0` verified, otherwise OpenSSL's `X509_V_ERR_*` number
 /// (see [`tls_verify_why`]). An info id on the already-bound [`curl_easy_getinfo_long`], not a

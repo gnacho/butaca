@@ -121,12 +121,24 @@ pub(crate) fn playing_item(
     sid: ServerId,
     rk: &str,
 ) -> Option<crate::metadata::PlayingItem> {
+    playing_item_source(c, sid, rk, None)
+}
+
+pub(crate) fn playing_item_source(
+    c: &JfClient,
+    sid: ServerId,
+    rk: &str,
+    source_id: Option<&str>,
+) -> Option<crate::metadata::PlayingItem> {
     let it = c.item_detail(rk)?;
-    let markers = c
-        .media_segments(rk)
-        .map(|s| convert_segments(&s))
-        .unwrap_or_default();
-    Some(playing_item_from_dto(&it, sid, rk, markers))
+    let markers = media_markers(c, rk);
+    playing_item_from_dto_source(&it, sid, rk, markers, source_id)
+}
+
+pub(crate) fn media_markers(c: &JfClient, rk: &str) -> Vec<crate::metadata::Marker> {
+    c.media_segments(rk)
+        .map(|segments| convert_segments(&segments))
+        .unwrap_or_default()
 }
 
 /// The mapping half of [`playing_item`], split from the two requests it needs so a test can pin
@@ -140,10 +152,29 @@ pub(crate) fn playing_item_from_dto(
     rk: &str,
     markers: Vec<crate::metadata::Marker>,
 ) -> crate::metadata::PlayingItem {
-    let src = it
-        .media_sources
-        .as_ref()
-        .and_then(|ss| ss.iter().find(|s| !s.streams.is_empty()).or(ss.first()));
+    playing_item_from_dto_source(it, sid, rk, markers, None)
+        .expect("the default source selection is always representable")
+}
+
+pub(crate) fn playing_item_from_dto_source(
+    it: &BaseItemDto,
+    sid: ServerId,
+    rk: &str,
+    markers: Vec<crate::metadata::Marker>,
+    source_id: Option<&str>,
+) -> Option<crate::metadata::PlayingItem> {
+    let src = match source_id {
+        Some(id) => Some(
+            it.media_sources
+                .as_ref()?
+                .iter()
+                .find(|source| source.id == id)?,
+        ),
+        None => it
+            .media_sources
+            .as_ref()
+            .and_then(|sources| sources.iter().find(|source| !source.streams.is_empty()).or(sources.first())),
+    };
     let mut audio = Vec::new();
     let mut subs = Vec::new();
     let mut video_fps = 0.0;
@@ -162,7 +193,7 @@ pub(crate) fn playing_item_from_dto(
             _ => {}
         }
     }
-    crate::metadata::PlayingItem {
+    Some(crate::metadata::PlayingItem {
         sid,
         rk: rk.to_string(),
         audio,
@@ -181,7 +212,7 @@ pub(crate) fn playing_item_from_dto(
         dovi,
         markers,
         chapters: chapters_from_dto(&it.chapters),
-    }
+    })
 }
 
 /// `ChapterDto[]` → the strip's `Chapter[]` — 1-based index, ticks to ms. Jellyfin HAS chapter

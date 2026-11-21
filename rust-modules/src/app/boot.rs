@@ -1257,6 +1257,7 @@ pub(crate) unsafe fn construct(
     // what every native-session call now asks for. See `player::adapter`.
     let adapters = super::Adapters {
         player: crate::player::adapter::PlayerAdapter::new(mt),
+        play_on: crate::jellyfin::play_on::PlayOnAdapter::default(),
     };
     let repause_at = 0i64;
     // ui::press click state: a grid-card OK is deferred (press-in on down, activate on the

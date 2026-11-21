@@ -116,6 +116,7 @@ mod recorder;
 pub(crate) mod events;
 pub(crate) mod lifecycle;
 pub(crate) mod playback;
+pub(crate) mod play_on;
 mod preferences;
 pub(crate) mod input;
 pub(crate) mod bridge;
@@ -204,6 +205,7 @@ use crate::screens::registry::AppArg;
 pub(crate) struct Adapters {
     /// The Starfish/ACB session slot and the `MainThread` token — see [`crate::player::adapter`].
     pub(crate) player: crate::player::adapter::PlayerAdapter,
+    pub(crate) play_on: crate::jellyfin::play_on::PlayOnAdapter,
 }
 
 /// The app core's state, gathered from `butaca_run`'s loop-locals (UI restructure spec v4 §13,
@@ -261,9 +263,9 @@ pub(crate) struct App {
     /// frame's tick. Reached as a parameter from here down — `crate::player::machine`'s doc says
     /// why the pipeline's own handles are a separate field.
     pub(crate) player: crate::player::machine::Player,
-    /// **The ADAPTERS** (restructure spec §2.2, phase 9) — the OS/FFI resources the machines act
-    /// through. One so far: the Player's, which holds the native session that was
-    /// `player::engine::ENGINE` together with the main-thread token that confines it.
+    /// **The ADAPTERS** (restructure spec §2.2, phase 9) - the OS/FFI and persistent-network
+    /// resources. The Player adapter holds the native session and main-thread token. Play On owns
+    /// the authenticated session socket and its worker lifecycle.
     pub(crate) adapters: Adapters,
     repause_at: i64,
     pub(crate) ok_armed: bool,
@@ -475,7 +477,11 @@ unsafe fn run_and_shutdown(app: &mut App) -> c_int {
     let failed = finish_recording(&mut app.rec, app.bridge.landgate())
         || app.bridge.controlled_failure().is_some();
     app.glass.sources.borrow_mut().clear();
-    run::shutdown(&mut app.player.session, &mut app.adapters.player);
+    run::shutdown(
+        &mut app.player.session,
+        &mut app.adapters.player,
+        &mut app.adapters.play_on,
+    );
     i32::from(failed)
 }
 

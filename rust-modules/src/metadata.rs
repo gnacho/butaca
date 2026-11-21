@@ -2110,6 +2110,14 @@ fn cached_playing(state: &MetadataState, sid: crate::registry::ServerId, rk: &st
 /// arrive by value: `client_opt()` here would fetch whichever server is CURRENT, and a ratingKey
 /// that also exists there would come back with a different film's stream list.
 pub(crate) fn fetch_playing_item(sid: crate::registry::ServerId, rk: &str) -> Option<PlayingItem> {
+    fetch_playing_item_for_source(sid, rk, None)
+}
+
+pub(crate) fn fetch_playing_item_for_source(
+    sid: crate::registry::ServerId,
+    rk: &str,
+    source_id: Option<&str>,
+) -> Option<PlayingItem> {
     if rk.is_empty() {
         return None;
     }
@@ -2118,7 +2126,7 @@ pub(crate) fn fetch_playing_item(sid: crate::registry::ServerId, rk: &str) -> Op
     // jellyfin arm's guard: slot 0 is also a valid slot id for the other backend in this build.
     if sid == crate::jellyfin::SERVER_ID {
         if let Some(c) = crate::jellyfin::client() {
-            return crate::jellyfin::detail::playing_item(c, sid, rk);
+            return crate::jellyfin::detail::playing_item_source(c, sid, rk, source_id);
         }
     }
     // The old arm (`client_for(sid)` + `Client::metadata`) went with the wire layer (#166): no

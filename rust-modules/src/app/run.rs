@@ -255,6 +255,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         crate::dev::scenarios::advance_content_boot(app, fr);
         loop_requests(app);
         land_server_switch(app);
+        super::play_on::pump(app, fr.now);
         app.instr.mark(crate::diag::heartbeat::Phase::NavCommit); // navcommit
         update(app, fr);
         app.rec.content_results();
@@ -2898,12 +2899,14 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
         }
 }
 
-/// Teardown after the loop: abandon the pending report, stop the feed, wait for the stop
+/// Teardown after the loop: close Play On, abandon the pending report, stop the feed, wait for the stop
 /// scrobble, close the capture stream and the poster workers, quit SDL.
 pub(crate) unsafe fn shutdown(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
+    play_on: &mut crate::jellyfin::play_on::PlayOnAdapter,
 ) {
+    play_on.shutdown();
     if is_started() {
         crate::player::stop_bufferfeed(ps, pa);
     }

@@ -329,6 +329,20 @@ pub(super) fn supported_quality(q: Quality) -> Quality {
 /// measured is to route it where the server applies the bound for you. That is the opposite of
 /// [`video_direct_plays`]'s unknown-passes rule, and deliberately so: a device bound is a
 /// capability, a user ceiling is an instruction.
+pub(crate) fn effective_source_kbps(
+    snapshot_kbps: i64,
+    playing: Option<&crate::metadata::PlayingItem>,
+    remote_source_selected: bool,
+) -> i64 {
+    if !remote_source_selected {
+        return snapshot_kbps;
+    }
+    playing
+        .map(|item| item.bitrate)
+        .filter(|bitrate| *bitrate > 0)
+        .unwrap_or(snapshot_kbps)
+}
+
 pub(super) fn quality_policy(
     q: Quality,
     auto_original: bool,
@@ -631,6 +645,8 @@ pub(crate) struct ResolveEnv {
     pub subtitle_override: Option<i64>,
     /// the loaded detail's streams when it IS this item — saves the worker a GET
     pub cached_item: Option<crate::metadata::PlayingItem>,
+    /// The remote-selected Jellyfin source, retained for a retry after the prepared item is gone.
+    pub media_source_id: Option<String>,
     /// The user's pick off the quality ladder, captured at the press like everything else here.
     /// The worker must not call [`quality`] itself for the reason this struct exists: it reads a
     /// process-global the main thread can move while the resolve is in flight.
@@ -820,6 +836,8 @@ pub(crate) struct Plan {
     pub sub_sid: i64,
     /// client-renderer ordinal for that subtitle (`metadata::sub_render_ordinal`). None = subs off.
     pub sub_render_ordinal: Option<i32>,
+    /// The controller explicitly selected Off. This blocks the server sidecar default on landing.
+    pub subtitle_explicit_off: bool,
     /// The subtitle-language preference this play resolved under — the SHOW's own pref if it set
     /// one, else the ACCOUNT's — as a BCP-47 code, for the Subtitles menu's "yours" grouping
     /// (`metadata::sub_layout::sub_sections`). `ui/` sees only this code, never an account type.
@@ -1078,6 +1096,20 @@ fn chosen_subtitle(subs: &[crate::metadata::Stream], sid: i64) -> Option<(i64, i
         return None;
     }
     Some((subs[i].id, ord))
+}
+
+pub(crate) fn playback_info_subtitle_index(tracks: StartTracks) -> Option<i32> {
+    tracks.subtitle().map(|sid| if sid == 0 { -1 } else { sid as i32 })
+}
+
+pub(crate) fn requested_subtitle_requires_transcode(
+    subs: &[crate::metadata::Stream],
+    tracks: StartTracks,
+) -> bool {
+    match tracks.subtitle() {
+        Some(sid) if sid > 0 => chosen_subtitle(subs, sid).is_none(),
+        _ => false,
+    }
 }
 
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
@@ -1421,7 +1453,14 @@ fn build_stream_jellyfin(
     plan.playing = env
         .cached_item
         .clone()
-        .or_else(|| crate::metadata::fetch_playing_item(env.sid, rk));
+        .or_else(|| match env.media_source_id.as_deref() {
+            None => crate::metadata::fetch_playing_item(env.sid, rk),
+            Some(_) => crate::metadata::fetch_playing_item_for_source(
+                env.sid,
+                rk,
+                env.media_source_id.as_deref(),
+            ),
+        });
     // Up Next (#41/#42): what follows this episode, off the show's own NextUp answer. The old
     // lane got the same fact free from its continuous PlayQueue, here it costs one query per
     // episode resolve, skipped for movies (no show_rk) and previews. Everything downstream —
@@ -1439,14 +1478,20 @@ fn build_stream_jellyfin(
         .as_ref()
         .map(|p| (p.width, p.height))
         .unwrap_or((0, 0));
-    plan.src_measure = (env.src_kbps, src_w, src_h);
+    let source_kbps = effective_source_kbps(
+        env.src_kbps,
+        plan.playing.as_ref(),
+        env.media_source_id.is_some(),
+    );
+    plan.src_measure = (source_kbps, src_w, src_h);
     plan.transport_kbps = plan
         .playing
         .as_ref()
         .map(|p| p.bitrate)
         .filter(|&v| v > 0)
-        .unwrap_or(env.src_kbps);
+        .unwrap_or(source_kbps);
     plan.contract.ceiling = env.quality.ceiling();
+    plan.subtitle_explicit_off = env.start_tracks.subtitle() == Some(0);
     let dovi = plan.playing.as_ref().map(|p| p.dovi).unwrap_or_default();
     let dv = dovi.presentation_now(vcodec == "hevc");
     let video_dp = video_direct_plays(vcodec, src_w, src_h, dv, crate::devcaps::caps());
@@ -1492,8 +1537,16 @@ fn build_stream_jellyfin(
     let streamable = streamable_container(container, part);
     // A fixed quality rung denies direct play exactly as on the retired branch, the user's ceiling
     // is an ask, and the only way to honour it is the branch where the server applies the bound.
-    let quality = quality_policy(env.quality, true, env.src_kbps, src_w, src_h);
-    let directplay = quality.direct_play && video_dp && streamable && audio_sel.is_some();
+    let quality = quality_policy(env.quality, true, source_kbps, src_w, src_h);
+    let subtitle_transcode = requested_subtitle_requires_transcode(
+        plan.playing
+            .as_ref()
+            .map(|playing| playing.subs.as_slice())
+            .unwrap_or(&[]),
+        env.start_tracks,
+    );
+    let directplay = quality.direct_play && video_dp && streamable && audio_sel.is_some()
+        && !subtitle_transcode;
     crate::player::log(&format!(
         "route(jellyfin): {vcodec}/{acodec} {src_w}x{src_h} {container} — video_dp={video_dp} audio_dp={} streamable={streamable} quality_dp={} → {}",
         audio_sel.is_some(),
@@ -1581,14 +1634,15 @@ fn build_stream_jellyfin(
     // (`playback_info_body_for`): without the source id the server answers with the DEFAULTS and
     // silently ignores the indices. No pick sends exactly the object the resolve path always has.
     let pick = env.start_tracks;
+    let subtitle_index = playback_info_subtitle_index(pick);
     let body = match (pick.audio(), pick.subtitle()) {
         (None, None) => crate::jellyfin::profile::playback_info_body(plan.contract.ceiling, 0),
-        (audio, sub) => crate::jellyfin::profile::playback_info_body_for(
+        (audio, _) => crate::jellyfin::profile::playback_info_body_for(
             plan.contract.ceiling,
             0,
             msid,
             audio.map(|sid| sid as i32),
-            sub.filter(|sid| *sid > 0).map(|sid| sid as i32),
+            subtitle_index,
         ),
     };
     let Some(info) = c.playback_info(rk, msid, &body) else {
