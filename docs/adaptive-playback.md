@@ -527,6 +527,16 @@ Moving between HLS and Original is different:
 - Original can restore Dolby Vision, Atmos/lossless audio and avoid generation loss;
 - Original has zero recurring server video-encode work; every HLS rendition has some.
 
+Explicit or legacy `Quality=Original` progressive direct play has no alternate rung to select when its
+link runs below source consumption. Once its application queues are depleted, `ClockDebt` compares
+native-position progress with wall time, forgives 5% drift, and requests an internal hold at 100 ms
+of accumulated debt. A separate native-clock silence arm covers a link that stops producing position
+callbacks. The hold publishes Buffering, leaves acquisition alive, and releases when either queue
+reaches its existing byte cap or the producer marks EOF. Queue sizes do not change. Auto Original is
+excluded because its existing Original-to-HLS exit is the recovery action, while previews, transcodes,
+fixed-quality routes, and local samples are excluded as well. These constants follow upstream device
+measurements. Butaca still needs its own throttled Original and healthy-control television runs.
+
 The mode comparison therefore scores the real Original candidate against the best currently
 supportable HLS alternative, not against a fabricated “top rung.”
 
@@ -695,6 +705,8 @@ abr: committed Up|Down to ...
 abr: tx Up|Down ... outcome=... decided=... control=... media=... \
     candidate_acq=... candidate_bytes=... candidate_dur=...
 hls: auto-rebuffer pause buf=... trial_reserve=... runway=... silent=...
+feed: progressive rebuffer hold arm=debt|silence S=... silent=... buf=...
+feed: progressive rebuffer resume reason=full|eof v=... a=...
 primed: v=... a=... runway=... -> Play
 primed: v=... a=... recovery_n=... debt=... runway=... -> Play
 abr: mode chose=... why=... scale=... win[...] lose[...]

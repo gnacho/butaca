@@ -2466,6 +2466,58 @@
       }
     },
     {
+      "name": "pipe_original_progressive_rebuffer",
+      "fixture": "pipe_h264_aac_mp4.mp4",
+      "title": "Pipeline Original: a starved progressive stream pauses, refills, and resumes without changing route",
+      "covers": [
+        "progressive-original-rebuffer",
+        "native-clock-debt",
+        "queue-refill-resume",
+        "mid-transfer-network-profile"
+      ],
+      "declare": {
+        "vcodec": "h264",
+        "acodec": "aac",
+        "fps": 24.0
+      },
+      "triggers": {
+        "quality": "original"
+      },
+      "network_profile": [
+        {
+          "until_s": 1.5,
+          "kbps": 40000
+        },
+        {
+          "until_s": 16.5,
+          "kbps": 2000
+        },
+        {
+          "until_s": 50.0,
+          "kbps": 40000
+        }
+      ],
+      "run_secs": 50,
+      "operations": [
+        {
+          "op": "play"
+        }
+      ],
+      "expect": {
+        "codec": "h264",
+        "min_video_width": 1900,
+        "load_video": "H264",
+        "load_audio": "AAC",
+        "load_dovi": "none",
+        "min_pos_climb_s": 8,
+        "require_video_bound": true,
+        "no_playing_error": true,
+        "load_count_exact": 1,
+        "server_opens_min": 1
+      },
+      "_validation_note": "The generic gates prove the route stays on one Original Load with no playback error. Device acceptance additionally requires at least one `feed: progressive rebuffer hold arm=debt|silence` and one `feed: progressive rebuffer resume reason=full|eof` in the event log. The unshaped `pipe_h264_aac_mp4` control must produce neither line."
+    },
+    {
       "name": "pipe_auto_original_slow_recover",
       "fixture": "pipe_h264_aac_mp4.mp4",
       "title": "Pipeline Auto: Original -> 4 Mbps collapse -> HLS -> recovered Original",

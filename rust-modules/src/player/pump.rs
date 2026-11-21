@@ -230,6 +230,87 @@ fn rebuffer_request_is_current(
     requested && (requested_tail_ns < 0 || current_tail_ns <= requested_tail_ns)
 }
 
+fn maybe_begin_progressive_rebuffer(
+    ps: &crate::route::PlaybackSession,
+    mt: &MainThread,
+    eng: &mut Engine,
+) {
+    if !crate::route::progressive_original_hold_eligible(ps)
+        || !eng.uses_stream_queues()
+        || eng.stage < Stage::Playing
+        || eng.prime_play
+        || TX.paused.load(Relaxed)
+        || SHARED.seeking.load(Relaxed)
+        || !SHARED.seen_frame.load(Relaxed)
+    {
+        eng.progressive_debt = super::progressive_rebuffer::ClockDebt::Ineligible;
+        eng.progressive_sample_at = 0;
+        restart_native_clock_watch();
+        return;
+    }
+    if super::engine::progressive_reserve_ready(eng) {
+        eng.progressive_debt = super::progressive_rebuffer::ClockDebt::Ineligible;
+        eng.progressive_sample_at = 0;
+        restart_native_clock_watch();
+        return;
+    }
+    let callback_at = SHARED.dg_vpres_at.load(Acquire);
+    if callback_at != 0 && callback_at != eng.progressive_sample_at {
+        let video_bytes = eng.aq_video.as_ref().map_or(0, |q| {
+            crate::aq::aq_status(&**q as *const _ as *mut _).0.max(0) as usize
+        });
+        eng.progressive_sample_at = callback_at;
+        eng.progressive_debt = eng.progressive_debt.step(
+            super::progressive_rebuffer::DebtSample {
+                wall_ms: callback_at,
+                pos_ns: SHARED.playpos_ns.load(Acquire),
+                video_queue_bytes: video_bytes,
+                eligible: true,
+            },
+        );
+    }
+    let buffered_ms = hls_buffered_ms();
+    let silence_ms = native_clock_silence_ms();
+    let clock_stopped = native_clock_stopped(silence_ms, buffered_ms);
+    if !eng.progressive_debt.fired() && !clock_stopped {
+        return;
+    }
+    let Some(pause_token) = SHARED.prepare_progressive_rebuffer_pause() else {
+        super::log("feed: progressive rebuffer pause deferred by clock transition; will retry");
+        return;
+    };
+    let paused = unsafe { ffi::sf_pause(mt) };
+    match SHARED.complete_progressive_rebuffer_pause(pause_token, paused != 0) {
+        HlsPauseCompletion::Accepted => {}
+        HlsPauseCompletion::Refused => {
+            super::log("feed: progressive rebuffer pause refused by Starfish; will retry");
+            return;
+        }
+        HlsPauseCompletion::Stale => {
+            super::log("feed: progressive rebuffer pause result was stale; will retry");
+            return;
+        }
+    }
+    arm_live_clock_prime(eng);
+    super::log(&format!(
+        "feed: progressive rebuffer hold arm={} S={}us silent={}ms buf={}ms",
+        if eng.progressive_debt.fired() { "debt" } else { "silence" },
+        eng.progressive_debt.s_us(),
+        silence_ms.map_or(-1, i64::from),
+        buffered_ms.unwrap_or(-1),
+    ));
+    eng.progressive_debt = super::progressive_rebuffer::ClockDebt::Ineligible;
+    eng.progressive_sample_at = 0;
+}
+
+fn maybe_begin_rebuffer(ps: &crate::route::PlaybackSession, mt: &MainThread, eng: &mut Engine) {
+    if crate::route::is_segmented_hls(ps) {
+        maybe_begin_hls_rebuffer(ps, mt, eng);
+    } else {
+        maybe_begin_progressive_rebuffer(ps, mt, eng);
+    }
+}
+
 /// Stop the INTERNAL A/V clock at a physical reserve boundary while leaving demux and feeding
 /// alive. This is intentionally not `TX.paused`: the viewer did not pause, and the whole point is
 /// to keep acquiring until `try_prime` sees enough measured runway to resume smoothly.
@@ -1555,7 +1636,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
     // issuing Play. NOT while a seek is armed: on a resume the seek is armed before PLAYING, so
     // feeding first would present the file start for a frame before the seek repositions — a
     // visible jump. ----------
-    maybe_begin_hls_rebuffer(ps, mt, eng);
+    maybe_begin_rebuffer(ps, mt, eng);
     if eng.stage >= Stage::Playing && TX.feed_allowed() && TX.seek_to_ns.load(Relaxed) < 0 {
         if stream {
             // Two-lane feed, then the prime attempt — the ordering and the reason both live in
@@ -1640,6 +1721,174 @@ mod tests {
     /// The physical fact the arithmetic cannot see is that the clock has STOPPED. This replays
     /// the numbers the log carries and asserts the hold begins about a second after it stops,
     /// not when the fetch completes.
+    #[cfg(feature = "hostsim")]
+    #[test]
+    fn progressive_rebuffer_does_not_pause_when_recovery_is_already_true() {
+        let _serial = crate::testlock::serial();
+        let mut eng = super::super::engine::prime_livelock_tests::engine_after_reload();
+        eng.stage = super::Stage::Playing;
+        eng.prime_play = false;
+        eng.progressive_debt = super::super::progressive_rebuffer::ClockDebt::Fired { s_us: 180_000 };
+        super::TX.reset();
+        SHARED.reset_session();
+        SHARED.reset_hls_clock_for_test();
+        SHARED.seen_frame.store(true, Relaxed);
+        crate::route::restore_quality(crate::route::Quality::Original);
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                super::super::ffi::force_pause_result_for_test(None);
+                SHARED.reset_session();
+                super::TX.reset();
+            }
+        }
+        let _cleanup = Cleanup;
+        super::super::ffi::force_pause_result_for_test(Some(1));
+        let audio = vec![0u8; 1024 * 1024];
+        let qa = &mut **eng.aq_audio.as_mut().unwrap() as *mut crate::aq::AuQueue;
+        assert_eq!(crate::aq::aq_push(qa, audio.as_ptr(), audio.len() as i32, 0, 1, 2), 0);
+        let ps = crate::route::PlaybackSession::IDLE;
+
+        super::maybe_begin_progressive_rebuffer(
+            &ps,
+            unsafe { &crate::task::MainThread::assume() },
+            &mut eng,
+        );
+
+        assert_eq!(SHARED.hls_prime_kind(), None);
+        assert!(!eng.prime_play);
+    }
+
+    #[cfg(feature = "hostsim")]
+    #[test]
+    fn progressive_rebuffer_holds_a_dead_native_clock_without_debt_samples() {
+        let _serial = crate::testlock::serial();
+        let mut eng = super::super::engine::prime_livelock_tests::engine_after_reload();
+        eng.stage = super::Stage::Playing;
+        eng.prime_play = false;
+        super::TX.reset();
+        SHARED.reset_session();
+        SHARED.reset_hls_clock_for_test();
+        SHARED.seen_frame.store(true, Relaxed);
+        crate::route::restore_quality(crate::route::Quality::Original);
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                super::super::ffi::force_pause_result_for_test(None);
+                SHARED.reset_session();
+                super::TX.reset();
+            }
+        }
+        let _cleanup = Cleanup;
+        super::super::ffi::force_pause_result_for_test(Some(1));
+        let ps = crate::route::PlaybackSession::IDLE;
+        let position_ns = 29_000_000_000;
+        SHARED.playpos_ns.store(position_ns, Relaxed);
+        SHARED.hls_video_tail_ns.store(position_ns + 100_000_000, Release);
+        SHARED.hls_audio_tail_ns.store(position_ns + 100_000_000, Release);
+        let stopped_at = {
+            while super::super::vclock_ms() <= super::NATIVE_CLOCK_STOPPED_MS + 1 {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            super::super::vclock_ms() - super::NATIVE_CLOCK_STOPPED_MS - 1
+        };
+        SHARED.dg_vpres_at.store(stopped_at, Relaxed);
+        super::CLOCK_WATCH_SINCE_MS.store(0, Relaxed);
+
+        super::maybe_begin_progressive_rebuffer(
+            &ps,
+            unsafe { &crate::task::MainThread::assume() },
+            &mut eng,
+        );
+
+        assert_eq!(
+            SHARED.hls_prime_kind(),
+            Some(super::super::shared::HlsPrimeKind::ProgressiveRebuffer)
+        );
+    }
+
+    #[cfg(feature = "hostsim")]
+    #[test]
+    fn progressive_rebuffer_samples_native_position_callbacks_until_debt_fires() {
+        let _serial = crate::testlock::serial();
+        let mut eng = super::super::engine::prime_livelock_tests::engine_after_reload();
+        eng.stage = super::Stage::Playing;
+        eng.prime_play = false;
+        super::TX.reset();
+        SHARED.reset_session();
+        SHARED.reset_hls_clock_for_test();
+        SHARED.seen_frame.store(true, Relaxed);
+        crate::route::restore_quality(crate::route::Quality::Original);
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                super::super::ffi::force_pause_result_for_test(None);
+                SHARED.reset_session();
+                super::TX.reset();
+            }
+        }
+        let _cleanup = Cleanup;
+        super::super::ffi::force_pause_result_for_test(Some(1));
+        let ps = crate::route::PlaybackSession::IDLE;
+        let mt = unsafe { &crate::task::MainThread::assume() };
+        let base = super::super::vclock_ms().max(1);
+        let start_ns = 10_000_000_000;
+
+        for (index, expected_hold) in [(0, false), (1, false), (2, true)] {
+            SHARED.dg_vpres_at.store(base + index * 200, Relaxed);
+            SHARED.playpos_ns.store(
+                start_ns + i64::from(index) * 100_000_000,
+                Relaxed,
+            );
+            super::maybe_begin_progressive_rebuffer(&ps, mt, &mut eng);
+            assert_eq!(
+                SHARED.hls_prime_kind()
+                    == Some(super::super::shared::HlsPrimeKind::ProgressiveRebuffer),
+                expected_hold,
+                "callback {index}",
+            );
+        }
+    }
+
+    #[cfg(feature = "hostsim")]
+    #[test]
+    fn a_progressive_debt_enters_the_real_hold_through_the_host_seam() {
+        let _serial = crate::testlock::serial();
+        let mut eng = super::super::engine::prime_livelock_tests::engine_after_reload();
+        eng.stage = super::Stage::Playing;
+        eng.prime_play = false;
+        eng.progressive_debt = super::super::progressive_rebuffer::ClockDebt::Fired { s_us: 180_000 };
+        assert_eq!(eng.progressive_sample_at, 0);
+        super::TX.reset();
+        SHARED.reset_session();
+        SHARED.reset_hls_clock_for_test();
+        SHARED.seen_frame.store(true, Relaxed);
+        crate::route::restore_quality(crate::route::Quality::Original);
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                super::super::ffi::force_pause_result_for_test(None);
+                SHARED.reset_session();
+                super::TX.reset();
+            }
+        }
+        let _cleanup = Cleanup;
+        super::super::ffi::force_pause_result_for_test(Some(1));
+        let ps = crate::route::PlaybackSession::IDLE;
+
+        super::maybe_begin_rebuffer(
+            &ps,
+            unsafe { &crate::task::MainThread::assume() },
+            &mut eng,
+        );
+
+        assert_eq!(
+            SHARED.hls_prime_kind(),
+            Some(super::super::shared::HlsPrimeKind::ProgressiveRebuffer)
+        );
+        assert!(eng.prime_play);
+    }
+
     #[test]
     fn a_stopped_native_clock_reaches_the_terminal_boundary_the_arithmetic_never_will() {
         let _serial = crate::testlock::serial();
