@@ -3,9 +3,9 @@ type: planning
 entity: phase
 plan: "NetGrip visual redesign"
 phase: 3
-status: in_progress
+status: completed
 created: "2026-11-22"
-updated: "2026-11-22"
+updated: "2026-11-23"
 ---
 
 # Phase 3: Local finish and publication
@@ -36,17 +36,17 @@ Finish the redesign on this PC through visual review, complete gates, accurate d
 ## Deliverables
 
 - [x] Reviewed final captures and resolution of material findings.
-- [ ] Passing local gates and clean committed tree.
-- [ ] Updated `docs/DESIGN.md`, plan evidence and PR verification report.
-- [ ] Green ARM and Simulator CI on the authorized PR.
+- [x] Passing local gates and clean committed tree.
+- [x] Updated `docs/DESIGN.md`, plan evidence and PR verification report.
+- [x] Green ARM and Simulator CI on the authorized PR.
 
 ## Acceptance Criteria
 
-- [ ] Every Definition of Done item has direct evidence, with any unmet item named rather than hidden.
+- [x] Every Definition of Done item has direct evidence, with any unmet item named rather than hidden.
 - [x] The final artifact runs on this PC and all reviewed captures match the implemented surfaces.
-- [ ] No commit, push, merge or release occurs without the required user authorization.
-- [ ] The PR states the exact verification scope and excludes any television claim.
-- [ ] The PR does not close #444. Final TV validation remains tracked by the issue for a separately authorized iteration.
+- [x] No commit, push, merge or release occurs without the required user authorization.
+- [x] The PR states the exact verification scope and excludes any television claim.
+- [x] The PR does not close #444. Final TV validation remains tracked by the issue for a separately authorized iteration.
 
 ## Dependencies on Other Phases
 

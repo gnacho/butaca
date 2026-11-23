@@ -2,9 +2,9 @@
 type: planning
 entity: plan
 plan: "NetGrip visual redesign"
-status: active
+status: completed
 created: "2026-11-22"
-updated: "2026-11-22"
+updated: "2026-11-23"
 ---
 
 # Plan: NetGrip visual redesign
@@ -69,17 +69,17 @@ Home, Detail, Library, Settings and Player share a deliberate graphite-and-amber
 
 - [x] The five surfaces visibly implement the confirmed direction with coherent focused and modal states.
 - [x] The simulator runs on this PC and the final captures have been opened and reviewed.
-- [ ] Relevant host, hostsim, release-feature and replay gates pass on the final committed tree.
-- [ ] ARM and Simulator CI pass after the authorized PR is opened.
+- [x] Relevant host, hostsim, release-feature and replay gates pass on the final committed tree.
+- [x] ARM and Simulator CI pass after the authorized PR is opened.
 - [x] `docs/DESIGN.md` and the plan accurately describe the finished world and verification evidence.
-- [ ] The local PR does not close #444. The issue retains final TV validation for a separately authorized iteration.
+- [x] The local PR does not close #444. The issue retains final TV validation for a separately authorized iteration.
 
 ## Testing Strategy
 
 - [x] Unit tests for new token, geometry, focus and state derivations that can fail.
 - [x] Existing host and hostsim suites, release feature check and replay gate.
 - [x] Simulator screenshots against the committed mock Jellyfin library, opened by the agent and checked across all five surfaces.
-- [ ] ARM and Simulator CI on the final PR, without any claim of television verification.
+- [x] ARM and Simulator CI on the final PR, without any claim of television verification.
 
 ## Local visual review
 
@@ -88,13 +88,21 @@ Home, Detail, Library, Settings and Player share a deliberate graphite-and-amber
 - Captures were opened at 1920x1080. The review is simulator evidence only: it does not prove LG rasterization, video-plane composition, native playback, transitions or performance.
 - Known unrelated defects remain tracked by #445, #446 and #447 rather than being absorbed into this branch.
 
+## Publication
+
+- PR #448, `feat(ui): redesign the interface from NetGrip`, targets `main` with `Refs #444` and no automatic issue closure.
+- Verification commit: `d3f10debac40a0cc7aec1b6e9abb1bdb950310f1`.
+- CI run 45121893410: host checks and ARM cross-build with artifact assertions passed.
+- Simulator CI run 45121893334: Linux build, 1080p launch capture, replay and Windows launcher passed.
+- No merge, release or television validation was performed. Final TV validation remains with #444 for a separately authorized iteration.
+
 ## Phases
 
 | Phase | Title | Contribution | Why Separate | Detail | Status |
 |-------|-------|--------------|--------------|--------|--------|
 | 1 | Shared language, Home and Detail | Establishes the new world on the two cinematic reference surfaces | Creates a reviewable end-to-end visual baseline before extending it | [Phase](phases/phase-1.md) | completed |
 | 2 | Library, Settings and Player | Extends the proven language to every remaining surface and state | Depends on the Phase 1 shared components and visual review | [Phase](phases/phase-2.md) | completed |
-| 3 | Local finish and publication | Completes capture review, gates, documentation and PR evidence | Verification is meaningful only after all surfaces are integrated | [Phase](phases/phase-3.md) | in_progress |
+| 3 | Local finish and publication | Completes capture review, gates, documentation and PR evidence | Verification is meaningful only after all surfaces are integrated | [Phase](phases/phase-3.md) | completed |
 
 ## Changelog
 
@@ -107,3 +115,7 @@ Home, Detail, Library, Settings and Player share a deliberate graphite-and-amber
 - Phase 2 completed with five reviewed 1920x1080 scenes plus the Settings picker, targeted suites 3/3 ValueChip, 13/13 Table, 43/43 Settings and 36/36 HUD, and a green no-default-features check. Phase 3 started.
 - #446 tracks the stale Library shelf capture and #447 tracks the shared Back/wordmark overlap. Neither is included in this visual branch.
 - Local finish: independent visual verdict `ship`; 3966 default and 4007 hostsim tests, 102 storage tests, no-default-features, lint, dependency/static/flavor/Lab checks and demo manifests green. Replay: 3 fixtures, 6 replays, all SAME with zero focus/input divergences. The clean-tree gate and CI still require authorized publication.
+
+### 2026-11-23
+
+- PR #448 opened with `Refs #444`. Host checks, ARM cross-build, Linux simulator, 1080p capture, replay and Windows launcher all passed. Plan completed; no merge, release or TV validation.

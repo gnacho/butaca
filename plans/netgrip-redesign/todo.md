@@ -2,29 +2,29 @@
 type: planning
 entity: todo
 plan: "NetGrip visual redesign"
-updated: "2026-11-22"
+updated: "2026-11-23"
 ---
 
 # Todo: NetGrip visual redesign
 
 > Tracking [NetGrip visual redesign](plan.md)
 
-## Active Phase: 3 - Local finish and publication
+## Plan Completed
 
 ### Phase Context
 
 - **Scope**: [Phase 3](phases/phase-3.md)
-- **Implementation**: Phase 2 plans and the final gates in `plan.md`
+- **Publication**: [Plan](../plan.md#publication)
 - **Latest Handover**: None
 - **Relevant Docs**: `PRODUCT.md`, `docs/DESIGN.md`, `rust-modules/src/ui/CLAUDE.md`, `rust-modules/src/screens/CLAUDE.md`, `rust-modules/src/player/CLAUDE.md`
 
 ### Pending
 
-- [ ] Commit, push, open the PR and run CI only after explicit user authorization <!-- added: 2026-11-22 -->
+- None
 
 ### In Progress
 
-- [ ] Present the local finish and request a publication decision <!-- started: 2026-11-22 -->
+- None
 
 ### Completed
 
@@ -35,10 +35,11 @@ updated: "2026-11-22"
 - [x] Capture and review Library opening/grid/sort, Settings root/picker and paused Player <!-- completed: 2026-11-22 -->
 - [x] Obtain an independent `ship` visual verdict and finish `docs/DESIGN.md` <!-- completed: 2026-11-22 -->
 - [x] Pass complete host, hostsim, storage, lint, release-feature and replay verification on the local tree <!-- completed: 2026-11-22 -->
+- [x] Open PR #448 with `Refs #444` and pass host, ARM, Linux simulator and Windows CI <!-- completed: 2026-11-23 -->
 
 ### Blocked
 
-- [ ] Final clean-tree gate, CI and publication require the user's explicit authorization, not needed for local implementation
+- None. Final TV validation belongs to #444 and requires a separately authorized iteration.
 
 ## Changelog
 
@@ -50,3 +51,7 @@ updated: "2026-11-22"
 - Phase 2 completed with reviewed local captures and targeted tests. Phase 3 started for independent review, docs, full verification and authorized publication.
 - #446 and #447 were filed for the stale shelf capture and the modal Back/wordmark overlap respectively.
 - Independent visual review returned `ship`. Full local suites, lint, release check and six SAME replays are green. Publication now awaits the user's explicit decision.
+
+### 2026-11-23
+
+- PR #448 opened after explicit user authorization. Host, ARM, Linux simulator and Windows CI passed. Plan completed without merge, release or TV validation.
