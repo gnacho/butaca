@@ -3,7 +3,7 @@ type: planning
 entity: phase
 plan: "butaca-mockup-fidelity"
 phase: 1
-status: in_progress
+status: completed
 created: "2026-11-23"
 updated: "2026-11-23"
 ---

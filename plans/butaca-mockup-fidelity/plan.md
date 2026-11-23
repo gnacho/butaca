@@ -79,7 +79,7 @@ A visibly faithful native implementation of the supplied Butaca mockup, demonstr
 
 | Phase | Title | Contribution | Why Separate | Detail | Status |
 |-------|-------|--------------|--------------|--------|--------|
-| 1 | Shared chrome and Settings | Delivers the first visibly faithful menu structure, display typography and real profile/server access | Establishes shared components consumed by later surfaces and provides an early visible milestone | [Phase](phases/phase-1.md) | in_progress |
+| 1 | Shared chrome and Settings | Delivers the first visibly faithful menu structure, display typography and real profile/server access | Establishes shared components consumed by later surfaces and provides an early visible milestone | [Phase](phases/phase-1.md) | completed |
 | 2 | Home, Library and Search | Implements the cinematic hero, poster grids, filters and search composition | Builds on the shared chrome and data contracts without mixing in Detail or Player geometry | [Phase](phases/phase-2.md) | pending |
 | 3 | Detail and Player | Aligns media presentation, track controls, episodes and playback OSD | Requires the shared typography and metadata work from earlier phases and has device-specific validation needs | [Phase](phases/phase-3.md) | pending |
 | 4 | Real audio and subtitle preferences | Adds the three persisted preferences and applies them to track selection | Changes server/session and route behavior beyond visual fidelity and needs isolated migration and playback tests | [Phase](phases/phase-4.md) | pending |
@@ -92,3 +92,4 @@ A visibly faithful native implementation of the supplied Butaca mockup, demonstr
 - Phase 1 implementation plan authored and verified. Phase 1 started.
 - The owner explicitly authorized the mockup's Play/Pause HUD control and revision of the older transport presentation rule on 2026-11-23.
 - All four implementation plans authored and checked against one another. The independent reviewer could not run because the provider quota was exhausted.
+- Phase 1 completed in PR #450: textual chrome, profile/server dialog, Manrope/Fraunces roles, Settings header and anchored pickers. Final code commit `efe7afed2` passed 3972 default, 4013 hostsim, 102 storage and 352 harness tests, release and hint checks, six deterministic captures, and 6/6 strict replays.

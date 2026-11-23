@@ -23,7 +23,7 @@ updated: "2026-11-23"
 - [x] Add failing regressions for textual navigation, real profile access, shared chrome and Settings geometry <!-- completed: 2026-11-23 -->
 - [x] Implement shared chrome, typography, real profile/server dialog and anchored Settings pickers <!-- completed: 2026-11-23 -->
 - [x] Review all six 1920x1080 comparison captures <!-- completed: 2026-11-23 -->
-- [ ] Run the final committed-tree gates and publish the Phase 1 PR <!-- added: 2026-11-23 -->
+- [x] Run the final committed-tree gates and publish the Phase 1 PR <!-- completed: 2026-11-23 -->
 
 
 ### In Progress
@@ -47,4 +47,4 @@ updated: "2026-11-23"
 
 - Plan created with Phase 1 active. Baseline captures collected for Home, Library, Detail and Settings. Player baseline capture is blocked by the unrelated host simvideo failure and will not be treated as redesign work.
 - Phase 1 implementation plan completed and regression authoring started.
-- Phase 1 code landed in ba1be9e4a, d92adebf4, 10773d8b4, b0dbde7cf and 1a8639953. Replay re-recorded; six captures reviewed and deterministic. Final committed-tree gate running.
+- Phase 1 code landed and PR #450 opened. Final code commit `efe7afed2` passed 3972 default, 4013 hostsim, 102 storage and 352 harness tests, release and hint checks, six deterministic captures, and 6/6 strict replays. CI on main plus Simulator remains to confirm.
