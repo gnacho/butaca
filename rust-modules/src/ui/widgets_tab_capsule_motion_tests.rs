@@ -348,7 +348,7 @@ fn a_settled_mixed_pill_is_the_boolean_look_it_replaced() {
     );
     is(
         TabPill::mixed_ink(0.0, 1.0),
-        theme::TEXT_PRIMARY,
+        theme::ACCENT,
         "selected, focus elsewhere",
     );
     is(
@@ -364,7 +364,7 @@ fn a_settled_mixed_pill_is_the_boolean_look_it_replaced() {
     // out-of-range mixes clamp rather than extrapolating past the tokens
     is(
         TabPill::mixed_ink(-1.0, 4.0),
-        theme::TEXT_PRIMARY,
+        theme::ACCENT,
         "an over-range selection clamps",
     );
     is(
@@ -448,8 +448,9 @@ fn a_travelling_plate_lands_back_on_the_plate_it_replaced() {
         ((idle + over * (1.0 - idle)) - composite).abs() < 1e-6,
         "same-colour source-over must be order-independent, or the draw order becomes load-bearing"
     );
-    // all three plate tokens are the same white; only their weight differs
+    // All three plates carry the signal amber. Only their weight differs.
     for i in 0..3 {
+        assert_eq!(theme::TAB_PLATE_IDLE[i], theme::ACCENT[i], "idle channel {i}");
         assert_eq!(
             theme::TAB_PLATE_SELECTED_OVER[i],
             theme::TAB_PLATE_IDLE[i],

@@ -42,10 +42,13 @@ impl View for ValueChip<'_> {
         let (fill, value_ink, name_ink) = if self.focused {
             (super::ACCENT, super::ACCENT_INK, theme::with_a(super::ACCENT_INK, NOTE_ALPHA))
         } else {
-            (theme::CONTROL_IDLE_FILL, theme::CONTROL_IDLE_INK, theme::TEXT_SECONDARY)
+            (theme::SURFACE_PANEL, theme::CONTROL_IDLE_INK, theme::TEXT_SECONDARY)
         };
         let r = self.rect;
-        p.rrect(r, r.h * 0.5, r.h * 0.5, fill);
+        p.rrect(r, theme::CARD_RING_RAD, theme::CARD_RING_RAD, fill);
+        if !self.focused {
+            p.rring(r, theme::CARD_RING_RAD, 1.0, theme::HAIRLINE);
+        }
         let y = crate::text::text_vcenter_y(theme::size::LABEL, 1, r.y + r.h * 0.5);
         let mut x = r.x + PAD;
         x += p.text(self.name.as_ptr(), x, y, theme::size::LABEL, name_ink, 0, 0);
@@ -86,6 +89,27 @@ mod tests {
             (" - Title".into(), theme::size::LABEL, true),
             ("  owner".into(), theme::size::MICRO, false),
         ]);
+    }
+
+    #[test]
+    fn idle_chip_has_one_keyline_and_focus_removes_it_without_moving_the_rect() {
+        let rect = Rect::new(96.0, 200.0, 320.0, 52.0);
+        let draw = |focused| {
+            crate::ui::draw_census::capture(|| {
+                ValueChip::new(c"Filter", c" - All", None, rect)
+                    .focused(focused)
+                    .draw(&Env::inert(), Painter::recording());
+            })
+        };
+        let idle = draw(false);
+        let focused = draw(true);
+        let at_rect = |r: &Rect| r.x == rect.x && r.y == rect.y && r.w == rect.w && r.h == rect.h;
+        for draws in [&idle, &focused] {
+            assert_eq!(draws.iter().filter(|(tag, _)| *tag == 2).count(), 1);
+            assert!(draws.iter().filter(|(tag, _)| *tag == 2).all(|(_, r)| at_rect(r)));
+        }
+        assert_eq!(idle.iter().filter(|(tag, r)| *tag == 3 && at_rect(r)).count(), 1);
+        assert!(focused.iter().all(|(tag, _)| *tag != 3));
     }
 
     #[test]

@@ -1276,25 +1276,51 @@ pub(crate) fn keyline_chip_w(text: &str, measure: &dyn crate::ui::machine::Measu
 /// The label is BOLD for the same reason the mock sets `font-weight:600` on it: two or three caps
 /// at `CAPTION` inside a ring have to hold their own against it, and regular weight is what made
 /// this chip read as an empty frame in the first device photograph of the identity line.
-pub(crate) fn keyline_chip(p: Painter, x: f32, cy: f32, text: &str, col: [f32; 4], measure: &dyn crate::ui::machine::Measure) -> f32 {
+pub(crate) fn keyline_chip_face(col: [f32; 4], focused: bool) -> (Option<[f32; 4]>, [f32; 4]) {
+    if focused {
+        (Some(theme::ACCENT), theme::ACCENT_INK)
+    } else {
+        (None, col)
+    }
+}
+
+pub(crate) fn keyline_chip(
+    p: Painter,
+    x: f32,
+    cy: f32,
+    text: &str,
+    col: [f32; 4],
+    focused: bool,
+    measure: &dyn crate::ui::machine::Measure,
+) -> f32 {
     let lc = match std::ffi::CString::new(text) {
         Ok(c) => c,
         Err(_) => return 0.0,
     };
     let w = keyline_chip_w(text, measure);
     let h = measure.cap_h(theme::size::CAPTION) + 2.0 * KEYLINE_PAD_Y; // hugs the label's cap band, not a fixed band
-    p.rring(
-        Rect::new(x, cy - h * 0.5, w, h),
-        KEYLINE_RAD,
-        KEYLINE_W,
-        col,
-    );
+    let (fill, ink) = keyline_chip_face(col, focused);
+    if let Some(fill) = fill {
+        p.rrect(
+            Rect::new(x, cy - h * 0.5, w, h),
+            KEYLINE_RAD,
+            0.0,
+            fill,
+        );
+    } else {
+        p.rring(
+            Rect::new(x, cy - h * 0.5, w, h),
+            KEYLINE_RAD,
+            KEYLINE_W,
+            ink,
+        );
+    }
     p.text(
         lc.as_ptr(),
         x + KEYLINE_PAD_X,
         crate::text::text_vcenter_y(theme::size::CAPTION, KEYLINE_BOLD, cy),
         theme::size::CAPTION,
-        col,
+        ink,
         0,
         KEYLINE_BOLD,
     );
@@ -2855,9 +2881,8 @@ pub(crate) fn draw_back_control(p: Painter, focused: bool) {
 /// [`draw_back_control`] in an explicit box — the detail page's Back sits at the very top of the
 /// safe area (`detail_back_frame`), since the poster now starts on the top bar's foot.
 pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
-    // **The lit Back disc is a FILLED #7373CB plate** with a white chevron, the same treatment a
-    // focused control wears (the owner's 2026-11-10 pass: hover and Back share one tone). A ring
-    // under an unfilled disc did not read as "the same colour" at all.
+    // The focused Back disc uses the same amber face as any focused control, with dark ink.
+    // At rest it keeps the ordinary unfilled Accent treatment.
     let lit = focused;
     let button = CircleButton::new(std::ptr::null())
         .frame(frame)
@@ -2866,7 +2891,7 @@ pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
         .style(if lit {
             ControlStyle::Custom {
                 fill: theme::CHROME_LIT,
-                ink: theme::TEXT_PRIMARY,
+                ink: theme::ACCENT_INK,
             }
         } else {
             ControlStyle::Accent
@@ -2983,11 +3008,12 @@ impl View for PageDots {
         for d in 0..self.count {
             let active = d == self.active;
             let w = if active { Self::PILL } else { Self::DOT };
-            // tokens, not a raw literal: full-strength white for the current page, dimmed for the rest
-            let col = crate::ui::theme::with_a(
-                crate::ui::theme::TEXT_PRIMARY,
-                if active { 1.0 } else { 0.35 },
-            );
+            // The active mark carries the signal amber; inactive marks keep the quiet ink ramp.
+            let col = if active {
+                crate::ui::theme::CHROME_LIT
+            } else {
+                crate::ui::theme::with_a(crate::ui::theme::TEXT_PRIMARY, 0.35)
+            };
             p.rect(
                 Rect::new(x, self.y, w, Self::DOT),
                 Self::DOT * 0.5,
@@ -3199,19 +3225,19 @@ impl AmbientWash {
 
     /// The shared blue envelope at a four-corner strength. No runtime blur is involved: the
     /// existing bilinear ambient pass supplies the soft edges for one deterministic draw.
-    pub(crate) const BLUE_W: [f32; 4] = theme::AMBIENT_BLUE_W;
+    pub(crate) const GRAPHITE_W: [f32; 4] = theme::AMBIENT_GRAPHITE_W;
 
     /// [`target`](Self::target) for the artwork-less blue ground.
-    pub(crate) const fn blue(w: [f32; 4]) -> [[f32; 4]; 4] {
-        Self::target(theme::WASH_BLUE_CORNERS, w)
+    pub(crate) const fn graphite(w: [f32; 4]) -> [[f32; 4]; 4] {
+        Self::target(theme::WASH_GRAPHITE_CORNERS, w)
     }
 
     /// An artwork-keyed wash carrying the shared blue atmosphere. The original keyed target
     /// remains dominant, so the artwork's own colours still identify the focused item.
-    pub(crate) fn blue_keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
+    pub(crate) fn graphite_keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
         let keyed = Self::keyed(blur, w);
-        let blue = Self::blue(w);
-        std::array::from_fn(|i| theme::mix(keyed[i], blue[i], theme::AMBIENT_BLUE_MIX))
+        let graphite = Self::graphite(w);
+        std::array::from_fn(|i| theme::mix(keyed[i], graphite[i], theme::AMBIENT_GRAPHITE_MIX))
     }
 
     /// [`target`](Self::target) for corners taken from an item's `UltraBlurColors` envelope
@@ -3521,8 +3547,8 @@ impl PageGround {
     /// and Collection pages share it.
     pub(crate) fn page_target(focused: Option<&crate::catalog::CatalogMovie>) -> [[f32; 4]; 4] {
         match focused.filter(|m| m.has_blur) {
-            Some(m) => AmbientWash::blue_keyed(m.blur, Self::CARD_W),
-            None => AmbientWash::blue(AmbientWash::BLUE_W),
+            Some(m) => AmbientWash::graphite_keyed(m.blur, Self::CARD_W),
+            None => AmbientWash::graphite(AmbientWash::GRAPHITE_W),
         }
     }
 
@@ -3531,7 +3557,7 @@ impl PageGround {
     pub(crate) const fn new() -> Self {
         PageGround {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            target: AmbientWash::blue(AmbientWash::BLUE_W),
+            target: AmbientWash::graphite(AmbientWash::GRAPHITE_W),
         }
     }
 
@@ -3542,7 +3568,7 @@ impl PageGround {
     /// Called once per frame from a screen's update, before anything reads the ground.
     pub(crate) fn key(&mut self, src: Option<[[f32; 3]; 4]>, w: [f32; 4], dt: f32) {
         if let Some(b) = src {
-            self.target = AmbientWash::blue_keyed(b, w);
+            self.target = AmbientWash::graphite_keyed(b, w);
         }
         self.wash.step(self.target, AmbientWash::K, dt);
     }
@@ -4783,7 +4809,7 @@ impl TabPill {
         theme::mix(
             theme::mix(
                 theme::TEXT_READING,
-                theme::TEXT_PRIMARY,
+                theme::ACCENT,
                 selected.clamp(0.0, 1.0),
             ),
             crate::ui::ACCENT_INK,
@@ -4839,7 +4865,7 @@ impl TabPill {
                 TabStyle::Button if self.selected => {
                     // Both standalone neighbours already have a resting plate. Use the shared
                     // plated-selection tint so the active mode stays visible beside that ground.
-                    (Some(theme::TAB_PLATE_SELECTED), theme::TEXT_PRIMARY, 1.0)
+                    (Some(theme::TAB_PLATE_SELECTED), theme::ACCENT, 1.0)
                 }
                 // The standalone pill is a CONTROL FACE, so its idle fill is the one the GROUND
                 // supplies — the light film over video, the dark plate on a page. See
@@ -4849,7 +4875,7 @@ impl TabPill {
                     (Some(crate::ui::ACCENT), crate::ui::ACCENT_INK, 1.0)
                 }
                 TabStyle::Segment { selected: true } if self.plated => {
-                    (Some(theme::TAB_PLATE_SELECTED), theme::TEXT_PRIMARY, 1.0)
+                    (Some(theme::TAB_PLATE_SELECTED), theme::ACCENT, 1.0)
                 }
                 TabStyle::Segment { .. } if self.plated => {
                     (Some(theme::TAB_PLATE_IDLE), theme::TEXT_TERTIARY, 0.0)
@@ -6891,15 +6917,9 @@ pub enum ControlGround {
     Unkeyed,
 }
 
-/// The colours a keyed control derives from its page's local ground sample.
-///
-/// Home and Detail read the pixels they already rendered under the row — artwork AFTER its scrims,
-/// not the server's artwork envelope. The sample's LIGHTNESS never reaches the control: it
-/// contributes only OKLCH hue and a fraction of chroma. That is the difference between a white
-/// object catching the scene's light and a white chip averaged toward a dark photograph, which
-/// turns muddy. A screen computes this once for its control row and copies it into every face.
-/// The player may receive one accidentally, but [`ControlGround::Unkeyed`] ignores it by
-/// construction.
+/// The colours a keyed control can derive from a ground sample. Product controls use [`Self::lit`]
+/// for the fixed NetGrip amber world. The ambient derivation remains available to the renderer's
+/// color-conversion tests, while `ControlGround::Unkeyed` ignores it by construction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ControlPalette {
     focus_top: [f32; 4],
@@ -6908,29 +6928,18 @@ pub struct ControlPalette {
     spent: [f32; 4],
 }
 
-/// How much of the chrome tone an IDLE control carries: enough to read as the same family as the
-/// focused one, quiet enough that the focused control still leads.
-const IDLE_TINT: f32 = 0.62;
-/// The same, over a video plane: a touch more film, since the picture moves under it.
-const UNKEYED_IDLE_TINT: f32 = 0.55;
 
 
 impl ControlPalette {
-    /// **The chrome's one lit tone**, fixed rather than derived from artwork: the owner's
-    /// 2026-11-10 pass names the colour ("#7373CB"), so the focused face is that colour and the
-    /// renderer must not re-derive it from a poster's ambient key. Idle and spent keep the
-    /// palette's own roles — this changes the LIT state only.
+    /// The fixed NetGrip control palette: flat amber focus, graphite idle and the existing spent
+    /// role. No artwork readback is involved, so every surface agrees on the same focus contract.
     pub fn lit() -> Self {
-        let mut p = Self::default();
-        p.focus_top = theme::CHROME_LIT;
-        p.focus_body = theme::with_a(theme::CHROME_LIT, 0.92);
-        // **Every button, not only the lit one** (the owner's 2026-11-10 pass: "de hecho todos los
-        // botones #7373CB"). The idle face is the same tone, quieter: a control at rest reads as
-        // the same family as the one under the cursor, which is what makes the whole row feel like
-        // one set. `spent` stays the palette's own, since it encodes a countdown rather than a
-        // colour choice.
-        p.idle = theme::with_a(theme::CHROME_LIT, IDLE_TINT);
-        p
+        Self {
+            focus_top: theme::ACCENT,
+            focus_body: theme::ACCENT,
+            idle: theme::CONTROL_IDLE_FILL,
+            spent: theme::CONTROL_SPENT_FILL,
+        }
     }
 }
 
@@ -7229,19 +7238,14 @@ impl ControlStyle {
                 flat(theme::ACCENT, theme::ACCENT_INK, theme::CONTROL_SPENT_FILL)
             }
             ControlStyle::Accent if ground == ControlGround::Unkeyed => flat(
-                // The idle face over video is the chrome tone at a film's weight, so the transport
-                // and the hero's discs are the same colour family as everything else.
-                theme::with_a(theme::CHROME_LIT, UNKEYED_IDLE_TINT),
+                theme::CONTROL_IDLE_FILL_UNKEYED,
                 theme::CONTROL_IDLE_INK,
                 theme::CONTROL_SPENT_FILL,
             ),
             ControlStyle::Accent if focused => ControlFace {
                 top: palette.focus_top,
                 body: palette.focus_body,
-                // **White, not the accent plate's near-black.** That ink was tuned for a warm
-                // off-white plate; on the chrome's violet it measured ~2:1, which is what made the
-                // focused control look "wrong" rather than merely a different hue.
-                ink: theme::TEXT_PRIMARY,
+                ink: theme::ACCENT_INK,
                 spent: palette.spent,
             },
             ControlStyle::Accent => flat(palette.idle, theme::CONTROL_IDLE_INK, palette.spent),

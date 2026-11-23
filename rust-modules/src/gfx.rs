@@ -4319,7 +4319,7 @@ static mut GROUND_PROBE: GroundProbe<GROUND_TAPS> = GroundProbe::new(GROUND_SAMP
 /// one surface in this app that is in that position.
 /// **May a ground sampler take a FRESH reading on this draw?** Not while the page is frozen.
 ///
-/// Both samplers ([`sample_ground`], [`sample_control_ground`]) answered from a synchronous
+/// The ground sampler ([`sample_ground`]) answered from a synchronous
 /// `glReadPixels` when this refusal was written, which returns only once the GPU has drawn
 /// everything submitted before it; they queue a [`GroundProbe`] copy now, which is cheap but still
 /// a mid-frame copy of framebuffer 0 and still pointless here. A frozen page is one served from the
@@ -4409,13 +4409,6 @@ impl ProbeCadence {
         }
     }
 
-    /// The pixels under the probe changed meaning (a new item behind the Hero row): drop any
-    /// reading in flight and queue a fresh one on the next call.
-    pub(crate) fn invalidate(&mut self) {
-        self.at = 0;
-        self.dirty = true;
-        self.pending = None;
-    }
 
     /// A kick that could not be queued (no target): nothing is in flight after all.
     fn abandon(&mut self) {
@@ -4453,11 +4446,6 @@ impl<const N: usize> GroundProbe<N> {
         }
     }
 
-    /// Drop any reading in flight or read back, and queue a fresh one on the next call.
-    fn invalidate(&mut self) {
-        self.cadence.invalidate();
-        self.ready = None;
-    }
 
     /// **The read-back, at a frame BOUNDARY.** Called right after the swap, before the next frame
     /// draws anything: reading the probe's target here binds another framebuffer while the
@@ -4528,7 +4516,6 @@ pub(crate) fn ground_probes_frame_end() {
     // SAFETY: main render thread, like every other access to the probes.
     unsafe {
         (*std::ptr::addr_of_mut!(GROUND_PROBE)).read_if_finished();
-        (*std::ptr::addr_of_mut!(CONTROL_PROBE)).read_if_finished();
     }
 }
 
@@ -4633,39 +4620,10 @@ pub(crate) fn sample_ground(r: [f32; 4], may_read: bool) -> Option<[f32; 3]> {
     }
 }
 
-/// The Hero controls' own ground sample. This is deliberately NOT [`sample_ground`]: the top bar
-/// asks for the brightest local patch so it can solve a contrast floor, while a control face asks
-/// for the colour of the material it is standing on. Sharing either the result or the rate latch
-/// would make one of those two answers silently wrong.
-///
-/// Five broad boxes are averaged in LINEAR light across the whole action row. That is the visual
-/// model of a very thick, diffuse glass body: it collects the local scene over a wide support, but
-/// neither displaces nor re-draws it. The sampled colour only keys the control's fixed-lightness
-/// OKLCH face; there is no blur texture and therefore no refraction. Crucially this reads after the
-/// backdrop art and its scrims have painted, so an authored green `UltraBlurColors` corner can
-/// never tint a button green when the actual ground under it is blue-black.
-const CONTROL_GROUND_SAMPLE_EVERY: u32 = 30;
-const CONTROL_GROUND_TAPS: usize = 5;
-const CONTROL_GROUND_TAP_PX: c_int = 49;
-static mut CONTROL_GROUND_RGB: Option<[f32; 3]> = None;
-/// The Hero row's probe — its own cadence and its own target, never the bar's.
-static mut CONTROL_PROBE: GroundProbe<CONTROL_GROUND_TAPS> =
-    GroundProbe::new(CONTROL_GROUND_SAMPLE_EVERY, CONTROL_GROUND_TAP_PX);
-
-/// Mark a Hero's sampled ground stale when the item behind the row changes. The last honest answer
-/// remains available during the carousel/route transition; the first settled draw queues a fresh
-/// reading, and a reading still in flight for the old item is dropped rather than latched.
-pub(crate) fn control_ground_invalidate() {
-    unsafe {
-        (*std::ptr::addr_of_mut!(CONTROL_PROBE)).invalidate();
-    }
-}
-
 /// **One display-encoded sRGB channel as RADIANCE** (IEC 61966-2-1), and [`enc`] back again.
 ///
-/// Free functions rather than the two closures that used to live inside [`diffuse_ground_mean`],
-/// because averaging framebuffer samples is no longer the only thing in this renderer that has to
-/// do it: `ui::underlay` low-passes, grades and reconstructs a whole 15x8 grid, and every one of
+/// Free functions keep the transfer functions shared by every weighted color operation. Two copies
+/// would be two chances to get an exponent wrong in a way nothing can see.
 /// those operations is a WEIGHTED SUM, which is only meaningful in linear light. Two copies of a
 /// transfer function are two chances to get an exponent wrong in a way nothing can see.
 #[inline]
@@ -4723,86 +4681,6 @@ fn enc_u8_thresholds() -> &'static [f32; 255] {
             f32::from_bits(lo)
         })
     })
-}
-
-/// Average display-encoded sRGB samples as radiance and encode the result back to sRGB.
-/// Kept pure so the material's defining operation is host-testable without an OpenGL context.
-fn diffuse_ground_mean(samples: impl IntoIterator<Item = [f32; 3]>) -> [f32; 3] {
-    let mut acc = [0.0f32; 3];
-    let mut n = 0usize;
-    for sample in samples {
-        for c in 0..3 {
-            acc[c] += lin(sample[c]);
-        }
-        n += 1;
-    }
-    if n == 0 {
-        return [0.0; 3];
-    }
-    let k = n as f32;
-    [enc(acc[0] / k), enc(acc[1] / k), enc(acc[2] / k)]
-}
-
-/// [`lin`] of every 8-bit channel value, `lin(v as f32 / 255.0)` exactly — the same function on the
-/// same input, so a mean taken through it is bit-identical to one taken through [`lin`].
-///
-/// A collected Hero-row probe is 5 x 49 x 49 texels, 36,015 channel values, and every one of them
-/// went through a `powf` on the render thread: ~12 ms of CPU on the frame that latched the reading
-/// (television, 2026-09-19 — the probe's read-back itself was 0.2 ms by then). There are only 256
-/// distinct inputs.
-fn lin_u8(v: u8) -> f32 {
-    static LUT: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
-    LUT.get_or_init(|| std::array::from_fn(|i| lin(i as f32 / 255.0)))[v as usize]
-}
-
-/// [`diffuse_ground_mean`] over RGBA8 texels, through [`lin_u8`]: the same sum in the same order,
-/// so the same answer to the bit.
-fn diffuse_ground_mean_u8<'a>(texels: impl IntoIterator<Item = &'a [u8]>) -> [f32; 3] {
-    let mut acc = [0.0f32; 3];
-    let mut n = 0usize;
-    for p in texels {
-        for c in 0..3 {
-            acc[c] += lin_u8(p[c]);
-        }
-        n += 1;
-    }
-    if n == 0 {
-        return [0.0; 3];
-    }
-    let k = n as f32;
-    [enc(acc[0] / k), enc(acc[1] / k), enc(acc[2] / k)]
-}
-
-/// Sample the pixels already rendered beneath one Hero action row.
-pub(crate) fn sample_control_ground(r: [f32; 4], may_read: bool) -> Option<[f32; 3]> {
-    unsafe {
-        if !may_read || blur_source_pass() || !may_read_ground() {
-            return *std::ptr::addr_of!(CONTROL_GROUND_RGB);
-        }
-        let have = (*std::ptr::addr_of!(CONTROL_GROUND_RGB)).is_some();
-        let (gx, gy, gw, gh) = crate::surface::viewport();
-        let (sx, sy) = (gw as f32 / SCR_W, gh as f32 / SCR_H);
-        let cy = gy + gh - 1 - ((r[1] + r[3] * 0.5) * sy) as c_int;
-        let origins: [(c_int, c_int); CONTROL_GROUND_TAPS] = std::array::from_fn(|i| {
-            let f = (i as f32 + 0.5) / CONTROL_GROUND_TAPS as f32;
-            let x = gx + ((r[0] + r[2] * f) * sx) as c_int;
-            (
-                (x - CONTROL_GROUND_TAP_PX / 2).clamp(gx, gx + gw - CONTROL_GROUND_TAP_PX),
-                (cy - CONTROL_GROUND_TAP_PX / 2).clamp(gy, gy + gh - CONTROL_GROUND_TAP_PX),
-            )
-        });
-        let probe = &mut *std::ptr::addr_of_mut!(CONTROL_PROBE);
-        let Some(buf) = probe.step(have, &origins, "control ground") else {
-            return *std::ptr::addr_of!(CONTROL_GROUND_RGB);
-        };
-        let taps: [[f32; 3]; CONTROL_GROUND_TAPS] = crate::diag::spans::span("gndmean", || {
-            std::array::from_fn(|i| {
-                diffuse_ground_mean_u8(probe_tap(&buf, i, CONTROL_GROUND_TAP_PX, CONTROL_GROUND_TAPS))
-            })
-        });
-        CONTROL_GROUND_RGB = Some(diffuse_ground_mean(taps));
-        *std::ptr::addr_of!(CONTROL_GROUND_RGB)
-    }
 }
 
 // ---- the shared output dither: one amplitude, one policy ---------------------------------------
@@ -6007,8 +5885,7 @@ fn field_run_finished(run: u32) -> bool {
 /// The refusals, and why each one is not a guess:
 ///
 /// * **Inside a blur source pass** ([`BLUR_IN_PASS`]) the bound framebuffer is a quarter-resolution
-///   crop of the page, not the page — the same reason [`sample_ground`] and
-///   [`sample_control_ground`] refuse there.
+///   crop of the page, not the page — the same reason [`sample_ground`] refuses there.
 /// * **On a video-plane frame** framebuffer 0 is the punch-through hole the television composites
 ///   the plane through, so a read returns transparent black; [`video_plane_refuses`] is the shared
 ///   gate, and it is why this returns `None` here rather than a photograph of the hole —
@@ -7048,60 +6925,18 @@ mod tests {
     fn a_frozen_page_answers_its_ground_from_the_last_reading() {
         let _g = crate::testlock::serial();
         let last = Some([0.25f32, 0.5, 0.75]);
-        let (g0, c0) = unsafe {
+        let g0 = unsafe {
             GROUND_RGB = last;
-            CONTROL_GROUND_RGB = last;
-            (
-                (*std::ptr::addr_of!(GROUND_PROBE)).cadence,
-                (*std::ptr::addr_of!(CONTROL_PROBE)).cadence,
-            )
+            (*std::ptr::addr_of!(GROUND_PROBE)).cadence
         };
         let was = set_page_frozen(true);
-        for _ in 0..(3 * GROUND_SAMPLE_EVERY.max(CONTROL_GROUND_SAMPLE_EVERY)) {
+        for _ in 0..(3 * GROUND_SAMPLE_EVERY) {
             assert_eq!(sample_ground([0.0, 0.0, 100.0, 40.0], true), last);
-            assert_eq!(sample_control_ground([0.0, 0.0, 100.0, 40.0], true), last);
         }
         set_page_frozen(was);
-        let (g1, c1) = unsafe {
-            (
-                (*std::ptr::addr_of!(GROUND_PROBE)).cadence,
-                (*std::ptr::addr_of!(CONTROL_PROBE)).cadence,
-            )
-        };
-        assert_eq!((g1, c1), (g0, c0), "no reading was even counted toward while frozen");
-        unsafe {
-            GROUND_RGB = None;
-            CONTROL_GROUND_RGB = None;
-        }
-    }
-
-    #[test]
-    fn discovery_does_not_advance_a_cached_control_ground_probe() {
-        let _g = crate::testlock::serial();
-        use crate::ui::frame::backdrop::{self, Sources};
-        use std::{cell::RefCell, rc::Rc};
-
-        let last = Some([0.25f32, 0.5, 0.75]);
-        let before = unsafe {
-            CONTROL_GROUND_RGB = last;
-            let probe = &mut *std::ptr::addr_of_mut!(CONTROL_PROBE);
-            probe.cadence = ProbeCadence {
-                every: CONTROL_GROUND_SAMPLE_EVERY,
-                at: 7,
-                last_drawn: drawn_frames(),
-                dirty: false,
-                pending: None,
-            };
-            probe.cadence
-        };
-        {
-            let _discovery = backdrop::discover(Rc::new(RefCell::new(Sources::default())));
-            assert_eq!(sample_control_ground([0.0, 0.0, 100.0, 40.0], true), last);
-        }
-        let after = unsafe { (*std::ptr::addr_of!(CONTROL_PROBE)).cadence };
-        assert_eq!(after, before, "discovery is descriptive and must not consume probe cadence");
-
-        unsafe { CONTROL_GROUND_RGB = None; }
+        let g1 = unsafe { (*std::ptr::addr_of!(GROUND_PROBE)).cadence };
+        assert_eq!(g1, g0, "no reading was even counted toward while frozen");
+        unsafe { GROUND_RGB = None; }
     }
 
     /// **A due ground reading never reads the frame it is due on.** The kick only queues a copy;
@@ -7127,41 +6962,6 @@ mod tests {
         assert_eq!(c.step(true, 133, true), ProbeStep::Collect);
     }
 
-    /// An invalidation drops a reading still in flight for the OLD item — collecting it would
-    /// latch the previous hero's ground — and queues a fresh one on the very next call.
-    #[test]
-    fn an_invalidated_probe_drops_its_reading_in_flight_and_queues_a_fresh_one() {
-        let mut c = ProbeCadence::new(30);
-        assert_eq!(c.step(true, 1, true), ProbeStep::Kick, "a fresh probe is dirty");
-        c.invalidate();
-        assert_eq!(c.step(true, 5, true), ProbeStep::Kick, "not the old kick's collect");
-        assert_eq!(c.step(true, 6, true), ProbeStep::Collect);
-        assert_eq!(c.step(true, 7, true), ProbeStep::Keep, "clean again once collected");
-    }
-
-    /// The table-driven mean is the `powf` mean to the bit, on every 8-bit value and on a real
-    /// probe-sized box of mixed texels.
-    #[test]
-    fn the_u8_ground_mean_is_the_powf_mean_to_the_bit() {
-        for v in 0..=255u8 {
-            assert_eq!(lin_u8(v).to_bits(), lin(v as f32 / 255.0).to_bits(), "value {v}");
-        }
-        let mut x = 0x2545_f491u32;
-        let texels: Vec<[u8; 4]> = (0..49 * 49)
-            .map(|_| {
-                x ^= x << 13;
-                x ^= x >> 17;
-                x ^= x << 5;
-                let b = x.to_le_bytes();
-                [b[0], b[1], b[2], 255]
-            })
-            .collect();
-        let fast = diffuse_ground_mean_u8(texels.iter().map(|t| &t[..]));
-        let slow = diffuse_ground_mean(
-            texels.iter().map(|t| [t[0] as f32 / 255.0, t[1] as f32 / 255.0, t[2] as f32 / 255.0]),
-        );
-        assert_eq!(fast.map(f32::to_bits), slow.map(f32::to_bits));
-    }
 
     /// Box `i` of a collected atlas is exactly its own `px x px` texels, row by row.
     #[test]
@@ -7219,18 +7019,6 @@ mod tests {
             "a chip-narrow field is too small for a plateau to be findable"
         );
         assert_eq!(dither_for_field(broad, broad), DITHER_LSB);
-    }
-
-    /// Thick diffuse material collects radiance across the WHOLE support. It must not inherit the
-    /// hue of one authored corner (the green-envelope failure), nor choose the brightest tap like the
-    /// top-bar contrast sampler: equal red and blue grounds produce their linear-light mean.
-    #[test]
-    fn control_ground_is_a_broad_linear_light_mean() {
-        let got = diffuse_ground_mean([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
-        let want = 0.735_356_9;
-        assert!((got[0] - want).abs() < 1e-5);
-        assert!(got[1].abs() < 1e-6);
-        assert!((got[2] - want).abs() < 1e-5);
     }
 
     /// The card path's UV rect is EXACTLY the identity `vs_img.vert` used to hard-code before it

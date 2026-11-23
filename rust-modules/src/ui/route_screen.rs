@@ -237,8 +237,9 @@ impl RouteGround {
         self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
     }
 
-    /// Draw the pre-Home atmosphere captured at construction. Ordinary Settings samples its
-    /// rendered host through draw_host instead. No application reads or writes happen in draw.
+    /// Draw the pre-Home atmosphere captured at construction. Filmography samples its rendered
+    /// host through draw_host. Ordinary Settings uses the authored default instead. No application
+    /// reads or writes happen in draw.
     pub(crate) fn draw_home(&mut self, p: Painter) {
         self.draw_default(p);
     }
@@ -254,7 +255,7 @@ impl RouteGround {
     /// Draw a pre-content route on the product's authored fallback atmosphere.
     ///
     /// Login and the profile ceremony have no Home frame and no media item to sample.  They still
-    /// belong to the same route family, so they take the same broad blue envelope as an
+    /// belong to the same route family, so they take the same graphite envelope as an
     /// artwork-less first-run screen instead of inventing another flat background locally.
     pub(crate) fn draw_default(&mut self, p: Painter) {
         self.latch_default();

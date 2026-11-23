@@ -7,8 +7,8 @@
 //! colour literal" rule. The design project mirrors this split exactly (`tokens/primitives.css` +
 //! `tokens/colors.css`), so a palette decision is one edit here and one there.
 //!
-//! Two roles may resolve to the SAME primitive and still stay two roles — [`ACCENT`] and
-//! [`TEXT_PRIMARY`] are both `WARM_0`, [`TEXT_TERTIARY`] and [`RATING_MUTED`] both warm stops —
+//! Two roles may resolve to the SAME primitive and still stay two roles — [`TEXT_PRIMARY`] and
+//! [`TEXT_HEADING`] are both `WARM_0`, [`TEXT_TERTIARY`] and [`RATING_MUTED`] both warm stops —
 //! because sharing a value is not sharing a job: retuning the focus fill must not restyle every
 //! title on the screen. They are values on one stop for that reason, not `pub use` aliases of each
 //! other.
@@ -34,21 +34,17 @@ const fn rgb8(r: u8, g: u8, b: u8) -> [f32; 4] {
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
 }
 
-// Warm — the mockup's ember palette: page ground, inks, gold accents and the ambient wash.
-// The DARK stops (900/950/1000) are the page grounds, and the owner's 2026-11-10 pass swapped their
-// brown for the Jellyfin logo palette: a near-black violet instead of the ember-brown, so the page
-// reads as Jellyfin rather than as a warm generic. The light stops stay warm (the text inks) — the
-// request was the BACKGROUND, not the reading colour.
+// Warm-neutral inks, graphite surfaces and the NetGrip signal amber.
+// The dark stops are page grounds. The light stops preserve the reading hierarchy.
 const WARM_0: [f32; 4] = rgb8(0xff, 0xfd, 0xf8);
-const WARM_100: [f32; 4] = rgb8(0xff, 0xce, 0xa3);
+const SIGNAL_AMBER: [f32; 4] = rgb8(0xff, 0x9e, 0x40);
 const WARM_300: [f32; 4] = rgb8(0xe8, 0xcd, 0xb0);
 const WARM_500: [f32; 4] = rgb8(0xd8, 0xc6, 0xb4);
 const WARM_700: [f32; 4] = rgb8(0xd0, 0xc3, 0xb4);
-const WARM_900: [f32; 4] = rgb8(0x1c, 0x18, 0x29);
-const WARM_950: [f32; 4] = rgb8(0x16, 0x12, 0x21);
-const WARM_1000: [f32; 4] = rgb8(0x0e, 0x0b, 0x16);
+const GRAPHITE_900: [f32; 4] = rgb8(0x17, 0x19, 0x1d);
+const GRAPHITE_950: [f32; 4] = rgb8(0x12, 0x13, 0x16);
+const GRAPHITE_1000: [f32; 4] = rgb8(0x0a, 0x0b, 0x0d);
 const WARM_ACCENT: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
-const WARM_GOLD: [f32; 4] = rgb8(0xe8, 0xa0, 0x4c);
 
 // Cool — blue-leaning: everything that is text, and artwork that has not loaded.
 const COOL_0: [f32; 4] = rgb8(0xf7, 0xfa, 0xfc);
@@ -84,14 +80,19 @@ const CAPTION_55: [f32; 4] = rgb8(0x8c, 0x8c, 0x8c);
 const CAPTION_40: [f32; 4] = rgb8(0x66, 0x66, 0x66);
 const CAPTION_28: [f32; 4] = rgb8(0x47, 0x47, 0x47);
 
-// Warm atmosphere — four dark, low-frequency stops for the artwork-less page ground. The range
-// used to run ember to wine; the owner's 2026-11-10 pass moved it to the Jellyfin logo palette, a
-// violet-to-blue sweep over the same near-black base. These are page grounds, never control fills
-// or state colours.
-const ATMOS_BLUE_KEY: [f32; 4] = rgb8(0x6a, 0x3f, 0xa0);
-const ATMOS_BLUE_INDIGO: [f32; 4] = rgb8(0x3f, 0x4a, 0x9a);
-const ATMOS_BLUE_DEEP: [f32; 4] = rgb8(0x22, 0x1a, 0x38);
-const ATMOS_BLUE_TEAL: [f32; 4] = rgb8(0x2a, 0x5a, 0x8a);
+// Warm atmosphere - four graphite stops for the artwork-less page ground. The bilinear ambient
+// pass supplies their soft transitions. These are page grounds, never control fills or state colours.
+const ATMOS_GRAPHITE_KEY: [f32; 4] = GRAPHITE_900;
+const ATMOS_GRAPHITE_INDIGO: [f32; 4] = GRAPHITE_950;
+const ATMOS_GRAPHITE_DEEP: [f32; 4] = GRAPHITE_1000;
+const ATMOS_GRAPHITE_TEAL: [f32; 4] = GRAPHITE_950;
+
+// Pre-Home atmosphere - a separate graphite envelope whose four corners remain visibly distinct
+// from the flat app ground. The subtler artwork wash above must not inherit this extra contrast.
+const ROUTE_GRAPHITE_KEY: [f32; 4] = rgb8(0x30, 0x34, 0x3d);
+const ROUTE_GRAPHITE_RAISED: [f32; 4] = rgb8(0x1e, 0x22, 0x29);
+const ROUTE_GRAPHITE_LOW: [f32; 4] = rgb8(0x1a, 0x1c, 0x20);
+const ROUTE_GRAPHITE_EDGE: [f32; 4] = rgb8(0x23, 0x28, 0x2f);
 
 // Semantic — amber / red / green: state and verdict, never decoration.
 const AMBER_300: [f32; 4] = rgb8(0xfa, 0xb8, 0x2e);
@@ -112,7 +113,7 @@ const GREEN_500: [f32; 4] = rgb8(0x2f, 0xae, 0x5b);
 /// Primary reading text / high-emphasis title. Collapses the 3-4 near-whites.
 /// The hero's kicker ink: the mockup's gold, one job only. Not [`ACCENT`], which is the focus
 /// fill and the control plate — a label painted in the fill colour would read as a control.
-pub const KICKER_INK: [f32; 4] = WARM_GOLD;
+pub const KICKER_INK: [f32; 4] = SIGNAL_AMBER;
 pub const TEXT_PRIMARY: [f32; 4] = WARM_0;
 /// Section headings ("Related", "Cast & Crew", About headings) — a touch below primary.
 pub const TEXT_HEADING: [f32; 4] = WARM_0;
@@ -123,11 +124,9 @@ pub const TEXT_SECONDARY: [f32; 4] = WARM_500;
 /// hero's synopsis, which is the longest run of text on the page and sits over the backdrop scrim;
 /// at [`TEXT_SECONDARY`] it read as fine print rather than as the blurb. A one-line metadata VALUE
 /// stays secondary — the distinction is paragraph-vs-label, not importance.
-/// **Reading copy, on the Jellyfin palette** (the owner's 2026-11-10 pass: "el texto del resumen
-/// debería ser misma gama cromática que el logo de jellyfin"). A pale violet that belongs to the
-/// page's own family rather than the warm ink it used to be, and still far enough from the ground
-/// to clear the 3:1 the synopsis is graded at over bright artwork.
-pub const TEXT_READING: [f32; 4] = rgb8(0xd8, 0xd4, 0xf0);
+/// Reading copy uses the existing warm-white primitive, distinct from secondary labels but without
+/// introducing a violet hue over the new graphite ground. It keeps the measured contrast contract.
+pub const TEXT_READING: [f32; 4] = WARM_0;
 /// Tertiary text: runtime, kickers, inactive tabs, About labels, dim/empty states.
 pub const TEXT_TERTIARY: [f32; 4] = WARM_700;
 /// The `·` between fine-print facts, and **only** that — a step below the words it separates.
@@ -301,17 +300,12 @@ pub mod logo {
 }
 
 // ── Accent / control ─────────────────────────────────────────────────────────
-/// **The focus fill — and the only fill a control can light up with.** The mockup's warm sand
-/// `#ffcea3`: a control lights up for exactly one reason, the remote is on it. Nothing is filled by
-/// rank, so there is no always-filled primary CTA: the hero Play pill sits idle like everything
-/// else until focus reaches it.
-/// The ONE hover/focus tone of the chromeless chrome (the owner's 2026-11-10 pass: "el tono del
-/// hover y del botón back los unificamos a #7373CB"). It is the Jellyfin violet, a step lighter than
-/// the page ground so a lit control separates from it without going white.
-pub const CHROME_LIT: [f32; 4] = rgb8(0x73, 0x73, 0xcb);
-pub const ACCENT: [f32; 4] = WARM_100;
+/// Focus and selection share the NetGrip signal amber `#FF9E40`. Controls light for remote focus,
+/// never by rank. Dark ink on the amber face keeps the label readable without returning to white.
+pub const CHROME_LIT: [f32; 4] = SIGNAL_AMBER;
+pub const ACCENT: [f32; 4] = SIGNAL_AMBER;
 /// Near-black ink/glyphs drawn over [`ACCENT`].
-pub const ACCENT_INK: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
+pub const ACCENT_INK: [f32; 4] = rgb8(0x0a, 0x0b, 0x0d);
 /// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this
 /// file: it is the same ROLE under a second name, not a second role that happens to share a stop.
 pub const INK_ON_ACCENT: [f32; 4] = ACCENT_INK;
@@ -339,7 +333,7 @@ pub const CONTROL_SPENT_FOCUS_W: f32 = 0.76;
 /// focus state changing. Deliberately close enough to `ACCENT` that [`ACCENT_INK`] stays legible on
 /// BOTH sides — the first version flipped the ink at the sweep line and cut the label in half
 /// mid-word.
-pub const CONTROL_SPENT_FILL: [f32; 4] = mix(WARM_100, WARM_1000, 1.0 - CONTROL_SPENT_FOCUS_W);
+pub const CONTROL_SPENT_FILL: [f32; 4] = mix(SIGNAL_AMBER, GRAPHITE_1000, 1.0 - CONTROL_SPENT_FOCUS_W);
 
 /// The Search query field's **editing** ink — the bright endpoint of the `hot` cross-fade in
 /// `search::field::draw` (idle end: `TEXT_SECONDARY`) while the television's keyboard is up. Its own
@@ -356,9 +350,9 @@ pub const CONTROL_SPENT_FILL: [f32; 4] = mix(WARM_100, WARM_1000, 1.0 - CONTROL_
 /// to the state that still has the caret to help it — see `field::draw`'s `ink_target`.
 pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
 
-/// The cool-tinted selected-row fill while a table field accepts text. Reuses [`COOL_150`]
-/// rather than the default near-white [`ACCENT`], so editing is visibly distinct without a stroke or
-/// a new palette stop; the existing near-black accent ink remains legible over it.
+/// The selected-row fill while a table field accepts text. Uses the warm reading white rather than
+/// the signal amber, so editing is visibly distinct without a stroke or a new palette stop; the
+/// existing near-black accent ink remains legible over it.
 pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = WARM_0;
 
 /// The Search query field's **focused-but-not-editing** ink — the `hot` cross-fade's bright
@@ -409,11 +403,9 @@ pub const CONTROL_RIM_IDLE_UNKEYED: [f32; 4] = with_a(WHITE, 0.34);
 /// The **focused** control's edge on the unkeyed ground — the one place in the app a rim goes to
 /// pure white instead of [`CARD_SHEEN`]'s .22.
 ///
-/// The focused face is [`ACCENT`], a near-white capsule, and the brightest ground the app can be
-/// asked to sit on is a snow frame: the line has to stay brighter than BOTH, and light is the only
-/// thing the two polarities of an unknown frame agree on. It is not an ink line — an even dark ring
-/// reads as a moulded plastic edge, i.e. volume drawn ON the control rather than the control's own
-/// boundary.
+/// The focused face is the signal amber [`ACCENT`], and the ground can be as bright as a snow
+/// frame. The white line separates the control from that unknown ground. It is not an ink line:
+/// an even dark ring reads as volume drawn ON the control rather than as the control's boundary.
 ///
 pub const CONTROL_RIM_FOCUS_UNKEYED: [f32; 4] = WHITE;
 /// The unkeyed stroke width — a quarter px over [`CARD_SHEEN_W`], the design's
@@ -450,9 +442,9 @@ pub const CONTROL_RIM_FOCUS_UNKEYED_GLOW: [f32; 4] = [5.0, 1.0, 2.5, 0.55];
 pub const CONTROL_CAST_FOCUS: [(f32, f32, f32); 2] = [(5.0, 32.0, 0.34), (1.0, 6.0, 0.20)];
 
 // ── Surfaces / backgrounds ───────────────────────────────────────────────────
-/// Flat shelf/app base — the mockup's ember-black **#130B07 (19,11,7)**. It is deliberately
-/// near-black, so artwork carries the light and the warm ambient wash colours the page around it.
-pub const SURFACE_APP: [f32; 4] = WARM_1000;
+/// Flat shelf/app base: NetGrip graphite `#0A0B0D`. Artwork carries the light and the ambient wash
+/// grades the page around it. The exact 8-bit stop also keeps the flat fill free of dither guesses.
+pub const SURFACE_APP: [f32; 4] = GRAPHITE_1000;
 /// Opaque sheet drawn over the hardware video plane when a detail page scrolls the hero away.
 /// Same stop as [`SURFACE_APP`] so the rising page and the cover are one surface. Different role:
 /// this hides the plane. It is not atmosphere, so [`scrim`] is the wrong token.
@@ -474,12 +466,12 @@ pub const IDLE_CLOCK_INK: [f32; 4] = with_a(WHITE, 0.16);
 /// presented a frame (`gfx::frame_clear_through`).
 pub const CLEAR_RGB: (f32, f32, f32) = (SURFACE_APP[0], SURFACE_APP[1], SURFACE_APP[2]);
 /// Opaque menu panel / fade mask / badge knockout interior.
-pub const SURFACE_PANEL: [f32; 4] = WARM_900;
+pub const SURFACE_PANEL: [f32; 4] = GRAPHITE_900;
 /// Near-opaque sheet/card gradient — top stop. [`SURFACE_PANEL`]'s own stop at .985, so the sheet
 /// and its opaque twin are one material rather than two greys a hair apart.
-pub const PANEL_TOP: [f32; 4] = with_a(WARM_900, 0.985);
+pub const PANEL_TOP: [f32; 4] = with_a(GRAPHITE_900, 0.985);
 /// Near-opaque sheet gradient — bottom stop (kept distinct; the gradient is deliberate).
-pub const PANEL_BOT: [f32; 4] = with_a(WARM_950, 0.985);
+pub const PANEL_BOT: [f32; 4] = with_a(GRAPHITE_950, 0.985);
 /// **The material scale, named rather than numbered — SwiftUI's `Material` is the vocabulary.**
 ///
 /// Every glass surface in this app used to be described by two unrelated numbers written at its own
@@ -665,13 +657,13 @@ pub const PANEL_FROST_BOT: [f32; 4] = with_a(NEUTRAL_750, 0.72);
 /// bright on purpose.
 pub const SURFACE_QR_PLATE: [f32; 4] = COOL_0;
 /// Poster/thumb skeleton flat placeholder.
-pub const CARD_PLACEHOLDER: [f32; 4] = WARM_950;
+pub const CARD_PLACEHOLDER: [f32; 4] = GRAPHITE_950;
 /// Loading-skeleton gradient — top. The same `COOL_850` stop as [`CARD_PLACEHOLDER`]: a card whose
 /// artwork is on the way and one with none to load are the same object at rest. Both lean BLUE,
 /// away from the neutral panel greys, so a missing poster never reads as a panel.
-pub const SKELETON_TOP: [f32; 4] = WARM_950;
+pub const SKELETON_TOP: [f32; 4] = GRAPHITE_950;
 /// Loading-skeleton gradient — bottom.
-pub const SKELETON_BOT: [f32; 4] = WARM_1000;
+pub const SKELETON_BOT: [f32; 4] = GRAPHITE_1000;
 
 // ── Scrims (near-black; alpha supplied per call) ─────────────────────────────
 /// Hero/scroll scrim ink; use via [`scrim`].
@@ -835,33 +827,37 @@ pub const RAIL_FILL: [f32; 4] = with_a(WHITE, 0.95);
 // (RAIL_MARKER, white @ 0.42, was the intro/credits band on the scrubber. Removed 2026-08-04 with
 // the band itself — at twice the track's opacity it read as a rendering artifact rather than as
 // information. See the "the rail carries NO marks" note in ui/player_hud.rs.)
-/// The blue ambient envelope for a page with no artwork to key from. The four stops create a
+/// The graphite ambient envelope for a page with no artwork to key from. The four stops create a
 /// soft directional wash at the same low cost as an UltraBlur gradient, without a blur pass.
-pub const WASH_BLUE_CORNERS: [[f32; 4]; 4] =
-    [ATMOS_BLUE_KEY, ATMOS_BLUE_INDIGO, ATMOS_BLUE_DEEP, ATMOS_BLUE_TEAL];
+pub const WASH_GRAPHITE_CORNERS: [[f32; 4]; 4] =
+    [ATMOS_GRAPHITE_KEY, ATMOS_GRAPHITE_INDIGO, ATMOS_GRAPHITE_DEEP, ATMOS_GRAPHITE_TEAL];
 /// Strength of that envelope at the four corners: top left, top right, bottom right, bottom left.
-pub const AMBIENT_BLUE_W: [f32; 4] = [0.55, 0.45, 0.30, 0.40];
-/// How much of the blue envelope an artwork-keyed wash carries. The source still supplies most
-/// of the colour, so a poster's identity survives the shared atmosphere.
-pub const AMBIENT_BLUE_MIX: f32 = 0.45;
+pub const AMBIENT_GRAPHITE_W: [f32; 4] = [0.55, 0.45, 0.30, 0.40];
+/// How much of the graphite envelope an artwork-keyed wash carries. The source supplies most of
+/// the colour, so a poster's identity survives the shared atmosphere.
+pub const AMBIENT_GRAPHITE_MIX: f32 = 0.45;
 /// Frozen ambient envelope for a route that intentionally appears before Home has fetched any
-/// artwork (Shared Sources). It is a DESIGN-SYSTEM fallback, not a screen colour: the blue stops
+/// artwork (Shared Sources). It is a DESIGN-SYSTEM fallback, not a screen colour: the graphite stops
 /// create low-frequency wallpaper light without pretending there is a poster behind a pre-Home
 /// screen. Once real artwork exists, [`crate::ui::route_screen::RouteGround`] uses that instead.
-pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] = WASH_BLUE_CORNERS;
+pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] = [
+    ROUTE_GRAPHITE_KEY,
+    ROUTE_GRAPHITE_RAISED,
+    ROUTE_GRAPHITE_LOW,
+    ROUTE_GRAPHITE_EDGE,
+];
 /// Warm amber Continue-Watching progress fill (Home only, no player equivalent). `#fab82e`.
 pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
 /// Unfilled track behind the Continue-Watching resume bar — the full-bleed card-bottom rail. A
 /// hair lighter than the player scrubber's so the amber reads against a bright poster.
 pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.22);
 /// Ink over [`RESUME_FILL`] when the amber is a SURFACE rather than a mark. Distinct from
-/// [`ACCENT_INK`]: that one is tuned against the near-white [`ACCENT`], and at that value it
-/// disappeared into the amber rather than reading as a knockout.
+/// [`ACCENT_INK`]: that one is tuned against the signal amber and remains its shared knockout ink.
 ///
 /// **No consumer today** — its one user was the amber watched DISC, which the 2026-08-13 evening
 /// sync replaced with a bare tick over a veil ([`TILE_MARK_INK`]). Kept because the design system
 /// still carries the role, and because the next amber surface needs exactly this ink.
-pub const INK_ON_RESUME: [f32; 4] = WARM_1000;
+pub const INK_ON_RESUME: [f32; 4] = GRAPHITE_1000;
 
 // ── A list row's trailing VALUE read-out ─────────────────────────────────────
 /// The word at a row's trailing edge that says what it is SET to (`On`/`Off`, "English"), over the
@@ -943,7 +939,7 @@ pub const DIAG_NETWORK_MEAN: [f32; 4] = AMBER_300;
 /// camera's chroma subsampling, which is the output format of this surface.
 pub const DIAG_SWEEP_CURSOR: [f32; 4] = COOL_0;
 /// Section divider hairline.
-pub const HAIRLINE: [f32; 4] = with_a(WARM_100, 0.12);
+pub const HAIRLINE: [f32; 4] = with_a(SIGNAL_AMBER, 0.12);
 
 /// The settings grid's card plate (issue #415): a step ABOVE the panel rather than a colour, so a
 /// row reads as its own object over the page. Every other table keeps drawing rows on the panel.
@@ -1172,7 +1168,7 @@ pub const TAB_TRACK_A_BOT: f32 = 0.82;
 /// than inside the top bar's track and so provide their own ground
 /// ([`crate::ui::widgets::TabPill::plated`], `Details Screen.dc.html`). The selected one is a step up
 /// from [`OVERLAY_FOCUS_PILL`]: at .14 against a plated neighbour at .08 the two read as the same pill.
-pub const TAB_PLATE_SELECTED: [f32; 4] = with_a(WHITE, 0.20);
+pub const TAB_PLATE_SELECTED: [f32; 4] = with_a(ACCENT, 0.20);
 /// The selected-segment plate as a **travelling capsule** over a plated strip
 /// ([`crate::ui::widgets::TabStrip`]). It is deliberately not [`TAB_PLATE_SELECTED`]: that value
 /// assumed the selected plate REPLACED the idle one, whereas a capsule *slides over* the idle plates
@@ -1183,9 +1179,9 @@ pub const TAB_PLATE_SELECTED: [f32; 4] = with_a(WHITE, 0.20);
 ///
 /// The top tab row needs no such value: its pills sit bare inside the tab-bar track (which already
 /// is their ground) and its selection capsule uses [`OVERLAY_FOCUS_PILL`] unchanged.
-pub const TAB_PLATE_SELECTED_OVER: [f32; 4] = with_a(WHITE, 0.13);
+pub const TAB_PLATE_SELECTED_OVER: [f32; 4] = with_a(ACCENT, 0.13);
 /// An unselected plated segment — present, but only just: it says "this is a control" and nothing more.
-pub const TAB_PLATE_IDLE: [f32; 4] = with_a(WHITE, 0.08);
+pub const TAB_PLATE_IDLE: [f32; 4] = with_a(ACCENT, 0.08);
 /// Softer selection panel — the lightest weight on the overlay ramp, and deliberately NOT
 /// [`TAB_PLATE_IDLE`]'s .08 one step up. The design project briefly resolved this role to that .08
 /// stop while its own specimen card and readme both said .07; holding the product at .07 was the
@@ -1258,7 +1254,7 @@ pub const RATING_SOURCE: [f32; 4] = WARM_500;
 // is tunable). The hero-grid card's wide glow pad is `consts::GLOW_PAD` (shared with off-screen
 // culling, so it has one home there).
 /// Card corner radius (tiles/shelves — `CardRow`'s rounded rect + its baked focus glow follow it).
-pub const CARD_RING_RAD: f32 = 14.0;
+pub const CARD_RING_RAD: f32 = 8.0;
 
 /// **The ALERT PANEL corner** — the full-frame glass sheet a block opens with OK
 /// (`Alert Views.dc.html`), as opposed to the anchored menus a chip or a button drops. Those keep
@@ -1277,8 +1273,8 @@ pub const CARD_RING_RAD: f32 = 14.0;
 /// > leaves it. 32 stays inside that vocabulary while still reading as softer than a card, and
 /// > clears the 28px glass bevel so the chamfer runs inside the arc."
 ///
-/// The tile's 14 is [`CARD_RING_RAD`] and the row pill's 18 is `table::PILL_RAD`, so that sentence
-/// is checkable against this tree rather than only against the mock. Two consequences are
+/// Tiles, compact chips and table row pills now share 8 through [`CARD_RING_RAD`],
+/// `value_chip` and `table::PILL_RAD`. Two consequences are
 /// load-bearing rather than decorative. The **bevel clause**: below the 28px glass bevel the
 /// chamfer would run OUTSIDE the corner arc and the rim would break at each corner. And the
 /// **padding clause**, which the design leaves implicit and the panels make explicit — every one of

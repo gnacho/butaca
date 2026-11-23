@@ -45,11 +45,21 @@
       "outputs": [{"file": "ux-account-menu.jpg", "size": "1920x1080"}]
     },
     {
+      "name": "settings",
+      "state": "The Settings root over a landed Home, with its first server card focused and the shared graphite ground.",
+      "triggers": {"settings": "root"},
+      "expect": ["coldopen screen=settings", "route=home overlay=settings"],
+      "outputs": [{"file": "ux-settings.jpg", "size": "1920x1080"}]
+    },
+    {
       "name": "library",
       "state": "The Movies library at the top of its page, as it opens: the Continue Watching shelf with focus on its first card (the catalog's hero, captioned with its time left), Recently Added Movies below.",
       "triggers": {"library": "0"},
       "expect": ["coldopen screen=library", "hubs: landed"],
-      "outputs": [{"file": "library.jpg", "size": "1600x900"}]
+      "outputs": [
+        {"file": "library.jpg", "size": "1600x900"},
+        {"file": "ux-library.jpg", "size": "1920x1080"}
+      ]
     },
     {
       "name": "library-grid",
@@ -104,7 +114,10 @@
       "state": "The player HUD, paused at 7:26 of Sintel (`@sintel`, the complete 14:48 film) on a close-up of Sintel, its Chapters tab beside Info: the clock sink plays the file the mock serves from the resume point (7:15), simvideo decodes it under the UI, and autopause pauses once the published playhead reaches 7:26.02 - mid-frame, where the clock sink is told to stop, so the pause freezes the same frame, clock and knob every run. The mock serves the film the item names, so the resume point and the pause use the real 14:48 file.",
       "triggers": {"server": "0", "play": "@sintel", "clocksink": "", "simvideo": "", "autopause": "at=446020"},
       "expect": ["simvideo: first picture decoded", "autopause: Pause accepted"],
-      "outputs": [{"file": "player.jpg", "size": "1600x900"}]
+      "outputs": [
+        {"file": "player.jpg", "size": "1600x900"},
+        {"file": "ux-player.jpg", "size": "1920x1080"}
+      ]
     },
     {
       "name": "site-glass",

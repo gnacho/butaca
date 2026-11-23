@@ -165,7 +165,7 @@ impl Backdrop {
     fn new() -> Self {
         Self {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            grid_target: AmbientWash::blue(AmbientWash::BLUE_W),
+            grid_target: AmbientWash::graphite(AmbientWash::GRAPHITE_W),
             art: Spring::at(0.0),
             outgoing_art: Spring::at(0.0),
             tex: (0, 0.0, 0.0),
@@ -198,7 +198,6 @@ impl Backdrop {
             _ => true,
         };
         if changed {
-            crate::gfx::control_ground_invalidate();
             self.outgoing_art.jump(self.art.pos);
             self.art.jump(f32::from(self.tex.0 != 0));
             if self.keyed.is_none() {
@@ -214,7 +213,7 @@ impl Backdrop {
             self.outgoing_art.step(1.0, AmbientWash::K, dt);
         }
         if let Some(item) = grid_item.filter(|m| m.has_blur) {
-            self.grid_target = AmbientWash::blue_keyed(item.blur, PageGround::CARD_W);
+            self.grid_target = AmbientWash::graphite_keyed(item.blur, PageGround::CARD_W);
         }
         self.wash.step(
             wash_corners(hero.map(|h| h.item), self.grid_target, snap),
@@ -1168,7 +1167,6 @@ impl HomeScreen {
                     view,
                     &env,
                     p.alpha(env.hero_a),
-                    f.page_alpha,
                     focus,
                     f.measure,
                     f.press.scale,
@@ -1193,7 +1191,6 @@ impl HomeScreen {
         view: HubsView<'_>,
         env: &Env,
         p: Painter,
-        page_alpha: f32,
         focus: Option<Located>,
         measure: &dyn Measure,
         press_scale: f32,
@@ -1205,14 +1202,14 @@ impl HomeScreen {
             if let Some(old) = self.outgoing_hero(view) {
                 let po = p.translate(out_x, 0.0);
                 hero_content(old.item, display_source(old.source), po, out_x, measure);
-                self.draw_hero_actions(old.item, env, po, out_x, false, page_alpha, focus, measure, press_scale);
+                self.draw_hero_actions(old.item, env, po, out_x, false, focus, measure, press_scale);
             }
             let pi = p.translate(in_x, 0.0);
             hero_content(hero.item, display_source(hero.source), pi, in_x, measure);
-            self.draw_hero_actions(hero.item, env, pi, in_x, true, page_alpha, focus, measure, press_scale);
+            self.draw_hero_actions(hero.item, env, pi, in_x, true, focus, measure, press_scale);
         } else {
             hero_content(hero.item, display_source(hero.source), p, 0.0, measure);
-            self.draw_hero_actions(hero.item, env, p, 0.0, true, page_alpha, focus, measure, press_scale);
+            self.draw_hero_actions(hero.item, env, p, 0.0, true, focus, measure, press_scale);
         }
         if view.hero_count() > 1 {
             PageDots::new(view.hero_count())
@@ -1229,7 +1226,6 @@ impl HomeScreen {
         p: Painter,
         dx: f32,
         live: bool,
-        page_alpha: f32,
         focus: Option<Located>,
         measure: &dyn Measure,
         press_scale: f32,
@@ -1264,13 +1260,7 @@ impl HomeScreen {
         ) {
             return;
         }
-        let may_read = live && dx.abs() < 0.5 && page_alpha >= 0.999;
-        let palette = crate::gfx::sample_control_ground(
-            [pill.x + dx, pill.y, info.x + info.w - pill.x, pill.h],
-            may_read,
-        )
-        .map(ControlPalette::ambient)
-        .unwrap_or_default();
+        let palette = ControlPalette::lit();
         let pop = |i| if live { self.hero_pop.scale_with(i, press_scale) } else { 1.0 };
         Button::new(label.as_ptr(), theme::size::BODY, pill)
             .icon(Icon::Play)
@@ -2358,8 +2348,8 @@ fn row_reveal_band(top: f32, h: f32) -> (f32, f32) {
 fn wash_corners(hero: Option<&CatalogMovie>, grid: [[f32; 4]; 4], snap: f32) -> [[f32; 4]; 4] {
     let hero = hero
         .filter(|m| m.has_blur)
-        .map(|m| AmbientWash::blue_keyed(m.blur, HERO_WASH_W))
-        .unwrap_or_else(|| AmbientWash::blue(HERO_WASH_W));
+        .map(|m| AmbientWash::graphite_keyed(m.blur, HERO_WASH_W))
+        .unwrap_or_else(|| AmbientWash::graphite(HERO_WASH_W));
     let t = snap.clamp(0.0, 1.0);
     // A focused tile with no envelope of its own must not erase the backdrop the page already
     // had. Keep the hero's attenuated wash in that case; a real tile wash still takes over.

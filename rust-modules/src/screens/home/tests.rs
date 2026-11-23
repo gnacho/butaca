@@ -546,18 +546,40 @@ fn blurred(blur: [[f32; 3]; 4]) -> CatalogMovie {
 }
 
 #[test]
-fn an_artless_home_falls_back_to_a_cool_wash() {
+fn netgrip_an_artless_home_falls_back_to_a_graphite_wash() {
     let corners = wash_corners(None, [theme::SURFACE_APP; 4], 1.0);
+    assert_eq!(
+        theme::SURFACE_APP,
+        [
+            0x0a as f32 / 255.0,
+            0x0b as f32 / 255.0,
+            0x0d as f32 / 255.0,
+            1.0,
+        ]
+    );
     assert!(corners.iter().any(|a| *a != corners[0]), "the fallback is a gradient");
     for (i, corner) in corners.iter().enumerate() {
-        assert!(corner[2] > corner[0], "corner {i} must lean cool, got {corner:?}");
+        assert!(corner[3] > 0.99, "corner {i} must stay opaque, got {corner:?}");
     }
+}
+
+#[test]
+fn netgrip_graphite_wash_reuses_the_surface_palette() {
+    let got = AmbientWash::graphite(AmbientWash::GRAPHITE_W);
+    let w = AmbientWash::GRAPHITE_W;
+    let expected = [
+        theme::mix(theme::SURFACE_APP, theme::SURFACE_PANEL, w[0]),
+        theme::mix(theme::SURFACE_APP, theme::CARD_PLACEHOLDER, w[1]),
+        theme::mix(theme::SURFACE_APP, theme::SURFACE_APP, w[2]),
+        theme::mix(theme::SURFACE_APP, theme::CARD_PLACEHOLDER, w[3]),
+    ];
+    assert_eq!(got, expected);
 }
 
 #[test]
 fn an_artless_grid_keeps_the_wash_floored_on_the_hero() {
     let flat = [theme::SURFACE_APP; 4];
-    let blue = AmbientWash::blue(HERO_WASH_W);
+    let blue = AmbientWash::graphite(HERO_WASH_W);
     assert_eq!(wash_corners(None, flat, 0.0), blue, "an empty pool carries the blue ground");
     assert_eq!(wash_corners(Some(&CatalogMovie::default()), flat, 0.0), blue,
         "an item with no envelope leaves the blue ground alone");
@@ -571,7 +593,7 @@ fn an_artless_grid_keeps_the_wash_floored_on_the_hero() {
     // A tile with no envelope contributes no second subject. The hero's attenuated wash therefore
     // survives the whole dive instead of being replaced by the flat app ground at its end.
     for m in [&bright, &blurred([[0.0; 3]; 4])] {
-        let wanted = AmbientWash::blue_keyed(m.blur, HERO_WASH_W);
+        let wanted = AmbientWash::graphite_keyed(m.blur, HERO_WASH_W);
         for sp in [0.0f32, 0.5, 0.9, 0.99, 0.996, 1.0, 1.5] {
             for (corner, expected) in wash_corners(Some(m), flat, sp).iter().zip(wanted) {
                 for (value, want) in corner.iter().zip(expected) {
@@ -591,7 +613,7 @@ fn an_artless_grid_keeps_the_wash_floored_on_the_hero() {
 #[test]
 fn the_grid_end_of_the_dive_is_the_focused_tiles_ground() {
     let hero = blurred([[0.95, 0.1, 0.1]; 4]); // red billboard
-    let tile = AmbientWash::blue_keyed([[0.1, 0.1, 0.95]; 4], PageGround::CARD_W); // blue shelf tile
+    let tile = AmbientWash::graphite_keyed([[0.1, 0.1, 0.95]; 4], PageGround::CARD_W); // blue shelf tile
     // A lerp evaluated at its own endpoints lands one ULP off them, so these are graded to a
     // float epsilon. The failure they guard against is a wash carrying the WRONG SUBJECT'S
     // colours, which is a whole ground apart.
@@ -606,7 +628,7 @@ fn the_grid_end_of_the_dive_is_the_focused_tiles_ground() {
     // at the top the grid end contributes NOTHING…
     same(
         wash_corners(Some(&hero), tile, 0.0),
-        AmbientWash::blue_keyed(hero.blur, HERO_WASH_W),
+        AmbientWash::graphite_keyed(hero.blur, HERO_WASH_W),
         "the billboard is the hero's alone",
     );
     // …and in the grid the hero contributes nothing.
@@ -628,7 +650,7 @@ fn the_grid_end_of_the_dive_is_the_focused_tiles_ground() {
     // on a library with no envelopes at all.
     same(
         wash_corners(Some(&hero), [theme::SURFACE_APP; 4], 1.0),
-        AmbientWash::blue_keyed(hero.blur, HERO_WASH_W),
+        AmbientWash::graphite_keyed(hero.blur, HERO_WASH_W),
         "an artless shelf keeps the hero's own ground",
     );
 
@@ -637,7 +659,7 @@ fn the_grid_end_of_the_dive_is_the_focused_tiles_ground() {
     // place neither subject is the page's.
     for (c, (h, g)) in wash_corners(Some(&hero), tile, 0.5)
         .iter()
-        .zip(AmbientWash::blue_keyed(hero.blur, HERO_WASH_W).iter().zip(tile))
+        .zip(AmbientWash::graphite_keyed(hero.blur, HERO_WASH_W).iter().zip(tile))
     {
         for (i, v) in c.iter().enumerate() {
             let want = h[i] + (g[i] - h[i]) * 0.5;
@@ -661,7 +683,7 @@ fn the_hero_backdrop_stays_visible_but_attenuated_under_shelves() {
 #[test]
 fn an_artless_grid_keeps_the_hero_wash() {
     let hero = blurred([[0.95, 0.1, 0.1]; 4]);
-    let want = AmbientWash::blue_keyed(hero.blur, HERO_WASH_W);
+    let want = AmbientWash::graphite_keyed(hero.blur, HERO_WASH_W);
     for snap in [1.0, 1.5] {
         let got = wash_corners(Some(&hero), [theme::SURFACE_APP; 4], snap);
         for (corner, wanted) in got.iter().zip(want) {

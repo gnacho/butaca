@@ -308,12 +308,12 @@ pub const CONTENT_X: f32 = SIDE + CONTENT_PAD;
 const CHECK_W: f32 = 32.0; // leading check column
 const GAP: f32 = 16.0; // check→label gap
 /// Focused-row pill corner radius. `pub` for the [`ROW_H`] caller shape.
-pub const PILL_RAD: f32 = 18.0;
+pub const PILL_RAD: f32 = theme::CARD_RING_RAD;
 /// Air above and below a card (issue #415): two cards must read as two plates, which a contiguous
 /// band of rows cannot.
 const CARD_GAP: f32 = 10.0;
-/// A card's corner radius, a touch rounder than the capsule since it now has its own edge.
-const CARD_RAD: f32 = 20.0;
+/// Cards and row pills share the compact corner language.
+const CARD_RAD: f32 = theme::CARD_RING_RAD;
 /// The card's own edge weight (idle and focused alike).
 const CARD_RING_W: f32 = 1.0;
 /// The status dot's diameter and its gap to the read-out, the mockup's 9px at this ramp.
@@ -991,9 +991,7 @@ impl TableView {
     }
 
     pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
-        // **The lit row is the chrome's one tone.** It was `ACCENT` — the warm off-white of the old
-        // mockup — which is why every menu's hover still read #FFCEA3 after the palette moved
-        // (the owner's 2026-11-10 pass: "el hover del menú ... debería tener #7373CB").
+        // The lit row uses the shared signal amber on every list and popover.
         self.draw_with_selection_fill(p, frame, measure, theme::CHROME_LIT);
     }
 
@@ -1470,12 +1468,17 @@ mod selection_tone_tests {
     /// still drew #FFCEA3 after the palette moved). The table's public `draw` is the path every
     /// popover takes, so pinning its fill is what keeps them from drifting back.
     #[test]
-    fn the_selected_row_fill_is_the_chrome_tone() {
-        assert_eq!(theme::CHROME_LIT[0], 0x73 as f32 / 255.0);
-        assert_eq!(theme::CHROME_LIT[1], 0x73 as f32 / 255.0);
-        assert_eq!(theme::CHROME_LIT[2], 0xcb as f32 / 255.0);
-        // The old warm plate must not come back as the default fill.
-        assert_ne!(theme::CHROME_LIT, theme::ACCENT);
+    fn netgrip_selected_row_fill_is_the_signal_amber() {
+        assert_eq!(theme::CHROME_LIT[0], 0xff as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT[1], 0x9e as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT[2], 0x40 as f32 / 255.0);
+        assert_eq!(theme::CHROME_LIT, theme::ACCENT);
+    }
+
+    #[test]
+    fn compact_table_corners_share_the_card_radius() {
+        assert_eq!(PILL_RAD, theme::CARD_RING_RAD);
+        assert_eq!(CARD_RAD, theme::CARD_RING_RAD);
     }
 }
 

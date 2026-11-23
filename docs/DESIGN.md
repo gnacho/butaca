@@ -18,6 +18,41 @@ pick and no web typography to tune.
 Distance changes what legible means. `CAPTION` 24 is the stated floor for ordinary content, and
 that number is a couch measurement rather than a taste call.
 
+## The visual world
+
+The current language is the NetGrip translation settled in
+[plans/netgrip-redesign/plan.md](../plans/netgrip-redesign/plan.md): graphite surfaces, one amber
+signal, warm reading ink, compact corners, artwork still leading. The values live in
+`rust-modules/src/ui/theme.rs`; the components live in `widgets.rs`. This section states the world
+the rest of this file assumes.
+
+- **Graphite surfaces.** The flat page ground is `SURFACE_APP` `#0A0B0D`. Panels and the sheet
+  gradient run `SURFACE_PANEL`/`PANEL_TOP` `#17191D` down to `PANEL_BOT`/`CARD_PLACEHOLDER`
+  `#121316`. Artwork carries the light and the ambient wash grades the page around it.
+- **One amber signal.** Focus, selection and the playbar's played fill resolve to `ACCENT` /
+  `CHROME_LIT` `#FF9E40`: one focus colour, never a colour per screen or per rank. The ink over an
+  amber face is the near-black `ACCENT_INK` `#0A0B0D`, so a lit control stays dark on amber rather
+  than returning to white.
+- **A warm reading hierarchy.** Text inks are warm neutrals: `TEXT_PRIMARY`/`TEXT_HEADING` `WARM_0`,
+  `TEXT_SECONDARY` `WARM_500`, `TEXT_TERTIARY` `WARM_700`.
+- **Compact corners and keylines.** `CARD_RING_RAD` 8 is the shared corner: tiles, table row pills
+  (`table::PILL_RAD`), table cards (`table::CARD_RAD`) and the `value_chip` capsule. The chip's idle
+  face is graphite (`SURFACE_PANEL`) with an amber-tinted `HAIRLINE` keyline; focus is flat `ACCENT`
+  under `ACCENT_INK`.
+- **Artwork-led, with an authored fallback.** A page that has artwork keys its ground from it; a
+  page without any draws the authored graphite envelope `ROUTE_GROUND_FALLBACK`.
+
+Two consequences of that last split are easy to mis-state, so they are called out:
+
+- **Settings vs Filmography.** Ordinary Settings draws the authored default ground
+  (`RouteGround::draw_default`, the `ROUTE_GROUND_FALLBACK` envelope). Filmography, which has a
+  rendered host to look at, keys its ground from the frame instead (`RouteGround::draw_host`). Both
+  are in `rust-modules/src/ui/route_screen.rs`.
+- **The playbar accent is the playbar's own, not the rails'.** The player's progress fill and
+  playhead are `ACCENT`, and the focused playhead's glow is derived from it (`with_a(ACCENT, .22)`
+  in `player_hud.rs`). The generic `RAIL_FILL` stays the neutral white it always was, so the scroll
+  rails elsewhere in the app are unchanged.
+
 ## Colour is two layers
 
 From `ui/CLAUDE.md` rule 1, enforced in `rust-modules/src/ui/theme.rs`:
@@ -26,8 +61,8 @@ From `ui/CLAUDE.md` rule 1, enforced in `rust-modules/src/ui/theme.rs`:
   `theme::scrim(a)`. Roles are what call sites use.
 - A **primitive** is a stop on the palette, private to `theme.rs`, added as an exact 8-bit code via
   `rgb8` and only when the palette genuinely has no such shade.
-- Two roles landing on the same stop stay two roles. `ACCENT` and `TEXT_PRIMARY` are both Cool 0,
-  and retuning the focus fill must not restyle every title on screen.
+- Two roles landing on the same stop stay two roles. `TEXT_PRIMARY` and `TEXT_HEADING` are both
+  `WARM_0`, and retuning the reading ink must not restyle every heading on screen.
 - Overlays are `with_a(WHITE, a)` on the measured alpha ramp. A new overlay is a weight, never a new
   hue.
 
