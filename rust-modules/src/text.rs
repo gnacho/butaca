@@ -87,9 +87,10 @@ const DROIDSANS: &CStr = c"/usr/share/fonts/DroidSans.ttf";
 /// `Display` is Fraunces, the wordmark and the Settings display title. Both retain Inter, the
 /// bundled CJK face and the system face as script fallbacks behind them, so the role changes the
 /// FIRST link of the chain and nothing else.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub(crate) enum FontRole {
+    #[default]
     Interface = 0,
     Display = 1,
 }

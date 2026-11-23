@@ -906,9 +906,23 @@ impl Recording {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(tag="kind", deny_unknown_fields)]
 pub enum MetricKey {
-    Width { text: Vec<u8>, sz: i32, bold: bool, role: crate::text::FontRole },
-    Cap { sz: i32, role: crate::text::FontRole },
-    Line { sz: i32, role: crate::text::FontRole },
+    Width {
+        text: Vec<u8>,
+        sz: i32,
+        bold: bool,
+        #[serde(default)]
+        role: crate::text::FontRole,
+    },
+    Cap {
+        sz: i32,
+        #[serde(default)]
+        role: crate::text::FontRole,
+    },
+    Line {
+        sz: i32,
+        #[serde(default)]
+        role: crate::text::FontRole,
+    },
 }
 
 const MAX_METRICS: usize = 65536;
@@ -1764,6 +1778,17 @@ mod tests {
         pending.cap_h(28);
         pending.prepare(Some(&HashMap::new()),None);
         assert!(pending.drain().is_err(),"late attachment must not erase an early query fault");
+    }
+
+    #[test]
+    fn a_pre_role_metric_reads_as_the_interface_face() {
+        let old: MetricKey = serde_json::from_str(
+            r#"{"kind":"Width","text":[65],"sz":28,"bold":true}"#,
+        ).expect("an old recording's measurement remains readable");
+        assert_eq!(old, MetricKey::Width {
+            text: b"A".to_vec(), sz: 28, bold: true,
+            role: crate::text::FontRole::Interface,
+        });
     }
 
     #[test]
