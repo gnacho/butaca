@@ -37,6 +37,15 @@ fn source_cx<'a>(
 }
 
 #[test]
+fn compact_menu_panels_are_520px_except_for_sources() {
+    assert_eq!(panel_width(LibraryMenuKind::Sort), 520.0);
+    assert_eq!(panel_width(LibraryMenuKind::Filter), 520.0);
+    assert_eq!(panel_width(LibraryMenuKind::Type), 520.0);
+    assert_eq!(panel_width(LibraryMenuKind::Genre), 520.0);
+    assert_eq!(panel_width(LibraryMenuKind::Sources), 650.0);
+}
+
+#[test]
 fn menu_anchor_is_frozen_and_a_new_open_uses_the_new_anchor() {
     let _guard = crate::testlock::serial();
     let session = crate::server::session::TempSession::new("menu-anchor-contract");

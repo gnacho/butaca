@@ -2,7 +2,7 @@
 type: planning
 entity: plan
 plan: "NetGrip visual redesign"
-status: completed
+status: active
 created: "2026-11-22"
 updated: "2026-11-23"
 ---
@@ -103,6 +103,7 @@ Home, Detail, Library, Settings and Player share a deliberate graphite-and-amber
 | 1 | Shared language, Home and Detail | Establishes the new world on the two cinematic reference surfaces | Creates a reviewable end-to-end visual baseline before extending it | [Phase](phases/phase-1.md) | completed |
 | 2 | Library, Settings and Player | Extends the proven language to every remaining surface and state | Depends on the Phase 1 shared components and visual review | [Phase](phases/phase-2.md) | completed |
 | 3 | Local finish and publication | Completes capture review, gates, documentation and PR evidence | Verification is meaningful only after all surfaces are integrated | [Phase](phases/phase-3.md) | completed |
+| 4 | Structural menu follow-up | Replaces the old tvOS menu structure with visibly NetGrip-derived navigation, chips and section cards | The first palette-only PR passed CI but the user still saw the old menus | [Phase](phases/phase-4.md) | in_progress |
 
 ## Changelog
 
@@ -119,3 +120,4 @@ Home, Detail, Library, Settings and Player share a deliberate graphite-and-amber
 ### 2026-11-23
 
 - PR #448 opened with `Refs #444`. Host checks, ARM cross-build, Linux simulator, 1080p capture, replay and Windows launcher all passed. Plan completed; no merge, release or TV validation.
+- User feedback showed that palette-only changes still read as the old menus. Phase 4 started for flat navigation, technical chips/popovers and section cards, with regressions before production edits.

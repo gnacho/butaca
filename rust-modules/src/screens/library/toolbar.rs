@@ -84,6 +84,15 @@ impl LibraryScreen {
         Chip { name, value: CString::new(format!(" · {value}")).unwrap_or_default(), note: None }
     }
 
+    pub(super) fn grid_eyebrow(&self) -> String {
+        let (number, kind) = match self.kind {
+            SecKind::Movie => ("02", crate::i18n::msg::browse_kind_movies()),
+            SecKind::Show => ("03", crate::i18n::msg::browse_kind_tv_shows()),
+            SecKind::Video => ("04", crate::i18n::msg::browse_kind_other_videos()),
+        };
+        format!("{number} / {} · {}", kind.to_uppercase(), crate::i18n::msg::browse_library_all().to_uppercase())
+    }
+
     pub(super) fn toolbar_chip_rect<H: LibraryLike>(&self, elem: u32, cx: &Cx<'_, H>, at: At) -> Rect {
         let x = MARGIN_X + self.toolbar_elems().iter().take_while(|&&key| key != elem)
             .map(|&key| self.toolbar_chip(key, cx).width(cx.measure) + 16.0).sum::<f32>();
@@ -91,7 +100,18 @@ impl LibraryScreen {
             At::Drawn => (&self.layout, self.scroll.pos),
             At::SpringTarget => (&self.target_layout, self.scroll_target),
         };
-        Rect::new(x, CONTENT_TOP + layout.grid_block_top() + crate::ui::consts::TITLE_DY + CARD_DY - scroll,
-            self.toolbar_chip(elem, cx).width(cx.measure), 52.0)
+        Rect::new(x, CONTENT_TOP + layout.grid_block_top() + crate::ui::consts::TITLE_DY + CARD_DY - scroll + 4.0,
+            self.toolbar_chip(elem, cx).width(cx.measure), 44.0)
+    }
+}
+
+#[cfg(test)]
+mod technical_toolbar_tests {
+    use super::*;
+
+    #[test]
+    fn library_grid_eyebrow_is_numbered_and_technical() {
+        let screen = LibraryScreen::new(crate::ui::machine::EntryId(0), crate::ui::machine::InstanceId(0), SecKind::Movie);
+        assert_eq!(screen.grid_eyebrow(), "02 / MOVIES · ALL");
     }
 }

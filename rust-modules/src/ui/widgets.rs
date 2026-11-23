@@ -5268,6 +5268,8 @@ pub(crate) enum SelMark {
 /// press and transform handler it writes on `plated`.
 #[derive(Clone, Copy)]
 pub(crate) enum TabGround {
+    /// Flat top navigation: graphite ground, underline selection and rectangular focus keyline.
+    Flat,
     /// **The shared top tab bar**, inside its own track. The pills have no ground of their own and
     /// nothing here scales: the capsule TRAVELLING under a row that encloses it is the whole focus
     /// mark, and a pill that also grew would be two answers to one question. `glass` is whether that
@@ -5389,15 +5391,21 @@ impl TabStrip {
         // The SELECTION capsule never scales, on either strip. It marks which season you are
         // browsing, which is a fact about the page and not about the control under your thumb — and
         // a plate that dipped with the press would say the selection had moved when it had not.
-        cap(
-            &self.sel,
-            sel_col,
-            matches!(ground, TabGround::Tracked { glass: true }).then_some(theme::GLASS_RIM),
-            1.0,
-            // No cast: it marks a PAGE fact (which department you are browsing), not the control
-            // under your thumb, and only the thing focus is actually on lifts off the page.
-            false,
-        );
+        if matches!(ground, TabGround::Flat) {
+            let (x, w) = self.sel.span();
+            let a = self.sel.alpha();
+            if a > 0.004 && w > 0.5 {
+                p.alpha(a).rect(Rect::new(x, top + h - 4.0, w, 4.0), 0.0, theme::ACCENT, theme::ACCENT, 0.0);
+            }
+        } else {
+            cap(
+                &self.sel,
+                sel_col,
+                matches!(ground, TabGround::Tracked { glass: true }).then_some(theme::GLASS_RIM),
+                1.0,
+                false,
+            );
+        }
         // The FOCUS capsule keeps its near-white fill: it is the one thing on this row that must not
         // read as a material, because the material is what everything else here is and focus has to
         // be the exception. On a TRACKED strip it wore two stops of shadow for a while — near-white
@@ -5416,6 +5424,13 @@ impl TabStrip {
         // pill sits bare on artwork exactly the way `linked_heading::Entry` sits bare on the page,
         // and it had the identical defect for the identical reason, so `cast: true` below.
         match ground {
+            TabGround::Flat => {
+                let (x, w) = self.foc.span();
+                let a = self.foc.alpha();
+                if a > 0.004 && w > 0.5 {
+                    p.alpha(a).rring(Rect::new(x, top, w, h), theme::CARD_RING_RAD, 2.0, theme::ACCENT);
+                }
+            }
             TabGround::Plated { pop } => {
                 cap(&self.foc, theme::CHROME_LIT, Some(theme::CARD_SHEEN), pop, true)
             }
@@ -6355,10 +6370,13 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: impl Fn(&std::ffi::CStr) -> f32) -> (Vec<CString>, Vec<f32>) {
     let words: Vec<CString> = labels.iter().map(|label| CString::new(label.as_str()).unwrap_or_default()).collect();
     let widths = words.iter().enumerate().map(|(i, word)| {
-        // a MARK is a square at the control family's height, because a mark is not measured like
-        // a word - the same rule the Search pill has always carried, now keyed on the face.
-        if icons.get(i).copied().flatten().is_some() { TAB_ICON_PILL_W }
-        else { measure(word) + 2.0 * TAB_PILL_PAD }
+        // An icon-only item is square; an icon with a label still measures the label, because the
+        // flat navigation draws both in the same control.
+        if icons.get(i).copied().flatten().is_some() && word.to_bytes().is_empty() {
+            TAB_ICON_PILL_W
+        } else {
+            measure(word) + 2.0 * TAB_PILL_PAD
+        }
     }).collect();
     (words, widths)
 }
@@ -6453,6 +6471,25 @@ fn tab_view_w(widths: &[f32]) -> f32 {
 /// budget is charged against ([`GLASS_TRACK_MAX`]), and what `draw_tab_row` builds its rect from.
 fn tab_track_w(widths: &[f32]) -> f32 {
     tab_view_w(widths) + 2.0 * TAB_TRACK_PAD
+}
+
+/// The flat top navigation spans the safe area while preserving the established bottom at 130.
+fn flat_top_track() -> Rect {
+    Rect::new(
+        crate::ui::consts::MARGIN_X,
+        TOP_BAR_Y - TAB_TRACK_PAD,
+        crate::ui::consts::SCR_W - 2.0 * crate::ui::consts::MARGIN_X,
+        TAB_PILL_H + 2.0 * TAB_TRACK_PAD,
+    )
+}
+
+/// Amber selection and focus stay legible on the flat graphite bar, with no dark-on-amber step.
+fn flat_tab_ink(focus: f32, selected: f32) -> [f32; 4] {
+    theme::mix(
+        theme::TEXT_SECONDARY,
+        theme::ACCENT,
+        selected.max(focus).clamp(0.0, 1.0),
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -6621,7 +6658,7 @@ impl StripRender {
         // The track is the strip's width until the strip outgrows the screen, then it caps and the
         // pills scroll inside it — the track itself never moves.
         let x0 = geometry.clip.x;
-        let track = geometry.track;
+        let track = flat_top_track();
         // The dispatcher owns the whole chrome band as one z layer. This widget has no
         // source-pass or modal exclusion: declaration, source and visible walks share this draw.
         // consumed unconditionally: the publisher writes every frame and the reset is what stops a
@@ -6636,7 +6673,8 @@ impl StripRender {
         // that is about to draw FLAT (a popover is up, `flattabs` is armed, or the strip is wider
         // than `GLASS_TRACK_MAX`) must not pay for a number only the glass path consumes. It did,
         // on every screen wearing the bar, for as long as the app was open.
-        let glass_on = tab_glass_on(track.w);
+        // The flat navigation deliberately retires the tvOS glass capsule.
+        let glass_on = false;
         let groundlog = ground_log_armed();
         // …and FASTER while a polarity is being decided: the decision is gated on two independent
         // readings, so the sampler's rate is the decision's rate, and every frame of it is spent
@@ -6758,11 +6796,13 @@ impl StripRender {
             // was a reported bug twice over: the write clobbered a value the spring owned, so the
             // next frame cut it back, and the hysteresis read the same clobbered value and walked
             // the committed polarity across with it. Both are gone with the polarity itself.
-            p.rect_sheened(
-                track,
-                track.h * 0.5,
-                theme::TAB_TRACK_TOP,
-                theme::TAB_TRACK_BOT,
+            p.rect(track, 0.0, theme::SURFACE_PANEL, theme::SURFACE_PANEL, 0.0);
+            p.rect(
+                Rect::new(track.x, track.y + track.h - 1.0, track.w, 1.0),
+                0.0,
+                theme::HAIRLINE,
+                theme::HAIRLINE,
+                0.0,
             );
         }
         // A strip wider than its track is a bounded panel, not a scrolling document, so this is the
@@ -6777,7 +6817,6 @@ impl StripRender {
         if scrolls {
             p.clip(view);
         }
-        let env = Env::inert();
         // The selection/focus fills, as ONE travelling capsule each (`top_strip`) rather than a
         // boolean fill per pill. They were placed in content space with `tab_pill_x`, so a single
         // translate puts them and the pills on the same ruler; drawn first, because they are the
@@ -6788,7 +6827,7 @@ impl StripRender {
             cp,
             TOP_BAR_Y,
             TAB_PILL_H,
-            TabGround::Tracked { glass: glass_on },
+            TabGround::Flat,
         );
         for i in 0..n {
             // ONE prefix sum per pill: `tab_pill_x` is O(i), and it was walked twice here — once for
@@ -6806,18 +6845,19 @@ impl StripRender {
                 // booleans, or a mid-travel label could darken toward ACCENT_INK with nothing bright
                 // under it (`cap_cover` is the one rule both sides read).
                 let (fm, sm) = self.top_strip.mixes((px, widths[i]));
+                let ink = flat_tab_ink(fm, sm);
                 if let Some(icon) = data.mark(i) {
-                    // A MARK takes its ink from exactly the same `mixed_ink` the labels do - so it
-                    // darkens toward ACCENT_INK under the focus capsule in step with its neighbours
-                    // instead of being a separate colour story. The glyph is centred in the square
-                    // pill the widths were laid out for, at the strip's own icon ratio.
-                    let d = TAB_ICON_D;
-                    let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + (r.h - d) * 0.5, d, d);
-                    crate::ui::icons::draw(p, icon, ir, TabPill::mixed_ink(fm, sm));
+                    let d = 20.0;
+                    let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + 4.0, d, d);
+                    crate::ui::icons::draw(p, icon, ir, ink);
+                    crate::ui::label::Label::new(labels[i].as_ptr(), theme::size::CAPTION, ink)
+                        .h(crate::ui::label::HAlign::Center)
+                        .v(crate::ui::label::VAlign::CapTop)
+                        .draw(p, Rect::new(r.x, r.y + 28.0, r.w, theme::size::CAPTION as f32));
                 } else {
-                    TabPill::new(labels[i].as_ptr(), theme::size::BODY, r)
-                        .mix(fm, sm)
-                        .draw(&env, p);
+                    crate::ui::label::Label::new(labels[i].as_ptr(), theme::size::BODY, ink)
+                        .h(crate::ui::label::HAlign::Center)
+                        .draw(p, r);
                 }
             }
         }

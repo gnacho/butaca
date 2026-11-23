@@ -52,6 +52,8 @@ pub struct Header<'a> {
     pub title: &'a str,
     pub copy: &'a str,
     pub copy_size: std::os::raw::c_int,
+    /// The narrative title rung. Defaults to `HERO`; Settings' compact root uses `TITLE`.
+    pub title_size: std::os::raw::c_int,
     /// **Wear the shared Back disc instead of the `‹ where BACK goes` crumb.** The disc is the
     /// control the detail page, a collection, a person and the player already draw
     /// (`widgets::back_control_frame`), and the owner asked Settings to stop being the one menu
@@ -69,6 +71,7 @@ impl<'a> Header<'a> {
             title,
             copy,
             copy_size: theme::size::LABEL,
+            title_size: theme::size::HERO,
             back_disc: false,
         }
     }
@@ -85,14 +88,20 @@ impl<'a> Header<'a> {
         self
     }
 
+    /// Use a compact title rung and its matching leading, without changing the route layout.
+    pub fn with_title_size(mut self, sz: std::os::raw::c_int) -> Self {
+        self.title_size = sz;
+        self
+    }
+
     /// The one drawing routine, for both loops. `focused` lights the crumb when the D-pad is on it.
     pub fn paint(&self, p: Painter, measure: &dyn Measure, focused: bool) {
         if self.back_disc {
             crate::ui::widgets::draw_back_control(p, focused);
-            self.layout.draw_narrative(p, None, self.title, self.copy, self.copy_size, measure, false);
+            self.layout.draw_narrative_sized(p, None, self.title, self.copy, self.title_size, self.copy_size, measure, false);
             return;
         }
-        self.layout.draw_narrative(p, self.crumb, self.title, self.copy, self.copy_size, measure, focused);
+        self.layout.draw_narrative_sized(p, self.crumb, self.title, self.copy, self.title_size, self.copy_size, measure, focused);
     }
 
     /// The crumb's box - what the pointer clicks and what the keyboard lands on - or `None` when

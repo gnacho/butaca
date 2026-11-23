@@ -37,18 +37,28 @@ impl<'a> ValueChip<'a> {
     }
 }
 
+fn value_chip_face(focused: bool) -> (Option<[f32; 4]>, [f32; 4], [f32; 4], [f32; 4]) {
+    if focused {
+        (
+            Some(theme::with_a(theme::ACCENT, 0.16)),
+            theme::ACCENT,
+            theme::with_a(theme::ACCENT, NOTE_ALPHA),
+            theme::ACCENT,
+        )
+    } else {
+        (None, theme::CONTROL_IDLE_INK, theme::TEXT_SECONDARY, theme::HAIRLINE)
+    }
+}
+
 impl View for ValueChip<'_> {
     fn draw(&self, _: &Env, p: Painter) {
-        let (fill, value_ink, name_ink) = if self.focused {
-            (super::ACCENT, super::ACCENT_INK, theme::with_a(super::ACCENT_INK, NOTE_ALPHA))
-        } else {
-            (theme::SURFACE_PANEL, theme::CONTROL_IDLE_INK, theme::TEXT_SECONDARY)
-        };
+        let (fill, value_ink, name_ink, ring) = value_chip_face(self.focused);
         let r = self.rect;
-        p.rrect(r, theme::CARD_RING_RAD, theme::CARD_RING_RAD, fill);
-        if !self.focused {
-            p.rring(r, theme::CARD_RING_RAD, 1.0, theme::HAIRLINE);
+        let rad = r.h * 0.5;
+        if let Some(fill) = fill {
+            p.rrect(r, rad, rad, fill);
         }
+        p.rring(r, rad, 1.0, ring);
         let y = crate::text::text_vcenter_y(theme::size::LABEL, 1, r.y + r.h * 0.5);
         let mut x = r.x + PAD;
         x += p.text(self.name.as_ptr(), x, y, theme::size::LABEL, name_ink, 0, 0);
@@ -59,7 +69,7 @@ impl View for ValueChip<'_> {
                 theme::with_a(value_ink, NOTE_ALPHA), 0, 0);
         }
         icons::draw(p, self.icon, Rect::new(x + ICON_GAP, r.y + (r.h - ICON_SIZE) * 0.5, ICON_SIZE, ICON_SIZE),
-            if self.focused { super::ACCENT_INK } else { theme::TEXT_SECONDARY });
+            value_ink);
     }
 }
 
@@ -104,12 +114,28 @@ mod tests {
         let idle = draw(false);
         let focused = draw(true);
         let at_rect = |r: &Rect| r.x == rect.x && r.y == rect.y && r.w == rect.w && r.h == rect.h;
+        assert!(idle.iter().all(|(tag, _)| *tag != 2));
+        assert_eq!(focused.iter().filter(|(tag, _)| *tag == 2).count(), 1);
         for draws in [&idle, &focused] {
-            assert_eq!(draws.iter().filter(|(tag, _)| *tag == 2).count(), 1);
-            assert!(draws.iter().filter(|(tag, _)| *tag == 2).all(|(_, r)| at_rect(r)));
+            assert_eq!(draws.iter().filter(|(tag, r)| *tag == 3 && at_rect(r)).count(), 1);
         }
-        assert_eq!(idle.iter().filter(|(tag, r)| *tag == 3 && at_rect(r)).count(), 1);
-        assert!(focused.iter().all(|(tag, _)| *tag != 3));
+    }
+
+    #[test]
+    fn technical_chip_face_is_a_wash_with_amber_ink_not_a_solid_block() {
+        assert_eq!(
+            value_chip_face(false),
+            (None, theme::CONTROL_IDLE_INK, theme::TEXT_SECONDARY, theme::HAIRLINE)
+        );
+        assert_eq!(
+            value_chip_face(true),
+            (
+                Some(theme::with_a(theme::ACCENT, 0.16)),
+                theme::ACCENT,
+                theme::with_a(theme::ACCENT, NOTE_ALPHA),
+                theme::ACCENT,
+            )
+        );
     }
 
     #[test]

@@ -53,6 +53,23 @@ Two consequences of that last split are easy to mis-state, so they are called ou
   in `player_hud.rs`). The generic `RAIL_FILL` stays the neutral white it always was, so the scroll
   rails elsewhere in the app are unchanged.
 
+## Structural navigation
+
+The current menus use structure, not just palette, to separate from the old tvOS presentation:
+
+- The shared top navigation is a flat graphite track inside the safe area. Every destination has an
+  icon above a short uppercase label. Selection is an amber underline and focus is a rectangular
+  amber keyline, not a solid capsule. `TOP_BAR_BOTTOM` and destination identities stay fixed.
+- Library's grid has a numbered technical eyebrow. Filter triggers are 44 px outlined chips with a
+  light focus wash. Sort, filter, type and genre popovers are 520 px wide (Sources remains 650) and
+  use hairlines between rows, with an outlined wash and a short amber spine for focus.
+- Settings' root uses a numbered compact title and one technical card per section. Rows stay inside
+  their section card with hairlines between them. The Back disc, pickers, actions and values are
+  unchanged.
+
+These are variants of `TabStrip`, `ValueChip`, `TableView` and `Header`, not parallel widgets.
+Structural regressions cover the new geometry, label vocabulary and section-card draw counts.
+
 ## Colour is two layers
 
 From `ui/CLAUDE.md` rule 1, enforced in `rust-modules/src/ui/theme.rs`:

@@ -9,22 +9,22 @@ updated: "2026-11-23"
 
 > Tracking [NetGrip visual redesign](plan.md)
 
-## Plan Completed
+## Active Phase: 4 - Structural menu follow-up
 
 ### Phase Context
 
-- **Scope**: [Phase 3](phases/phase-3.md)
-- **Publication**: [Plan](../plan.md#publication)
+- **Scope**: [Phase 4](phases/phase-4.md)
+- **Implementation**: [Phase 4 implementation plan](implementation/phase-4-impl.md)
 - **Latest Handover**: None
-- **Relevant Docs**: `PRODUCT.md`, `docs/DESIGN.md`, `rust-modules/src/ui/CLAUDE.md`, `rust-modules/src/screens/CLAUDE.md`, `rust-modules/src/player/CLAUDE.md`
+- **Relevant Docs**: `PRODUCT.md`, `docs/DESIGN.md`, `rust-modules/src/ui/CLAUDE.md`, `rust-modules/src/screens/CLAUDE.md`
 
 ### Pending
 
-- None
+- [ ] Run full host, hostsim, release-feature and replay verification, then commit and run CI <!-- added: 2026-11-23 -->
 
 ### In Progress
 
-- None
+- [ ] Complete structural verification and publish the follow-up <!-- started: 2026-11-23 -->
 
 ### Completed
 
@@ -55,3 +55,4 @@ updated: "2026-11-23"
 ### 2026-11-23
 
 - PR #448 opened after explicit user authorization. Host, ARM, Linux simulator and Windows CI passed. Plan completed without merge, release or TV validation.
+- User feedback reopened the structural scope: the running build was correct, but the old menu geometry remained. Phase 4 started with flat navigation, technical chips/popovers and section cards.

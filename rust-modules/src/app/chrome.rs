@@ -89,13 +89,9 @@ impl ChromeSnapshot {
             self.labels.clear();
             self.icons.clear();
             self.keys.clear();
-            // **The two global ends of the strip are MARKS, not words** (owner, 2026-11-10): a
-            // house for Inicio and a heart for Favoritos - the same heart the detail hero's
-            // favourite disc wears, so "favourite" is one glyph everywhere. A word is still the
-            // right face for a LIBRARY, whose names are the server's and are not a fixed
-            // vocabulary of icons; and the page a mark leads to still names itself in its own
-            // heading, which is where a word belongs.
-            self.labels.push(String::new());
+            // Every destination publishes an icon above a short uppercase label for the flat
+            // navigation. The keys and order remain unchanged.
+            self.labels.push(crate::i18n::msg::browse_chrome_home().to_uppercase());
             self.icons.push(Some(crate::ui::icons::Icon::Home));
             self.keys.push(STRIP_BASE);
             for i in 0..directory.tab_count() {
@@ -104,18 +100,21 @@ impl ChromeSnapshot {
                     SecKind::Movie => crate::i18n::msg::browse_kind_movies(),
                     SecKind::Show => crate::i18n::msg::browse_kind_tv_shows(),
                     SecKind::Video => crate::i18n::msg::browse_kind_other_videos(),
-                }.into());
-                self.icons.push(None);
+                }.to_uppercase());
+                self.icons.push(Some(match kind {
+                    SecKind::Movie | SecKind::Video => crate::ui::icons::Icon::Episode,
+                    SecKind::Show => crate::ui::icons::Icon::Show,
+                }));
                 self.keys.push(STRIP_BASE + match kind {
                     SecKind::Movie => 1,
                     SecKind::Show => 2,
                     SecKind::Video => 5,
                 });
             }
-            self.labels.push(String::new());
+            self.labels.push(crate::i18n::msg::browse_kind_favorites().to_uppercase());
             self.icons.push(Some(crate::ui::icons::Icon::Heart));
             self.keys.push(STRIP_BASE + 6);
-            self.labels.push(String::new());
+            self.labels.push(crate::i18n::msg::browse_chrome_search().to_uppercase());
             self.icons.push(Some(crate::ui::icons::Icon::Search));
             self.keys.push(STRIP_BASE + 3);
             self.widths = widgets::tab_widths(&self.labels, &self.icons, measure);
@@ -310,12 +309,11 @@ mod tests {
         };
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
         assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3]);
-        assert_eq!(&snapshot.labels[..3], &["", "Movies", "TV Shows"]);
-        assert_eq!(snapshot.icons[0], Some(crate::ui::icons::Icon::Home),
-            "Inicio is a mark");
-        assert_eq!(snapshot.icons[3], Some(crate::ui::icons::Icon::Heart),
-            "Favoritos is a mark");
-        assert_eq!(snapshot.icons[1], None, "a library keeps its own name as a word");
+        assert_eq!(&snapshot.labels[..3], &["HOME", "MOVIES", "TV SHOWS"]);
+        assert_eq!(snapshot.icons[0], Some(crate::ui::icons::Icon::Home));
+        assert_eq!(snapshot.icons[1], Some(crate::ui::icons::Icon::Episode));
+        assert_eq!(snapshot.icons[2], Some(crate::ui::icons::Icon::Show));
+        assert_eq!(snapshot.icons[3], Some(crate::ui::icons::Icon::Heart));
         let mut members = Vec::new();
         snapshot.members(0, None, 0.0, &mut members);
         assert_eq!(members.iter().map(|member| member.elem).collect::<Vec<_>>(),
@@ -330,10 +328,14 @@ mod tests {
         };
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
         assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 5, STRIP_BASE + 6, STRIP_BASE + 3]);
-        assert_eq!(snapshot.labels, ["", "Movies", "TV Shows", "Other Videos", "", ""]);
+        assert_eq!(snapshot.labels, ["HOME", "MOVIES", "TV SHOWS", "OTHER VIDEOS", "FAVORITES", "SEARCH"]);
         assert_eq!(&snapshot.icons[..], &[
-            Some(crate::ui::icons::Icon::Home), None, None, None,
-            Some(crate::ui::icons::Icon::Heart), Some(crate::ui::icons::Icon::Search),
+            Some(crate::ui::icons::Icon::Home),
+            Some(crate::ui::icons::Icon::Episode),
+            Some(crate::ui::icons::Icon::Show),
+            Some(crate::ui::icons::Icon::Episode),
+            Some(crate::ui::icons::Icon::Heart),
+            Some(crate::ui::icons::Icon::Search),
         ]);
         assert_eq!(pill_at(directory.view(), 3), Pill::Section(SecKind::Video));
         assert_eq!(pill_of(directory.view(), Pill::Section(SecKind::Video)), Some(3));

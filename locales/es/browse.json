@@ -32,6 +32,7 @@
   "browse.auth.switch_retry": "No se pudo cambiar de perfil. Inténtalo de nuevo.",
   "browse.auth.timeout": "Se agotó el tiempo para iniciar sesión; inténtalo de nuevo.",
   "browse.chrome.home": "Inicio",
+  "browse.chrome.search": "Buscar",
   "browse.collection.empty": "Nada de esta colección está en tus bibliotecas",
   "browse.collection.items": "Elementos",
   "browse.collection.kind": "Colección",

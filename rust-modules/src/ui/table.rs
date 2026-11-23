@@ -371,6 +371,17 @@ const ACCESSORY_ICON_W: f32 = 26.0;
 /// reserves both runs before measuring the label.
 const VALUE_BOLD: std::os::raw::c_int = 1;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TableFace {
+    Capsule,
+    Technical,
+}
+
+/// A focused technical row: a translucent amber wash, an outline and reading ink on the dark ground.
+fn technical_focus_face(selection_fill: [f32; 4]) -> ([f32; 4], [f32; 4], [f32; 4]) {
+    (theme::with_a(selection_fill, 0.16), selection_fill, theme::TEXT_PRIMARY)
+}
+
 pub struct TableView {
     pub sections: Vec<Section>,
     pub sel: i32, // global index across all sections' rows (headers are not selectable)
@@ -405,6 +416,8 @@ pub struct TableView {
     /// with its own edge, and a focus wash instead of the solid capsule. Off by default — a menu,
     /// a picker and a library list are one list on the panel, which is what a card would break.
     cards: bool,
+    face: TableFace,
+    section_cards: bool,
     /// Semantic ink for section labels. Ambient routes can raise this role for contrast without
     /// replacing the shared table header renderer or changing row/detail hierarchy.
     pub header_ink: [f32; 4],
@@ -420,7 +433,7 @@ impl TableView {
     /// The owner records its row data separately. These fields determine layout, the selected
     /// face and subsequent motion; no text/texture cache or renderer pointer is traversed.
     pub(crate) fn write_motion(&self, c: &mut crate::ui::machine::Canon) {
-        let Self { sections: _, sel, list_focused, compact, tall, cols: _, cards: _, header_ink, hl_top, hl_bot, scroll } = self;
+        let Self { sections: _, sel, list_focused, compact, tall, cols: _, cards: _, face: _, section_cards: _, header_ink, hl_top, hl_bot, scroll } = self;
         c.u32(*sel as u32).bool(*list_focused).bool(*compact).bool(*tall);
         for component in header_ink { c.f32(*component); }
         for spring in [hl_top, hl_bot, scroll] { c.f32(spring.pos).f32(spring.vel); }
@@ -461,6 +474,16 @@ impl TableView {
     /// turn each of them into a stack of unrelated boxes.
     pub fn cards(&mut self, on: bool) {
         self.cards = on;
+    }
+
+    /// Use hairlines, an amber outline and a wash for focused rows instead of a solid capsule.
+    pub fn technical(&mut self, on: bool) {
+        self.face = if on { TableFace::Technical } else { TableFace::Capsule };
+    }
+
+    /// Draw one plate around each section instead of one plate around each row.
+    pub fn section_cards(&mut self, on: bool) {
+        self.section_cards = on;
     }
 
     pub(crate) fn cols(&self) -> usize {
@@ -536,6 +559,8 @@ impl TableView {
             tall: false,
             cols: 1,
             cards: false,
+            face: TableFace::Capsule,
+            section_cards: false,
             header_ink: theme::TEXT_TERTIARY,
             hl_top: Spring::at(0.0),
             hl_bot: Spring::at(0.0),
@@ -990,6 +1015,31 @@ impl TableView {
         self.scroll.pos
     }
 
+    fn section_card_rects(&self, frame: Rect, scroll: f32) -> Vec<Rect> {
+        let mut out = Vec::new();
+        let mut active: Option<(usize, f32, f32)> = None;
+        self.walk(|cy, gi, si, _| {
+            let top = frame.y + TOP_PAD + cy - scroll;
+            let bottom = top + if gi < 0 { HDR_H } else { self.rows_at(gi).height_in(self.tall_row_h()) };
+            match active {
+                None => active = Some((si, top, bottom)),
+                Some((current, start, previous_bottom)) if current == si => {
+                    active = Some((si, start, previous_bottom.max(bottom)));
+                }
+                Some((_, start, previous_bottom)) => {
+                    out.push(Rect::new(frame.x + SIDE, start + 4.0, frame.w - 2.0 * SIDE,
+                        (previous_bottom - start - 8.0).max(1.0)));
+                    active = Some((si, top, bottom));
+                }
+            }
+        });
+        if let Some((_, start, bottom)) = active {
+            out.push(Rect::new(frame.x + SIDE, start + 4.0, frame.w - 2.0 * SIDE,
+                (bottom - start - 8.0).max(1.0)));
+        }
+        out
+    }
+
     pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
         // The lit row uses the shared signal amber on every list and popover.
         self.draw_with_selection_fill(p, frame, measure, theme::CHROME_LIT);
@@ -1027,7 +1077,7 @@ impl TableView {
         let dimc = theme::TEXT_TERTIARY; // was #8a8a8e; unified onto the tertiary grey
         // Ink over the SOLID capsule is near-black; over a card's wash it is the reading ink,
         // which is the whole point of the wash (the label stays legible on a dark plate).
-        let ink = if self.cards {
+        let ink = if self.face == TableFace::Technical || self.cards {
             theme::TEXT_PRIMARY
         } else {
             crate::ui::ACCENT_INK
@@ -1036,6 +1086,12 @@ impl TableView {
         let cell_w = self.cell_width(frame.w);
         let cell_text_w = self.cell_budget_w(frame.w);
 
+        if self.section_cards {
+            for rect in self.section_card_rects(frame, scroll) {
+                p.rrect(rect, CARD_RAD, CARD_RAD, theme::TABLE_CARD_FILL);
+                p.rring(rect, CARD_RAD, CARD_RING_W, theme::HAIRLINE);
+            }
+        }
         // ---- sliding pill (under the rows) — warm off-white; top/bottom edges morph independently ----
         // It follows its GROUP's dim: the focused row of an unreachable server must not be the one
         // bright thing in a panel that is telling you the server is unreachable.
@@ -1056,19 +1112,18 @@ impl TableView {
         // keeps its own), but a settings grid passes the lit tone and the ink stays readable.
         if self.list_focused && pill.y + pill.h > vis_top && pill.y < vis_bot {
             let gp = self.group_painter(p, self.section_of_row(self.sel));
-            if self.cards {
-                // The mockup's focused card: a wash of the chrome's tone plus a ring on the same
-                // tone, riding the SAME springs as the old capsule, so focus still travels between
-                // cells and morphs between row heights. The caller's `selection_fill` decides the
-                // wash's family, and the ink on top stays the reading ink.
+            if self.face == TableFace::Technical {
+                let (fill, ring, _) = technical_focus_face(selection_fill);
+                gp.rrect(pill, PILL_RAD, PILL_RAD, fill);
+                gp.rring(pill, PILL_RAD, 1.0, ring);
+                gp.rect(Rect::new(pill.x, pill.y, 3.0, pill.h), 0.0, ring, ring, 0.0);
+            } else if self.cards {
                 let card = Rect::new(
                     pill.x,
                     pill.y + CARD_GAP * 0.5,
                     pill.w,
                     (pill.h - CARD_GAP).max(1.0),
                 );
-                // The caller's fill is the family's LIT tone; over a card it is worn as a tint,
-                // so the label on top keeps reading ink.
                 gp.rrect(card, CARD_RAD, CARD_RAD, theme::with_a(selection_fill, CARD_FOCUS_A));
                 gp.rring(card, CARD_RAD, CARD_RING_W, theme::TABLE_CARD_RING);
             } else {
@@ -1172,6 +1227,15 @@ impl TableView {
                 );
                 return;
             }
+            if self.face == TableFace::Technical && gi > 0 && self.section_of_row(gi - 1) == si {
+                p.rect(
+                    Rect::new(content_x, sy, (text_right - content_x).max(0.0), 1.0),
+                    0.0,
+                    theme::HAIRLINE,
+                    theme::HAIRLINE,
+                    0.0,
+                );
+            }
             // **The card itself** (issue #415): one plate per cell, inset vertically so
             // consecutive cards leave air between them — a contiguous band is what makes a list
             // read as a form rather than as a grid of objects.
@@ -1194,8 +1258,9 @@ impl TableView {
             };
             let row_bg = if !focused {
                 if cards { theme::TABLE_CARD_FILL } else { PANEL_BG }
+            } else if self.face == TableFace::Technical {
+                theme::mix(PANEL_BG, selection_fill, 0.16)
             } else if cards {
-                // a badge knocked out of the focused card gets the wash's flattened colour
                 theme::mix(theme::TABLE_CARD_FILL, theme::CHROME_LIT, 0.24)
             } else {
                 theme::CHROME_LIT
@@ -1279,7 +1344,11 @@ impl TableView {
             }
             trailing += dot;
             if let Some(v) = row.readout() {
-                let ink = row_value_ink(row, focused, cards);
+                let ink = if focused && self.face == TableFace::Technical {
+                    theme::TEXT_SECONDARY
+                } else {
+                    row_value_ink(row, focused, cards)
+                };
                 // the value gives way before the label (`row_columns`): elided to its column
                 let vsz = theme::size::LABEL;
                 let value_w = self.row_columns(row, cell_text_w, measure).value_w;
@@ -1348,7 +1417,7 @@ impl TableView {
             // while the badges sat on the title's line: right-aligned and row-centred, a chip now
             // occupies the sub-line's band too, and an unbounded sub-line would run under it.
             if !row.detail.is_empty() {
-                let sub = if focused && !cards {
+                let sub = if focused && !cards && self.face != TableFace::Technical {
                     theme::scrim_black(0.6)
                 } else {
                     dimc
@@ -1473,6 +1542,42 @@ mod selection_tone_tests {
         assert_eq!(theme::CHROME_LIT[1], 0x9e as f32 / 255.0);
         assert_eq!(theme::CHROME_LIT[2], 0x40 as f32 / 255.0);
         assert_eq!(theme::CHROME_LIT, theme::ACCENT);
+    }
+
+    #[test]
+    fn technical_focus_uses_wash_outline_and_reading_ink() {
+        assert_eq!(
+            technical_focus_face(theme::CHROME_LIT),
+            (theme::with_a(theme::CHROME_LIT, 0.16), theme::CHROME_LIT, theme::TEXT_PRIMARY)
+        );
+    }
+
+    #[test]
+    fn section_cards_wrap_each_section_once_with_a_focus_outline() {
+        struct Fixed;
+        impl crate::ui::machine::Measure for Fixed {
+            fn width(&self, text: &std::ffi::CStr, _size: i32, _bold: bool) -> f32 {
+                text.to_string_lossy().chars().count() as f32 * 10.0
+            }
+            fn cap_h(&self, size: i32) -> f32 { size as f32 * 0.7 }
+            fn line_h(&self, size: i32) -> f32 { size as f32 * 1.2 }
+        }
+        let mut table = TableView::new();
+        table.technical(true);
+        table.section_cards(true);
+        table.set_sections(
+            vec![
+                Section::new("A").row(Row::new("One")).row(Row::new("Two")),
+                Section::new("B").row(Row::new("Three")),
+            ],
+            0,
+            false,
+        );
+        let draws = crate::ui::draw_census::capture(|| {
+            table.draw(Painter::recording(), Rect::new(0.0, 0.0, 900.0, 600.0), &Fixed);
+        });
+        assert_eq!(draws.iter().filter(|(tag, _)| *tag == 3).count(), 3,
+            "two section outlines plus the focused row outline");
     }
 
     #[test]
