@@ -46,6 +46,33 @@ pub(crate) enum Action {
     /// (`docs/lab-diagnostics.md` §7). Never offered in any other build —
     /// [`crate::lab::menu_row_enabled`] is `false` at compile time.
     SendDiagnostics,
+    /// A configured server row (index into `jellyfin::boot::load_servers`) — sign in against it
+    /// and make it active, the same real action `ServersPage` requests.
+    SwitchServer(usize),
+    /// The *Add by password* row — arm add-server mode on the sign-in form.
+    AddServer,
+}
+
+/// The profile menu's element namespace for the two dynamic row kinds. The four fixed actions keep
+/// their `Action` discriminants (`1..=4`); server rows sit above `SERVER_BASE` so their stable
+/// identity is the server LIST index, not a position the menu might reorder.
+const SERVER_BASE: u32 = 0x100;
+const ADD_ELEM: u32 = 0x1FF;
+
+impl Action {
+    /// The stable element id this action's row is keyed by. Server rows are `SERVER_BASE + index`,
+    /// so the engine's focus and the loop's `JfSwitchServer(index)` name the same index.
+    pub(crate) fn key(self) -> u32 {
+        match self {
+            Action::None => 0,
+            Action::SignIn => 1,
+            Action::SignOut => 2,
+            Action::Settings => 3,
+            Action::SendDiagnostics => 4,
+            Action::SwitchServer(i) => SERVER_BASE + i as u32,
+            Action::AddServer => ADD_ELEM,
+        }
+    }
 }
 
 
@@ -55,15 +82,18 @@ const PANEL_RAD: f32 = 24.0;
 pub(crate) const SHAPE: &str =
     "AccountMenu{header:str,rows:[u32],sel:u32,table:TableViewMotion}";
 
-/// The rows for a Jellyfin account state, in order. Signed out offers sign-in; signed in offers
-/// sign-out. Settings and the compile-time lab action are independent of account state.
-fn rows_for(signed_in: bool) -> &'static [Action] {
+/// The rows for a Jellyfin account state, in order, BELOW the configured-server list. Signed out
+/// offers sign-in; signed in offers sign-out. Settings and the compile-time lab action are
+/// independent of account state.
+fn rows_for(signed_in: bool) -> Vec<Action> {
+    let mut rows = Vec::new();
     match (signed_in, crate::lab::menu_row_enabled()) {
-        (false, false) => &[Action::SignIn, Action::Settings],
-        (false, true) => &[Action::SignIn, Action::Settings, Action::SendDiagnostics],
-        (true, false) => &[Action::SignOut, Action::Settings],
-        (true, true) => &[Action::SignOut, Action::Settings, Action::SendDiagnostics],
+        (false, false) => rows.extend([Action::SignIn, Action::Settings]),
+        (false, true) => rows.extend([Action::SignIn, Action::Settings, Action::SendDiagnostics]),
+        (true, false) => rows.extend([Action::SignOut, Action::Settings]),
+        (true, true) => rows.extend([Action::SignOut, Action::Settings, Action::SendDiagnostics]),
     }
+    rows
 }
 
 /// **What the profile CHIP calls the user** — the unfurled name beside the avatar, and the initial
@@ -96,13 +126,14 @@ fn label(a: Action) -> &'static str {
         Action::SignOut => crate::i18n::msg::settings_account_sign_out(),
         Action::Settings => crate::i18n::msg::settings_account_settings(),
         Action::SendDiagnostics => crate::i18n::msg::settings_account_diagnostics(),
-        Action::None => "",
+        Action::AddServer => crate::i18n::msg::settings_servers_add_password(),
+        Action::None | Action::SwitchServer(_) => "",
     }
 }
 
 /// Rows that leave for another screen carry the drill-in chevron; "Sign out" acts in place.
 fn drills_in(a: Action) -> bool {
-    matches!(a, Action::SignIn | Action::Settings)
+    matches!(a, Action::SignIn | Action::Settings | Action::AddServer)
 }
 
 /// Rows whose action ends something in place. Never where the menu's focus starts
@@ -122,16 +153,14 @@ fn action_at(rows: &[Action], sel: i32) -> Action {
         .unwrap_or(Action::None)
 }
 
-/// Top-left popover, tucked under the profile chip.
-///
-/// `px` is the app's own side margin: it was a literal 80, which sat 16px outside the 5% overscan
-/// frame — and the chip it hangs off is at `MARGIN_X`, so aligning the two is what the design meant
-/// anyway. `py` clears `widgets::TOP_BAR_BOTTOM` (130) by a `space::MD`.
+/// The account sheet as the mockup's centred server dialog: a fixed-width panel centred on the
+/// canvas, clear of the overscan frame. It is a dialog now, not a chip-tucked corner sheet, because
+/// it lists every configured server — the same content `ServersPage` presents full-screen.
 fn panel_rect(table: &TableView) -> Rect {
-    let pw = 440.0f32;
-    let px = crate::ui::consts::MARGIN_X;
-    let py = 154.0f32;
-    let ph = table.measured_height().clamp(120.0, 440.0);
+    let pw = 560.0f32;
+    let px = (crate::surface::LOGICAL_W - pw) * 0.5;
+    let ph = table.measured_height().clamp(120.0, 520.0);
+    let py = (crate::surface::LOGICAL_H - ph) * 0.5;
     Rect::new(px, py, pw, ph)
 }
 
@@ -150,7 +179,10 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, crate::ui::Rect)>) {
 pub(crate) struct AccountMenuScreen {
     entry: EntryId,
     header: String,
-    rows: &'static [Action],
+    rows: Vec<Action>,
+    /// The configured servers, in the same order as the rows (server rows first, one per server).
+    servers: Vec<crate::jellyfin::boot::ServerEntry>,
+    active: usize,
     table: TableView,
     built: bool,
 }
@@ -159,28 +191,58 @@ impl AccountMenuScreen {
     pub(crate) fn new(entry: EntryId) -> Self {
         Self {
             entry,
-            header: crate::i18n::msg::settings_account_title().to_string(),
-            rows: &[],
+            header: crate::i18n::msg::settings_servers_select().to_string(),
+            rows: Vec::new(),
+            servers: Vec::new(),
+            active: 0,
             table: TableView::new(),
             built: false,
         }
     }
 
-    /// Build only from the installed Jellyfin client. An old account session is never an
-    /// account source for this menu.
+    /// Build from the configured servers and the installed Jellyfin client. An old account session
+    /// is never an account source for this menu.
     fn build(&mut self) {
         if self.built {
             return;
         }
         self.built = true;
-        let selected = action_at(self.rows, self.table.sel);
+        let selected = action_at(&self.rows, self.table.sel);
         let name = crate::jellyfin::client().and_then(|client| client.user_name());
         let signed_in = name.is_some();
-        self.rows = rows_for(signed_in);
-        self.header = name.unwrap_or_else(|| crate::i18n::msg::settings_account_title().to_string());
+        // The real server list, exactly as `ServersPage` reads it: one row per configured server
+        // (user + url), the active one checked, then the *Add by password* door.
+        let (servers, active) = match crate::jellyfin::boot::load_servers() {
+            Some(list) => (list.servers, list.active),
+            None => (Vec::new(), 0),
+        };
+        self.servers = servers;
+        self.active = active;
+        self.rows.clear();
+        for i in 0..self.servers.len() {
+            self.rows.push(Action::SwitchServer(i));
+        }
+        self.rows.push(Action::AddServer);
+        // The native additions follow, below the server choices: sign-in/sign-out, Settings, and
+        // the compile-time lab action.
+        self.rows.extend(rows_for(signed_in));
+        self.header = crate::i18n::msg::settings_servers_select().to_string();
+
         let mut sec = Section::new(self.header.clone());
-        for a in self.rows {
-            sec = sec.row(Row::new(label(*a)).chevron(drills_in(*a)).destructive(destructive(*a)));
+        for (i, a) in self.rows.iter().enumerate() {
+            let row = match a {
+                Action::SwitchServer(idx) => {
+                    let server = self.servers.get(*idx);
+                    Row::new(server.map_or_else(String::new, |s| s.user.clone()))
+                        .detail(server.map_or_else(String::new, |s| s.url.clone()))
+                        .checked(*idx == self.active)
+                }
+                _ => Row::new(label(*a).to_string())
+                    .chevron(drills_in(*a))
+                    .destructive(destructive(*a)),
+            };
+            sec = sec.row(row);
+            let _ = i;
         }
         self.table.compact = true;
         match self.rows.iter().position(|a| *a == selected) {
@@ -191,7 +253,7 @@ impl AccountMenuScreen {
     }
 
     fn row_of(&self, elem: u32) -> Option<usize> {
-        self.rows.iter().position(|action| *action as u32 == elem)
+        self.rows.iter().position(|action| action.key() == elem)
     }
 
     fn frame(&self) -> Rect {
@@ -202,15 +264,13 @@ impl AccountMenuScreen {
     /// closing before it returned; what differs per action is the request the loop then performs.
     fn activate<H: AppLike>(&mut self, elem: u32, fx: &mut Effects<'_, H>) {
         let act = self.row_of(elem).map_or(Action::None, |row| self.rows[row]);
-        // The five that need the LOOP: three flip `app.route` after an `auth` call, one presents
-        // another surface (whose `Style` is the application's to choose, not a screen's), and one
-        // reaches `crate::lab`. None of them is expressible as a `Fx::Nav`, which is why they are
-        // requests rather than effects a screen performs itself (§2.1, §14).
         let req = match act {
             Action::SignIn => Some(LoopReq::AccountSignIn),
             Action::SignOut => Some(LoopReq::AccountSignOut),
             Action::Settings => Some(LoopReq::AccountSettings),
             Action::SendDiagnostics => Some(LoopReq::AccountSendDiagnostics),
+            Action::SwitchServer(i) => Some(LoopReq::JfSwitchServer(i)),
+            Action::AddServer => Some(LoopReq::JfAddServer),
             Action::None => None,
         };
         if let Some(req) = req {
@@ -222,7 +282,7 @@ impl AccountMenuScreen {
     /// The action a focus with nowhere better to go lands on — the table's opening row, which is
     /// never a destructive one while any other is on offer.
     fn opening_action(&self) -> Action {
-        action_at(self.rows, self.table.opening_row())
+        action_at(&self.rows, self.table.opening_row())
     }
 
     /// The highlighted row, for the focus probe — a READ of the cursor the engine moves.
@@ -301,7 +361,7 @@ impl<H: AppLike> Focusable<H> for AccountMenuScreen {
         match next.filter(|i| *i < self.rows.len()) {
             Some(i) => Step::Move(FocusKey {
                 entry: self.entry,
-                elem: self.rows[i] as u32,
+                elem: self.rows[i].key(),
             }),
             None => Step::Edge,
         }
@@ -322,14 +382,14 @@ impl<H: AppLike> Focusable<H> for AccountMenuScreen {
         } else {
             FocusKey {
                 entry: self.entry,
-                elem: self.opening_action() as u32,
+                elem: self.opening_action().key(),
             }
         }
     }
     fn seat(&self, _: GroupId, _: Placed, _: &Cx<'_, H>) -> FocusKey<u32> {
         FocusKey {
             entry: self.entry,
-            elem: action_at(self.rows, self.table.sel) as u32,
+            elem: action_at(&self.rows, self.table.sel).key(),
         }
     }
 }
@@ -363,8 +423,8 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
         crate::ui::profile::phase("glass.foreground", || {
             self.table.draw(p, r, measure);
         });
-        for action in self.rows {
-            let elem = *action as u32;
+        for action in &self.rows {
+            let elem = action.key();
             if let Some(placed) = <Self as Focusable<H>>::place(self, &elem, f.cx, At::Drawn) {
                 f.stop(
                     p,
@@ -391,8 +451,8 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
 impl LogicalState for AccountMenuScreen {
     fn write(&self, c: &mut Canon) {
         c.str(&self.header).seq(self.rows.len());
-        for a in self.rows {
-            c.u32(*a as u32);
+        for a in &self.rows {
+            c.u32(a.key());
         }
         c.u32(self.table.sel as u32);
         self.table.write_motion(c);
@@ -407,12 +467,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn signed_out_menu_offers_jellyfin_sign_in_and_settings() {
+    fn signed_out_menu_offers_the_server_dialog_with_sign_in_and_settings() {
         let _guard = crate::testlock::serial();
         crate::jellyfin::uninstall();
         let mut menu = AccountMenuScreen::new(EntryId(0));
         menu.build();
-        assert_eq!(menu.rows, &[Action::SignIn, Action::Settings]);
+        assert_eq!(menu.rows, vec![Action::AddServer, Action::SignIn, Action::Settings]);
         assert!(!menu.rows.contains(&Action::SignOut));
     }
 
@@ -430,8 +490,8 @@ mod tests {
         let mut menu = AccountMenuScreen::new(EntryId(0));
         menu.build();
         assert!(menu.built);
-        assert_eq!(menu.header, "demo");
-        assert_eq!(menu.rows, &[Action::SignOut, Action::Settings]);
+        assert_eq!(menu.header, crate::i18n::msg::settings_servers_select());
+        assert_eq!(menu.rows, vec![Action::AddServer, Action::SignOut, Action::Settings]);
 
         crate::jellyfin::uninstall();
         let _ = server.finish();
@@ -440,13 +500,13 @@ mod tests {
     #[test]
     fn selection_maps_by_the_drawn_row_list() {
         let signed_out = rows_for(false);
-        assert_eq!(action_at(signed_out, 0), Action::SignIn);
-        assert_eq!(action_at(signed_out, 1), Action::Settings);
-        assert_eq!(action_at(signed_out, 2), Action::None);
+        assert_eq!(action_at(&signed_out, 0), Action::SignIn);
+        assert_eq!(action_at(&signed_out, 1), Action::Settings);
+        assert_eq!(action_at(&signed_out, 2), Action::None);
         let signed_in = rows_for(true);
-        assert_eq!(action_at(signed_in, 0), Action::SignOut);
-        assert_eq!(action_at(signed_in, 1), Action::Settings);
-        assert_eq!(action_at(signed_in, 2), Action::None);
-        assert_eq!(action_at(signed_in, -1), Action::None);
+        assert_eq!(action_at(&signed_in, 0), Action::SignOut);
+        assert_eq!(action_at(&signed_in, 1), Action::Settings);
+        assert_eq!(action_at(&signed_in, 2), Action::None);
+        assert_eq!(action_at(&signed_in, -1), Action::None);
     }
 }

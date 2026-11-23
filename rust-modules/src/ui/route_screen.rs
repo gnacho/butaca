@@ -1094,6 +1094,7 @@ impl RouteLayout {
             back_to,
             title,
             theme::size::HERO,
+            crate::text::FontRole::Interface,
             copy,
             copy_size,
             measure,
@@ -1101,8 +1102,8 @@ impl RouteLayout {
         );
     }
 
-    /// [`Self::draw_narrative`] with an explicit title rung. Everything after the title still
-    /// flows from the measured result, so a smaller title tightens the whole narrative band.
+    /// [`Self::draw_narrative`] with an explicit title rung and role. Everything after the title
+    /// still flows from the measured result, so a smaller title tightens the whole narrative band.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_narrative_sized(
         self,
@@ -1110,6 +1111,7 @@ impl RouteLayout {
         back_to: Option<&str>,
         title: &str,
         title_size: std::os::raw::c_int,
+        title_role: crate::text::FontRole,
         copy: &str,
         copy_size: std::os::raw::c_int,
         measure: &dyn Measure,
@@ -1120,7 +1122,10 @@ impl RouteLayout {
             self.draw_crumb(p, self.narrative.y, back_to, measure, focused);
         }
 
-        let title = Self::narrative_title_sized(title, title_size);
+        let mut title = Self::narrative_title_sized(title, title_size);
+        if title_role == crate::text::FontRole::Display {
+            title = title.display();
+        }
         let title_h = title.measure_h(self.narrative.w);
         title.draw(p, Rect::new(self.narrative.x, top, self.narrative.w, title_h));
 

@@ -188,6 +188,32 @@ for a trademark note that applies to some of them.
 
 ### 2.3 Fonts
 
+**Manrope** — `appfont-manrope-400.ttf`, `appfont-manrope-700.ttf`
+Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope), per the font's
+own name table.
+Licence: **SIL Open Font License 1.1** — the full text ships in this package as `OFL.txt`.
+Provenance: downloaded from the Google Fonts repository `google/fonts`, path
+`ofl/manrope/Manrope[wght].ttf` at commit `b31870aff700ab7a1d74fa0c6887d95beb9e0037`.
+*Modified*: static instances at weight 400 / 700, instantiated with fontTools 4.68.0.
+Checksums: `appfont-manrope-400.ttf`
+`d37c889f1aabea0eb8adf78c4ce1682466890cdfda762bf94af8391d10e306bb`; `appfont-manrope-700.ttf`
+`9b5d326141885b08315c77f7251c1d6638f3a0b39fcd380245d9d2e99773055f`.
+The Manrope copyright statement declares **no Reserved Font Name**, so OFL §3 imposes no rename.
+
+**Fraunces** — `appfont-fraunces-600.ttf`, `appfont-fraunces-700.ttf`
+Copyright 2020 The Fraunces Project Authors (https://github.com/undercasetype/Fraunces), per the
+font's own name table.
+Licence: **SIL Open Font License 1.1** — the full text ships in this package as `OFL.txt`.
+Provenance: downloaded from the Google Fonts repository `google/fonts`, path
+`ofl/fraunces/Fraunces[SOFT,WONK,opsz,wght].ttf` at commit
+`ac502d8eff76ef4d9477cdcc8ef7d0c84fde5372`.
+*Modified*: static instances at weight 600 / 700, optical size 72, SOFT 0, WONK 0, instantiated
+with fontTools 4.68.0.
+Checksums: `appfont-fraunces-600.ttf`
+`924063c7375c2d328aca04b6000f7004f924dbc36e64e9cf7dd0ec3433515b7b`; `appfont-fraunces-700.ttf`
+`0d63f1f9df608dc8146a37fc4720937852b3c6f93ab0cca9038bc911ec53194d`.
+The Fraunces copyright statement declares **no Reserved Font Name**, so OFL §3 imposes no rename.
+
 **Inter** — `appfont.ttf`, `appfont-bold.ttf`
 Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter), per the fonts' own
 name table; the licence file shipped with this package states "Copyright 2020". Version
@@ -475,10 +501,10 @@ runtime notices listed below:
 | `licenses/FreeType.txt` | FreeType's elected FTL and contributed module notices (§1.2) |
 | `licenses/HarfBuzz-Old-MIT.txt` | HarfBuzz and its copyright holders (§1.2) |
 
-`OFL.txt` (SIL Open Font License 1.1, for **Inter and Noto Sans CJK KR** — §2.3) already ships at
-the root of this package. Keep it there; do not add a second copy under `licenses/`, and do not
-add a second copy for the second font: the two upstream licence bodies are byte-identical, and
-what differs between them (the copyright statement and the Reserved Font Name) is reproduced in
+`OFL.txt` (SIL Open Font License 1.1, for **Manrope, Fraunces, Inter and Noto Sans CJK KR** — §2.3)
+already ships at the root of this package. Keep it there; do not add a second copy under
+`licenses/`, and do not add a second copy per font: the upstream licence bodies are byte-identical,
+and what differs between them (the copyright statement and the Reserved Font Name) is reproduced in
 §2.3 and carried inside each font's own name table.
 
 No BSD-3-Clause text is required because Apache-2.0 is elected for `moxcms` and `pxfm`. The full GPLv3 text is supplied at the package root as `LICENSE`; `LICENSING.md` states

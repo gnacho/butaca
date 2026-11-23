@@ -83,25 +83,59 @@ use crate::ui::overdraw::{gate, Class};
 /// Last resort only. Reaching this is a DEFECT, not a graceful degradation — see `font_at`.
 const DROIDSANS: &CStr = c"/usr/share/fonts/DroidSans.ttf";
 
+/// Which scoped typeface a text run selects. `Interface` is Manrope, the ordinary product face;
+/// `Display` is Fraunces, the wordmark and the Settings display title. Both retain Inter, the
+/// bundled CJK face and the system face as script fallbacks behind them, so the role changes the
+/// FIRST link of the chain and nothing else.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub(crate) enum FontRole {
+    Interface = 0,
+    Display = 1,
+}
+
+impl FontRole {
+    /// The regular + bold shipped faces for this role, in `pkg/`. Inter (`appfont.ttf` /
+    /// `appfont-bold.ttf`) is the shared script fallback and is addressed separately by
+    /// [`inter_font`], never here.
+    fn files(self) -> (&'static str, &'static str) {
+        match self {
+            FontRole::Interface => ("appfont-manrope-400.ttf", "appfont-manrope-700.ttf"),
+            FontRole::Display => ("appfont-fraunces-600.ttf", "appfont-fraunces-700.ttf"),
+        }
+    }
+}
+
 /// The shipped fonts, addressed relative to wherever the ipk actually got installed
 /// (`crate::paths` explains why this cannot be a literal). Built once; `TTF_OpenFont` wants a
 /// `*const c_char` that outlives the call, so these are leaked `CString`s rather than temporaries.
-fn app_font(bold: bool) -> &'static CStr {
-    static REG: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
-    static BOLD: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
-    let slot = if bold { &BOLD } else { &REG };
-    slot.get_or_init(|| {
-        let name = if bold {
-            "appfont-bold.ttf"
-        } else {
-            "appfont.ttf"
-        };
-        CString::new(
+fn app_font(role: FontRole, bold: bool) -> &'static CStr {
+    let (regular, heavy) = role.files();
+    let name = if bold { heavy } else { regular };
+    app_font_named(name)
+}
+
+/// The retained Inter fallback faces, shared by both roles behind their own primary face.
+fn inter_font(bold: bool) -> &'static CStr {
+    app_font_named(if bold { "appfont-bold.ttf" } else { "appfont.ttf" })
+}
+
+fn app_font_named(name: &'static str) -> &'static CStr {
+    // One leaked CString per distinct shipped face. `name` is always one of the four constants, so
+    // the map stays small and bounded by the face count rather than the call rate.
+    use std::collections::HashMap;
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<HashMap<&'static str, &'static CStr>>> =
+        std::sync::OnceLock::new();
+    let map = NAMES.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut map = map.lock().expect("font name map poisoned");
+    *map.entry(name).or_insert_with(|| {
+        let cs = CString::new(
             crate::paths::in_app_dir(name)
                 .into_os_string()
                 .into_encoded_bytes(),
         )
-        .unwrap_or_else(|_| CString::new("/nonexistent").expect("literal has no NUL"))
+        .unwrap_or_else(|_| CString::new("/nonexistent").expect("literal has no NUL"));
+        Box::leak(Box::new(cs))
     })
 }
 
@@ -217,8 +251,14 @@ static mut TLF_VBOT: c_int = 0;
 /// One opened face per pixel size, per array. 80 covers the whole `theme::size` ladder; the
 /// simulator's supersampled rendering (`surface::render_scale`, up to 4x) rasterises at up to 4x it.
 const FONT_SLOTS: usize = if cfg!(feature = "hostsim") { 320 } else { 80 };
-static mut FONTS: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
-static mut FONTS_B: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
+/// One opened base face per pixel size, per role (Interface=Manrope, Display=Fraunces). 80 covers
+/// the whole `theme::size` ladder; the simulator's supersampled rendering rasterises at up to 4x it.
+static mut FONTS: [[*mut TtfFont; FONT_SLOTS]; 2] = [[std::ptr::null_mut(); FONT_SLOTS]; 2];
+static mut FONTS_B: [[*mut TtfFont; FONT_SLOTS]; 2] = [[std::ptr::null_mut(); FONT_SLOTS]; 2];
+/// The retained Inter fallback face, one per pixel size, per weight. Shared by both roles behind
+/// their own primary face, so a role never opens it until a codepoint actually needs it.
+static mut FONTS_INTER: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
+static mut FONTS_INTER_B: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 static mut TEXT_OK: c_int = 0;
 
 #[derive(Clone, Copy)]
@@ -233,6 +273,10 @@ struct TCacheEntry {
     klen: u32,
     sz: c_int,
     bold: c_int,
+    /// The scoped typeface this entry was rasterised in. Two roles share a size/weight ladder, so
+    /// the role is part of the identity: a Fraunces glyph texture must never be reused for a
+    /// Manrope string, or the wordmark and a heading would trade faces silently.
+    role: FontRole,
     tex: c_uint,
     w: c_int,
     h: c_int,
@@ -256,6 +300,7 @@ impl TCacheEntry {
         klen: 0,
         sz: 0,
         bold: 0,
+        role: FontRole::Interface,
         tex: 0,
         w: 0,
         h: 0,
@@ -266,15 +311,16 @@ impl TCacheEntry {
     };
 }
 
-/// the cache key hash: string bytes + size + bold. The per-frame lookup is a linear scan of all
-/// 160 slots (~80-100 text ops/frame on the detail page); comparing one u64 first makes the
+/// the cache key hash: string bytes + size + bold + role. The per-frame lookup is a linear scan of
+/// all 160 slots (~80-100 text ops/frame on the detail page); comparing one u64 first makes the
 /// non-matching 159 probes a single integer compare instead of a size/bold/byte-key memcmp each.
-fn key_hash(s: &[u8], sz: c_int, bold: c_int) -> u64 {
+fn key_hash(s: &[u8], sz: c_int, bold: c_int, role: FontRole) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut h);
     sz.hash(&mut h);
     bold.hash(&mut h);
+    role.hash(&mut h);
     h.finish()
 }
 // Big enough to hold every distinct string visible in one frame WITHOUT eviction. The detail About
@@ -319,6 +365,7 @@ struct WarmKey {
     bytes: Vec<u8>,
     sz: c_int,
     bold: c_int,
+    role: FontRole,
 }
 
 thread_local! {
@@ -342,14 +389,15 @@ pub(crate) fn capture_text_runs_for_test(f: impl FnOnce()) -> Vec<String> {
 
 /// Does the resident cache already hold this exact key? Unlike `text_tex`, this does not touch the
 /// LRU or the frame occupancy: merely observing a destination must not make it hot.
-fn cache_has(s: &[u8], sz: c_int, bold: c_int) -> bool {
-    let hash = key_hash(s, sz, bold);
+fn cache_has(s: &[u8], sz: c_int, bold: c_int, role: FontRole) -> bool {
+    let hash = key_hash(s, sz, bold, role);
     unsafe {
         (&*addr_of!(TCACHE_A)).iter().any(|e| {
             e.hash == hash
                 && e.tex != 0
                 && e.sz == sz
                 && e.bold == bold
+                && e.role == role
                 && e.klen as usize == s.len()
                 && s.starts_with(entry_key(e))
         })
@@ -359,6 +407,11 @@ fn cache_has(s: &[u8], sz: c_int, bold: c_int) -> bool {
 /// Record a text-cache miss from an off-screen painter. Duplicate draws of the same label collapse
 /// to one job, and the queue is refused before it can consume the cache's 32-slot safety margin.
 pub(crate) fn queue_prewarm(s: *const c_char, sz: c_int, bold: c_int) {
+    queue_prewarm_role(FontRole::Interface, s, sz, bold);
+}
+
+/// [`queue_prewarm`] for a run in an explicit role — the wordmark and the Settings display title.
+pub(crate) fn queue_prewarm_role(role: FontRole, s: *const c_char, sz: c_int, bold: c_int) {
     if s.is_null() {
         return;
     }
@@ -369,19 +422,19 @@ pub(crate) fn queue_prewarm(s: *const c_char, sz: c_int, bold: c_int) {
             runs.push(String::from_utf8_lossy(bytes).into_owned());
         }
     });
-    if bytes.is_empty() || cache_has(bytes, sz, bold) {
+    if bytes.is_empty() || cache_has(bytes, sz, bold, role) {
         return;
     }
     PREWARM.with(|q| {
         let mut q = q.borrow_mut();
-        if q.iter().any(|k| k.sz == sz && k.bold == bold && k.bytes == bytes) {
+        if q.iter().any(|k| k.sz == sz && k.bold == bold && k.role == role && k.bytes == bytes) {
             return;
         }
         let ceiling = TCACHE.saturating_sub(PREWARM_HEADROOM);
         if live_this_frame() as usize + q.len() >= ceiling {
             return;
         }
-        q.push_back(WarmKey { bytes: bytes.to_vec(), sz, bold });
+        q.push_back(WarmKey { bytes: bytes.to_vec(), sz, bold, role });
     });
 }
 
@@ -415,7 +468,7 @@ pub(crate) fn drain_prewarm(budget_us: u64, now: impl FnMut() -> u64) -> usize {
             unsafe {
                 if *addr_of!(TEXT_OK) != 0 {
                     if let Ok(s) = CString::new(job.bytes.clone()) {
-                        let _ = text_tex(&job.bytes, s.as_ptr(), job.sz, job.bold);
+                        let _ = text_tex(job.role, &job.bytes, s.as_ptr(), job.sz, job.bold);
                     }
                 }
             }
@@ -468,32 +521,41 @@ const WARM_GLYPHS: &[u8] =
 /// Glyphs per warming job, so one job stays well inside an idle slice.
 const WARM_CHUNK: usize = 19;
 const WARM_CHUNKS: usize = WARM_GLYPHS.len().div_ceil(WARM_CHUNK);
-const WARM_JOBS: usize = WARM_SIZES.len() * 2 * WARM_CHUNKS;
+/// Two roles (Interface=Manrope, Display=Fraunces), two weights each.
+const WARM_FACES: usize = 4;
+const WARM_JOBS: usize = WARM_SIZES.len() * WARM_FACES * WARM_CHUNKS;
 
 thread_local! {
     /// The next [`warm_job`] to run. Main-render-thread only, like the faces it warms.
     static WARM_NEXT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Job `j`: a face (size, weight) and the glyph run to load its metrics for. The first chunk of a
-/// face also opens it.
-fn warm_job(j: usize) -> (c_int, c_int, &'static [u8]) {
+/// Job `j`: a face (role, size, weight) and the glyph run to load its metrics for. The first chunk
+/// of a face also opens it.
+fn warm_job(j: usize) -> (FontRole, c_int, c_int, &'static [u8]) {
     let chunk = j % WARM_CHUNKS;
     let face = j / WARM_CHUNKS;
+    let role = if face % WARM_FACES < 2 { FontRole::Interface } else { FontRole::Display };
+    let bold = (face % 2) as c_int;
+    let size = WARM_SIZES[face / WARM_FACES];
     let lo = chunk * WARM_CHUNK;
     let hi = (lo + WARM_CHUNK).min(WARM_GLYPHS.len());
-    (WARM_SIZES[face / 2], (face % 2) as c_int, &WARM_GLYPHS[lo..hi])
+    (role, size, bold, &WARM_GLYPHS[lo..hi])
 }
 
 /// Run warming jobs from the cursor until `budget_us` has passed on `now` — at least one, like
 /// [`drain_budgeted`]. Returns how many ran; 0 once every face is warm.
-fn warm_step(budget_us: u64, mut now: impl FnMut() -> u64, mut run: impl FnMut(c_int, c_int, &[u8])) -> usize {
+fn warm_step(
+    budget_us: u64,
+    mut now: impl FnMut() -> u64,
+    mut run: impl FnMut(FontRole, c_int, c_int, &[u8]),
+) -> usize {
     WARM_NEXT.with(|next| {
         let start = now();
         let mut done = 0;
         while next.get() < WARM_JOBS && (done == 0 || now().saturating_sub(start) < budget_us) {
-            let (sz, bold, glyphs) = warm_job(next.get());
-            run(sz, bold, glyphs);
+            let (role, sz, bold, glyphs) = warm_job(next.get());
+            run(role, sz, bold, glyphs);
             next.set(next.get() + 1);
             done += 1;
         }
@@ -512,8 +574,8 @@ pub(crate) fn warm_fonts_idle(budget_us: u64, now: impl FnMut() -> u64) -> usize
     if unsafe { *addr_of!(TEXT_OK) } == 0 {
         return 0;
     }
-    warm_step(budget_us, now, |sz, bold, glyphs| unsafe {
-        let f = font_at(sz, bold);
+    warm_step(budget_us, now, |role, sz, bold, glyphs| unsafe {
+        let f = font_at(role, sz, bold);
         if f.is_null() {
             return;
         }
@@ -613,17 +675,18 @@ fn log_font_fallback_once() {
     });
 }
 
-unsafe fn font_at(sz: c_int, bold: c_int) -> *mut TtfFont {
+unsafe fn font_at(role: FontRole, sz: c_int, bold: c_int) -> *mut TtfFont {
     let sz = sz.clamp(8, FONT_SLOTS as c_int - 1) as usize;
     let arr = if bold != 0 {
         &mut *addr_of_mut!(FONTS_B)
     } else {
         &mut *addr_of_mut!(FONTS)
     };
+    let arr = &mut arr[role as usize];
     if arr[sz].is_null() {
-        arr[sz] = TTF_OpenFont(app_font(bold != 0).as_ptr(), sz as c_int);
+        arr[sz] = TTF_OpenFont(app_font(role, bold != 0).as_ptr(), sz as c_int);
         if arr[sz].is_null() {
-            arr[sz] = TTF_OpenFont(app_font(false).as_ptr(), sz as c_int);
+            arr[sz] = TTF_OpenFont(app_font(role, false).as_ptr(), sz as c_int);
             if arr[sz].is_null() {
                 // DroidSans is NOT an acceptable outcome, and it used to be an invisible one: the
                 // app booted looking plausible while every rung of the theme::size ladder rendered
@@ -651,32 +714,63 @@ unsafe fn font_at(sz: c_int, bold: c_int) -> *mut TtfFont {
     arr[sz]
 }
 
+/// The retained Inter fallback face at a size/weight, opened lazily exactly like the primary faces.
+unsafe fn inter_font_at(sz: c_int, bold: c_int) -> *mut TtfFont {
+    let sz = sz.clamp(8, FONT_SLOTS as c_int - 1) as usize;
+    let arr = if bold != 0 {
+        &mut *addr_of_mut!(FONTS_INTER_B)
+    } else {
+        &mut *addr_of_mut!(FONTS_INTER)
+    };
+    if arr[sz].is_null() {
+        arr[sz] = TTF_OpenFont(inter_font(bold != 0).as_ptr(), sz as c_int);
+        if arr[sz].is_null() {
+            arr[sz] = TTF_OpenFont(inter_font(false).as_ptr(), sz as c_int);
+        }
+        if !arr[sz].is_null() && bold != 0 {
+            TTF_SetFontStyle(arr[sz], TTF_STYLE_BOLD);
+        }
+        if !arr[sz].is_null() {
+            TTF_SetFontHinting(arr[sz], TTF_HINTING_LIGHT);
+        }
+    }
+    arr[sz]
+}
+
 // ------------------------------------------------------------------------------------------------
 // The fallback chain. See this module's header for the design; this half is the mechanism.
 // ------------------------------------------------------------------------------------------------
 
-/// One link of the chain, in priority order. `as usize` indexes [`COV`] and the face arrays, so
-/// the discriminants are load-bearing.
+/// One link of the chain, in priority order. `Base` is role-dependent (Manrope for Interface,
+/// Fraunces for Display); the rest are shared. [`cov_index`] maps `(role, link)` into the flat
+/// [`COV`]/[`COV_TRIED`] arrays, so the discriminants are load-bearing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Link {
-    /// Inter — `appfont.ttf` / `appfont-bold.ttf`. The app's typeface, and the ONLY link with a
-    /// bold companion. 2853 codepoints.
+    /// The role's primary face — Manrope (`appfont-manrope-400/700.ttf`) for Interface, Fraunces
+    /// (`appfont-fraunces-600/700.ttf`) for Display. The ONLY link with a bold companion of its own.
     Base = 0,
+    /// The retained Inter fallback (`appfont.ttf` / `appfont-bold.ttf`), 2853 codepoints, shared
+    /// behind both roles. Reached when the role's face lacks a codepoint the old face had (e.g.
+    /// U+266A ♪, which Manrope does not carry).
+    Inter = 1,
     /// The bundled `appfont-cjk.ttf` (Noto Sans CJK KR, `tools/cut-noto-cjk.py`). 44810
     /// codepoints: all of Hangul, Kana, Han and CJK punctuation. Shipped rather than borrowed
     /// because a submission is graded on whichever firmware the reviewer has.
-    Cjk = 1,
+    Cjk = 2,
     /// The television's own `DroidSansFallback.ttf`. Free insurance behind the bundled face —
     /// measured on webOS 4.10.0 as covering the same Hangul/Han/Kana ground — and it costs
     /// nothing when it is absent, as it is on the desktop simulator.
     ///
     /// **That measurement is ONE television and cannot be generalised.** `tools/fwcompat.py`
     /// grades symbols, not filesystems, so it has nothing to say about a font PATH on the other 13
-    /// releases; we have no images for them. This is precisely why link 2 is bundled rather than
-    /// borrowed — this link is a bonus that may or may not exist, and the code treats it as such.
-    Sys = 2,
+    /// releases; we have no images for them. This is precisely why the bundled link is shipped
+    /// rather than borrowed — this link is a bonus that may or may not exist, and the code treats
+    /// it as such.
+    Sys = 3,
 }
-const CHAIN: [Link; 3] = [Link::Base, Link::Cjk, Link::Sys];
+/// Interface = Manrope -> Inter -> bundled CJK -> system; Display = Fraunces -> Inter -> bundled
+/// CJK -> system. `Base` resolves through the role's own face; the order is fixed.
+const CHAIN: [Link; 4] = [Link::Base, Link::Inter, Link::Cjk, Link::Sys];
 
 /// The bundled fallback face, cut by `tools/cut-noto-cjk.py` and staged beside the binary.
 const CJK_FONT: &str = "appfont-cjk.ttf";
@@ -686,19 +780,31 @@ const DROIDSANS_FALLBACK: &str = "/usr/share/fonts/DroidSansFallback.ttf";
 
 static mut FONTS_CJK: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 static mut FONTS_SYS: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
-/// Per-link coverage, read from the file's cmap on FIRST NEED and never again. `None` after
-/// `COV_TRIED` means the file is absent or unreadable, i.e. the link is empty.
-static mut COV: [Option<crate::fontcov::Coverage>; 3] = [None, None, None];
-static mut COV_TRIED: [bool; 3] = [false; 3];
+/// Per-(role, link) coverage, read from the file's cmap on FIRST NEED and never again. `None`
+/// after `COV_TRIED` means the file is absent or unreadable, i.e. the link is empty.
+static mut COV: [Option<crate::fontcov::Coverage>; 5] = [None, None, None, None, None];
+static mut COV_TRIED: [bool; 5] = [false; 5];
+
+/// The flat [`COV`] index for `(role, link)`. `Base` is the only role-dependent slot; Inter, Cjk
+/// and Sys are shared and keep one slot each.
+fn cov_index(role: FontRole, link: Link) -> usize {
+    match link {
+        Link::Base => role as usize,
+        Link::Inter => 2,
+        Link::Cjk => 3,
+        Link::Sys => 4,
+    }
+}
 
 /// The ONE place a link's file is named — both the coverage read and the `TTF_OpenFont` go
 /// through it, so the two can never disagree about which file a link is.
-fn link_file(link: Link) -> std::path::PathBuf {
+fn link_file(role: FontRole, link: Link) -> std::path::PathBuf {
     match link {
         // Coverage is read from the REGULAR face only. That is sound because `fontcov`'s
         // `bold_face_covers_exactly_what_the_regular_one_does` asserts the two are identical in
         // `make check` — the gate is not decoration here, it is what makes one read enough.
-        Link::Base => crate::paths::in_app_dir("appfont.ttf"),
+        Link::Base => crate::paths::in_app_dir(role.files().0),
+        Link::Inter => crate::paths::in_app_dir("appfont.ttf"),
         Link::Cjk => crate::paths::in_app_dir(CJK_FONT),
         Link::Sys => std::path::PathBuf::from(DROIDSANS_FALLBACK),
     }
@@ -707,21 +813,21 @@ fn link_file(link: Link) -> std::path::PathBuf {
 /// Can `link` draw `cp`? Loads that link's coverage on first ask.
 ///
 /// The BASE link answers `true` for everything when its own cmap cannot be read. That is
-/// deliberate: an install whose `appfont.ttf` is missing has already fallen through to
+/// deliberate: an install whose primary face is missing has already fallen through to
 /// `font_at`'s DroidSans branch and logged loudly, and in that state the useful behaviour is the
 /// pre-chain one — render the whole string in one call with whatever face opened — not to split
 /// every string into runs against a coverage set of nothing.
-unsafe fn link_covers(link: Link, cp: u32) -> bool {
-    let i = link as usize;
+unsafe fn link_covers(role: FontRole, link: Link, cp: u32) -> bool {
+    let i = cov_index(role, link);
     let tried = &mut *addr_of_mut!(COV_TRIED);
     if !tried[i] {
         tried[i] = true;
-        let path = link_file(link);
+        let path = link_file(role, link);
         let cov = &mut *addr_of_mut!(COV);
         match crate::fontcov::of_file(&path) {
             Ok(c) => {
                 log(&format!(
-                    "font chain: {link:?} {} codepoints={}",
+                    "font chain: {role:?} {link:?} {} codepoints={}",
                     path.display(),
                     c.len()
                 ));
@@ -732,7 +838,7 @@ unsafe fn link_covers(link: Link, cp: u32) -> bool {
             // WITH the path, because "why is this still tofu" is otherwise unanswerable from a log
             // and the answer is usually that the file is not where the install put it.
             Err(e) => log(&format!(
-                "font chain: {link:?} unavailable — {}: {e}",
+                "font chain: {role:?} {link:?} unavailable — {}: {e}",
                 path.display()
             )),
         }
@@ -743,38 +849,39 @@ unsafe fn link_covers(link: Link, cp: u32) -> bool {
     }
 }
 
-/// The face for one run. Bold exists only on [`Link::Base`]: the fallback ships at a single
-/// weight, and SDL_ttf's synthetic bold turns dense ideographs into solid blocks at every UI size
-/// (measured — see this module's header). So a bold CJK run renders in the regular fallback face,
-/// which is also what halves the memory below.
+/// The face for one run. Bold exists only on the primary face and on Inter: the script fallbacks
+/// ship at a single weight, and SDL_ttf's synthetic bold turns dense ideographs into solid blocks
+/// at every UI size (measured — see this module's header). So a bold CJK run renders in the regular
+/// fallback face, which is also what halves the memory below.
 ///
 /// **Cost, and why it is lazy.** SDL_ttf 2.0.x opens one `FT_Face` per (file, ptsize) — there is
 /// no size sharing — and this face has 65535 glyphs, so its `loca`, `hmtx` and `cmap` are large.
-/// Host-measured through the same FreeType: **~2.1 MB resident per opened size**, ~17 MB if a
-/// library exercises all eight rungs of `theme::size`. Nothing here opens until a string actually
-/// needs it, so a Latin or Cyrillic library pays exactly zero — and sharing one face between
-/// regular and bold is what keeps the worst case at eight faces rather than sixteen.
-unsafe fn link_font(link: Link, sz: c_int, bold: c_int) -> *mut TtfFont {
-    if link == Link::Base {
-        return font_at(sz, bold);
-    }
-    let sz = sz.clamp(8, FONT_SLOTS as c_int - 1) as usize;
-    let arr = match link {
-        Link::Cjk => &mut *addr_of_mut!(FONTS_CJK),
-        _ => &mut *addr_of_mut!(FONTS_SYS),
-    };
-    if arr[sz].is_null() {
-        let file = link_file(link);
-        let Ok(c) = CString::new(file.into_os_string().into_encoded_bytes()) else {
-            return std::ptr::null_mut();
-        };
-        arr[sz] = TTF_OpenFont(c.as_ptr(), sz as c_int);
-        if !arr[sz].is_null() {
-            // The same light-hinting contract the base face is opened under (see `font_at`).
-            TTF_SetFontHinting(arr[sz], TTF_HINTING_LIGHT);
+/// Host-measured through the same FreeType: **~2.1 MB resident per opened size**. Nothing here
+/// opens until a string actually needs it, so a Latin or Cyrillic library pays exactly zero.
+unsafe fn link_font(role: FontRole, link: Link, sz: c_int, bold: c_int) -> *mut TtfFont {
+    match link {
+        Link::Base => font_at(role, sz, bold),
+        Link::Inter => inter_font_at(sz, bold),
+        Link::Cjk | Link::Sys => {
+            let sz = sz.clamp(8, FONT_SLOTS as c_int - 1) as usize;
+            let arr = match link {
+                Link::Cjk => &mut *addr_of_mut!(FONTS_CJK),
+                _ => &mut *addr_of_mut!(FONTS_SYS),
+            };
+            if arr[sz].is_null() {
+                let file = link_file(role, link);
+                let Ok(c) = CString::new(file.into_os_string().into_encoded_bytes()) else {
+                    return std::ptr::null_mut();
+                };
+                arr[sz] = TTF_OpenFont(c.as_ptr(), sz as c_int);
+                if !arr[sz].is_null() {
+                    // The same light-hinting contract the base face is opened under (see `font_at`).
+                    TTF_SetFontHinting(arr[sz], TTF_HINTING_LIGHT);
+                }
+            }
+            arr[sz]
         }
     }
-    arr[sz]
 }
 
 /// A string's split into single-face runs. Fixed capacity so the common path allocates nothing;
@@ -787,13 +894,13 @@ struct Runs {
 }
 
 /// Split `s` into maximal runs, each drawable by one face. Returns `None` when the WHOLE string
-/// is drawable by [`Link::Base`] — the overwhelmingly common case, and the caller's signal to take
-/// the untouched single-render path.
+/// is drawable by the role's primary face ([`Link::Base`]) — the overwhelmingly common case, and the
+/// caller's signal to take the untouched single-render path.
 ///
 /// The ASCII shortcut is the reason an English library pays nothing at all for this feature: it
-/// returns before any coverage is loaded, so `appfont-cjk.ttf`'s cmap is never even opened.
-unsafe fn split_runs(s: &str) -> Option<Runs> {
-    split_runs_with(s, |link, cp| link_covers(link, cp))
+/// returns before any coverage is loaded, so no fallback cmap is ever opened.
+unsafe fn split_runs(role: FontRole, s: &str) -> Option<Runs> {
+    split_runs_with(s, |link, cp| link_covers(role, link, cp))
 }
 
 /// [`split_runs`] with the coverage oracle passed in — the pure half, so the host suite can drive
@@ -873,12 +980,13 @@ fn buf_ink_v(px: &[u8], w: c_int, h: c_int) -> (c_int, c_int) {
 /// base face), because growing it upward would move every glyph relative to the caller's `y` and
 /// silently mis-align a mixed-script label against its pure-Latin neighbours.
 unsafe fn render_runs(
+    role: FontRole,
     s: &str,
     runs: &Runs,
     sz: c_int,
     bold: c_int,
 ) -> Option<(Vec<u8>, c_int, c_int)> {
-    let base = font_at(sz, bold);
+    let base = font_at(role, sz, bold);
     if base.is_null() {
         return None;
     }
@@ -898,7 +1006,7 @@ unsafe fn render_runs(
     };
     let (mut w, mut below) = (0i32, TTF_FontHeight(base) - base_asc);
     for &(link, from, to) in &runs.at[..runs.n] {
-        let f = link_font(link, sz, bold);
+        let f = link_font(role, link, sz, bold);
         // A link whose face will not open is not fatal: fall back to the base face, which draws
         // the run's .notdef boxes — the pre-chain result for that run only.
         let f = if f.is_null() { base } else { f };
@@ -996,7 +1104,7 @@ pub(crate) fn init_text() {
             glUniform2f(TLF_SCREEN, SCR_W, SCR_H);
             glUniform1i(TLF_TEX, 0);
         }
-        if !font_at(28, 0).is_null() {
+        if !font_at(FontRole::Interface, 28, 0).is_null() {
             TEXT_OK = 1;
         }
         // read through a raw pointer, not `&TEXT_OK`: `format!` takes its arguments BY REFERENCE,
@@ -1047,12 +1155,13 @@ unsafe fn surface_ink_v(surf: *const SdlSurface) -> (c_int, c_int) {
 
 /// returns (GL texture id (0 on failure), w, h, ink_top, ink_bottom)
 unsafe fn text_tex(
+    role: FontRole,
     s_bytes: &[u8],
     s_c: *const c_char,
     sz: c_int,
     bold: c_int,
 ) -> (c_uint, c_int, c_int, c_int, c_int) {
-    let hash = key_hash(s_bytes, sz, bold);
+    let hash = key_hash(s_bytes, sz, bold, role);
     {
         let cache = &mut *addr_of_mut!(TCACHE_A);
         for e in cache.iter_mut() {
@@ -1062,6 +1171,7 @@ unsafe fn text_tex(
                 && e.tex != 0
                 && e.sz == sz
                 && e.bold == bold
+                && e.role == role
                 && e.klen as usize == s_bytes.len()
                 && s_bytes.starts_with(entry_key(e))
             {
@@ -1072,22 +1182,22 @@ unsafe fn text_tex(
             }
         }
     }
-    // A string the base face cannot draw on its own goes through the run compositor; everything
-    // else — every ASCII string, and every string Inter fully covers — takes the single
+    // A string the role's face cannot draw on its own goes through the run compositor; everything
+    // else — every ASCII string, and every string the primary face fully covers — takes the single
     // `TTF_RenderUTF8_Blended` it always did, byte for byte. A compositor FAILURE also falls
-    // through to that path, which renders the base face's .notdef boxes: the pre-chain result,
+    // through to that path, which renders the primary face's .notdef boxes: the pre-chain result,
     // which is a worse picture but never a missing one.
     let composed = std::str::from_utf8(s_bytes)
         .ok()
-        .and_then(|st| Some((st, split_runs(st)?)))
-        .and_then(|(st, runs)| render_runs(st, &runs, sz, bold));
+        .and_then(|st| Some((st, split_runs(role, st)?)))
+        .and_then(|(st, runs)| render_runs(role, st, &runs, sz, bold));
     if let Some((px, w, h)) = composed {
         let (ink_t, ink_b) = buf_ink_v(&px, w, h);
         let tex = crate::gfx::upload_rgba(0, w, h, px.as_ptr());
-        return cache_store(s_bytes, hash, sz, bold, tex, w, h, ink_t, ink_b);
+        return cache_store(s_bytes, hash, sz, bold, role, tex, w, h, ink_t, ink_b);
     }
 
-    let f = font_at(sz, bold);
+    let f = font_at(role, sz, bold);
     if f.is_null() {
         return (0, 0, 0, 0, 0);
     }
@@ -1130,7 +1240,7 @@ unsafe fn text_tex(
         crate::gfx::upload_rgba(0, sw, sh, packed.as_ptr())
     };
     SDL_FreeSurface(surf);
-    cache_store(s_bytes, hash, sz, bold, tex, sw, sh, ink_t, ink_b)
+    cache_store(s_bytes, hash, sz, bold, role, tex, sw, sh, ink_t, ink_b)
 }
 
 /// **Which slot a new entry takes**, and the whole of the eviction policy — pure, over the array,
@@ -1181,6 +1291,7 @@ unsafe fn cache_store(
     hash: u64,
     sz: c_int,
     bold: c_int,
+    role: FontRole,
     tex: c_uint,
     sw: c_int,
     sh: c_int,
@@ -1209,6 +1320,7 @@ unsafe fn cache_store(
     }
     cache[slot].sz = sz;
     cache[slot].bold = bold;
+    cache[slot].role = role;
     cache[slot].tex = tex;
     cache[slot].w = sw;
     cache[slot].h = sh;
@@ -1252,13 +1364,23 @@ unsafe fn cache_store(
 /// `TTF_SizeUTF8`, decided before any coverage is loaded. Failed or partial measurements and the
 /// uninitialized-font estimate are never cached.
 pub(crate) fn text_width(s: *const c_char, sz: c_int, bold: c_int) -> f32 {
-    text_bounds(s,sz,bold).0
+    text_width_role(FontRole::Interface, s, sz, bold)
+}
+
+/// [`text_width`] in an explicit role — the wordmark and the Settings display title.
+pub(crate) fn text_width_role(role: FontRole, s: *const c_char, sz: c_int, bold: c_int) -> f32 {
+    text_bounds_role(role, s, sz, bold).0
 }
 
 /// CPU-only layout bounds, using the same baseline/descent composition as `render_runs`.
 /// A declaration pass needs the height too: an assumed em multiple can miss a linked face.
 /// This does not render or upload a glyph and does not spend the text-prewarm budget.
-pub(crate) fn text_bounds(s: *const c_char, sz: c_int, bold: c_int) -> (f32,f32) {
+pub(crate) fn text_bounds(s: *const c_char, sz: c_int, bold: c_int) -> (f32, f32) {
+    text_bounds_role(FontRole::Interface, s, sz, bold)
+}
+
+/// [`text_bounds`] in an explicit role.
+pub(crate) fn text_bounds_role(role: FontRole, s: *const c_char, sz: c_int, bold: c_int) -> (f32, f32) {
     unsafe {
         if s.is_null() || *s == 0 {
             return (0.0, 0.0);
@@ -1272,27 +1394,27 @@ pub(crate) fn text_bounds(s: *const c_char, sz: c_int, bold: c_int) -> (f32,f32)
             return (unmeasured_width(CStr::from_ptr(s).to_bytes().len(), sz), sz as f32);
         }
         let text = CStr::from_ptr(s);
-        MEASURED_BOUNDS.with(|cache| cache.borrow_mut().bounds(text, sz, bold,
-            || measure_native_bounds(text, sz, bold)))
+        MEASURED_BOUNDS.with(|cache| cache.borrow_mut().bounds(text, sz, bold, role,
+            || measure_native_bounds(role, text, sz, bold)))
     }
 }
 
 /// The second result says every run was measured successfully, including mixed-script labels.
-fn measure_native_bounds(s: &CStr, sz: c_int, bold: c_int) -> ((f32, f32), bool) {
+fn measure_native_bounds(role: FontRole, s: &CStr, sz: c_int, bold: c_int) -> ((f32, f32), bool) {
     unsafe {
         let bytes = s.to_bytes();
         if let Some((st, runs)) = std::str::from_utf8(bytes)
             .ok()
-            .and_then(|st| Some((st, split_runs(st)?)))
+            .and_then(|st| Some((st, split_runs(role, st)?)))
         {
             let mut total = 0.0f32;
-            let base=font_at(sz,bold);
-            let ascent=if base.is_null() {0} else {TTF_FontAscent(base)};
-            let mut below=if base.is_null() {0} else {TTF_FontHeight(base)-ascent};
+            let base = font_at(role, sz, bold);
+            let ascent = if base.is_null() { 0 } else { TTF_FontAscent(base) };
+            let mut below = if base.is_null() { 0 } else { TTF_FontHeight(base) - ascent };
             let mut complete = !base.is_null();
             for &(link, from, to) in &runs.at[..runs.n] {
-                let f = link_font(link, sz, bold);
-                let f = if f.is_null() { font_at(sz, bold) } else { f };
+                let f = link_font(role, link, sz, bold);
+                let f = if f.is_null() { font_at(role, sz, bold) } else { f };
                 let Ok(c) = CString::new(&st[from..to]) else {
                     complete = false;
                     continue;
@@ -1307,7 +1429,7 @@ fn measure_native_bounds(s: &CStr, sz: c_int, bold: c_int) -> ((f32, f32), bool)
             }
             return ((total, if base.is_null() { 0.0 } else { (ascent + below) as f32 }), complete);
         }
-        let f = font_at(sz, bold);
+        let f = font_at(role, sz, bold);
         if f.is_null() {
             return ((0.0, 0.0), false);
         }
@@ -1355,11 +1477,22 @@ impl crate::ui::machine::Measure for TtfMeasure {
         debug_assert!(ok, "TtfMeasure::width before init_text: no font is loaded");
         text_width(s.as_ptr(), sz, bold as c_int)
     }
+    fn width_role(&self, s: &CStr, sz: c_int, bold: bool, role: FontRole) -> f32 {
+        let ok = unsafe { std::ptr::addr_of!(TEXT_OK).read() } != 0;
+        debug_assert!(ok, "TtfMeasure::width_role before init_text: no font is loaded");
+        text_width_role(role, s.as_ptr(), sz, bold as c_int)
+    }
     fn cap_h(&self, sz: c_int) -> f32 {
         cap_h(sz, 0)
     }
+    fn cap_h_role(&self, sz: c_int, role: FontRole) -> f32 {
+        cap_h_role(role, sz, 0)
+    }
     fn line_h(&self, sz: c_int) -> f32 {
         text_height(sz, 0)
+    }
+    fn line_h_role(&self, sz: c_int, role: FontRole) -> f32 {
+        text_height_role(role, sz, 0)
     }
     fn live_font(&self) -> bool {
         true
@@ -1375,7 +1508,7 @@ struct MeasuredBounds {
 
 struct MeasuredBound {
     text: Box<[u8]>,
-    spec: (c_int, c_int),
+    spec: (c_int, c_int, FontRole),
     bounds: (f32, f32),
 }
 
@@ -1385,10 +1518,10 @@ thread_local! {
 }
 
 impl MeasuredBounds {
-    fn bounds(&mut self, text: &CStr, sz: c_int, bold: c_int,
+    fn bounds(&mut self, text: &CStr, sz: c_int, bold: c_int, role: FontRole,
         compute: impl FnOnce() -> ((f32, f32), bool)) -> (f32, f32) {
         let bytes = text.to_bytes();
-        let spec = (sz, bold);
+        let spec = (sz, bold, role);
         let mut hash = DefaultHasher::new();
         (bytes, spec).hash(&mut hash);
         let key = hash.finish();
@@ -1408,7 +1541,7 @@ impl MeasuredBounds {
     #[cfg(test)]
     fn width(&mut self, text: &CStr, sz: c_int, bold: c_int,
         compute: impl FnOnce() -> (f32, bool)) -> f32 {
-        self.bounds(text, sz, bold, || {
+        self.bounds(text, sz, bold, FontRole::Interface, || {
             let (width, complete) = compute();
             ((width, 0.0), complete)
         }).0
@@ -1423,11 +1556,12 @@ mod measured_width_tests {
     #[test]
     fn native_bounds_cache_keeps_mixed_font_height_and_retries_partial_runs() {
         let mut cache = MeasuredBounds::default();
-        assert_eq!(cache.bounds(c"A linked face", 26, 0, || ((120.0, 35.0), false)), (120.0, 35.0));
+        let i = FontRole::Interface;
+        assert_eq!(cache.bounds(c"A linked face", 26, 0, i, || ((120.0, 35.0), false)), (120.0, 35.0));
         assert!(cache.entries.is_empty(), "a missing linked run cannot become a permanent bound");
-        assert_eq!(cache.bounds(c"A linked face", 26, 0, || ((180.0, 41.0), true)), (180.0, 41.0));
-        assert_eq!(cache.bounds(c"A linked face", 26, 0, || panic!("cached bounds")), (180.0, 41.0));
-        assert_eq!(cache.bounds(c"A linked face", 26, 1, || ((183.0, 43.0), true)), (183.0, 43.0));
+        assert_eq!(cache.bounds(c"A linked face", 26, 0, i, || ((180.0, 41.0), true)), (180.0, 41.0));
+        assert_eq!(cache.bounds(c"A linked face", 26, 0, i, || panic!("cached bounds")), (180.0, 41.0));
+        assert_eq!(cache.bounds(c"A linked face", 26, 1, i, || ((183.0, 43.0), true)), (183.0, 43.0));
     }
 
     #[test]
@@ -1744,11 +1878,16 @@ mod supplied_elide_tests {
 /// rendered height in px of a line of text at `sz`/`bold` — the font's line height, independent of
 /// the string. Used to vertically center a glyph on a text line (e.g. the transport clock).
 pub(crate) fn text_height(sz: c_int, bold: c_int) -> f32 {
+    text_height_role(FontRole::Interface, sz, bold)
+}
+
+/// [`text_height`] in an explicit role.
+pub(crate) fn text_height_role(role: FontRole, sz: c_int, bold: c_int) -> f32 {
     unsafe {
         if TEXT_OK == 0 {
             return sz as f32;
         }
-        let (_tex, _w, h, _it, _ib) = text_tex(b"0", c"0".as_ptr(), sz, bold);
+        let (_tex, _w, h, _it, _ib) = text_tex(role, b"0", c"0".as_ptr(), sz, bold);
         h as f32
     }
 }
@@ -1759,11 +1898,16 @@ pub(crate) fn text_height(sz: c_int, bold: c_int) -> f32 {
 /// (g j y p q) and ascenders, so every label of a given size aligns the same way. Falls back to a
 /// rough em band without TTF.
 pub(crate) fn text_cap_band(sz: c_int, bold: c_int) -> (f32, f32) {
+    text_cap_band_role(FontRole::Interface, sz, bold)
+}
+
+/// [`text_cap_band`] in an explicit role.
+pub(crate) fn text_cap_band_role(role: FontRole, sz: c_int, bold: c_int) -> (f32, f32) {
     unsafe {
         if TEXT_OK == 0 {
             return (sz as f32 * 0.15, sz as f32 * 0.9);
         }
-        let (_t, _w, _h, it, ib) = text_tex(b"H", c"H".as_ptr(), sz, bold);
+        let (_t, _w, _h, it, ib) = text_tex(role, b"H", c"H".as_ptr(), sz, bold);
         (it as f32, ib as f32)
     }
 }
@@ -1773,7 +1917,12 @@ pub(crate) fn text_cap_band(sz: c_int, bold: c_int) -> (f32, f32) {
 /// docs for the rule). The one place this subtraction lives, because every screen that stacks text
 /// needs it and three of them had written it out by hand.
 pub(crate) fn cap_h(sz: c_int, bold: c_int) -> f32 {
-    let (top, base) = text_cap_band(sz, bold);
+    cap_h_role(FontRole::Interface, sz, bold)
+}
+
+/// [`cap_h`] in an explicit role.
+pub(crate) fn cap_h_role(role: FontRole, sz: c_int, bold: c_int) -> f32 {
+    let (top, base) = text_cap_band_role(role, sz, bold);
     base - top
 }
 
@@ -1782,7 +1931,12 @@ pub(crate) fn cap_h(sz: c_int, bold: c_int) -> f32 {
 /// descenders ("From Beginning") and one without ("Go to Movie") land identically — descenders hang
 /// below the optical centre instead of dragging the whole line up.
 pub(crate) fn text_vcenter_y(sz: c_int, bold: c_int, cy: f32) -> f32 {
-    let (ct, cb) = text_cap_band(sz, bold);
+    text_vcenter_y_role(FontRole::Interface, sz, bold, cy)
+}
+
+/// [`text_vcenter_y`] in an explicit role.
+pub(crate) fn text_vcenter_y_role(role: FontRole, sz: c_int, bold: c_int, cy: f32) -> f32 {
+    let (ct, cb) = text_cap_band_role(role, sz, bold);
     cy - (ct + cb) * 0.5
 }
 
@@ -1820,6 +1974,7 @@ pub(crate) fn baseline_y(sz: c_int, bold: c_int, on_sz: c_int, on_bold: c_int, o
 /// every width and metric the layout reads is still the logical one.
 #[inline]
 unsafe fn drawn_tex(
+    role: FontRole,
     s_bytes: &[u8],
     s: *const c_char,
     sz: c_int,
@@ -1830,19 +1985,21 @@ unsafe fn drawn_tex(
     {
         let n = crate::surface::render_scale();
         if n > 1 {
-            let (t, w, h, _, _) = text_tex(s_bytes, s, sz * n, bold);
+            let (t, w, h, _, _) = text_tex(role, s_bytes, s, sz * n, bold);
             if t != 0 {
                 return (t, w as f32 / n as f32, h as f32 / n as f32);
             }
         }
     }
     #[cfg(not(feature = "hostsim"))]
-    let _ = (s_bytes, s, sz, bold);
+    let _ = (role, s_bytes, s, sz, bold);
     (logical.0, logical.1 as f32, logical.2 as f32)
 }
 
 /// align: 0 left, 1 center, 2 right (x is the anchor edge). returns text width.
-pub(crate) fn draw_text(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_text_role(
+    role: FontRole,
     s: *const c_char,
     x: f32,
     y: f32,
@@ -1860,11 +2017,11 @@ pub(crate) fn draw_text(
         if s_bytes.is_empty() {
             return 0.0;
         }
-        let (tex, w, h, _it, _ib) = text_tex(s_bytes, s, sz, bold);
+        let (tex, w, h, _it, _ib) = text_tex(role, s_bytes, s, sz, bold);
         if tex == 0 {
             return 0.0;
         }
-        let (tex, dw, dh) = drawn_tex(s_bytes, s, sz, bold, (tex, w, h));
+        let (tex, dw, dh) = drawn_tex(role, s_bytes, s, sz, bold, (tex, w, h));
         let dx = match align {
             1 => x - dw * 0.5,
             2 => x - dw,
@@ -1916,9 +2073,27 @@ pub(crate) fn draw_text_fade(
     vfade_top: Option<(f32, f32)>,
     vfade_bot: Option<(f32, f32)>,
 ) -> f32 {
+    draw_text_fade_role(FontRole::Interface, s, x, y, sz, col, align, bold, hfade, vfade_top, vfade_bot)
+}
+
+/// [`draw_text_fade`] in an explicit role.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_text_fade_role(
+    role: FontRole,
+    s: *const c_char,
+    x: f32,
+    y: f32,
+    sz: c_int,
+    col: *const f32,
+    align: c_int,
+    bold: c_int,
+    hfade: Option<(f32, f32)>,
+    vfade_top: Option<(f32, f32)>,
+    vfade_bot: Option<(f32, f32)>,
+) -> f32 {
     unsafe {
         if TPROGF == 0 {
-            return draw_text(s, x, y, sz, col, align, bold);
+            return draw_text_role(role, s, x, y, sz, col, align, bold);
         }
         if TEXT_OK == 0 || s.is_null() {
             return 0.0;
@@ -1928,11 +2103,11 @@ pub(crate) fn draw_text_fade(
         if s_bytes.is_empty() {
             return 0.0;
         }
-        let (tex, w, h, _it, _ib) = text_tex(s_bytes, s, sz, bold);
+        let (tex, w, h, _it, _ib) = text_tex(role, s_bytes, s, sz, bold);
         if tex == 0 {
             return 0.0;
         }
-        let (tex, dw, dh) = drawn_tex(s_bytes, s, sz, bold, (tex, w, h));
+        let (tex, dw, dh) = drawn_tex(role, s_bytes, s, sz, bold, (tex, w, h));
         let dx = match align {
             1 => x - dw * 0.5,
             2 => x - dw,
@@ -1986,11 +2161,15 @@ mod tests {
     use super::*;
     use crate::fontcov;
 
-    /// The real shipped cmaps, parsed once for the whole test binary (see `fontcov::shipped`).
-    /// `Link::Sys` is `None` on purpose: the television's DroidSansFallback does not exist on a
-    /// build host, so this is also the "the chain is SHORT" configuration under test.
-    fn chain() -> [Option<&'static fontcov::Coverage>; 3] {
+    /// The real shipped cmaps, parsed once for the whole test binary (see `fontcov::shipped`),
+    /// indexed by [`cov_index`] for the Interface role's chain: Manrope (0) -> Inter (2) ->
+    /// bundled CJK (3). Slot 1 (the Display base) is `None` because no Interface split asks it, and
+    /// slot 4 (`Link::Sys`) is `None` on purpose: the television's DroidSansFallback does not exist
+    /// on a build host, so this is also the "the chain is SHORT" configuration under test.
+    fn chain() -> [Option<&'static fontcov::Coverage>; 5] {
         [
+            fontcov::shipped("appfont-manrope-400.ttf").as_ref().ok(),
+            None,
             fontcov::shipped("appfont.ttf").as_ref().ok(),
             fontcov::shipped("appfont-cjk.ttf").as_ref().ok(),
             None,
@@ -2000,7 +2179,7 @@ mod tests {
     fn split(s: &str) -> Option<Runs> {
         let cov = chain();
         split_runs_with(s, |link, cp| {
-            cov[link as usize].is_some_and(|c| c.contains(cp))
+            cov[cov_index(FontRole::Interface, link)].is_some_and(|c| c.contains(cp))
         })
     }
 
@@ -2036,24 +2215,38 @@ mod tests {
         assert_eq!(joined, s, "the runs do not reassemble the string");
     }
 
-    /// Anything Inter fully covers must return `None`, which is the caller's signal to take the
+    /// Anything Manrope fully covers must return `None`, which is the caller's signal to take the
     /// single-render path byte for byte. This is the performance contract of the whole feature:
-    /// an English or Russian library pays nothing, and never even opens the 21 MB fallback.
+    /// an English or Russian library pays nothing, and never even opens a fallback cmap.
     #[test]
     fn strings_the_base_face_covers_take_the_untouched_fast_path() {
         for s in [
-            "Breaking Bad",                     // pure ASCII — decided before any cmap is read
-            "Amélie",                           // Latin-1
-            "Ирония судьбы",                    // Cyrillic
-            "Ο Θίασος",                         // Greek
-            "\u{266A} It seems today \u{266B}", // the ♪ regression: Inter carries U+2669..U+266C
-            "S1 · E1 — 47 min",                 // the punctuation the UI composes by hand
+            "Breaking Bad",     // pure ASCII — decided before any cmap is read
+            "Amélie",           // Latin-1
+            "Ирония судьбы",    // Cyrillic
+            "Ο Θίασος",         // Greek
+            "S1 · E1 — 47 min", // the punctuation the UI composes by hand
         ] {
             assert!(
                 split(s).is_none(),
                 "{s:?} should not need the fallback chain"
             );
         }
+    }
+
+    /// Manrope does not carry the music notes U+2669..U+266C that Inter does, so a title with a
+    /// ♪ leaves the primary face and lands on the retained Inter fallback — still rendered, in the
+    /// previous typeface, which is exactly what the fallback link is for.
+    #[test]
+    fn a_music_note_falls_back_to_the_retained_inter_face() {
+        assert_eq!(
+            runs_of("\u{266A} It seems today \u{266B}"),
+            vec![
+                (Link::Inter, "\u{266A}"),
+                (Link::Base, " It seems today "),
+                (Link::Inter, "\u{266B}")
+            ],
+        );
     }
 
     #[test]
@@ -2183,25 +2376,27 @@ mod cache_policy_tests {
         let clock = Cell::new(0u64);
         let seen = RefCell::new(Vec::new());
         // one job per 1 ms against a 2 ms slice: two jobs, then the loop sleeps
-        let ran = warm_step(2_000, || clock.get(), |sz, bold, glyphs| {
+        let ran = warm_step(2_000, || clock.get(), |role, sz, bold, glyphs| {
             clock.set(clock.get() + 1_000);
-            seen.borrow_mut().push((sz, bold, glyphs.to_vec()));
+            seen.borrow_mut().push((role, sz, bold, glyphs.to_vec()));
         });
         assert_eq!(ran, 2);
         // the rest of the idle slices finish the ladder, then warming is a no-op
-        while warm_step(2_000, || clock.get(), |sz, bold, glyphs| {
+        while warm_step(2_000, || clock.get(), |role, sz, bold, glyphs| {
             clock.set(clock.get() + 1_000);
-            seen.borrow_mut().push((sz, bold, glyphs.to_vec()));
+            seen.borrow_mut().push((role, sz, bold, glyphs.to_vec()));
         }) > 0 {}
-        assert_eq!(warm_step(2_000, || clock.get(), |_, _, _| panic!("already warm")), 0);
+        assert_eq!(warm_step(2_000, || clock.get(), |_, _, _, _| panic!("already warm")), 0);
         let seen = seen.into_inner();
-        for &sz in &WARM_SIZES {
-            for bold in [0, 1] {
-                let glyphs: Vec<u8> = seen.iter()
-                    .filter(|(s, b, _)| *s == sz && *b == bold)
-                    .flat_map(|(_, _, g)| g.iter().copied())
-                    .collect();
-                assert_eq!(glyphs, WARM_GLYPHS, "size {sz} bold {bold}: every printable ASCII glyph, once");
+        for role in [FontRole::Interface, FontRole::Display] {
+            for &sz in &WARM_SIZES {
+                for bold in [0, 1] {
+                    let glyphs: Vec<u8> = seen.iter()
+                        .filter(|(r, s, b, _)| *r == role && *s == sz && *b == bold)
+                        .flat_map(|(_, _, _, g)| g.iter().copied())
+                        .collect();
+                    assert_eq!(glyphs, WARM_GLYPHS, "{role:?} size {sz} bold {bold}: every printable ASCII glyph, once");
+                }
             }
         }
         assert!(WARM_SIZES.contains(&crate::ui::theme::size::HERO));

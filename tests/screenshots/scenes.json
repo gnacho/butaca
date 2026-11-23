@@ -139,6 +139,27 @@
       "tolerance_reason": "Measured over four capture pairs: about one run in three, the rim of the Next Episode button (its glass edge, sampled at 3x) comes back 2 levels apart on some 1400 pixels; every other pixel stays within 1.",
       "expect": ["next=S1E3", "clockstop: clock held at 175750 ms"],
       "outputs": [{"file": "closeup-player.jpg", "dest": "site", "crop": [1250, 570, 640, 388], "size": "1440x873"}]
+    },
+    {
+      "name": "settings",
+      "state": "The Settings root: the display title in Fraunces, the real profile/version subtitle, and the four groups as two-column cards. The shared bar with its textual destinations and profile chip sits above.",
+      "triggers": {"settings": "root"},
+      "expect": ["coldopen screen=settings"],
+      "outputs": [{"file": "settings.jpg", "size": "1920x1080"}]
+    },
+    {
+      "name": "settings-quality",
+      "state": "The Settings root with the playback quality picker anchored to its row, opened through the real D-pad/OK path.",
+      "triggers": {"settings": "root", "settingspicker": "quality"},
+      "expect": ["coldopen screen=settings"],
+      "outputs": [{"file": "settings-quality.jpg", "size": "1920x1080"}]
+    },
+    {
+      "name": "settings-subtitle-size",
+      "state": "The Settings root with the subtitle-size picker anchored to its row, opened through the real D-pad/OK path.",
+      "triggers": {"settings": "root", "settingspicker": "subtitle-size"},
+      "expect": ["coldopen screen=settings"],
+      "outputs": [{"file": "settings-subtitle-size.jpg", "size": "1920x1080"}]
     }
   ]
 }

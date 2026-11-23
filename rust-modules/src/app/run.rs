@@ -2024,6 +2024,15 @@ fn loop_requests(app: &mut App) {
             crate::screens::registry::LoopReq::JfDisconnectServer => {
                 jellyfin_disconnect_server(app);
             }
+            // A bar-wearing surface's textual destination (Detail, Settings): the same door the
+            // top pages use, so a pill from Detail teleports exactly as one from Home does.
+            crate::screens::registry::LoopReq::ChromeTab(tab) => {
+                super::bridge::nav_tab(&mut app.pages, &mut app.bridge, tab, None, None);
+            }
+            // A bar-wearing surface's profile chip: open the account menu over it.
+            crate::screens::registry::LoopReq::ChromeAccount => {
+                super::bridge::open_account_menu(&mut app.pages);
+            }
         }
     }
 }

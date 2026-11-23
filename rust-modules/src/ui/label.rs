@@ -44,6 +44,7 @@ pub struct Label {
     col: [f32; 4],
     h: HAlign,
     v: VAlign,
+    role: crate::text::FontRole,
 }
 impl Label {
     pub fn new(text: *const c_char, sz: c_int, col: [f32; 4]) -> Self {
@@ -54,6 +55,7 @@ impl Label {
             col,
             h: HAlign::Left,
             v: VAlign::Middle,
+            role: crate::text::FontRole::Interface,
         }
     }
     pub fn bold(mut self) -> Self {
@@ -68,6 +70,12 @@ impl Label {
         self.v = v;
         self
     }
+    /// Draw in the Fraunces display face — the wordmark and the Settings display title. Ordinary
+    /// labels stay on the Manrope interface face unless this is called.
+    pub fn display(mut self) -> Self {
+        self.role = crate::text::FontRole::Display;
+        self
+    }
     /// Draw into `frame` (the layout box). Horizontal per `h`; vertical per `v`, always off the cap
     /// band. Returns the painted width. The ink may extend outside `frame` — that is intended.
     pub fn draw(&self, p: Painter, frame: Rect) -> f32 {
@@ -76,12 +84,12 @@ impl Label {
             HAlign::Center => (frame.cx(), 1),
             HAlign::Right => (frame.x + frame.w, 2),
         };
-        let (cap_top, baseline) = crate::text::text_cap_band(self.sz, self.bold);
+        let (cap_top, baseline) = crate::text::text_cap_band_role(self.role, self.sz, self.bold);
         let y = match self.v {
             VAlign::Middle => frame.y + frame.h * 0.5 - (cap_top + baseline) * 0.5,
             VAlign::CapTop => frame.y - cap_top,
             VAlign::Baseline => frame.y + frame.h - baseline,
         };
-        p.text(self.text, x, y, self.sz, self.col, code, self.bold)
+        p.text_role(self.role, self.text, x, y, self.sz, self.col, code, self.bold)
     }
 }

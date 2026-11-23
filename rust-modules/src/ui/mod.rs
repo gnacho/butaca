@@ -406,6 +406,14 @@ fn recorded_text_width(s: *const c_char, sz: c_int, bold: c_int) -> f32 {
     widgets::LegacyMeasure.width(unsafe { CStr::from_ptr(s) }, sz, bold != 0)
 }
 
+fn recorded_text_width_role(role: crate::text::FontRole, s: *const c_char, sz: c_int, bold: c_int) -> f32 {
+    if s.is_null() {
+        return 0.0;
+    }
+    use crate::ui::machine::Measure as _;
+    widgets::LegacyMeasure.width_role(unsafe { CStr::from_ptr(s) }, sz, bold != 0, role)
+}
+
 /// **The per-frame draw census** — every primitive a RECORDING painter ([`Painter::recording`]) is
 /// handed while [`draw_census::capture`] runs on this thread, as `(command tag, screen rect)`. The
 /// tag is the one [`Painter::declare`] already carries (`2` a rounded rect, `100` a text run, …).
@@ -435,12 +443,16 @@ pub(crate) mod draw_census {
 }
 
 fn declared_text_bounds(s: *const c_char, sz: c_int, bold: c_int) -> (f32,f32) {
+    declared_text_bounds_role(crate::text::FontRole::Interface, s, sz, bold)
+}
+
+fn declared_text_bounds_role(role: crate::text::FontRole, s: *const c_char, sz: c_int, bold: c_int) -> (f32,f32) {
     // A discovery walk above the surface band, or inside a completely covered layer, records
     // nothing. Do not populate/measure the glyph cache merely to discover that exclusion later in
     // `Painter::declare`; discovery is a description pass, not resource preparation.
     if frame::backdrop::recording_excluded() { return (0.0, 0.0); }
     if s.is_null() { return (0.0,0.0); }
-    widgets::LegacyMeasure.bounds(unsafe { CStr::from_ptr(s) },sz,bold!=0)
+    widgets::LegacyMeasure.bounds_role(role, unsafe { CStr::from_ptr(s) }, sz, bold != 0)
 }
 
 /// Folds a cascading alpha (+ optional translate) into every primitive call.
@@ -1431,8 +1443,24 @@ impl Painter {
         align: c_int,
         bold: c_int,
     ) -> f32 {
+        self.text_role(crate::text::FontRole::Interface, s, x, y, sz, col, align, bold)
+    }
+    /// [`text`](Self::text) in an explicit font role — the wordmark and the Settings display title
+    /// (`crate::text::FontRole::Display`, Fraunces).
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_role(
+        self,
+        role: crate::text::FontRole,
+        s: *const c_char,
+        x: f32,
+        y: f32,
+        sz: c_int,
+        col: [f32; 4],
+        align: c_int,
+        bold: c_int,
+    ) -> f32 {
         if frame::backdrop::discovering() {
-            let (width,height)=declared_text_bounds(s,sz,bold);
+            let (width,height)=declared_text_bounds_role(role, s, sz, bold);
             self.declare(Rect::new(match align { 1 => x-width*0.5, 2 => x-width, _ => x },y,width,height),100,|data| {
                 use frame::backdrop::Value;
                 frame::backdrop::text_value(s,data);
@@ -1444,14 +1472,14 @@ impl Painter {
             return width;
         }
         if self.text_recorder {
-            crate::text::queue_prewarm(s, sz, bold);
-            let w = recorded_text_width(s, sz, bold);
+            crate::text::queue_prewarm_role(role, s, sz, bold);
+            let w = recorded_text_width_role(role, s, sz, bold);
             #[cfg(test)]
             draw_census::note(100, Rect::new(x + self.dx, y + self.dy, w, 0.0));
             return w;
         }
         let c = self.c(col);
-        crate::text::draw_text(s, x + self.dx, y + self.dy, sz, c.as_ptr(), align, bold)
+        crate::text::draw_text_role(role, s, x + self.dx, y + self.dy, sz, c.as_ptr(), align, bold)
     }
     /// [`text`](Self::text) with a horizontal fade-out: glyph alpha runs 1→0 between
     /// `fade_from`..`fade_to` px from the string's left edge (see `text::draw_text_fade`).

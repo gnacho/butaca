@@ -12,8 +12,13 @@ The rules you must follow when writing UI code live in
 
 One fixed surface: 1920x1080, `ui::consts::SCR_W` / `SCR_H`. There is no responsive work here and no
 second viewport. Input is a webOS remote, so focus is a first-class state and hover is not a
-discovery mechanism. Text is rasterized by the TV's own text engine, so there is no font stack to
-pick and no web typography to tune.
+discovery mechanism.
+
+Text is rasterized by the TV's own text engine. The typeface is selected by a scoped font role, not
+a web font stack: `text::FontRole::Interface` (Manrope) is the ordinary product face and
+`text::FontRole::Display` (Fraunces) is reserved for the wordmark and the Settings display title.
+Both roles fall back to the retained Inter face, the bundled Noto Sans CJK KR and the television's
+own DroidSansFallback, in that order (see `rust-modules/src/text.rs`).
 
 Distance changes what legible means. `CAPTION` 24 is the stated floor for ordinary content, and
 that number is a couch measurement rather than a taste call.

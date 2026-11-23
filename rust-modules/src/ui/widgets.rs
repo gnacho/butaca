@@ -30,17 +30,29 @@ impl LegacyMeasure {
     pub(crate) fn bounds(&self, s: &CStr, sz: c_int, bold: bool) -> (f32,f32) {
         crate::text::text_bounds(s.as_ptr(),sz,bold as c_int)
     }
+    pub(crate) fn bounds_role(&self, role: crate::text::FontRole, s: &CStr, sz: c_int, bold: bool) -> (f32,f32) {
+        crate::text::text_bounds_role(role, s.as_ptr(), sz, bold as c_int)
+    }
 }
 
 impl crate::ui::machine::Measure for LegacyMeasure {
     fn width(&self, s: &CStr, sz: c_int, bold: bool) -> f32 {
         crate::text::text_width(s.as_ptr(), sz, bold as c_int)
     }
+    fn width_role(&self, s: &CStr, sz: c_int, bold: bool, role: crate::text::FontRole) -> f32 {
+        crate::text::text_width_role(role, s.as_ptr(), sz, bold as c_int)
+    }
     fn cap_h(&self, sz: c_int) -> f32 {
         crate::text::cap_h(sz, 0)
     }
+    fn cap_h_role(&self, sz: c_int, role: crate::text::FontRole) -> f32 {
+        crate::text::cap_h_role(role, sz, 0)
+    }
     fn line_h(&self, sz: c_int) -> f32 {
         crate::text::text_height(sz, 0)
+    }
+    fn line_h_role(&self, sz: c_int, role: crate::text::FontRole) -> f32 {
+        crate::text::text_height_role(role, sz, 0)
     }
     fn live_font(&self) -> bool {
         true

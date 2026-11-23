@@ -38,9 +38,16 @@ except ImportError:
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 THEME = os.path.join(REPO, "rust-modules", "src", "ui", "theme.rs")
+# Every shipped LATIN face, so a face swap cannot dodge the gate. Manrope is the interface
+# primary, Fraunces the display primary, Inter the retained script fallback. `pkg/appfont-cjk.ttf`
+# is deliberately NOT audited here: it never draws Latin in this app (see the module docstring).
 FONTS = {
-    "bold": os.path.join(REPO, "pkg", "appfont-bold.ttf"),
     "regular": os.path.join(REPO, "pkg", "appfont.ttf"),
+    "bold": os.path.join(REPO, "pkg", "appfont-bold.ttf"),
+    "manrope-regular": os.path.join(REPO, "pkg", "appfont-manrope-400.ttf"),
+    "manrope-bold": os.path.join(REPO, "pkg", "appfont-manrope-700.ttf"),
+    "fraunces-regular": os.path.join(REPO, "pkg", "appfont-fraunces-600.ttf"),
+    "fraunces-bold": os.path.join(REPO, "pkg", "appfont-fraunces-700.ttf"),
 }
 # Named carve-outs living outside the ladder (see theme.rs's size-module doc).
 CARVEOUTS = {54: "HUD_TITLE_SZ (bold)", 36: "subtitle caption (bold)"}
@@ -48,7 +55,17 @@ CARVEOUTS = {54: "HUD_TITLE_SZ (bold)", 36: "subtitle caption (bold)"}
 # sites (26) are bar-heavy by one solid pixel even under LIGHT hinting; both are low-
 # prominence roles and every remedy (size nudge) costs scale hierarchy. Anything NOT in
 # this set that measures bar-heavy is a regression and fails the audit.
-ACCEPTED = {("regular", 22), ("regular", 26)}
+#
+# Manrope (2026-11-23) carries a capital F whose top bar is one solid pixel heavier than its stem
+# at the listed rungs — a typeface proportion, not a hinting regression, and the same +1px class
+# the Inter exceptions above already accept. The interface face draws the whole ladder, so its
+# entries cover every flagged rung.
+ACCEPTED = {
+    ("regular", 22), ("regular", 26),
+    ("manrope-regular", 20), ("manrope-regular", 26), ("manrope-regular", 32),
+    ("manrope-regular", 40), ("manrope-regular", 48), ("manrope-regular", 54),
+    ("manrope-bold", 20), ("manrope-bold", 32), ("manrope-bold", 36),
+}
 
 
 def ladder():

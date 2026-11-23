@@ -54,6 +54,7 @@ pub(crate) struct DevFlags {
     pub(crate) lib_switch: bool,
     pub(crate) search_osc: bool,
     pub(crate) settings_boot: Option<String>,
+    pub(crate) settingspicker_boot: Option<String>,
     pub(crate) settings_osc: bool,
     pub(crate) modal_osc: bool,
     pub(crate) legal_doc: bool,
@@ -105,6 +106,10 @@ pub(crate) struct Scenarios {
     pub(crate) replay_left: u32,
     pub(crate) grid_tried: bool,
     pub(crate) settings_tried: bool,
+    /// `/tmp/butaca-settingspicker`'s one-shot latch, and how many DOWN presses it has spent
+    /// walking the Settings root's column to the named picker's row.
+    pub(crate) settingspicker_tried: bool,
+    pub(crate) settingspicker_step: u8,
     pub(crate) seek_tried: bool,
     pub(crate) seek_script: Vec<String>,
     pub(crate) seek_script_at: u32,
@@ -359,6 +364,11 @@ pub(crate) fn searchosc_armed() -> bool {
 /// `/tmp/butaca-settings=<root|home|privacy|legal>`.
 pub(crate) fn settings_boot_value() -> Option<String> {
     crate::dev::read("settings")
+}
+/// `/tmp/butaca-settingspicker=<quality|subtitle-size>` — open that picker on the Settings root
+/// through the real D-pad/OK path, for the 1920x1080 capture of the anchored selector.
+pub(crate) fn settingspicker_boot_value() -> Option<String> {
+    crate::dev::read("settingspicker")
 }
 /// `/tmp/butaca-settingsosc`.
 pub(crate) fn settingsosc_armed() -> bool {
@@ -939,6 +949,49 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
         } else if fr.now.wrapping_sub(app.t0) > 12_000 {
             app.scenarios.settings_tried = true;
             crate::log("settings: boot target timed out before Home became available");
+        }
+    }
+}
+
+/// `/tmp/butaca-settingspicker` — open a named Settings picker through the real D-pad/OK path, so
+/// the 1920x1080 capture shows the ANCHORED selector, not one pushed programmatically. It opens the
+/// root (the same door `settings_boot_arm` uses), then walks the root's column DOWN to the picker's
+/// row one press per frame, then OK. The row depths are the root's flat column order: the three
+/// *Servidor* rows, then the *Reproducción* knobs (Quality third), then the *Audio* knobs
+/// (Subtitle size first).
+fn settingspicker_arm(app: &mut App, fr: &mut Frame) {
+    if app.scenarios.settingspicker_tried {
+        return;
+    }
+    let Some(target) = app.scenarios.dev.settingspicker_boot.clone() else {
+        app.scenarios.settingspicker_tried = true;
+        return;
+    };
+    let steps: u8 = match target.trim() {
+        "quality" => 3,
+        "subtitle-size" => 10,
+        _other => {
+            #[cfg(feature = "devtriggers")]
+            crate::log(&format!("BADTRIGGER settingspicker target {_other:?} unknown"));
+            app.scenarios.settingspicker_tried = true;
+            return;
+        }
+    };
+    if !matches!(app.route(), AppArg::Settings(_)) {
+        if fr.now.wrapping_sub(app.t0) > 800 {
+            crate::app::bridge::open_settings(&mut app.pages);
+        }
+        return;
+    }
+    if app.scenarios.settingspicker_step < steps {
+        app.scenarios.settingspicker_step += 1;
+        for ev in crate::app::bridge::script_key(Key::Down, Tick { ms: fr.now, dt_us: 0 }) {
+            app.inputs.push(ev);
+        }
+    } else if !app.scenarios.settingspicker_tried {
+        app.scenarios.settingspicker_tried = true;
+        for ev in crate::app::bridge::script_key(Key::Ok, Tick { ms: fr.now, dt_us: 0 }) {
+            app.inputs.push(ev);
         }
     }
 }
@@ -1695,6 +1748,7 @@ pub(crate) unsafe fn each_frame(app: &mut App, fr: &mut Frame) -> bool {
     autoplay_arm(app, fr);
     grid_library_search_heroidx_arm(app, fr);
     settings_boot_arm(app, fr);
+    settingspicker_arm(app, fr);
     press_arm(app, fr);
     itemmenu_arm(app, fr);
     acct_arm(app, fr);

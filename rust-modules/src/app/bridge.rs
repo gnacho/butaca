@@ -256,11 +256,6 @@ pub(crate) struct Bridge {
     /// bar's one reachable owner: the only `Rig::draw_chrome` implementation, and the only place
     /// `update_home_chrome` is called from.
     strip: crate::ui::widgets::StripRender,
-    /// The Butaca wordmark, uploaded once on the render thread. `0` is "not loaded yet"; a
-    /// missing asset degrades to a text wordmark rather than an empty corner.
-    logo_tex: u32,
-    logo_px: (u32, u32),
-    logo_tried: bool,
     home_commands: std::collections::VecDeque<HomeCmd>,
     library_commands: std::collections::VecDeque<crate::screens::registry::LibraryCmd>,
     /// Requests the owned screens made of the loop this frame (§14), drained by [`frame`]'s caller.
@@ -431,9 +426,6 @@ impl Bridge {
             chrome: super::chrome::ChromeSnapshot::default(),
             chrome_selection: 0,
             strip: crate::ui::widgets::StripRender::new(),
-            logo_tex: 0,
-            logo_px: (0, 0),
-            logo_tried: false,
             home_commands: std::collections::VecDeque::new(),
             library_commands: std::collections::VecDeque::new(),
             reqs: Vec::new(),
@@ -700,14 +692,19 @@ impl Bridge {
         let route = &route;
         let search = *route == AppArg::Search;
         let favorites = matches!(route, AppArg::Content(ContentArg::Collection(id)) if id.is_favorites());
-        if matches!(route, AppArg::Home | AppArg::Library) || search || favorites {
-            d.nav.tabs.strip_fallback = Some(if search {
-                crate::ui::dispatch::STRIP_BASE + 3
-            } else if favorites {
-                crate::ui::dispatch::STRIP_BASE + 6
-            } else {
-                crate::screens::home::STRIP_HOME_ELEM
-            });
+        // Detail also wears the bar (mockup fidelity phase 1): the same strip, with no pill
+        // selected — it is not a tab destination, so `strip_fallback` stays `None`.
+        let detail = matches!(route, AppArg::Content(ContentArg::Detail { .. }));
+        if matches!(route, AppArg::Home | AppArg::Library) || search || favorites || detail {
+            if !detail {
+                d.nav.tabs.strip_fallback = Some(if search {
+                    crate::ui::dispatch::STRIP_BASE + 3
+                } else if favorites {
+                    crate::ui::dispatch::STRIP_BASE + 6
+                } else {
+                    crate::screens::home::STRIP_HOME_ELEM
+                });
+            }
             if let Some(io) = &self.home_io {
                 refresh_chrome(&mut self.chrome, &self.measure, self.directory.view(),
                     Some((&io.profile, &io.preferences)));
@@ -1211,23 +1208,6 @@ impl Bridge {
     /// dozen small allocations this otherwise costs at the loop rate.
     /// The video plane's EDGE, from `Player::set_video_plane_bound` and from nowhere else
     /// (spec §16 risk 10). Reaches both the dispatcher's present gate and this rig's own copy.
-    /// Upload the original Butaca wordmark once. A failed read leaves `logo_tex` at zero and the
-    /// bar simply omits the mark; it never blocks the chrome pass.
-    fn prepare_chrome_logo(&mut self) {
-        if self.logo_tried { return; }
-        self.logo_tried = true;
-        let path = crate::paths::in_app_dir("butaca-name.png");
-        let Ok(png) = std::fs::read(&path) else { return };
-        let (mut w, mut h): (std::os::raw::c_int, std::os::raw::c_int) = (0, 0);
-        let px = crate::img::img_decode_rgba(png.as_ptr(), png.len() as _, &mut w, &mut h);
-        if px.is_null() { return; }
-        if w > 0 && h > 0 {
-            self.logo_tex = crate::img::img_upload_rgba(px, w, h);
-            self.logo_px = (w as u32, h as u32);
-        }
-        crate::img::img_free(px);
-    }
-
     pub(crate) fn publish_video_plane(&mut self, bound: bool) {
         self.video_plane = bound;
     }
@@ -1259,7 +1239,6 @@ impl Rig<AppHost> for Bridge {
         glass: Option<&mut crate::ui::frame::glass::GlassPlan>) {
         if !Self::draws_chrome_for(arg) { return; }
         let Some(glass) = glass else { return };
-        self.prepare_chrome_logo();
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
         // **The brand leaves with the page** (owner, 2026-11-10). It is drawn outside every page's
         // own frame, so it cannot ride the page's alpha: the page states how far it has left its
@@ -1267,15 +1246,24 @@ impl Rig<AppHost> for Bridge {
         // this presentation, and this is the one reader. The strip, the clock and the gear stay -
         // the bar is still the bar; only the wordmark goes.
         let brand = crate::ui::widgets::brand_alpha(nav.page_scroll);
-        if self.logo_tex != 0 && self.logo_px.0 > 0 && self.logo_px.1 > 0 && brand > 0.004 {
-            let h = 46.0;
-            let w = h * self.logo_px.0 as f32 / self.logo_px.1 as f32;
-            let logo = crate::ui::Rect::new(
+        if brand > 0.004 {
+            // The Fraunces wordmark, drawn as display-role text beside the profile chip. It
+            // replaces the old rasterised PNG (`pkg/butaca-name.png` was never in APP_FILES), so a
+            // shipped typeface rather than a missing asset is what renders the brand.
+            let wordmark = c"butaca";
+            let frame = crate::ui::Rect::new(
                 crate::ui::widgets::CHIP_FRAME.x + crate::ui::widgets::CHIP_D + 20.0,
-                crate::ui::widgets::TOP_BAR_Y
-                    + (crate::ui::widgets::TAB_PILL_H - h) * 0.5,
-                w, h);
-            p.alpha(brand).tex(self.logo_tex, logo, 0.0, crate::ui::theme::TEXT_PRIMARY);
+                crate::ui::widgets::TOP_BAR_Y,
+                320.0,
+                crate::ui::widgets::TAB_PILL_H,
+            );
+            crate::ui::label::Label::new(wordmark.as_ptr(), crate::ui::theme::size::DISPLAY,
+                crate::ui::theme::TEXT_PRIMARY)
+                .bold()
+                .display()
+                .h(crate::ui::label::HAlign::Left)
+                .v(crate::ui::label::VAlign::Middle)
+                .draw(p.alpha(brand), frame);
         }
         if let Some(instance) = self.chrome.instance().map(|label| label.as_ptr()) {
             let badge = crate::ui::widgets::CircleButton::new(instance)

@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use super::machine::{Canon, LogicalState, Measure, Tick};
+use crate::text::FontRole;
 mod strict_json;
 
 /// The record format's version. A recording from another schema is REFUSED, both printed.
@@ -570,8 +571,8 @@ impl Writer {
     }
 
     pub fn metrics(&mut self, f: u64, text: &str, sz: i32, bold: bool, w: f32, h: f32) {
-        self.metric(f, &MetricKey::Width { text: text.as_bytes().to_vec(), sz, bold }, w.to_bits());
-        self.metric(f, &MetricKey::Line { sz }, h.to_bits());
+        self.metric(f, &MetricKey::Width { text: text.as_bytes().to_vec(), sz, bold, role: FontRole::Interface }, w.to_bits());
+        self.metric(f, &MetricKey::Line { sz, role: FontRole::Interface }, h.to_bits());
     }
 
     pub(crate) fn metric(&mut self, f: u64, key: &MetricKey, bits: u32) {
@@ -899,13 +900,15 @@ impl Recording {
     }
 }
 
-/// Canonical measurement identity. Raw CStr bytes distinguish non-UTF8 strings too.
+/// Canonical measurement identity. Raw CStr bytes distinguish non-UTF8 strings too. The role keeps
+/// a Fraunces (Display) metric from ever answering for a Manrope (Interface) string of the same
+/// text, size and weight.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(tag="kind", deny_unknown_fields)]
 pub enum MetricKey {
-    Width { text: Vec<u8>, sz: i32, bold: bool },
-    Cap { sz: i32 },
-    Line { sz: i32 },
+    Width { text: Vec<u8>, sz: i32, bold: bool, role: crate::text::FontRole },
+    Cap { sz: i32, role: crate::text::FontRole },
+    Line { sz: i32, role: crate::text::FontRole },
 }
 
 const MAX_METRICS: usize = 65536;
@@ -1019,17 +1022,26 @@ pub(crate) fn speculating() -> bool {
 
 impl Measure for TableMeasure {
     fn width(&self, s: &CStr, sz: i32, bold: bool) -> f32 {
+        self.width_role(s, sz, bold, FontRole::Interface)
+    }
+    fn width_role(&self, s: &CStr, sz: i32, bold: bool, role: FontRole) -> f32 {
         let fill=self.fill;
-        self.query(MetricKey::Width { text:s.to_bytes().to_vec(), sz, bold },
-            |_| fill.map_or(0.0,|m| m.width(s,sz,bold)))
+        self.query(MetricKey::Width { text:s.to_bytes().to_vec(), sz, bold, role },
+            |_| fill.map_or(0.0,|m| m.width_role(s,sz,bold,role)))
     }
     fn cap_h(&self, sz: i32) -> f32 {
+        self.cap_h_role(sz, FontRole::Interface)
+    }
+    fn cap_h_role(&self, sz: i32, role: FontRole) -> f32 {
         let fill=self.fill;
-        self.query(MetricKey::Cap {sz}, |_| fill.map_or(0.0,|m| m.cap_h(sz)))
+        self.query(MetricKey::Cap {sz, role}, |_| fill.map_or(0.0,|m| m.cap_h_role(sz,role)))
     }
     fn line_h(&self, sz: i32) -> f32 {
+        self.line_h_role(sz, FontRole::Interface)
+    }
+    fn line_h_role(&self, sz: i32, role: FontRole) -> f32 {
         let fill=self.fill;
-        self.query(MetricKey::Line {sz}, |_| fill.map_or(0.0,|m| m.line_h(sz)))
+        self.query(MetricKey::Line {sz, role}, |_| fill.map_or(0.0,|m| m.line_h_role(sz,role)))
     }
 }
 
@@ -1139,16 +1151,25 @@ impl Measure for Measurements {
         crate::text::fit_line_by(self, s, budget, sz, bold)
     }
     fn width(&self,s:&CStr,sz:i32,bold:bool)->f32 {
-        if let Self::Live(source)=self { return source.width(s,sz,bold); }
-        self.query(MetricKey::Width {text:s.to_bytes().to_vec(),sz,bold},|m|m.width(s,sz,bold))
+        self.width_role(s, sz, bold, FontRole::Interface)
+    }
+    fn width_role(&self,s:&CStr,sz:i32,bold:bool,role:FontRole)->f32 {
+        if let Self::Live(source)=self { return source.width_role(s,sz,bold,role); }
+        self.query(MetricKey::Width {text:s.to_bytes().to_vec(),sz,bold,role},|m|m.width_role(s,sz,bold,role))
     }
     fn cap_h(&self,sz:i32)->f32 {
-        if let Self::Live(source)=self { return source.cap_h(sz); }
-        self.query(MetricKey::Cap {sz},|m|m.cap_h(sz))
+        self.cap_h_role(sz, FontRole::Interface)
+    }
+    fn cap_h_role(&self,sz:i32,role:FontRole)->f32 {
+        if let Self::Live(source)=self { return source.cap_h_role(sz,role); }
+        self.query(MetricKey::Cap {sz,role},|m|m.cap_h_role(sz,role))
     }
     fn line_h(&self,sz:i32)->f32 {
-        if let Self::Live(source)=self { return source.line_h(sz); }
-        self.query(MetricKey::Line {sz},|m|m.line_h(sz))
+        self.line_h_role(sz, FontRole::Interface)
+    }
+    fn line_h_role(&self,sz:i32,role:FontRole)->f32 {
+        if let Self::Live(source)=self { return source.line_h_role(sz,role); }
+        self.query(MetricKey::Line {sz,role},|m|m.line_h_role(sz,role))
     }
     /// Only `Live` passes its source's answer through: `Record` must see every query, and
     /// `Pending`/`Replay` must never be answered from the font.
@@ -1641,19 +1662,19 @@ mod tests {
     #[test]
     fn a_replay_measure_miss_fails_loudly() {
         let mut t = HashMap::new();
-        t.insert(MetricKey::Width {text:b"Play".to_vec(),sz:28,bold:false},61.0f32.to_bits());
+        t.insert(MetricKey::Width {text:b"Play".to_vec(),sz:28,bold:false,role:FontRole::Interface},61.0f32.to_bits());
         let m = TableMeasure::new(t);
         assert_eq!(m.width(c"Play", 28, false), 61.0);
         assert!(m.take_miss().is_none());
         let _ = m.width(c"Pause", 28, false);
-        assert_eq!(m.take_miss(), Some(MetricKey::Width {text:b"Pause".to_vec(),sz:28,bold:false}));
+        assert_eq!(m.take_miss(), Some(MetricKey::Width {text:b"Pause".to_vec(),sz:28,bold:false,role:FontRole::Interface}));
     }
 
     #[test]
     fn a_filling_table_learns_a_missing_measure_and_reports_it() {
         static M:crate::ui::fixture::FixtureMeasure=crate::ui::fixture::FixtureMeasure;
         let m=TableMeasure::filling(HashMap::new(), &M);
-        let key=MetricKey::Width {text:b"Play".to_vec(),sz:28,bold:false};
+        let key=MetricKey::Width {text:b"Play".to_vec(),sz:28,bold:false,role:FontRole::Interface};
         let got=m.width(c"Play", 28, false);
         assert_eq!(got, M.width(c"Play", 28, false), "a filling table measures what the app measures");
         assert!(m.take_miss().is_none(), "a learned measure is not a miss");
@@ -1671,7 +1692,7 @@ mod tests {
         let record=Measurements::record(&M);
         let warmed=speculative(|| record.width(c"s025b413f", 26, true));
         let metrics:HashMap<_,_>=record.drain().unwrap().into_iter().collect();
-        let key=MetricKey::Width {text:b"s025b413f".to_vec(),sz:26,bold:true};
+        let key=MetricKey::Width {text:b"s025b413f".to_vec(),sz:26,bold:true,role:FontRole::Interface};
         assert_eq!(metrics.get(&key), Some(&warmed.to_bits()), "a current recording answers the walk exactly");
 
         // An older recording that never measured the key: the walk's miss is answered, not charged.

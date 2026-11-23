@@ -22,14 +22,20 @@ fn content_instances_compare_item_identity_and_keep_distinct_entries() {
 #[test]
 fn a_page_arg_wears_the_chrome_its_own_table_says() {
     for r in every_route() {
-        let want = if matches!(r, AppArg::Home | AppArg::Library | AppArg::Search) {
+        let want = if matches!(
+            r,
+            AppArg::Home
+                | AppArg::Library
+                | AppArg::Search
+                | AppArg::Content(ContentArg::Detail { .. })
+        ) {
             Chrome::TabBar
         } else {
             Chrome::None
         };
         assert_eq!(r.chrome(), want, "{}", super::super::words::route_word(&r));
     }
-    assert_eq!(AppArg::Settings(SettingsPage::Root).chrome(), Chrome::None);
+    assert_eq!(AppArg::Settings(SettingsPage::Root).chrome(), Chrome::TabBar);
     // …and the root payload is a boot address, never an identity: the two Settings arguments
     // below are ONE screen, which is what stops a dev boot target minting a second surface.
     assert!(AppArg::Settings(SettingsPage::Root).same_instance(&AppArg::Settings(SettingsPage::Legal)));
@@ -725,7 +731,7 @@ fn account_to_settings_never_unfreezes_the_host() {
     assert_eq!(d.host_policy(), (HostUpdate::Frozen, HostRender::Cached));
 
     // Focus the Settings row and commit it. Signed out (a host test has no session file the
-    // fixture wrote), the rows are [Sign in, Settings], so one DOWN then OK.
+    // fixture wrote), the rows are [Add server, Sign in, Settings], so two DOWNs then OK.
     let menu_entry = d.nav.modals.top().unwrap().entry.id;
     let mut t = 2;
     let mut press = |d: &mut Dispatcher<AppHost>, rig: &mut Bridge, key: Key| {
@@ -734,9 +740,10 @@ fn account_to_settings_never_unfreezes_the_host() {
         t += 1;
     };
     press(&mut d, &mut rig, Key::Down);
+    press(&mut d, &mut rig, Key::Down);
     assert_eq!(
         d.focus().map(|k| (k.entry, k.elem)),
-        Some((menu_entry, crate::screens::account_menu::Action::Settings as u32)),
+        Some((menu_entry, crate::screens::account_menu::Action::Settings.key())),
         "the engine walked the menu's own rows"
     );
     press(&mut d, &mut rig, Key::Ok);

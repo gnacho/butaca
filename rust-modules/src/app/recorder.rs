@@ -165,7 +165,7 @@ const APP_SHAPES: &[&str] = &[
 /// Product wire compatibility joins the existing TextInputWire/content codec census. The
 /// generic frame envelope is schema 3; product recordings without ordered resolutions and
 /// canonical final focus must be refused before parsing/boot, including Targets mode.
-const RESOLUTION_SHAPE: &str = "ProductResolutionV1{fo:Option<(entry:u32,elem:u32,group:Option<u32>)>,rs:ordered<Focus{phase:u8,entry:u32,focus:Option<(u32,u32)>,group:Option<u32>,outcome:u8,from:Option<(u32,u32)>,to:Option<(u32,u32)>,by:u8}|Hit{phase:u8,entry:Option<u32>,hit:Option<(u32,u32)>,focus:Option<(u32,u32)>,activate:Option<((u32,u32),u8)>,miss:bool}>,input:post-hit,metrics:Width(bytes,i32,bool)|Cap(i32)|Line(i32)->f32bits}";
+const RESOLUTION_SHAPE: &str = "ProductResolutionV2{fo:Option<(entry:u32,elem:u32,group:Option<u32>)>,rs:ordered<Focus{phase:u8,entry:u32,focus:Option<(u32,u32)>,group:Option<u32>,outcome:u8,from:Option<(u32,u32)>,to:Option<(u32,u32)>,by:u8}|Hit{phase:u8,entry:Option<u32>,hit:Option<(u32,u32)>,focus:Option<(u32,u32)>,activate:Option<((u32,u32),u8)>,miss:bool}>,input:post-hit,metrics:Width(bytes,i32,bool,role:Interface|Display)|Cap(i32,role:Interface|Display)|Line(i32,role:Interface|Display)->f32bits}";
 
 /// The state SHAPE of the product hash: bump by changing a `SHAPE` string, never silently.
 ///
@@ -213,7 +213,7 @@ pub(crate) fn state_fp() -> u64 {
     shapes.push(super::bootstrap::CONTENT_SHAPE);
     shapes.push(RESOLUTION_SHAPE);
     shapes.push("CaptureReadinessV1{before_dispatch:pending:bool}");
-    shapes.push("MeasurementV1{query:Width(text:bytes,sz:i32,bold:bool)|Cap(sz:i32)|Line(sz:i32),answer:f32bits:u32}");
+    shapes.push("MeasurementV2{query:Width(text:bytes,sz:i32,bold:bool,role:Interface|Display)|Cap(sz:i32,role:Interface|Display)|Line(sz:i32,role:Interface|Display),answer:f32bits:u32}");
     shapes.extend_from_slice(crate::screens::registry::SCREEN_SHAPES);
     crate::ui::rec::state_fp(&shapes)
 }
@@ -1731,9 +1731,9 @@ mod tests {
         assert!(bridge.take_measurements().is_err(),"construction-order violations must latch");
         let mut bridge=super::super::bridge::Bridge::controlled_home(||0,&initial,&mt,true);
         let table=[
-            (crate::ui::rec::MetricKey::Width {text:b"no fonts loaded".to_vec(),sz:28,bold:false},0x80000000),
-            (crate::ui::rec::MetricKey::Cap {sz:28},0x00000001),
-            (crate::ui::rec::MetricKey::Line {sz:28},0x41abcdef),
+            (crate::ui::rec::MetricKey::Width {text:b"no fonts loaded".to_vec(),sz:28,bold:false,role:crate::text::FontRole::Interface},0x80000000),
+            (crate::ui::rec::MetricKey::Cap {sz:28,role:crate::text::FontRole::Interface},0x00000001),
+            (crate::ui::rec::MetricKey::Line {sz:28,role:crate::text::FontRole::Interface},0x41abcdef),
         ].into_iter().collect();
         bridge.prepare_measurements(Some(&table),false);
         let m=bridge.split().measure;

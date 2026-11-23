@@ -97,6 +97,9 @@ pub struct TextView<'a> {
     /// the mark `fade_last` reserves room for is drawn whether or not the text truncates — see
     /// [`mark_always`](Self::mark_always)
     mark_always: bool,
+    /// Scoped typeface: Manrope (Interface) by default, Fraunces (Display) for the wordmark and
+    /// the Settings display title. Threaded through wrap and paint so the two never share metrics.
+    role: crate::text::FontRole,
     /// Vertical edge-dissolve bands, in the SAME absolute coordinate space `draw`'s `frame.y` is
     /// drawn in — see [`edge_fade`](Self::edge_fade). `None` on each axis by default.
     vfade_top: Option<(f32, f32)>,
@@ -135,12 +138,19 @@ impl<'a> TextView<'a> {
             lead_bold: true,
             fade_last: 0.0,
             mark_always: false,
+            role: crate::text::FontRole::Interface,
             vfade_top: None,
             vfade_bot: None,
         }
     }
     pub fn bold(mut self) -> Self {
         self.bold = 1;
+        self
+    }
+    /// Draw in the Fraunces display face — the wordmark and the Settings display title. Ordinary
+    /// prose stays on the Manrope interface face unless this is called.
+    pub fn display(mut self) -> Self {
+        self.role = crate::text::FontRole::Display;
         self
     }
     /// Borrow the frame's measurement capability for wrapping and inline-run placement.
@@ -154,11 +164,11 @@ impl<'a> TextView<'a> {
 
     fn width(&self, text: &std::ffi::CStr, bold: bool) -> f32 {
         match self.measure {
-            Some(measure) => measure.width(text, self.sz, bold),
+            Some(measure) => measure.width_role(text, self.sz, bold, self.role),
             None => {
                 #[cfg(test)]
                 assert!(!FORBID_LIVE.with(std::cell::Cell::get), "live TextView measurement forbidden");
-                crate::text::text_width(text.as_ptr(), self.sz, i32::from(bold))
+                crate::text::text_width_role(self.role, text.as_ptr(), self.sz, i32::from(bold))
             }
         }
     }

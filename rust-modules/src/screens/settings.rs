@@ -712,6 +712,15 @@ impl<H: DirectoryLike> Machine<H> for RouteSurface {
                 fx.push(Fx::App(AppFx::Loop(crate::screens::registry::LoopReq::GoHome)));
                 Handled::Yes
             }
+            // The shared bar's destinations and profile chip, drawn over the Settings surface. A
+            // pill becomes `LoopReq::ChromeTab`, the chip `LoopReq::ChromeAccount`, the gear opens
+            // Settings (which is already open, so it is a no-op via the existing surface path).
+            ScreenEvent::Activate(e) if *e >= crate::ui::dispatch::STRIP_BASE => {
+                if let Some(req) = crate::screens::registry::chrome_element_request(*e) {
+                    fx.push(Fx::App(AppFx::Loop(req)));
+                }
+                Handled::Yes
+            }
             ScreenEvent::Activate(e) => self.step_top(ScreenEvent::Activate(*e), cx, fx),
             ScreenEvent::PressHold(id) => self.step_top(ScreenEvent::PressHold(*id), cx, fx),
             ScreenEvent::PressCommit(id) => self.step_top(ScreenEvent::PressCommit(*id), cx, fx),

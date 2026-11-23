@@ -357,6 +357,7 @@ impl RootPage {
         TableScreen::new(
             Header::new(layout, None, title, self.header_copy(level))
             .with_title_size(crate::ui::theme::size::DISPLAY)
+            .with_title_display()
             .with_back_disc(),
             table,
             GroupId(0),

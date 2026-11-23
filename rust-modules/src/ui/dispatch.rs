@@ -1597,16 +1597,24 @@ where
             // its stops above the page and below surfaces, from the same keyed geometry the
             // engine queries. A folded page disables hover seating, but its visible controls
             // retain direct clicks (the legacy Home bar allowed clicks from the grid too).
-            if let Some(entry) = nav.tabs.stack.top() {
-                if strip_owner == Some(entry.id) && entry.inst.as_ref().is_some_and(|i| i.screen.hit_source() == HitSource::Engine) {
-                    let hover = if entry.inst.as_ref().is_some_and(|i| i.screen.strip_reachable()) {
-                        super::screen::Hover::Focus
-                    } else { super::screen::Hover::Ignore };
-                    stops.extend(nav.tabs.strip.iter().map(|member| Stop {
-                        key: FocusKey { entry: entry.id, elem: member.elem },
-                        rect: member.drawn, rest_rect: member.target, clip: member.clip,
-                        hover, activate: Activate::Direct,
-                    }));
+            //
+            // Keyed to the strip OWNER (the input owner), not the top page: a bar-wearing SURFACE
+            // (Settings) owns the strip while it is open, so its stops must resolve inside that
+            // surface's entry or the pills would be dead behind the opaque panel.
+            if let Some(owner_id) = strip_owner {
+                if let Some(entry) = nav.entry(owner_id) {
+                    let wearing = entry.arg.chrome() == super::machine::Chrome::TabBar;
+                    let engine = entry.inst.as_ref().is_some_and(|i| i.screen.hit_source() == HitSource::Engine);
+                    if wearing && engine {
+                        let hover = if entry.inst.as_ref().is_some_and(|i| i.screen.strip_reachable()) {
+                            super::screen::Hover::Focus
+                        } else { super::screen::Hover::Ignore };
+                        stops.extend(nav.tabs.strip.iter().map(|member| Stop {
+                            key: FocusKey { entry: owner_id, elem: member.elem },
+                            rect: member.drawn, rest_rect: member.target, clip: member.clip,
+                            hover, activate: Activate::Direct,
+                        }));
+                    }
                 }
             }
             // **The surfaces' modal dim, last thing in the page pass** (§6.2, §8.3). It is here
@@ -1681,6 +1689,26 @@ where
                 set.bytes += render.bytes;
                 // an Opaque surface's ground has drawn: the fold REPLACES the host from here
                 if !crate::gfx::blur_source_pass() { s.ground_ready = inst.screen.ground_ready(); }
+            }
+        }
+        // **The shared chrome for a bar-wearing SURFACE** (Settings). An Opaque surface covers the
+        // top page's chrome, so the bar is drawn a second time ABOVE the surface, keyed to the
+        // surface's entry so focus and hits resolve inside it. `capture_chrome` already populated
+        // `nav.tabs.strip` from the page beneath, which is the same destination set.
+        if !source_pass {
+            let top_chrome = modals.surfaces.iter().rev()
+                .find(|s| matches!(s.phase, super::containers::modal::Phase::Opening
+                    | super::containers::modal::Phase::Open))
+                .filter(|s| s.entry.arg.chrome() == super::machine::Chrome::TabBar
+                    && s.entry.inst.as_ref().is_some_and(|i| i.screen.focus_source() == FocusSource::Engine));
+            if let Some(s) = top_chrome {
+                let z = Z::surface(modals.surfaces.len());
+                let _chrome_layer = backdrop::layer(z, true);
+                let mut chrome_parts = parts.clone();
+                chrome_parts.owner = InputOwner::Entry(s.entry.id);
+                chrome_parts.focus = input.engine.read(chrome_parts.owner);
+                backdrop::draw_span("chrome.surface", || rig.draw_chrome(
+                    &s.entry.arg, &chrome_parts, navigation, glass.as_deref_mut()));
             }
         }
         // the hit map swaps only on a presented frame (§7.6); a legacy page registers nothing
