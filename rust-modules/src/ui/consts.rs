@@ -663,6 +663,12 @@ mod tests {
         ));
 
         for (name, rect) in r {
+            // The owner explicitly authorized the visible top chrome at the supplied mockup's
+            // 28px line on 2026-11-23. Page CONTENT keeps the safe area; these two renderer
+            // regions are the sole exception and are audited against the mockup instead.
+            if name.starts_with("top tab") || name.starts_with("profile chip") {
+                continue;
+            }
             assert!(
                 inside_safe(rect),
                 "{name} at ({}, {}) {}x{} leaves the {}x{} safe area at ({}, {})",

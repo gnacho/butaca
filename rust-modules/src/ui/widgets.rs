@@ -2372,7 +2372,7 @@ const CHIP_NAME_MAX: f32 = 320.0;
 /// its pills. Written as `MARGIN_X` flat until 2026-08-23, which put the focused capsule's left edge
 /// at 88, i.e. 8px into the overscan exclusion zone, on the three screens that wear this bar.
 pub(crate) const CHIP_FRAME: Rect = Rect::new(
-    crate::ui::consts::MARGIN_X + TAB_TRACK_PAD,
+    56.0,
     TOP_BAR_Y,
     CHIP_D,
     CHIP_D,
@@ -5163,7 +5163,7 @@ pub(crate) fn draw_strip(
             continue;
         }
         let (fm, sm) = strip.mixes((pill.x, pill.w));
-        TabPill::new(lay.label.as_ptr(), theme::size::BODY, pill)
+        TabPill::new(lay.label.as_ptr(), theme::size::CAPTION, pill)
             .plated()
             .mix(fm, sm)
             .draw(&env, p);
@@ -5443,11 +5443,13 @@ const TAB_ICON_D: f32 = 32.0;
 /// exclusion zone — on the three screens that wear this bar, i.e. exactly the "main page" LG's
 /// checklist item #2 names. The band is measured from its OUTERMOST ink (the track, not the pills),
 /// so the whole control clears the frame rather than only the part you press.
-pub(crate) const TOP_BAR_Y: f32 = crate::ui::consts::MARGIN_Y + TAB_TRACK_PAD;
+/// The supplied mockup's top chrome line. The owner explicitly authorized this literal mockup
+/// position on 2026-11-23; page content keeps the LG safe area.
+pub(crate) const TOP_BAR_Y: f32 = 28.0;
 /// SAME element, SAME geometry as the detail season tabs (user directive): one control height
 /// (the 60px circle-button CD family) and the season tabs' ±18 label padding — the two rows
 /// must be indistinguishable as a control.
-pub(crate) const TAB_PILL_H: f32 = 60.0;
+pub(crate) const TAB_PILL_H: f32 = 44.0;
 const TAB_PILL_PAD: f32 = 18.0;
 /// UNIFORM inset from the tab-bar track to the pills inside it, on every side: the pill (r=30) and
 /// the track (r=38) stay CONCENTRIC (outer radius = inner radius + gap), so an end pill's corner
@@ -5459,7 +5461,11 @@ pub(crate) const TAB_TRACK_PAD: f32 = 8.0;
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
 /// host test instead of leaving it to a device capture.
-pub(crate) const TOP_BAR_BOTTOM: f32 = TOP_BAR_Y + TAB_PILL_H + TAB_TRACK_PAD; // 130
+/// The content clearance stays the television's original band even though the owner explicitly
+/// moved the VISIBLE mockup bar upward. Page copy keeps its legibility and safe-area contract.
+pub(crate) const TOP_BAR_BOTTOM: f32 = 130.0;
+/// The visible bar's own foot, for renderer regions that follow the ink rather than page content.
+const TOP_BAR_VISUAL_BOTTOM: f32 = TOP_BAR_Y + TAB_PILL_H + TAB_TRACK_PAD;
 
 /// **How far a page scrolls before the shared bar's brand has left it** - the owner's "el logo de
 /// Butaca que desaparezca en cuanto hacemos scroll" (2026-11-10).
@@ -5496,7 +5502,7 @@ const TAB_GAP: f32 = 16.0;
 /// How wide the pill strip may grow before it starts scrolling. The row stays CENTERED, but it
 /// must never reach the profile chip (a focus stop of its own at `MARGIN_X`), so the viewport is
 /// the screen less a symmetric chip-clearing margin, less the track's own inset on both ends.
-const TAB_SIDE_CLEAR: f32 = CHIP_FRAME.x + CHIP_D + theme::space::MD;
+const TAB_SIDE_CLEAR: f32 = crate::ui::consts::MARGIN_X + CHIP_D + theme::space::MD;
 const TAB_VIEW_MAX: f32 = crate::ui::consts::SCR_W - 2.0 * (TAB_SIDE_CLEAR + TAB_TRACK_PAD);
 /// **The shared top bar's outermost drawn chrome, for the overscan audit**
 /// ([`crate::ui::consts::SAFE`]) — the one band Home, the Library and Search all wear, i.e. the
@@ -6242,7 +6248,7 @@ const GLASS_TRACK_TOUCH_MAX: f32 = crate::ui::consts::SCR_W - 2.0 * (CHIP_CAP_MA
 /// `0 .. TOP_BAR_BOTTOM + BLUR_MARGIN`. If the bar ever drops far enough that the top stops
 /// clamping, this over-states the region and [`the_whole_bands_glass_fits_one_region_budget`] (which
 /// asks `gfx::blur_region` itself, not this) is what will say so.
-const BAND_REGION_H: f32 = TOP_BAR_BOTTOM + crate::gfx::BLUR_MARGIN;
+const BAND_REGION_H: f32 = TOP_BAR_VISUAL_BOTTOM + crate::gfx::BLUR_MARGIN;
 
 /// [`crate::gfx::GLASS_REGION_BUDGET`], restated here because that constant is `cfg(test)` on a
 /// deliberate argument — *"a number the shipping build never reads should not pretend to"* — and
@@ -6353,7 +6359,7 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
 /// input geometry; the capability keeps host fixtures independent of a loaded SDL font.
 pub(crate) fn tab_widths(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
-    tab_metrics_from(labels, icons, |word| measure.width(word, theme::size::BODY, true)).1
+    tab_metrics_from(labels, icons, |word| measure.width(word, theme::size::CAPTION, true)).1
 }
 
 /// Publish control geometry from the strip's actual scroll and its current destination. Keys
@@ -6416,7 +6422,7 @@ fn with_tab_metrics_for<R>(data: TabLabels<'_>, f: impl FnOnce(&[CString], &[f32
         use crate::ui::machine::Measure as _;
         let measure = LegacyMeasure;
         let (labels, widths) = tab_metrics_from(data.labels, data.icons,
-            |l| measure.width(l, theme::size::BODY, true));
+            |l| measure.width(l, theme::size::CAPTION, true));
         // The Search pill, last. It carries an EMPTY label so nothing here has to special-case a
         // missing entry — `labels.len()` stays the pill count, which is what the draw and the hit
         // test both walk — and a fixed square width, because a mark is not measured like a word.
@@ -6801,7 +6807,7 @@ impl StripRender {
                     let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + (r.h - d) * 0.5, d, d);
                     crate::ui::icons::draw(p, icon, ir, TabPill::mixed_ink(fm, sm));
                 } else {
-                    TabPill::new(labels[i].as_ptr(), theme::size::BODY, r)
+                    TabPill::new(labels[i].as_ptr(), theme::size::CAPTION, r)
                         .mix(fm, sm)
                         .draw(&env, p);
                 }

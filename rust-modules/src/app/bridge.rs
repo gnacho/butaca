@@ -1257,7 +1257,7 @@ impl Rig<AppHost> for Bridge {
                 320.0,
                 crate::ui::widgets::TAB_PILL_H,
             );
-            crate::ui::label::Label::new(wordmark.as_ptr(), crate::ui::theme::size::DISPLAY,
+            crate::ui::label::Label::new(wordmark.as_ptr(), crate::ui::theme::size::TITLE,
                 crate::ui::theme::TEXT_PRIMARY)
                 .bold()
                 .display()

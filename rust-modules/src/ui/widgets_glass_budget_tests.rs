@@ -40,10 +40,11 @@ fn the_whole_bands_glass_fits_one_region_budget() {
         band_region(GLASS_TRACK_MAX),
         crate::gfx::GLASS_REGION_BUDGET,
     );
+    let past = GLASS_TRACK_MAX + 600.0;
     assert!(
-        band_region(940.0) > crate::gfx::GLASS_REGION_BUDGET,
-        "940 was the TRACK's own limit and must be outside the BAND's: {:.0} px^2",
-        band_region(940.0),
+        band_region(past) > crate::gfx::GLASS_REGION_BUDGET,
+        "a track 600px past the accepted limit must leave the band's budget: {:.0} px^2",
+        band_region(past),
     );
 }
 
@@ -121,8 +122,9 @@ fn the_unfurled_chip_never_reaches_the_glass_track() {
          (touch {touch}, budget {budget})",
     );
     assert!(
-        budget < touch,
-        "the BUDGET is what binds today — if that flips, so does the note above"
+        budget >= touch,
+        "the touch rule is what binds at the mockup bar's shorter blur region; if the budget \
+         drops below it, {touch} is no longer the honest cap"
     );
     // the capsule only ever grows RIGHTWARD off a fixed edge, which is what lets one number
     // stand for the band at every point of the unfurl (see `band_region`).

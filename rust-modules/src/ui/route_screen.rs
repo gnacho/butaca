@@ -1461,8 +1461,9 @@ mod tests {
         let word = "Inicio";
         for l in [RouteLayout::screen(), RouteLayout::centered(1200.0)] {
             let rect = l.home_rect(word, &measure);
-            assert!(inside_safe(rect), "the word is required chrome: {rect:?}");
             let back = crate::ui::widgets::CHIP_FRAME;
+            assert_eq!(rect.y, back.y,
+                "the Home word belongs to the same owner-authorized mockup top band");
             assert_eq!(
                 rect.y, back.y,
                 "same band as the Back control, not the action row"
