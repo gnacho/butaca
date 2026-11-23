@@ -1276,51 +1276,25 @@ pub(crate) fn keyline_chip_w(text: &str, measure: &dyn crate::ui::machine::Measu
 /// The label is BOLD for the same reason the mock sets `font-weight:600` on it: two or three caps
 /// at `CAPTION` inside a ring have to hold their own against it, and regular weight is what made
 /// this chip read as an empty frame in the first device photograph of the identity line.
-pub(crate) fn keyline_chip_face(col: [f32; 4], focused: bool) -> (Option<[f32; 4]>, [f32; 4]) {
-    if focused {
-        (Some(theme::ACCENT), theme::ACCENT_INK)
-    } else {
-        (None, col)
-    }
-}
-
-pub(crate) fn keyline_chip(
-    p: Painter,
-    x: f32,
-    cy: f32,
-    text: &str,
-    col: [f32; 4],
-    focused: bool,
-    measure: &dyn crate::ui::machine::Measure,
-) -> f32 {
+pub(crate) fn keyline_chip(p: Painter, x: f32, cy: f32, text: &str, col: [f32; 4], measure: &dyn crate::ui::machine::Measure) -> f32 {
     let lc = match std::ffi::CString::new(text) {
         Ok(c) => c,
         Err(_) => return 0.0,
     };
     let w = keyline_chip_w(text, measure);
     let h = measure.cap_h(theme::size::CAPTION) + 2.0 * KEYLINE_PAD_Y; // hugs the label's cap band, not a fixed band
-    let (fill, ink) = keyline_chip_face(col, focused);
-    if let Some(fill) = fill {
-        p.rrect(
-            Rect::new(x, cy - h * 0.5, w, h),
-            KEYLINE_RAD,
-            0.0,
-            fill,
-        );
-    } else {
-        p.rring(
-            Rect::new(x, cy - h * 0.5, w, h),
-            KEYLINE_RAD,
-            KEYLINE_W,
-            ink,
-        );
-    }
+    p.rring(
+        Rect::new(x, cy - h * 0.5, w, h),
+        KEYLINE_RAD,
+        KEYLINE_W,
+        col,
+    );
     p.text(
         lc.as_ptr(),
         x + KEYLINE_PAD_X,
         crate::text::text_vcenter_y(theme::size::CAPTION, KEYLINE_BOLD, cy),
         theme::size::CAPTION,
-        ink,
+        col,
         0,
         KEYLINE_BOLD,
     );
@@ -2881,8 +2855,9 @@ pub(crate) fn draw_back_control(p: Painter, focused: bool) {
 /// [`draw_back_control`] in an explicit box — the detail page's Back sits at the very top of the
 /// safe area (`detail_back_frame`), since the poster now starts on the top bar's foot.
 pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
-    // The focused Back disc uses the same amber face as any focused control, with dark ink.
-    // At rest it keeps the ordinary unfilled Accent treatment.
+    // **The lit Back disc is a FILLED #7373CB plate** with a white chevron, the same treatment a
+    // focused control wears (the owner's 2026-11-10 pass: hover and Back share one tone). A ring
+    // under an unfilled disc did not read as "the same colour" at all.
     let lit = focused;
     let button = CircleButton::new(std::ptr::null())
         .frame(frame)
@@ -2891,7 +2866,7 @@ pub(crate) fn draw_back_control_at(p: Painter, focused: bool, frame: Rect) {
         .style(if lit {
             ControlStyle::Custom {
                 fill: theme::CHROME_LIT,
-                ink: theme::ACCENT_INK,
+                ink: theme::TEXT_PRIMARY,
             }
         } else {
             ControlStyle::Accent
@@ -3008,12 +2983,11 @@ impl View for PageDots {
         for d in 0..self.count {
             let active = d == self.active;
             let w = if active { Self::PILL } else { Self::DOT };
-            // The active mark carries the signal amber; inactive marks keep the quiet ink ramp.
-            let col = if active {
-                crate::ui::theme::CHROME_LIT
-            } else {
-                crate::ui::theme::with_a(crate::ui::theme::TEXT_PRIMARY, 0.35)
-            };
+            // tokens, not a raw literal: full-strength white for the current page, dimmed for the rest
+            let col = crate::ui::theme::with_a(
+                crate::ui::theme::TEXT_PRIMARY,
+                if active { 1.0 } else { 0.35 },
+            );
             p.rect(
                 Rect::new(x, self.y, w, Self::DOT),
                 Self::DOT * 0.5,
@@ -3225,19 +3199,19 @@ impl AmbientWash {
 
     /// The shared blue envelope at a four-corner strength. No runtime blur is involved: the
     /// existing bilinear ambient pass supplies the soft edges for one deterministic draw.
-    pub(crate) const GRAPHITE_W: [f32; 4] = theme::AMBIENT_GRAPHITE_W;
+    pub(crate) const BLUE_W: [f32; 4] = theme::AMBIENT_BLUE_W;
 
     /// [`target`](Self::target) for the artwork-less blue ground.
-    pub(crate) const fn graphite(w: [f32; 4]) -> [[f32; 4]; 4] {
-        Self::target(theme::WASH_GRAPHITE_CORNERS, w)
+    pub(crate) const fn blue(w: [f32; 4]) -> [[f32; 4]; 4] {
+        Self::target(theme::WASH_BLUE_CORNERS, w)
     }
 
     /// An artwork-keyed wash carrying the shared blue atmosphere. The original keyed target
     /// remains dominant, so the artwork's own colours still identify the focused item.
-    pub(crate) fn graphite_keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
+    pub(crate) fn blue_keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
         let keyed = Self::keyed(blur, w);
-        let graphite = Self::graphite(w);
-        std::array::from_fn(|i| theme::mix(keyed[i], graphite[i], theme::AMBIENT_GRAPHITE_MIX))
+        let blue = Self::blue(w);
+        std::array::from_fn(|i| theme::mix(keyed[i], blue[i], theme::AMBIENT_BLUE_MIX))
     }
 
     /// [`target`](Self::target) for corners taken from an item's `UltraBlurColors` envelope
@@ -3547,8 +3521,8 @@ impl PageGround {
     /// and Collection pages share it.
     pub(crate) fn page_target(focused: Option<&crate::catalog::CatalogMovie>) -> [[f32; 4]; 4] {
         match focused.filter(|m| m.has_blur) {
-            Some(m) => AmbientWash::graphite_keyed(m.blur, Self::CARD_W),
-            None => AmbientWash::graphite(AmbientWash::GRAPHITE_W),
+            Some(m) => AmbientWash::blue_keyed(m.blur, Self::CARD_W),
+            None => AmbientWash::blue(AmbientWash::BLUE_W),
         }
     }
 
@@ -3557,7 +3531,7 @@ impl PageGround {
     pub(crate) const fn new() -> Self {
         PageGround {
             wash: AmbientWash::flat(theme::SURFACE_APP),
-            target: AmbientWash::graphite(AmbientWash::GRAPHITE_W),
+            target: AmbientWash::blue(AmbientWash::BLUE_W),
         }
     }
 
@@ -3568,7 +3542,7 @@ impl PageGround {
     /// Called once per frame from a screen's update, before anything reads the ground.
     pub(crate) fn key(&mut self, src: Option<[[f32; 3]; 4]>, w: [f32; 4], dt: f32) {
         if let Some(b) = src {
-            self.target = AmbientWash::graphite_keyed(b, w);
+            self.target = AmbientWash::blue_keyed(b, w);
         }
         self.wash.step(self.target, AmbientWash::K, dt);
     }
@@ -4809,7 +4783,7 @@ impl TabPill {
         theme::mix(
             theme::mix(
                 theme::TEXT_READING,
-                theme::ACCENT,
+                theme::TEXT_PRIMARY,
                 selected.clamp(0.0, 1.0),
             ),
             crate::ui::ACCENT_INK,
@@ -4865,7 +4839,7 @@ impl TabPill {
                 TabStyle::Button if self.selected => {
                     // Both standalone neighbours already have a resting plate. Use the shared
                     // plated-selection tint so the active mode stays visible beside that ground.
-                    (Some(theme::TAB_PLATE_SELECTED), theme::ACCENT, 1.0)
+                    (Some(theme::TAB_PLATE_SELECTED), theme::TEXT_PRIMARY, 1.0)
                 }
                 // The standalone pill is a CONTROL FACE, so its idle fill is the one the GROUND
                 // supplies — the light film over video, the dark plate on a page. See
@@ -4875,7 +4849,7 @@ impl TabPill {
                     (Some(crate::ui::ACCENT), crate::ui::ACCENT_INK, 1.0)
                 }
                 TabStyle::Segment { selected: true } if self.plated => {
-                    (Some(theme::TAB_PLATE_SELECTED), theme::ACCENT, 1.0)
+                    (Some(theme::TAB_PLATE_SELECTED), theme::TEXT_PRIMARY, 1.0)
                 }
                 TabStyle::Segment { .. } if self.plated => {
                     (Some(theme::TAB_PLATE_IDLE), theme::TEXT_TERTIARY, 0.0)
@@ -5268,8 +5242,6 @@ pub(crate) enum SelMark {
 /// press and transform handler it writes on `plated`.
 #[derive(Clone, Copy)]
 pub(crate) enum TabGround {
-    /// Flat top navigation: graphite ground, underline selection and rectangular focus keyline.
-    Flat,
     /// **The shared top tab bar**, inside its own track. The pills have no ground of their own and
     /// nothing here scales: the capsule TRAVELLING under a row that encloses it is the whole focus
     /// mark, and a pill that also grew would be two answers to one question. `glass` is whether that
@@ -5391,21 +5363,15 @@ impl TabStrip {
         // The SELECTION capsule never scales, on either strip. It marks which season you are
         // browsing, which is a fact about the page and not about the control under your thumb — and
         // a plate that dipped with the press would say the selection had moved when it had not.
-        if matches!(ground, TabGround::Flat) {
-            let (x, w) = self.sel.span();
-            let a = self.sel.alpha();
-            if a > 0.004 && w > 0.5 {
-                p.alpha(a).rect(Rect::new(x, top + h - 4.0, w, 4.0), 0.0, theme::ACCENT, theme::ACCENT, 0.0);
-            }
-        } else {
-            cap(
-                &self.sel,
-                sel_col,
-                matches!(ground, TabGround::Tracked { glass: true }).then_some(theme::GLASS_RIM),
-                1.0,
-                false,
-            );
-        }
+        cap(
+            &self.sel,
+            sel_col,
+            matches!(ground, TabGround::Tracked { glass: true }).then_some(theme::GLASS_RIM),
+            1.0,
+            // No cast: it marks a PAGE fact (which department you are browsing), not the control
+            // under your thumb, and only the thing focus is actually on lifts off the page.
+            false,
+        );
         // The FOCUS capsule keeps its near-white fill: it is the one thing on this row that must not
         // read as a material, because the material is what everything else here is and focus has to
         // be the exception. On a TRACKED strip it wore two stops of shadow for a while — near-white
@@ -5424,13 +5390,6 @@ impl TabStrip {
         // pill sits bare on artwork exactly the way `linked_heading::Entry` sits bare on the page,
         // and it had the identical defect for the identical reason, so `cast: true` below.
         match ground {
-            TabGround::Flat => {
-                let (x, w) = self.foc.span();
-                let a = self.foc.alpha();
-                if a > 0.004 && w > 0.5 {
-                    p.alpha(a).rring(Rect::new(x, top, w, h), theme::CARD_RING_RAD, 2.0, theme::ACCENT);
-                }
-            }
             TabGround::Plated { pop } => {
                 cap(&self.foc, theme::CHROME_LIT, Some(theme::CARD_SHEEN), pop, true)
             }
@@ -6370,13 +6329,10 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: impl Fn(&std::ffi::CStr) -> f32) -> (Vec<CString>, Vec<f32>) {
     let words: Vec<CString> = labels.iter().map(|label| CString::new(label.as_str()).unwrap_or_default()).collect();
     let widths = words.iter().enumerate().map(|(i, word)| {
-        // An icon-only item is square; an icon with a label still measures the label, because the
-        // flat navigation draws both in the same control.
-        if icons.get(i).copied().flatten().is_some() && word.to_bytes().is_empty() {
-            TAB_ICON_PILL_W
-        } else {
-            measure(word) + 2.0 * TAB_PILL_PAD
-        }
+        // a MARK is a square at the control family's height, because a mark is not measured like
+        // a word - the same rule the Search pill has always carried, now keyed on the face.
+        if icons.get(i).copied().flatten().is_some() { TAB_ICON_PILL_W }
+        else { measure(word) + 2.0 * TAB_PILL_PAD }
     }).collect();
     (words, widths)
 }
@@ -6471,25 +6427,6 @@ fn tab_view_w(widths: &[f32]) -> f32 {
 /// budget is charged against ([`GLASS_TRACK_MAX`]), and what `draw_tab_row` builds its rect from.
 fn tab_track_w(widths: &[f32]) -> f32 {
     tab_view_w(widths) + 2.0 * TAB_TRACK_PAD
-}
-
-/// The flat top navigation spans the safe area while preserving the established bottom at 130.
-fn flat_top_track() -> Rect {
-    Rect::new(
-        crate::ui::consts::MARGIN_X,
-        TOP_BAR_Y - TAB_TRACK_PAD,
-        crate::ui::consts::SCR_W - 2.0 * crate::ui::consts::MARGIN_X,
-        TAB_PILL_H + 2.0 * TAB_TRACK_PAD,
-    )
-}
-
-/// Amber selection and focus stay legible on the flat graphite bar, with no dark-on-amber step.
-fn flat_tab_ink(focus: f32, selected: f32) -> [f32; 4] {
-    theme::mix(
-        theme::TEXT_SECONDARY,
-        theme::ACCENT,
-        selected.max(focus).clamp(0.0, 1.0),
-    )
 }
 
 #[derive(Clone, Copy)]
@@ -6658,7 +6595,7 @@ impl StripRender {
         // The track is the strip's width until the strip outgrows the screen, then it caps and the
         // pills scroll inside it — the track itself never moves.
         let x0 = geometry.clip.x;
-        let track = flat_top_track();
+        let track = geometry.track;
         // The dispatcher owns the whole chrome band as one z layer. This widget has no
         // source-pass or modal exclusion: declaration, source and visible walks share this draw.
         // consumed unconditionally: the publisher writes every frame and the reset is what stops a
@@ -6673,8 +6610,7 @@ impl StripRender {
         // that is about to draw FLAT (a popover is up, `flattabs` is armed, or the strip is wider
         // than `GLASS_TRACK_MAX`) must not pay for a number only the glass path consumes. It did,
         // on every screen wearing the bar, for as long as the app was open.
-        // The flat navigation deliberately retires the tvOS glass capsule.
-        let glass_on = false;
+        let glass_on = tab_glass_on(track.w);
         let groundlog = ground_log_armed();
         // …and FASTER while a polarity is being decided: the decision is gated on two independent
         // readings, so the sampler's rate is the decision's rate, and every frame of it is spent
@@ -6796,13 +6732,11 @@ impl StripRender {
             // was a reported bug twice over: the write clobbered a value the spring owned, so the
             // next frame cut it back, and the hysteresis read the same clobbered value and walked
             // the committed polarity across with it. Both are gone with the polarity itself.
-            p.rect(track, 0.0, theme::SURFACE_PANEL, theme::SURFACE_PANEL, 0.0);
-            p.rect(
-                Rect::new(track.x, track.y + track.h - 1.0, track.w, 1.0),
-                0.0,
-                theme::HAIRLINE,
-                theme::HAIRLINE,
-                0.0,
+            p.rect_sheened(
+                track,
+                track.h * 0.5,
+                theme::TAB_TRACK_TOP,
+                theme::TAB_TRACK_BOT,
             );
         }
         // A strip wider than its track is a bounded panel, not a scrolling document, so this is the
@@ -6817,6 +6751,7 @@ impl StripRender {
         if scrolls {
             p.clip(view);
         }
+        let env = Env::inert();
         // The selection/focus fills, as ONE travelling capsule each (`top_strip`) rather than a
         // boolean fill per pill. They were placed in content space with `tab_pill_x`, so a single
         // translate puts them and the pills on the same ruler; drawn first, because they are the
@@ -6827,7 +6762,7 @@ impl StripRender {
             cp,
             TOP_BAR_Y,
             TAB_PILL_H,
-            TabGround::Flat,
+            TabGround::Tracked { glass: glass_on },
         );
         for i in 0..n {
             // ONE prefix sum per pill: `tab_pill_x` is O(i), and it was walked twice here — once for
@@ -6845,19 +6780,18 @@ impl StripRender {
                 // booleans, or a mid-travel label could darken toward ACCENT_INK with nothing bright
                 // under it (`cap_cover` is the one rule both sides read).
                 let (fm, sm) = self.top_strip.mixes((px, widths[i]));
-                let ink = flat_tab_ink(fm, sm);
                 if let Some(icon) = data.mark(i) {
-                    let d = 20.0;
-                    let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + 4.0, d, d);
-                    crate::ui::icons::draw(p, icon, ir, ink);
-                    crate::ui::label::Label::new(labels[i].as_ptr(), theme::size::CAPTION, ink)
-                        .h(crate::ui::label::HAlign::Center)
-                        .v(crate::ui::label::VAlign::CapTop)
-                        .draw(p, Rect::new(r.x, r.y + 28.0, r.w, theme::size::CAPTION as f32));
+                    // A MARK takes its ink from exactly the same `mixed_ink` the labels do - so it
+                    // darkens toward ACCENT_INK under the focus capsule in step with its neighbours
+                    // instead of being a separate colour story. The glyph is centred in the square
+                    // pill the widths were laid out for, at the strip's own icon ratio.
+                    let d = TAB_ICON_D;
+                    let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + (r.h - d) * 0.5, d, d);
+                    crate::ui::icons::draw(p, icon, ir, TabPill::mixed_ink(fm, sm));
                 } else {
-                    crate::ui::label::Label::new(labels[i].as_ptr(), theme::size::BODY, ink)
-                        .h(crate::ui::label::HAlign::Center)
-                        .draw(p, r);
+                    TabPill::new(labels[i].as_ptr(), theme::size::BODY, r)
+                        .mix(fm, sm)
+                        .draw(&env, p);
                 }
             }
         }
@@ -6957,9 +6891,15 @@ pub enum ControlGround {
     Unkeyed,
 }
 
-/// The colours a keyed control can derive from a ground sample. Product controls use [`Self::lit`]
-/// for the fixed NetGrip amber world. The ambient derivation remains available to the renderer's
-/// color-conversion tests, while `ControlGround::Unkeyed` ignores it by construction.
+/// The colours a keyed control derives from its page's local ground sample.
+///
+/// Home and Detail read the pixels they already rendered under the row — artwork AFTER its scrims,
+/// not the server's artwork envelope. The sample's LIGHTNESS never reaches the control: it
+/// contributes only OKLCH hue and a fraction of chroma. That is the difference between a white
+/// object catching the scene's light and a white chip averaged toward a dark photograph, which
+/// turns muddy. A screen computes this once for its control row and copies it into every face.
+/// The player may receive one accidentally, but [`ControlGround::Unkeyed`] ignores it by
+/// construction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ControlPalette {
     focus_top: [f32; 4],
@@ -6968,18 +6908,29 @@ pub struct ControlPalette {
     spent: [f32; 4],
 }
 
+/// How much of the chrome tone an IDLE control carries: enough to read as the same family as the
+/// focused one, quiet enough that the focused control still leads.
+const IDLE_TINT: f32 = 0.62;
+/// The same, over a video plane: a touch more film, since the picture moves under it.
+const UNKEYED_IDLE_TINT: f32 = 0.55;
 
 
 impl ControlPalette {
-    /// The fixed NetGrip control palette: flat amber focus, graphite idle and the existing spent
-    /// role. No artwork readback is involved, so every surface agrees on the same focus contract.
+    /// **The chrome's one lit tone**, fixed rather than derived from artwork: the owner's
+    /// 2026-11-10 pass names the colour ("#7373CB"), so the focused face is that colour and the
+    /// renderer must not re-derive it from a poster's ambient key. Idle and spent keep the
+    /// palette's own roles — this changes the LIT state only.
     pub fn lit() -> Self {
-        Self {
-            focus_top: theme::ACCENT,
-            focus_body: theme::ACCENT,
-            idle: theme::CONTROL_IDLE_FILL,
-            spent: theme::CONTROL_SPENT_FILL,
-        }
+        let mut p = Self::default();
+        p.focus_top = theme::CHROME_LIT;
+        p.focus_body = theme::with_a(theme::CHROME_LIT, 0.92);
+        // **Every button, not only the lit one** (the owner's 2026-11-10 pass: "de hecho todos los
+        // botones #7373CB"). The idle face is the same tone, quieter: a control at rest reads as
+        // the same family as the one under the cursor, which is what makes the whole row feel like
+        // one set. `spent` stays the palette's own, since it encodes a countdown rather than a
+        // colour choice.
+        p.idle = theme::with_a(theme::CHROME_LIT, IDLE_TINT);
+        p
     }
 }
 
@@ -7278,14 +7229,19 @@ impl ControlStyle {
                 flat(theme::ACCENT, theme::ACCENT_INK, theme::CONTROL_SPENT_FILL)
             }
             ControlStyle::Accent if ground == ControlGround::Unkeyed => flat(
-                theme::CONTROL_IDLE_FILL_UNKEYED,
+                // The idle face over video is the chrome tone at a film's weight, so the transport
+                // and the hero's discs are the same colour family as everything else.
+                theme::with_a(theme::CHROME_LIT, UNKEYED_IDLE_TINT),
                 theme::CONTROL_IDLE_INK,
                 theme::CONTROL_SPENT_FILL,
             ),
             ControlStyle::Accent if focused => ControlFace {
                 top: palette.focus_top,
                 body: palette.focus_body,
-                ink: theme::ACCENT_INK,
+                // **White, not the accent plate's near-black.** That ink was tuned for a warm
+                // off-white plate; on the chrome's violet it measured ~2:1, which is what made the
+                // focused control look "wrong" rather than merely a different hue.
+                ink: theme::TEXT_PRIMARY,
                 spent: palette.spent,
             },
             ControlStyle::Accent => flat(palette.idle, theme::CONTROL_IDLE_INK, palette.spent),

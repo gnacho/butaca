@@ -51,7 +51,7 @@ fn the_root_is_the_mockups_one_page_of_four_groups() {
     assert_eq!(root.table.sections[3].rows.len(), 3, "language, legal, about");
     assert!(root.table.sections[1].rows.len() >= 7,
         "quality, direct play, audio sync, next episode, skip, recently added, screensaver");
-    assert_eq!(root.table.cols(), 1, "one column of technical section cards");
+    assert_eq!(root.table.cols(), 2, "the mockup's two-column grid");
 }
 
 #[test]

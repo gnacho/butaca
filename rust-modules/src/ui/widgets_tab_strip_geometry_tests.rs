@@ -65,29 +65,6 @@ fn captured_tab_labels_measure_words_and_give_every_mark_a_square_pill() {
 }
 
 #[test]
-fn flat_top_track_uses_the_safe_area_full_width() {
-    let r = flat_top_track();
-    assert_eq!((r.x, r.y, r.w, r.h), (96.0, 54.0, 1728.0, 76.0));
-    assert_eq!(r.y + r.h, TOP_BAR_BOTTOM);
-}
-
-#[test]
-fn flat_tab_ink_keeps_focus_amber_on_graphite() {
-    assert_eq!(flat_tab_ink(0.0, 0.0), theme::TEXT_SECONDARY);
-    assert_eq!(flat_tab_ink(0.0, 1.0), theme::ACCENT);
-    assert_eq!(flat_tab_ink(1.0, 0.0), theme::ACCENT);
-    assert_ne!(flat_tab_ink(1.0, 1.0), crate::ui::ACCENT_INK);
-}
-
-#[test]
-fn a_flat_nav_item_measures_its_label_even_when_it_also_has_an_icon() {
-    let labels = vec!["Home".into()];
-    let icons = [Some(crate::ui::icons::Icon::Home)];
-    let (_, widths) = tab_metrics_from(&labels, &icons, |s| s.to_bytes().len() as f32 * 7.0);
-    assert_eq!(widths[0], 4.0 * 7.0 + 2.0 * TAB_PILL_PAD);
-}
-
-#[test]
 fn tab_metrics_cache_rejects_different_captured_labels_even_at_the_same_generation() {
     use super::*;
     let labels = vec!["Home".into(), "Movies".into(), String::new()];

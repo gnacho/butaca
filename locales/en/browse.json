@@ -165,10 +165,6 @@
     "value": "Home",
     "description": "browse chrome home"
   },
-  "browse.chrome.search": {
-    "value": "Search",
-    "description": "Short search destination label in the flat top navigation"
-  },
   "browse.collection.empty": {
     "value": "Nothing in this collection is in your libraries",
     "description": "Collection page read-out when none of the collection's members is in the viewer's libraries (an empty collection)"

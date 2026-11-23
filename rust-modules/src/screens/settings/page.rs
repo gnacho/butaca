@@ -179,8 +179,6 @@ enum Pending {
 /// The Settings root: every group of the mockup on one page, plus the pickers its rows open.
 pub(crate) struct RootPage {
     entry: EntryId,
-    /// Numbered technical title used by the compact root header.
-    pub(super) root_title: String,
     /// The page's own list of rows — the parent level of every picker. `pub(super)` for the
     /// family's test modules, which assert the drawn row set and measure its text fit.
     pub(super) table: TableView,
@@ -209,7 +207,6 @@ impl RootPage {
     pub(crate) fn new(entry: EntryId) -> Self {
         let mut s = Self {
             entry,
-            root_title: format!("06 / {}", crate::i18n::msg::settings_title().to_uppercase()),
             table: TableView::new(),
             picker_table: TableView::new(),
             submenu: RoutePush::new(),
@@ -310,13 +307,11 @@ impl RootPage {
     fn view_at(&self, level: Option<Field>) -> TableScreen<'_> {
         let (title, table) = match level {
             Some(field) => (field.title(), &self.picker_table),
-            None => (self.root_title.as_str(), &self.table),
+            None => (crate::i18n::msg::settings_title(), &self.table),
         };
         let layout = Self::layout();
         TableScreen::new(
-            Header::new(layout, None, title, self.header_copy(level))
-                .with_back_disc()
-                .with_title_size(if level.is_some() { theme::size::HERO } else { theme::size::TITLE }),
+            Header::new(layout, None, title, self.header_copy(level)).with_back_disc(),
             table,
             GroupId(0),
             self.entry,
@@ -675,12 +670,12 @@ impl RootPage {
             table.compact = false;
             table.header_ink = theme::TEXT_READING;
             table.list_focused = true;
-            table.technical(true);
         }
-        // One technical card per section, with its rows inside and hairlines between them.
-        self.table.grid(1);
-        self.table.cards(false);
-        self.table.section_cards(true);
+        // **The mockup's two-column grid of cards** (issue #415): every group pairs its rows, and
+        // every row is its own plate. The PICKER stays a one-column list, because a popover of
+        // options is one column on one ground.
+        self.table.grid(2);
+        self.table.cards(true);
         self.table.set_sections(vec![server, playback, audio, interface], list_sel, false);
         if let Some(field) = self.state.picker {
             let current = self.current_value(field);
@@ -1470,8 +1465,9 @@ mod tests {
         crate::route::restore_show_recently_added(false);
     }
 
-    /// Four groups in order, one technical card per section, and every row on the page. The crash
-    /// this guards against is a group label that a translated string leaves empty.
+    /// **The mockup's four groups, in its order, and every row on the page.** The groups are the
+    /// grid's pairing unit, so the section list is what decides where the two-column layout breaks
+    /// — and the crash this guards against is a group label that a translated string leaves empty.
     #[test]
     fn the_page_is_the_mockups_four_groups_in_order() {
         let _serial = crate::testlock::serial();
@@ -1488,7 +1484,7 @@ mod tests {
             ],
             "the mockup's four groups, each with its own word"
         );
-        assert_eq!(page.table.cols(), 1, "one column of technical section cards");
+        assert_eq!(page.table.cols(), 2, "the mockup pairs rows in two columns");
         assert_eq!(
             page.actions.len(),
             page.table.sections.iter().map(|s| s.rows.len()).sum::<usize>(),

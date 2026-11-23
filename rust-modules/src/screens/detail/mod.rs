@@ -2062,11 +2062,12 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
             crate::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
         }
         let p = f.painter;
+        let nav_page_alpha = f.nav_page_alpha;
         let d = self.detail(meta);
         self.draw_backdrop(p, d, f.measure, preview, meta);
         let hero_vis = hero_alpha(self.scroll.pos, HERO_FADE);
         if hero_vis > 0.01 {
-            self.draw_hero(p.translate(0.0, -self.scroll.pos).alpha(hero_vis), f, d);
+            self.draw_hero(p.translate(0.0, -self.scroll.pos).alpha(hero_vis), f, d, nav_page_alpha);
         }
         if let Some(d) = d {
             self.draw_compact_title(p, d, hero_vis, f.measure);
@@ -2347,7 +2348,7 @@ impl DetailScreen {
         }
     }
 
-    fn draw_hero<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, d: Option<&Detail>) {
+    fn draw_hero<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, d: Option<&Detail>, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let measure = cx.measure;
         use crate::ui::detail_layout::HERO_TEXT_W;
@@ -2490,7 +2491,7 @@ impl DetailScreen {
         // focus there — `hero::focusable` keeps Play legitimate, so the engine has somewhere to
         // stand and the page does not scroll itself into the sections below — it simply fades out
         // with `chrome`, like everything else the page owns.
-        self.draw_buttons(chrome, cx, chain.btn_y);
+        self.draw_buttons(chrome, cx, chain.btn_y, nav_page_alpha);
         // The hint that UP is there — since 2026-09-18 a third element on the HEADER line rather
         // than page furniture under the action row: centred on the screen, vertically centred on
         // the same row the preview-shrunk logo/title occupies (`PREVIEW_LOGO_Y`/`compact_band`),
@@ -2588,7 +2589,7 @@ impl DetailScreen {
             (d.audio.iter().any(|s| s.ad), crate::i18n::msg::widgets_badge_ad()),
         ] {
             if present {
-                x += crate::ui::widgets::keyline_chip(p, x, cy, label, theme::TEXT_SECONDARY, false, measure)
+                x += crate::ui::widgets::keyline_chip(p, x, cy, label, theme::TEXT_SECONDARY, measure)
                     + theme::space::XS;
             }
         }
@@ -2607,7 +2608,7 @@ impl DetailScreen {
             }
             let lit = focus == Some(genre_elem(i));
             let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
-            x += crate::ui::widgets::keyline_chip(p, x, cy, &label, ink, lit, measure) + theme::space::XS;
+            x += crate::ui::widgets::keyline_chip(p, x, cy, &label, ink, measure) + theme::space::XS;
         }
         // Studios, in the same chip vocabulary and after the genres: the production company the
         // item page names. Capped at two so a co-production list cannot push the row past the edge.
@@ -2617,7 +2618,7 @@ impl DetailScreen {
             }
             let lit = focus == Some(studio_elem(i));
             let ink = if lit { theme::CHROME_LIT } else { theme::TEXT_SECONDARY };
-            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, ink, lit, measure) + theme::space::XS;
+            x += crate::ui::widgets::keyline_chip(p, x, cy, studio, ink, measure) + theme::space::XS;
         }
     }
 
@@ -2665,7 +2666,7 @@ impl DetailScreen {
         }
     }
 
-    fn draw_buttons<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, y: f32) {
+    fn draw_buttons<H: ContentLike + crate::screens::registry::MetadataLike>(&self, p: Painter, cx: &Cx<'_, H>, y: f32, nav_page_alpha: f32) {
         let meta = H::metadata(cx);
         let set = self.hero_set(meta);
         let widths = hero::hero_widths(cx.measure, self.resume_ms(meta));
@@ -2676,8 +2677,24 @@ impl DetailScreen {
         // fades every button through `chrome`'s `preview_chrome` alpha (`draw_hero`), and cutting
         // four of the five pills here a frame early defeats that fade before it can be seen.
         let (controls, n) = hero::hero_ctls(set);
+        let last = hero::hero_btn_rect_at(set, n.saturating_sub(1), y, widths);
+        let row = [
+            crate::ui::consts::MARGIN_X,
+            y - self.scroll.pos,
+            last.x + last.w - crate::ui::consts::MARGIN_X,
+            hero::CD,
+        ];
         let picture = crate::player::preview::view().picture;
-        // Fixed amber focus and graphite idle: no framebuffer readback or artwork-derived hue.
+        // A text-recording pass (the transition's prewarm, or a headless sweep) drew no pixels
+        // under this row, so a read-back there would sample some other page's ground.
+        let may_read = !picture
+            && !p.is_recording()
+            && may_sample_control_ground(nav_page_alpha, hero_alpha(self.scroll.pos, HERO_FADE));
+        // **The lit face is the ONE chrome tone, not an ambient derivation** (the owner's
+        // 2026-11-10 pass names it: "#7373CB"). Sampling the artwork used to tint the focused
+        // control with whatever poster was behind it, which is why the colour never matched the
+        // one that was asked for. The ground is still sampled for the idle/spent roles.
+        let _ = (row, may_read);
         let palette = ControlPalette::lit();
         let ground = if picture {
             ControlGround::Unkeyed
@@ -2947,6 +2964,17 @@ fn disc_verb_rect(y: f32) -> Rect {
     Rect::new(x, y + (hero::CD - cap) * 0.5, crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - x, hero::CD)
 }
 
+/// Is it safe to sample the panel behind the hero buttons for the ambient control palette this
+/// frame (spec §14 phase 8)? Only once BOTH the route-level nav dip (`nav_page_alpha`,
+/// `DrawFrame::nav_page_alpha` — replaces the old live `ui::nav::page_alpha()` read) and the
+/// hero's own scroll fade have fully settled — a frame either is still fading through is not a
+/// stable backdrop to sample: `sample_control_ground` caches its result across frames
+/// (`CONTROL_GROUND_SAMPLE_EVERY`), so a sample taken mid-transition would be read back for
+/// several frames after the transition ends, on a real device screen this cannot be tested on.
+fn may_sample_control_ground(nav_page_alpha: f32, hero_alpha: f32) -> bool {
+    nav_page_alpha >= 0.999 && hero_alpha > 0.99
+}
+
 fn ease(value: &mut f32, target: f32, dt: f32) -> bool {
     let next = *value + (target - *value) * (dt / 0.35).clamp(0.0, 1.0);
     let moved = (next - *value).abs() > 0.001;
@@ -2972,6 +3000,23 @@ mod disc_verb_rect_tests {
         let a = disc_verb_rect(800.0);
         let b = disc_verb_rect(900.0);
         assert_eq!(b.y - a.y, 100.0, "it travels with the row, one for one");
+    }
+}
+
+#[cfg(test)]
+mod may_sample_control_ground_tests {
+    use super::may_sample_control_ground;
+
+    #[test]
+    fn requires_both_the_route_dip_and_the_hero_fade_to_have_settled() {
+        assert!(may_sample_control_ground(1.0, 1.0), "fully settled: safe to sample");
+        assert!(!may_sample_control_ground(0.5, 1.0), "a route change in flight must not sample");
+        assert!(!may_sample_control_ground(1.0, 0.5), "a scrolling hero must not sample either");
+        assert!(!may_sample_control_ground(0.5, 0.5), "neither settled: must not sample");
+        // the exact thresholds this frame's caller passes in, at their boundary
+        assert!(!may_sample_control_ground(0.998, 1.0));
+        assert!(may_sample_control_ground(0.999, 1.0));
+        assert!(!may_sample_control_ground(1.0, 0.99));
     }
 }
 
@@ -3319,9 +3364,9 @@ impl DetailScreen {
                 dt,
             );
             let target = if d.has_blur {
-                AmbientWash::graphite_keyed(d.blur, [AmbientWash::GROUND_W; 4])
+                AmbientWash::blue_keyed(d.blur, [AmbientWash::GROUND_W; 4])
             } else {
-                AmbientWash::graphite([AmbientWash::GROUND_W; 4])
+                AmbientWash::blue([AmbientWash::GROUND_W; 4])
             };
             self.ground.step(target, AmbientWash::K, dt);
         }

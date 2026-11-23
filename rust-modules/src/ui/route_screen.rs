@@ -237,9 +237,8 @@ impl RouteGround {
         self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
     }
 
-    /// Draw the pre-Home atmosphere captured at construction. Filmography samples its rendered
-    /// host through draw_host. Ordinary Settings uses the authored default instead. No application
-    /// reads or writes happen in draw.
+    /// Draw the pre-Home atmosphere captured at construction. Ordinary Settings samples its
+    /// rendered host through draw_host instead. No application reads or writes happen in draw.
     pub(crate) fn draw_home(&mut self, p: Painter) {
         self.draw_default(p);
     }
@@ -255,7 +254,7 @@ impl RouteGround {
     /// Draw a pre-content route on the product's authored fallback atmosphere.
     ///
     /// Login and the profile ceremony have no Home frame and no media item to sample.  They still
-    /// belong to the same route family, so they take the same graphite envelope as an
+    /// belong to the same route family, so they take the same broad blue envelope as an
     /// artwork-less first-run screen instead of inventing another flat background locally.
     pub(crate) fn draw_default(&mut self, p: Painter) {
         self.latch_default();
@@ -1056,15 +1055,10 @@ impl RouteLayout {
     /// constant grades the constant. Building the view here lets it grade the thing that is drawn.
     /// App-owned titles and questions wrap completely; following content uses their measured height.
     pub(crate) fn narrative_title(title: &str) -> TextView<'_> {
-        Self::narrative_title_sized(title, theme::size::HERO)
-    }
-
-    /// The same title flow at a named rung, with its leading derived from that rung.
-    pub(crate) fn narrative_title_sized(title: &str, size: std::os::raw::c_int) -> TextView<'_> {
-        TextView::new(title, size, theme::TEXT_HEADING)
+        TextView::new(title, theme::size::HERO, theme::TEXT_HEADING)
             .bold()
             .break_long_words()
-            .leading(size as f32 * 1.05)
+            .leading(TITLE_LEADING)
     }
 
     /// Draw a measured crumb→title→copy flow.  Each block begins after the previous one's actual
@@ -1076,13 +1070,12 @@ impl RouteLayout {
     /// screens draw their own line is what makes that a contract instead of a convention: a new
     /// route cannot forget to answer without deleting an argument. `focused` lights the crumb in
     /// the pill family's focus face; see [`Self::draw_crumb`].
-    pub(crate) fn draw_narrative_sized(
+    pub(crate) fn draw_narrative(
         self,
         p: Painter,
         back_to: Option<&str>,
         title: &str,
         copy: &str,
-        title_size: std::os::raw::c_int,
         copy_size: std::os::raw::c_int,
         measure: &dyn Measure,
         focused: bool,
@@ -1092,7 +1085,7 @@ impl RouteLayout {
             self.draw_crumb(p, self.narrative.y, back_to, measure, focused);
         }
 
-        let title = Self::narrative_title_sized(title, title_size);
+        let title = Self::narrative_title(title);
         let title_h = title.measure_h(self.narrative.w);
         title.draw(p, Rect::new(self.narrative.x, top, self.narrative.w, title_h));
 
@@ -1113,20 +1106,6 @@ impl RouteLayout {
                     (copy_bottom - copy_top).max(0.0),
                 ),
             );
-    }
-
-    /// The ordinary route title at `HERO`; compact routes use [`Self::draw_narrative_sized`].
-    pub(crate) fn draw_narrative(
-        self,
-        p: Painter,
-        back_to: Option<&str>,
-        title: &str,
-        copy: &str,
-        copy_size: std::os::raw::c_int,
-        measure: &dyn Measure,
-        focused: bool,
-    ) {
-        self.draw_narrative_sized(p, back_to, title, copy, theme::size::HERO, copy_size, measure, focused);
     }
 }
 

@@ -473,7 +473,7 @@ fn back_leaves_the_quick_connect_form_after_its_poll_died() {
     open_settings(&mut d);
     let mut walk = SettingsWalk { d: &mut d, rig: &mut rig, t: 1 };
     walk.settle();
-    walk.press(Key::Down); // one section card: Quick connect is the next row
+    walk.press(Key::Right); // the root's grid: Select server | Quick connect
     walk.press(Key::Ok);
     assert_eq!(
         walk.rig.take_reqs(),

@@ -37,17 +37,6 @@ fn settings_scrim_and_entrance_alpha_compose_local_and_nav_page_alpha() {
 }
 
 #[test]
-fn settings_root_header_is_numbered_and_compact() {
-    let page = RootPage::new(EntryId(0));
-    assert_eq!(page.root_title, "06 / SETTINGS");
-    let header = Header::new(RouteLayout::settings(), None, &page.root_title, "")
-        .with_back_disc()
-        .with_title_size(theme::size::TITLE);
-    assert_eq!(header.title_size, theme::size::TITLE);
-    assert!(header.back_disc);
-}
-
-#[test]
 fn nested_draw_preserves_navigation_at_rest_and_through_push_and_pop() {
     use crate::ui::containers::stack::Entry;
     use crate::ui::screen::NavPresentation;

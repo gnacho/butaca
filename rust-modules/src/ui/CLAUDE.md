@@ -22,8 +22,8 @@ kill. Full design + migration status: `docs/ui-system-migration.md`.
    what is this colour *for*) and it resolves to a **primitive** (a stop on the palette, private to
    that module) — reach for an existing stop first, and only add one when the palette genuinely has
    no such shade, as an exact 8-bit code via `rgb8`. Two roles landing on one stop is expected and
-   stays two roles (`TEXT_PRIMARY` and `TEXT_HEADING` are both Warm 0): retuning the title fill must
-   not restyle every section heading on screen. Overlays are `with_a(WHITE, a)` on the measured alpha ramp — a new
+   stays two roles (`ACCENT` and `TEXT_PRIMARY` are both Cool 0): retuning the focus fill must not
+   restyle every title on screen. Overlays are `with_a(WHITE, a)` on the measured alpha ramp — a new
    overlay is a weight, never a new hue. The layering mirrors the `Butaca Design System` project
    (`tokens/primitives.css` + `tokens/colors.css`), so a palette decision is one edit in each.
 

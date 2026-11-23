@@ -18,11 +18,7 @@ use crate::ui::Rect;
 use std::borrow::Cow;
 
 // The compact Library menu's existing corner geometry.
-const PANEL_RADIUS: f32 = 12.0;
-
-fn panel_width(kind: LibraryMenuKind) -> f32 {
-    if matches!(kind, LibraryMenuKind::Sources) { 650.0 } else { 520.0 }
-}
+const PANEL_RADIUS: f32 = 20.0;
 
 pub(crate) const SHAPE: [&str; 2] = [
     "LibraryMenu{arg:LibraryMenuArg,kind:u32,desired_unwatched:Option<bool>,identities:[str],dependencies:[u8],rows:[{key:u32,table_index:i32}],table:TableViewMotion}",
@@ -363,7 +359,7 @@ impl LibraryMenu {
         Rect::new(
             x.clamp(96.0, 1174.0),
             (y + h + 16.0).clamp(96.0, 984.0 - height),
-            panel_width(self.kind),
+            650.0,
             height,
         )
     }
@@ -411,7 +407,6 @@ impl LibraryMenu {
         self.stamp = draft.stamp;
         self.rows = rows;
         self.table.compact = true;
-        self.table.technical(true);
         self.table.set_sections(draft.sections, selected, false);
     }
 

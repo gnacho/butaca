@@ -37,20 +37,6 @@ fn an_ambient_key_tints_both_levels_of_the_focused_face() {
     );
 }
 
-#[test]
-fn netgrip_keyed_controls_use_flat_amber_focus_and_graphite_idle() {
-    let palette = ControlPalette::lit();
-    let focus = ControlStyle::Accent.face(true, ControlGround::Keyed, palette);
-    assert_eq!(
-        (focus.top, focus.body, focus.ink),
-        (theme::ACCENT, theme::ACCENT, theme::ACCENT_INK)
-    );
-    let idle = ControlStyle::Accent.face(false, ControlGround::Keyed, palette);
-    assert_eq!(idle.top, theme::CONTROL_IDLE_FILL);
-    assert_eq!(idle.body, theme::CONTROL_IDLE_FILL);
-    assert_eq!(idle.ink, theme::CONTROL_IDLE_INK);
-}
-
 /// Video is the explicit exception: its pixels live on another plane, so even a supplied key
 /// is ignored. The focused face stays flat ACCENT and the idle face stays the HUD's light film.
 #[test]
@@ -62,11 +48,12 @@ fn an_unkeyed_control_never_samples_the_ambient_palette() {
         (focus.top, focus.body, focus.ink),
         (theme::ACCENT, theme::ACCENT, theme::ACCENT_INK)
     );
-    // Over video, idle returns to the neutral light film rather than carrying the signal color.
-    assert_eq!(
-        (idle.top, idle.body),
-        (theme::CONTROL_IDLE_FILL_UNKEYED, theme::CONTROL_IDLE_FILL_UNKEYED)
-    );
+    // The idle face over video is the chrome tone at a film's weight (the owner's "todos los
+    // botones #7373CB" reaches the transport), not the old 10% white.
+    assert_eq!((idle.top, idle.body), (idle.top, idle.top));
+    assert_eq!(idle.top[0], theme::CHROME_LIT[0]);
+    assert_eq!(idle.top[2], theme::CHROME_LIT[2]);
+    assert!(idle.top[3] > 0.0 && idle.top[3] < 1.0, "a film, not a solid");
 }
 
 /// **A control row's pop animates BOTH ways**, which is the whole reason it is an array of
@@ -349,8 +336,11 @@ fn the_unkeyed_ground_drops_the_ambient_contract_whole() {
     let keyed_idle = ControlStyle::Accent.face(false, ControlGround::Keyed, palette);
     let video_idle = ControlStyle::Accent.face(false, ControlGround::Unkeyed, palette);
     assert_eq!(keyed_idle.top, palette.idle);
-    // Over video the idle face is the HUD's neutral light film, not a tinted plate.
-    assert_eq!(video_idle.top, theme::CONTROL_IDLE_FILL_UNKEYED);
+    // Over video the idle face is the chrome tone at a film's weight, not the old 10% white: the
+    // owner's "todos los botones #7373CB" reaches the transport too.
+    assert_ne!(video_idle.top, theme::CONTROL_IDLE_FILL_UNKEYED);
+    assert_eq!(video_idle.top[0], theme::CHROME_LIT[0]);
+    assert_eq!(video_idle.top[2], theme::CHROME_LIT[2]);
     assert_ne!(keyed_idle.top, video_idle.top);
     assert_eq!(keyed_idle.ink, video_idle.ink, "one `--control-idle-ink`");
 
@@ -365,8 +355,11 @@ fn the_unkeyed_ground_drops_the_ambient_contract_whole() {
         (video_focus.top, video_focus.body),
         (theme::ACCENT, theme::ACCENT)
     );
-    // Both grounds use dark ink over the same amber focus.
-    assert_eq!(keyed_focus.ink, theme::ACCENT_INK);
+    // The two grounds keep the same MEANING (an ink that reads on the lit face) but no longer the
+    // same token: the keyed face is the chrome's violet, so its ink is white, while the unkeyed
+    // face is still the warm accent plate and keeps its near-black. They briefly shared a token
+    // and the violet plate then measured ~2:1 against it.
+    assert_eq!(keyed_focus.ink, theme::TEXT_PRIMARY);
     assert_eq!(video_focus.ink, theme::ACCENT_INK);
 }
 
@@ -590,23 +583,11 @@ fn the_focus_cast_is_a_contact_and_a_pool_at_twice_the_css_blur() {
 }
 
 #[test]
-fn netgrip_focused_keyline_chip_gains_a_fill_and_dark_ink() {
-    assert_eq!(
-        keyline_chip_face(theme::TEXT_SECONDARY, false),
-        (None, theme::TEXT_SECONDARY)
-    );
-    assert_eq!(
-        keyline_chip_face(theme::TEXT_SECONDARY, true),
-        (Some(theme::ACCENT), theme::ACCENT_INK)
-    );
-}
-
-#[test]
 fn a_selected_player_tab_keeps_a_quiet_face_until_it_owns_focus() {
     let pill = || TabPill::new(c"Chapters".as_ptr(), theme::size::BODY, Rect::new(0.0, 0.0, 200.0, 64.0))
         .ground(ControlGround::Unkeyed).selected(true);
     let selected = pill().face();
-    assert_eq!(selected, (Some(theme::TAB_PLATE_SELECTED), theme::ACCENT, 1.0));
+    assert_eq!(selected, (Some(theme::TAB_PLATE_SELECTED), theme::TEXT_PRIMARY, 1.0));
     assert_ne!(selected.0, Some(crate::ui::ACCENT));
     let focused = pill().focused(true).face();
     assert_eq!(focused, (Some(crate::ui::ACCENT), crate::ui::ACCENT_INK, 1.0));

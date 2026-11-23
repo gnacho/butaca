@@ -355,7 +355,6 @@ fn draw_cell(
                 text_top + date_y + (top + baseline) * 0.5,
                 &ep.rating,
                 dim,
-                false,
                 measure,
             );
         }

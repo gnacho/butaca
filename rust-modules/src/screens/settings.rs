@@ -59,7 +59,7 @@ pub(crate) use self::page::{RootPage, SHAPE};
 /// Which ceremony the surface carries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Family {
-    /// Settings, over a live page: modal scrim plus the authored graphite ground.
+    /// Settings, over a live page: scrim + ambient ground sampled off the host.
     Settings,
 }
 
@@ -880,7 +880,7 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
                 // opaque ground at rest and what fades out over the host on dismissal
                 let dim = theme::scrim_black(settings_scrim_alpha(a, f.nav_page_alpha));
                 root.rect(Rect::FULL, 0.0, dim, dim, 0.0);
-                crate::ui::profile::phase("st.ground", || self.ground.draw_default(root.alpha(a)));
+                crate::ui::profile::phase("st.ground", || self.ground.draw_host(root.alpha(a)));
             }
         }
         self.ground_ready = a >= 0.995;

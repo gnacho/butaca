@@ -1561,7 +1561,6 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
     let white = theme::TEXT_PRIMARY;
     let dim = theme::TEXT_SECONDARY;
     let track = theme::RAIL_TRACK;
-    let progress = theme::ACCENT;
     let sx = SB_X;
     let sw = sb_w();
     let sy = SB_Y;
@@ -1583,16 +1582,16 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
     p.rect(Rect::new(sx, sy, sw, sh), sh * 0.5, track, track, 0.0);
     let fw = (sw as f64 * frac) as f32;
     if fw > sh * 0.5 {
-        p.rrect(Rect::new(sx, sy, fw, sh), sh * 0.5, 0.0, progress);
+        p.rrect(Rect::new(sx, sy, fw, sh), sh * 0.5, 0.0, white);
     } else if fw > 0.0 {
-        p.rrect(Rect::new(sx, sy, fw, sh), fw * 0.5, 0.0, progress);
+        p.rrect(Rect::new(sx, sy, fw, sh), fw * 0.5, 0.0, white);
     }
     // playhead: a focus-glowing knob when the scrubber is focused, a plain knob while scrubbing,
     // else a thin tick.
     let hx = sx + fw;
     let cy = sy + sh * 0.5;
     if bar.knob == Knob::Focused {
-        let glow = theme::with_a(theme::ACCENT, 0.22);
+        let glow = [1.0f32, 1.0, 1.0, 0.22];
         p.rect(
             Rect::new(hx - 17.0, cy - 17.0, 34.0, 34.0),
             17.0,
@@ -1603,24 +1602,24 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
         p.rect(
             Rect::new(hx - 11.0, cy - 11.0, 22.0, 22.0),
             11.0,
-            progress,
-            progress,
+            white,
+            white,
             0.0,
         );
     } else if bar.knob == Knob::Held {
         p.rect(
             Rect::new(hx - 9.0, cy - 9.0, 18.0, 18.0),
             9.0,
-            progress,
-            progress,
+            white,
+            white,
             0.0,
         );
     } else {
         p.rect(
             Rect::new(hx - 1.5, sy - 4.0, 3.0, sh + 8.0),
             0.0,
-            progress,
-            progress,
+            white,
+            white,
             0.0,
         );
     }
