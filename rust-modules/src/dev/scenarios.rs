@@ -1009,6 +1009,8 @@ fn settingspicker_arm(app: &mut App, fr: &mut Frame) {
         for ev in crate::app::bridge::script_key(Key::Ok, Tick { ms: fr.now, dt_us: 0 }) {
             app.inputs.push(ev);
         }
+        #[cfg(feature = "devtriggers")]
+        crate::log(&format!("settingspicker: opened {}", target.trim()));
     }
 }
 
