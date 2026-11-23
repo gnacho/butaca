@@ -258,6 +258,21 @@ impl RootPage {
         }
     }
 
+    /// The mockup's selector hangs from the row that opened it instead of replacing the page.
+    fn picker_frame(&self) -> Rect {
+        let table = Self::layout().content;
+        let anchor = self
+            .table
+            .row_frame(table, self.parent_row)
+            .unwrap_or(Rect::new(table.x, table.y, table.w, 1.0));
+        crate::ui::widgets::anchored_menu(
+            anchor,
+            520.0,
+            self.picker_table.measured_height().min(520.0),
+            false,
+        )
+    }
+
     fn active_mut(&mut self) -> &mut TableView {
         if self.state.picker.is_some() {
             &mut self.picker_table
@@ -312,7 +327,23 @@ impl RootPage {
     }
 
     fn view(&self) -> TableScreen<'_> {
-        self.view_at(self.state.picker)
+        match self.state.picker {
+            Some(_) => self.picker_view(self.picker_frame()),
+            None => self.view_at(None),
+        }
+    }
+
+    /// One picker as a compact panel over the root: the same table and title, a frame anchored to
+    /// the parent row, and no second route.
+    fn picker_view(&self, frame: Rect) -> TableScreen<'_> {
+        let layout = Self::layout();
+        TableScreen::new(
+            Header::new(layout, None, "", ""),
+            &self.picker_table,
+            GroupId(0),
+            self.entry,
+        )
+        .with_frame(frame)
     }
 
     /// One level of the page: the row list (`None`) or a picker, each with its own title. The
@@ -999,7 +1030,7 @@ impl Machine<InnerHost> for RootPage {
                 }
                 let h = Self::layout().content.h;
                 self.table.update(t.dt(), h);
-                self.picker_table.update(t.dt(), h);
+                self.picker_table.update(t.dt(), self.picker_frame().h);
                 let open = self.state.picker.is_some();
                 self.submenu.tick(open, *t, &mut fx.present());
                 if !open && self.submenu.resting(false) {
@@ -1110,22 +1141,28 @@ impl Screen<InnerHost> for RootPage {
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
-        let open = self.state.picker.is_some();
-        if self.submenu.resting(open) {
-            let mut v = self.view();
-            crate::ui::screen::Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
+        // The root stays on screen under every picker, as the mockup does.
+        let root_stops = self.draw_level(f, None, f.painter);
+        let level = self.state.picker.or(self.leaving);
+        if let Some(field) = level {
+            let open = self.state.picker == Some(field);
+            let panel_p = if open { f.painter } else { self.submenu.child(f.painter) };
+            let frame = self.picker_frame();
+            crate::ui::widgets::panel_ground(
+                panel_p,
+                frame,
+                20.0,
+                f.underlay,
+            );
+            let mut view = self.picker_view(frame);
+            let mut inner = DrawFrame::with_navigation(f.cx, panel_p, f.navigation());
+            crate::ui::screen::Part::<InnerHost>::draw(&mut view, &mut inner, Rect::FULL);
+            let panel_stops = inner.into_stops();
+            for s in if open { panel_stops } else { root_stops } {
+                f.stop(Painter::root(), s);
+            }
         } else {
-            // Mid-push: the row list in the parent role, the picker (or the one leaving) in the
-            // child role; only the level focus acts on contributes stops.
-            let (parent_p, child_p) = (self.submenu.parent(f.painter), self.submenu.child(f.painter));
-            let parent = self.draw_level(f, None, parent_p);
-            let child = self
-                .state
-                .picker
-                .or(self.leaving)
-                .map(|field| self.draw_level(f, Some(field), child_p))
-                .unwrap_or_default();
-            for s in if open { child } else { parent } {
+            for s in root_stops {
                 f.stop(Painter::root(), s);
             }
         }
@@ -1509,6 +1546,30 @@ mod tests {
         assert_eq!(page.table.sections[0].rows.len(), 3, "server, add, disconnect");
         assert_eq!(page.table.sections[2].rows.len(), 3, "the three subtitle rows");
         assert_eq!(page.table.sections[3].rows.len(), 3, "language, legal, about");
+    }
+
+    #[test]
+    fn a_picker_is_anchored_to_its_row_and_leaves_the_root_page_visible() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("settings-anchored-picker");
+        let mut page = RootPage::new(EntryId(0));
+        let quality = row_of(&page, crate::i18n::msg::settings_playback_quality());
+        with_fx(|fx| page.activate(quality as usize, fx));
+        assert_eq!(page.state.picker, Some(Field::Quality));
+        let anchor = page
+            .table
+            .row_frame(RootPage::layout().content, page.parent_row)
+            .expect("the opening row has a rect");
+        let frame = page.picker_frame();
+        assert_eq!(frame.w, 520.0, "the mockup's compact selector width");
+        assert!(
+            frame.y == anchor.y + anchor.h + crate::ui::theme::space::MD
+                || frame.y + frame.h + crate::ui::theme::space::MD == anchor.y,
+            "the panel hangs directly under its row, or above it at the screen foot"
+        );
+        assert_eq!(page.view().table.frame.y, frame.y,
+            "focus geometry follows the anchored panel, not the old full-level frame");
+        with_fx(|fx| page.close_picker(fx));
     }
 
     #[test]
