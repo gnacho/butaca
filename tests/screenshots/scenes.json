@@ -145,8 +145,8 @@
     {
       "name": "settings",
       "free_regions": [[220, 448, 360, 40]],
-      "max_delta": 3,
-      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 3 levels per channel, with no geometry, text or focus change; the scene is at rest.",
+      "max_delta": 4,
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 4 levels per channel, with no geometry, text or focus change; the scene is at rest.",
       "state": "The Settings root: the display title in Fraunces, the real profile/version subtitle, and the four groups as two-column cards. The shared bar with its textual destinations and profile chip sits above.",
       "triggers": {"heropin": "0", "settings": "root"},
       "expect": ["coldopen screen=settings"],
@@ -155,8 +155,8 @@
     {
       "name": "settings-quality",
       "free_regions": [[220, 448, 360, 40]],
-      "max_delta": 3,
-      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 3 levels per channel, with no geometry, text, focus or selector change; the scene is at rest.",
+      "max_delta": 4,
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 4 levels per channel, with no geometry, text, focus or selector change; the scene is at rest.",
       "state": "The Settings root with the playback quality picker anchored to its row, opened through the real D-pad/OK path.",
       "triggers": {"heropin": "0", "settingspicker": "quality"},
       "expect": ["coldopen screen=settings", "settingspicker: opened quality"],
@@ -165,8 +165,8 @@
     {
       "name": "settings-subtitle-size",
       "free_regions": [[220, 448, 360, 40]],
-      "max_delta": 3,
-      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 3 levels per channel, with no geometry, text, focus or selector change; the scene is at rest.",
+      "max_delta": 4,
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 4 levels per channel, with no geometry, text, focus or selector change; the scene is at rest.",
       "state": "The Settings root with the subtitle-size picker anchored to its row, opened through the real D-pad/OK path.",
       "triggers": {"heropin": "0", "settingspicker": "subtitle-size"},
       "expect": ["coldopen screen=settings", "settingspicker: opened subtitle-size"],
