@@ -3,7 +3,7 @@ type: planning
 entity: implementation-plan
 plan: "NetGrip visual redesign"
 phase: 4
-status: active
+status: completed
 created: "2026-11-23"
 updated: "2026-11-23"
 ---

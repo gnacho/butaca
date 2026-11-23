@@ -3,7 +3,7 @@ type: planning
 entity: phase
 plan: "NetGrip visual redesign"
 phase: 4
-status: in_progress
+status: completed
 created: "2026-11-23"
 updated: "2026-11-23"
 ---
@@ -35,17 +35,17 @@ Make the menus visibly NetGrip-derived instead of preserving the old tvOS struct
 
 ## Deliverables
 
-- [ ] Flat top navigation with complete icon and label vocabulary.
-- [ ] Technical Library chips and compact popovers.
-- [ ] Settings' compact numbered header and section cards.
-- [ ] Passing regressions, full suites, replay and reviewed simulator captures.
+- [x] Flat top navigation with complete icon and label vocabulary.
+- [x] Technical Library chips and compact popovers.
+- [x] Settings' compact numbered header and section cards.
+- [x] Passing regressions, full suites, replay and reviewed simulator captures.
 
 ## Acceptance Criteria
 
-- [ ] The menu structure is visibly different from the previous tvOS capsules, large popovers and per-setting buttons.
-- [ ] Destination identities, focus order, actions, strings, remote behavior and 1920x1080 geometry contracts remain intact.
-- [ ] Host, hostsim, release-feature and replay gates pass on the final committed tree.
-- [ ] The follow-up PR head passes ARM and Simulator CI.
+- [x] The menu structure is visibly different from the previous tvOS capsules, large popovers and per-setting buttons.
+- [x] Destination identities, focus order, actions, strings, remote behavior and 1920x1080 geometry contracts remain intact.
+- [x] Host, hostsim, release-feature and replay gates pass on the final committed tree.
+- [x] The follow-up PR head passes ARM and Simulator CI.
 
 ## Dependencies on Other Phases
 

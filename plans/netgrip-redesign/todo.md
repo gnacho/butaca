@@ -9,7 +9,7 @@ updated: "2026-11-23"
 
 > Tracking [NetGrip visual redesign](plan.md)
 
-## Active Phase: 4 - Structural menu follow-up
+## Plan Completed
 
 ### Phase Context
 
@@ -20,11 +20,11 @@ updated: "2026-11-23"
 
 ### Pending
 
-- [ ] Run full host, hostsim, release-feature and replay verification, then commit and run CI <!-- added: 2026-11-23 -->
+- None
 
 ### In Progress
 
-- [ ] Complete structural verification and publish the follow-up <!-- started: 2026-11-23 -->
+- None
 
 ### Completed
 
@@ -56,3 +56,4 @@ updated: "2026-11-23"
 
 - PR #448 opened after explicit user authorization. Host, ARM, Linux simulator and Windows CI passed. Plan completed without merge, release or TV validation.
 - User feedback reopened the structural scope: the running build was correct, but the old menu geometry remained. Phase 4 started with flat navigation, technical chips/popovers and section cards.
+- Phase 4 completed with all suites, replay and CI green on the structural follow-up head.
