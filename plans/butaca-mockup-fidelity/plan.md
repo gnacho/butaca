@@ -90,3 +90,5 @@ A visibly faithful native implementation of the supplied Butaca mockup, demonstr
 
 - Plan created after the full mockup audit and the user's decision to include real audio/subtitle preferences.
 - Phase 1 implementation plan authored and verified. Phase 1 started.
+- The owner explicitly authorized the mockup's Play/Pause HUD control and revision of the older transport presentation rule on 2026-11-23.
+- All four implementation plans authored and checked against one another. The independent reviewer could not run because the provider quota was exhausted.

@@ -22,7 +22,7 @@ Align media detail and playback presentation with the mockup's editorial detail 
 
 - Detail's 52vh backdrop, overlapped 280x420 poster, scoped display title, kicker, action order and lower track selectors.
 - Vertical episode rows with independent play/detail actions, plus retained cast and related shelves.
-- Player title/metadata placement, left-aligned primary controls and retained secondary native controls.
+- Player title/metadata placement, left-aligned Play/Pause, Audio, Subtitles and Settings controls, and retained Stop/Next secondary native controls.
 - Bottom playbar with fixed time labels, focused knob and real chapter markers, plus safe Skip Intro and Up Next placement.
 - Geometry, pointer, activation and overlay regressions, followed by simulator and television captures.
 
@@ -41,7 +41,7 @@ Align media detail and playback presentation with the mockup's editorial detail 
 
 - [ ] Detail visibly matches the mockup's backdrop, poster, copy and action composition without losing Restart, Trailer, alternate versions or artwork.
 - [ ] Track selectors continue to reach the real playback choices and selected tracks survive the flow.
-- [ ] Player controls, chapter markers and pointer targets match the new geometry without cross-activation or subtitle collisions.
+- [ ] The authorized Play/Pause control and the other primary/secondary controls, chapter markers and pointer targets match the new geometry without cross-activation or subtitle collisions.
 - [ ] Final television captures verify native text and video-plane composition without playback-history writes.
 
 ## Dependencies on Other Phases
