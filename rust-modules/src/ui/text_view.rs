@@ -597,6 +597,9 @@ impl<'a> TextView<'a> {
                 if self.lead_bold {
                     lab = lab.bold();
                 }
+                if self.role == crate::text::FontRole::Display {
+                    lab = lab.display();
+                }
                 lab.draw(p, Rect::new(lx, frame.y, frame.w, 0.0));
             }
         }
@@ -667,6 +670,9 @@ impl<'a> TextView<'a> {
                 .v(VAlign::CapTop);
             if self.bold == 1 {
                 lab = lab.bold();
+            }
+            if self.role == crate::text::FontRole::Display {
+                lab = lab.display();
             }
             lab.draw(p, row);
             // the run hugs the (possibly clipped) last line, positioned by its measured width

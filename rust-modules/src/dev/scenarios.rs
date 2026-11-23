@@ -110,6 +110,9 @@ pub(crate) struct Scenarios {
     /// walking the Settings root's column to the named picker's row.
     pub(crate) settingspicker_tried: bool,
     pub(crate) settingspicker_step: u8,
+    /// When the previous D-pad press was delivered, so the capture walk waits for one frame's
+    /// navigation commit before the next rather than spending every press in one frame.
+    pub(crate) settingspicker_last_ms: u32,
     pub(crate) seek_tried: bool,
     pub(crate) seek_script: Vec<String>,
     pub(crate) seek_script_at: u32,
@@ -968,8 +971,8 @@ fn settingspicker_arm(app: &mut App, fr: &mut Frame) {
         return;
     };
     let steps: u8 = match target.trim() {
-        "quality" => 3,
-        "subtitle-size" => 10,
+        "quality" => 2,
+        "subtitle-size" => 6,
         _other => {
             #[cfg(feature = "devtriggers")]
             crate::log(&format!("BADTRIGGER settingspicker target {_other:?} unknown"));
@@ -977,18 +980,31 @@ fn settingspicker_arm(app: &mut App, fr: &mut Frame) {
             return;
         }
     };
-    if !matches!(app.route(), AppArg::Settings(_)) {
+    // Settings is a ModalStack SURFACE, so `app.route()` stays Home while it is open. This arm
+    // owns both the open and the walk: wait for Home, open once, give the surface a beat to mount,
+    // then send one real DOWN per navigation frame and finally the OK.
+    if app.scenarios.settingspicker_last_ms == 0 {
         if fr.now.wrapping_sub(app.t0) > 800 {
             crate::app::bridge::open_settings(&mut app.pages);
+            app.scenarios.settingspicker_last_ms = fr.now.max(1);
         }
         return;
     }
+    if fr.now.wrapping_sub(app.scenarios.settingspicker_last_ms) < 500 {
+        return;
+    }
     if app.scenarios.settingspicker_step < steps {
+        if fr.now.wrapping_sub(app.scenarios.settingspicker_last_ms) < 140 {
+            return;
+        }
         app.scenarios.settingspicker_step += 1;
+        app.scenarios.settingspicker_last_ms = fr.now.max(1);
         for ev in crate::app::bridge::script_key(Key::Down, Tick { ms: fr.now, dt_us: 0 }) {
             app.inputs.push(ev);
         }
-    } else if !app.scenarios.settingspicker_tried {
+    } else if !app.scenarios.settingspicker_tried
+        && fr.now.wrapping_sub(app.scenarios.settingspicker_last_ms) >= 320
+    {
         app.scenarios.settingspicker_tried = true;
         for ev in crate::app::bridge::script_key(Key::Ok, Tick { ms: fr.now, dt_us: 0 }) {
             app.inputs.push(ev);

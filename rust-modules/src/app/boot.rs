@@ -1370,6 +1370,7 @@ pub(crate) unsafe fn construct(
     let settings_tried = settings_boot.is_none();
     let settingspicker_tried = settingspicker_boot.is_none();
     let settingspicker_step = 0u8;
+    let settingspicker_last_ms = 0u32;
     let seek_tried = false;
     // /tmp/butaca-autoseek seek script (see the parse site): pending steps, the tick of
     // the last fired step, the gap between steps, and the last REQUESTED target (the base
@@ -1494,6 +1495,7 @@ pub(crate) unsafe fn construct(
             settings_tried,
             settingspicker_tried,
             settingspicker_step,
+            settingspicker_last_ms,
             seek_tried,
             seek_script,
             seek_script_at,

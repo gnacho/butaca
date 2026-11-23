@@ -39,6 +39,8 @@
     },
     {
       "name": "account-menu",
+      "free_regions": [[740, 468, 360, 42]],
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the centered server dialog renders that complete address under the active profile. Only its text box may move; the dialog title, selection, actions, profile chip and page behind still grade at 1.",
       "state": "The account menu open over a LANDED Home (the menu waits for 800 ms of rest, so the hero backdrop is in).",
       "triggers": {"heropin": "0", "acct": "800"},
       "expect": ["home: hero pinned at slot 0", "coldopen screen=account"],
@@ -142,6 +144,9 @@
     },
     {
       "name": "settings",
+      "free_regions": [[220, 448, 360, 40]],
+      "max_delta": 3,
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 3 levels per channel, with no geometry, text or focus change; the scene is at rest.",
       "state": "The Settings root: the display title in Fraunces, the real profile/version subtitle, and the four groups as two-column cards. The shared bar with its textual destinations and profile chip sits above.",
       "triggers": {"settings": "root"},
       "expect": ["coldopen screen=settings"],
@@ -149,15 +154,21 @@
     },
     {
       "name": "settings-quality",
+      "free_regions": [[220, 448, 360, 40]],
+      "max_delta": 3,
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 3 levels per channel, with no geometry, text, focus or selector change; the scene is at rest.",
       "state": "The Settings root with the playback quality picker anchored to its row, opened through the real D-pad/OK path.",
-      "triggers": {"settings": "root", "settingspicker": "quality"},
+      "triggers": {"settingspicker": "quality"},
       "expect": ["coldopen screen=settings"],
       "outputs": [{"file": "settings-quality.jpg", "size": "1920x1080"}]
     },
     {
       "name": "settings-subtitle-size",
+      "free_regions": [[220, 448, 360, 40]],
+      "max_delta": 3,
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the Settings server row renders that complete address, so only that text box is free. Across three capture pairs the translucent Settings surface and its dithered host field otherwise differ by at most 3 levels per channel, with no geometry, text, focus or selector change; the scene is at rest.",
       "state": "The Settings root with the subtitle-size picker anchored to its row, opened through the real D-pad/OK path.",
-      "triggers": {"settings": "root", "settingspicker": "subtitle-size"},
+      "triggers": {"settingspicker": "subtitle-size"},
       "expect": ["coldopen screen=settings"],
       "outputs": [{"file": "settings-subtitle-size.jpg", "size": "1920x1080"}]
     }
