@@ -32,6 +32,7 @@
   "browse.auth.switch_retry": "Не ўдалося змяніць профіль. Паспрабуйце зноў.",
   "browse.auth.timeout": "Час чакання ўваходу скончыўся — паспрабуйце зноў.",
   "browse.chrome.home": "Галоўная",
+  "browse.chrome.search": "Пошук",
   "browse.collection.empty": "Нічога з гэтай калекцыі няма ў вашых бібліятэках",
   "browse.collection.items": "Элементы",
   "browse.collection.kind": "Калекцыя",

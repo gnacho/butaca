@@ -1106,6 +1106,14 @@
     "value": "Manage this television and your Jellyfin servers. Everything stays on your local network: no account, no telemetry, nothing leaves it.",
     "description": "Settings root left-column intro on the Jellyfin flavor: settings.root.jellyfin_copy"
   },
+  "settings.root.subtitle": {
+    "value": "Profile: {profile} · Butaca {version} · No telemetry: the app only talks to your server",
+    "args": {
+      "profile": "str",
+      "version": "str"
+    },
+    "description": "Settings subtitle under the page title, with the real active profile and app version"
+  },
   "settings.playback.skip_markers": {
     "value": "Skip intro and credits",
     "description": "Settings, consent or sign-in UI: settings.playback.skip_markers"

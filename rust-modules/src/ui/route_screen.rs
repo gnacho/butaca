@@ -805,7 +805,7 @@ impl RouteLayout {
         // the first card. One line plus the group's own step is what the mockup measures.
         let head = CRUMB_BAND
             + theme::space::SM
-            + theme::size::HERO as f32
+            + theme::size::DISPLAY as f32
             + theme::space::MD
             + theme::size::LABEL as f32
             + theme::space::XS;
@@ -1055,7 +1055,16 @@ impl RouteLayout {
     /// constant grades the constant. Building the view here lets it grade the thing that is drawn.
     /// App-owned titles and questions wrap completely; following content uses their measured height.
     pub(crate) fn narrative_title(title: &str) -> TextView<'_> {
-        TextView::new(title, theme::size::HERO, theme::TEXT_HEADING)
+        Self::narrative_title_sized(title, theme::size::HERO)
+    }
+
+    /// The same title flow at an explicitly chosen rung. A centred route may use a smaller display
+    /// title without forking the wrapping, leading or measurement rules.
+    pub(crate) fn narrative_title_sized(
+        title: &str,
+        size: std::os::raw::c_int,
+    ) -> TextView<'_> {
+        TextView::new(title, size, theme::TEXT_HEADING)
             .bold()
             .break_long_words()
             .leading(TITLE_LEADING)
@@ -1080,12 +1089,38 @@ impl RouteLayout {
         measure: &dyn Measure,
         focused: bool,
     ) {
+        self.draw_narrative_sized(
+            p,
+            back_to,
+            title,
+            theme::size::HERO,
+            copy,
+            copy_size,
+            measure,
+            focused,
+        );
+    }
+
+    /// [`Self::draw_narrative`] with an explicit title rung. Everything after the title still
+    /// flows from the measured result, so a smaller title tightens the whole narrative band.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_narrative_sized(
+        self,
+        p: Painter,
+        back_to: Option<&str>,
+        title: &str,
+        title_size: std::os::raw::c_int,
+        copy: &str,
+        copy_size: std::os::raw::c_int,
+        measure: &dyn Measure,
+        focused: bool,
+    ) {
         let top = self.narrative_top(back_to.is_some());
         if let Some(back_to) = back_to {
             self.draw_crumb(p, self.narrative.y, back_to, measure, focused);
         }
 
-        let title = Self::narrative_title(title);
+        let title = Self::narrative_title_sized(title, title_size);
         let title_h = title.measure_h(self.narrative.w);
         title.draw(p, Rect::new(self.narrative.x, top, self.narrative.w, title_h));
 

@@ -1270,7 +1270,8 @@ impl Rig<AppHost> for Bridge {
         if self.logo_tex != 0 && self.logo_px.0 > 0 && self.logo_px.1 > 0 && brand > 0.004 {
             let h = 46.0;
             let w = h * self.logo_px.0 as f32 / self.logo_px.1 as f32;
-            let logo = crate::ui::Rect::new(crate::ui::consts::MARGIN_X,
+            let logo = crate::ui::Rect::new(
+                crate::ui::widgets::CHIP_FRAME.x + crate::ui::widgets::CHIP_D + 20.0,
                 crate::ui::widgets::TOP_BAR_Y
                     + (crate::ui::widgets::TAB_PILL_H - h) * 0.5,
                 w, h);
@@ -1284,6 +1285,8 @@ impl Rig<AppHost> for Bridge {
         }
         let chrome = self.chrome.read(self.strip.chip_expand_pos());
         self.strip.draw(chrome.labels, p, glass.tab_band_mut());
+        let bar_face = glass.tab_face();
+        crate::ui::widgets::profile_chip_with(p, chrome.profile, chrome.chip_expand, bar_face);
         let clock = clock_text();
         let clock_frame = crate::ui::Rect::new(
             crate::ui::widgets::SETTINGS_GEAR_FRAME.x - 154.0,

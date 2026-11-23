@@ -165,6 +165,10 @@
     "value": "Home",
     "description": "browse chrome home"
   },
+  "browse.chrome.search": {
+    "value": "Search",
+    "description": "Shared top-bar destination label"
+  },
   "browse.collection.empty": {
     "value": "Nothing in this collection is in your libraries",
     "description": "Collection page read-out when none of the collection's members is in the viewer's libraries (an empty collection)"

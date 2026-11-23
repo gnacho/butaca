@@ -66,7 +66,7 @@ pub(crate) struct ChromeSnapshot {
     session_watch: crate::server::session::VisibleSessionWatch,
     labels: Vec<String>,
     /// Which pills are MARKS rather than words, in strip order (`ui::widgets::TabLabels`). The
-    /// owner's 2026-11-10 pass made Inicio and Favoritos icons; Search has always been one.
+    /// supplied Butaca mockup names every fixed destination, so these stay empty.
     icons: Vec<Option<crate::ui::icons::Icon>>,
     keys: Vec<u32>,
     widths: Vec<f32>,
@@ -89,14 +89,10 @@ impl ChromeSnapshot {
             self.labels.clear();
             self.icons.clear();
             self.keys.clear();
-            // **The two global ends of the strip are MARKS, not words** (owner, 2026-11-10): a
-            // house for Inicio and a heart for Favoritos - the same heart the detail hero's
-            // favourite disc wears, so "favourite" is one glyph everywhere. A word is still the
-            // right face for a LIBRARY, whose names are the server's and are not a fixed
-            // vocabulary of icons; and the page a mark leads to still names itself in its own
-            // heading, which is where a word belongs.
-            self.labels.push(String::new());
-            self.icons.push(Some(crate::ui::icons::Icon::Home));
+            // The supplied mockup names every destination in the strip. Keep the stable keys and
+            // measured labels while leaving the mark channel empty.
+            self.labels.push(crate::i18n::msg::browse_chrome_home().into());
+            self.icons.push(None);
             self.keys.push(STRIP_BASE);
             for i in 0..directory.tab_count() {
                 let Some(kind) = directory.tab_kind(i) else { continue };
@@ -112,11 +108,11 @@ impl ChromeSnapshot {
                     SecKind::Video => 5,
                 });
             }
-            self.labels.push(String::new());
-            self.icons.push(Some(crate::ui::icons::Icon::Heart));
+            self.labels.push(crate::i18n::msg::browse_kind_favorites().into());
+            self.icons.push(None);
             self.keys.push(STRIP_BASE + 6);
-            self.labels.push(String::new());
-            self.icons.push(Some(crate::ui::icons::Icon::Search));
+            self.labels.push(crate::i18n::msg::browse_chrome_search().into());
+            self.icons.push(None);
             self.keys.push(STRIP_BASE + 3);
             self.widths = widgets::tab_widths(&self.labels, &self.icons, measure);
             self.tabs_generation = Some(generation);
@@ -185,6 +181,7 @@ impl ChromeSnapshot {
 
     pub(crate) fn focus(&self, focus: Option<FocusKey<u32>>) -> TopFocus {
         match focus.map(|focus| focus.elem) {
+            Some(key) if key == STRIP_BASE + 4 => TopFocus::Chip,
             Some(key) if key == STRIP_BASE + 7 => TopFocus::Gear,
             Some(key) if key == STRIP_BASE + 8 => TopFocus::Instance,
             Some(key) => self.keys.iter().position(|&id| id == key).map(TopFocus::Pill).unwrap_or(TopFocus::Away),
@@ -197,6 +194,7 @@ impl ChromeSnapshot {
     /// own; the `Bridge` methods that call this are the one place both live.
     pub(crate) fn members(&self, selected: i32, focus: Option<FocusKey<u32>>, scroll: f32, out: &mut Vec<StripMember<u32>>) {
         out.clear();
+        out.push(StripMember::new(STRIP_BASE + 4, widgets::CHIP_FRAME));
         widgets::tab_members(&self.widths, &self.keys, selected, self.focus(focus), scroll, out);
         out.push(StripMember::new(STRIP_BASE + 7, widgets::SETTINGS_GEAR_FRAME));
         if self.instance.is_some() {
@@ -280,7 +278,8 @@ mod tests {
         assert_eq!(snapshot.focus(at(2)), TopFocus::Pill(1));
         assert_eq!(snapshot.focus(at(3)), TopFocus::Pill(2));
         assert_eq!(snapshot.focus(at(1)), TopFocus::Away);
-        assert_eq!(snapshot.focus(at(4)), TopFocus::Away);
+        assert_eq!(snapshot.focus(at(4)), TopFocus::Chip,
+            "the real profile chip keeps its stable element even when not enumerated here");
         for elem in [0, 1] {
             assert_eq!(snapshot.focus(Some(FocusKey { entry: EntryId(1), elem })), TopFocus::Away);
         }
@@ -310,16 +309,19 @@ mod tests {
         };
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
         assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3]);
-        assert_eq!(&snapshot.labels[..3], &["", "Movies", "TV Shows"]);
-        assert_eq!(snapshot.icons[0], Some(crate::ui::icons::Icon::Home),
-            "Inicio is a mark");
-        assert_eq!(snapshot.icons[3], Some(crate::ui::icons::Icon::Heart),
-            "Favoritos is a mark");
-        assert_eq!(snapshot.icons[1], None, "a library keeps its own name as a word");
+        assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Favorites", "Search"],
+            "the supplied mockup names every destination");
+        assert!(snapshot.icons.iter().all(Option::is_none),
+            "the supplied mockup uses words, not destination marks");
         let mut members = Vec::new();
         snapshot.members(0, None, 0.0, &mut members);
         assert_eq!(members.iter().map(|member| member.elem).collect::<Vec<_>>(),
-            vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3, STRIP_BASE + 7]);
+            vec![STRIP_BASE + 4, STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2,
+                STRIP_BASE + 6, STRIP_BASE + 3, STRIP_BASE + 7]);
+        let chip = members[0].target;
+        assert_eq!((chip.x, chip.y, chip.w, chip.h),
+            (widgets::CHIP_FRAME.x, widgets::CHIP_FRAME.y, widgets::CHIP_FRAME.w, widgets::CHIP_FRAME.h),
+            "the real profile chip is the bar's leftmost stop");
     }
 
     #[test]
@@ -330,11 +332,9 @@ mod tests {
         };
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
         assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 5, STRIP_BASE + 6, STRIP_BASE + 3]);
-        assert_eq!(snapshot.labels, ["", "Movies", "TV Shows", "Other Videos", "", ""]);
-        assert_eq!(&snapshot.icons[..], &[
-            Some(crate::ui::icons::Icon::Home), None, None, None,
-            Some(crate::ui::icons::Icon::Heart), Some(crate::ui::icons::Icon::Search),
-        ]);
+        assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Other Videos", "Favorites", "Search"]);
+        assert!(snapshot.icons.iter().all(Option::is_none),
+            "every fixed destination is a word in the supplied mockup");
         assert_eq!(pill_at(directory.view(), 3), Pill::Section(SecKind::Video));
         assert_eq!(pill_of(directory.view(), Pill::Section(SecKind::Video)), Some(3));
         assert_eq!(snapshot.library_selection(SecKind::Video), 3);

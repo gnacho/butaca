@@ -192,6 +192,7 @@ pub(crate) struct RootPage {
     state: State,
     parent_row: i32,
     copy: String,
+    root_copy: String,
     pending: Option<Pending>,
     /// The "Show recently added" switch's optimistic value until its write lands (#297). Kept
     /// outside [`State`] on purpose: this page's logical state is a recorded shape, and the
@@ -226,6 +227,7 @@ impl RootPage {
             },
             parent_row: 0,
             copy: String::new(),
+            root_copy: String::new(),
             pending: None,
             pending_recent: None,
             pending_idle: None,
@@ -294,8 +296,19 @@ impl RootPage {
         }
         match level {
             Some(_) => "",
-            None => crate::i18n::msg::settings_root_jellyfin_copy(),
+            None => &self.root_copy,
         }
+    }
+
+    /// The mockup's real second line: the active profile, the build that is running and the
+    /// no-telemetry commitment. It carries no placeholder identity or version.
+    fn root_subtitle(profile: &str) -> String {
+        let profile = if profile.is_empty() {
+            crate::i18n::msg::settings_audio_not_set()
+        } else {
+            profile
+        };
+        crate::i18n::msg::settings_root_subtitle(profile, crate::server::identity::VERSION)
     }
 
     fn view(&self) -> TableScreen<'_> {
@@ -311,7 +324,9 @@ impl RootPage {
         };
         let layout = Self::layout();
         TableScreen::new(
-            Header::new(layout, None, title, self.header_copy(level)).with_back_disc(),
+            Header::new(layout, None, title, self.header_copy(level))
+            .with_title_size(crate::ui::theme::size::DISPLAY)
+            .with_back_disc(),
             table,
             GroupId(0),
             self.entry,
@@ -529,6 +544,7 @@ impl RootPage {
 
         // Servidor: the account this television uses, the door to another one, and the way out.
         let (user, url) = Self::server_line();
+        self.root_copy = Self::root_subtitle(&user);
         let connected = !user.is_empty();
         let value = if user.is_empty() {
             crate::i18n::msg::settings_audio_not_set().to_string()
@@ -1493,5 +1509,22 @@ mod tests {
         assert_eq!(page.table.sections[0].rows.len(), 3, "server, add, disconnect");
         assert_eq!(page.table.sections[2].rows.len(), 3, "the three subtitle rows");
         assert_eq!(page.table.sections[3].rows.len(), 3, "language, legal, about");
+    }
+
+    #[test]
+    fn the_page_header_uses_the_real_profile_version_and_display_title() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("settings-root-subtitle");
+        let page = RootPage::new(EntryId(0));
+        let copy = RootPage::root_subtitle("Synthetic owner");
+        assert!(copy.contains("Synthetic owner"), "the active profile is the subject");
+        assert!(copy.contains(crate::server::identity::VERSION),
+            "the running build version is real");
+        let view = page.view_at(None);
+        assert_eq!(view.header.title_size, crate::ui::theme::size::DISPLAY,
+            "the mockup's Settings title is the display rung, not the HERO rung");
+        assert_eq!(view.header.copy, page.root_copy,
+            "the root draws its captured real subtitle rather than the old generic paragraph");
+        assert!(view.header.copy.contains(crate::server::identity::VERSION));
     }
 }
