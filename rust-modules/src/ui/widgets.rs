@@ -2388,7 +2388,7 @@ pub(crate) const INSTANCE_FRAME: Rect = Rect::new(
 
 /// The Settings gear mirrors the profile chip at the right safe-area edge.
 pub(crate) const SETTINGS_GEAR_FRAME: Rect = Rect::new(
-    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - TAB_TRACK_PAD - CHIP_D,
+    1767.0,
     TOP_BAR_Y,
     CHIP_D,
     CHIP_D,

@@ -13,7 +13,7 @@ fn keyed_tab_geometry_uses_the_same_centered_lattice_for_draw_and_target() {
     tab_members_at(&widths, &keys, 17.0, 43.0, &mut members);
     assert_eq!(members.iter().map(|m| m.elem).collect::<Vec<_>>(), keys);
     let content = widths.iter().sum::<f32>() + 2.0 * TAB_GAP;
-    let left = (crate::ui::consts::SCR_W - content) * 0.5;
+    let left = (crate::ui::consts::SCR_W - content) * 0.5 + 34.0;
     assert_eq!(members[0].drawn.x, left - 17.0);
     assert_eq!(members[0].target.x, left - 43.0);
     for (i, member) in members.iter().enumerate() {
@@ -135,10 +135,10 @@ fn the_profile_chip_is_hit_where_it_is_drawn_and_sits_left_of_the_pills() {
     assert!(!profile_chip_at(r.cx(), r.y + r.h + 1.0), "…on either axis");
     // it shares the bar's line with the pills: one control height, one top edge
     assert_eq!(r.y, TOP_BAR_Y);
-    // one control height with the pills, which is also what makes the focused chip's capsule
-    // the tab track's own band — the two read as one strip of chrome rather than as two
-    // objects at different heights (see `CHIP_D`)
-    assert_eq!(r.h, TAB_PILL_H);
+    // The mockup gives the avatar its own 46px diameter inside a 43px pill row; both share the
+    // same top edge and read as one chrome band.
+    assert_eq!(r.h, 46.0);
+    assert_eq!(r.h, CHIP_D);
 
     // the widest strip the row will ever lay out, centred: its left edge must clear the chip
     for n in 1..=16usize {

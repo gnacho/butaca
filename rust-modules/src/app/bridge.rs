@@ -1277,9 +1277,9 @@ impl Rig<AppHost> for Bridge {
         crate::ui::widgets::profile_chip_with(p, chrome.profile, chrome.chip_expand, bar_face);
         let clock = clock_text();
         let clock_frame = crate::ui::Rect::new(
-            crate::ui::widgets::SETTINGS_GEAR_FRAME.x - 154.0,
+            1818.0,
             crate::ui::widgets::SETTINGS_GEAR_FRAME.y,
-            130.0,
+            46.0,
             crate::ui::widgets::SETTINGS_GEAR_FRAME.h,
         );
         crate::ui::label::Label::new(clock.as_ptr(), 17,
