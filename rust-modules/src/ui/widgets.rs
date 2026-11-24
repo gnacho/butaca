@@ -2680,8 +2680,8 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
         p.rect_sheened(
             r,
             d * 0.5,
-            theme::CONTROL_IDLE_FILL,
-            theme::CONTROL_IDLE_FILL,
+            theme::PROFILE_FALLBACK_TOP,
+            theme::PROFILE_FALLBACK_BOT,
         );
         if initial_c.to_bytes().is_empty() {
             // nobody to name — signed out, or signed in with no roster landed yet. A generic
@@ -2699,7 +2699,7 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
                 r.x + d * 0.5,
                 ty,
                 theme::size::HEADLINE,
-                theme::TEXT_PRIMARY,
+                theme::PROFILE_FALLBACK_INK,
                 1,
                 1,
             );

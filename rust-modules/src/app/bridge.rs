@@ -1253,7 +1253,7 @@ impl Rig<AppHost> for Bridge {
             let wordmark = c"butaca";
             let frame = crate::ui::Rect::new(
                 crate::ui::widgets::CHIP_FRAME.x + crate::ui::widgets::CHIP_D + 20.0,
-                crate::ui::widgets::TOP_BAR_Y,
+                crate::ui::widgets::TOP_BAR_Y - 8.0,
                 320.0,
                 crate::ui::widgets::CHIP_D,
             );

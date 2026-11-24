@@ -372,6 +372,10 @@ pub const FIELD_WAITING_INK: [f32; 4] = WHITE;
 
 /// Idle (unfocused) control disc/pill fill — solid dark, faintly translucent.
 pub const CONTROL_IDLE_FILL: [f32; 4] = with_a(NEUTRAL_600, 0.92);
+/// The mockup's initial-avatar fallback: its red-to-plum gradient and cream ink.
+pub const PROFILE_FALLBACK_TOP: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
+pub const PROFILE_FALLBACK_BOT: [f32; 4] = rgb8(0x8a, 0x2f, 0x5c);
+pub const PROFILE_FALLBACK_INK: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
 /// White glyph/label over an idle control. Both grounds ink it the same: the design system states
 /// one `--control-idle-ink`, and the UNKEYED face below is a white film over a black ramp, which is
 /// still a dark surface — see [`CONTROL_IDLE_FILL_UNKEYED`].
