@@ -2,7 +2,7 @@
 type: planning
 entity: todo
 plan: "butaca-mockup-fidelity"
-updated: "2026-11-23"
+updated: "2026-11-25"
 ---
 
 # Todo: butaca-mockup-fidelity
@@ -28,7 +28,7 @@ updated: "2026-11-23"
 
 ### In Progress
 
-- [ ] Add failing regressions for textual navigation, real profile access, shared chrome and Settings geometry <!-- started: 2026-11-23 -->
+- [ ] Pixel-fidelity pass on the shared top bar against the reference (geometry, faces, inks) <!-- started: 2026-11-25 -->
 
 ### Completed
 
@@ -42,6 +42,24 @@ updated: "2026-11-23"
 - None
 
 ## Changelog
+
+### 2026-11-25
+
+- The shared top bar now names the supplied mockup's own numbers instead of approximating them.
+  Measured off the reference's DOM at 1920x1080: `#topbar { padding: 28px 56px 22px }`, avatar 46px
+  at (56, 34.5) and FIRST in the left group, the wordmark's two runs at 122 / 192.33, `#mainnav`'s
+  content box at 707.84 inside a 59px track on 28, its pills 45 tall at 35 with `padding: 11px 24px`
+  around a 17px label, the gear at 1752.02 and the clock right-aligned on 1864.
+- Two faces the mockup is set in are now shipped as their own roles, because the ones the app had
+  are a weight and an optical size away: Manrope 600 (`#mainnav button`) and Fraunces 700 instanced
+  at optical size 30 (the wordmark; the 72pt cut the app shipped is ~10% narrower at 30px). Both are
+  drawn UNHINTED, which is what the browser does - light hinting snapped every nav advance to a
+  whole pixel and cost +8px across the five labels.
+- The bar's material is the reference's warm brown at its .55 with the peach rim, not the solved
+  light-lift face; the solve still decides the alpha, with .55 as its floor, so the labels keep the
+  app's contrast floor over bright artwork while a dark ground draws the reference's exact weight.
+- `the_top_bar_is_the_supplied_mockups_own_geometry` asserts every one of those numbers, so a later
+  "small tweak" cannot walk the bar off the reference again.
 
 ### 2026-11-23
 

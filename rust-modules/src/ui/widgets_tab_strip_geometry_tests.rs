@@ -4,6 +4,51 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
+/// **The bar's numbers ARE the supplied mockup's, measured off its DOM at 1920x1080.**
+///
+/// Every value here was read from `getBoundingClientRect()` and `getComputedStyle()` on the
+/// reference itself (2026-11-25), not eyeballed from a screenshot: `#topbar { padding: 28px 56px
+/// 22px }`, `#avatar` 46px at (56, 34.5), `#mainnav` content box at x 707.84 inside a 59px track on
+/// 28, `#mainnav button { padding: 11px 24px }` around a 17px label (45 tall at y 35), the gear at
+/// 1752.02 and the clock right-aligned on 1864. This is the one assertion that catches a later
+/// "small tweak" walking the bar off the reference again, which is exactly how the avatar ended up
+/// 40px inboard (the page margin 96 was read where the bar's own 56 belongs).
+#[test]
+fn the_top_bar_is_the_supplied_mockups_own_geometry() {
+    assert_eq!(crate::ui::widgets::CHROME_MARGIN_X, 56.0);
+    assert_eq!(TOP_BAR_Y, 28.0);
+    assert_eq!(TAB_PILL_Y, 35.0);
+    assert_eq!(TAB_PILL_H, 45.0);
+    assert_eq!(TAB_TRACK_PAD, 7.0);
+    assert_eq!(TAB_ROW_X, 707.84);
+    assert_eq!(CHIP_D, 46.0);
+    let same = |r: Rect, x: f32, y: f32, w: f32, h: f32| {
+        (r.x - x).abs() < 0.01 && (r.y - y).abs() < 0.01 && (r.w - w).abs() < 0.01
+            && (r.h - h).abs() < 0.01
+    };
+    assert!(same(CHIP_FRAME, 56.0, 34.5, 46.0, 46.0), "chip {:?}", CHIP_FRAME);
+    assert!(
+        same(SETTINGS_GEAR_FRAME, 1752.02, 34.5, 46.0, 46.0),
+        "gear {:?}",
+        SETTINGS_GEAR_FRAME
+    );
+    // The clock's right edge is the same 56px margin the avatar's left edge is, mirrored.
+    let clock_right = crate::ui::consts::SCR_W - CHROME_MARGIN_X;
+    assert_eq!(clock_right, 1864.0);
+    assert_eq!(clock_right - CLOCK_W, 1816.0);
+    assert_eq!(SETTINGS_GEAR_FRAME.x + CHIP_D + CLOCK_GAP, 1816.02);
+
+    // The track the five reference labels lay out inside, to a hundredth of a pixel.
+    let widths = [91.72, 121.09, 99.41, 122.09, 104.0];
+    let g = tab_geometry(&widths, 0.0);
+    assert!((g.track.x - 700.84).abs() < 0.01, "track x {}", g.track.x);
+    assert!((g.track.y - 28.0).abs() < 0.01);
+    assert!((g.track.w - 576.31).abs() < 0.01, "track w {}", g.track.w);
+    assert!((g.track.h - 59.0).abs() < 0.01);
+    assert!((g.clip.x - 707.84).abs() < 0.01);
+    assert!((g.clip.y - 35.0).abs() < 0.01);
+}
+
 #[test]
 fn keyed_tab_geometry_uses_the_same_centered_lattice_for_draw_and_target() {
     use super::*;

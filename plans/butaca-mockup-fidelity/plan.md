@@ -4,7 +4,7 @@ entity: plan
 plan: "butaca-mockup-fidelity"
 status: active
 created: "2026-11-23"
-updated: "2026-11-23"
+updated: "2026-11-25"
 ---
 
 # Plan: butaca-mockup-fidelity
@@ -20,7 +20,11 @@ A visibly faithful native implementation of the supplied Butaca mockup, demonstr
 ## Guiding Decisions & Constraints
 
 - The supplied Butaca mockup is the only visual reference.
-- Preserve the current Jellyfin violet/blue palette and artwork-derived atmosphere rather than copying the mockup's warm colors.
+- Preserve the current Jellyfin violet/blue palette and artwork-derived atmosphere for PAGE surfaces.
+  **The shared top bar is the exception** (owner, 2026-11-25): it is held against the reference pixel
+  for pixel, so it wears the mockup's own chrome palette, type cuts and geometry, and its material
+  is the reference's fixed `rgba(19,11,7,.55)` with the app's legibility floor as a minimum - never
+  the ground solve's light lift.
 - Preserve the fixed 1920x1080 canvas, LG safe margins, couch-legibility floor, remote-first focus, destinations and existing native capabilities.
 - Use and extend the shared Rust theme, text, layout, widget and motion systems. No parallel screen-local design system.
 - Mockup placeholder interactions become real native flows using existing routes and actions. No hard-coded profile, version, media, timestamps or server data.

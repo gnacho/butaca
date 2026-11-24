@@ -48,6 +48,11 @@ FONTS = {
     "manrope-bold": os.path.join(REPO, "pkg", "appfont-manrope-700.ttf"),
     "fraunces-regular": os.path.join(REPO, "pkg", "appfont-fraunces-600.ttf"),
     "fraunces-bold": os.path.join(REPO, "pkg", "appfont-fraunces-700.ttf"),
+    # The two cuts the supplied design mockup is set in: `#mainnav button { font: 600 17px
+    # Manrope }` and the wordmark's Fraunces 700 at optical size 30. Audited like every other
+    # shipped latin face, so a swap cannot dodge the ladder here either.
+    "manrope-medium": os.path.join(REPO, "pkg", "appfont-manrope-600.ttf"),
+    "fraunces-brand": os.path.join(REPO, "pkg", "appfont-brand-700.ttf"),
 }
 # Named carve-outs living outside the ladder (see theme.rs's size-module doc).
 CARVEOUTS = {54: "HUD_TITLE_SZ (bold)", 36: "subtitle caption (bold)"}
@@ -65,6 +70,12 @@ ACCEPTED = {
     ("manrope-regular", 20), ("manrope-regular", 26), ("manrope-regular", 32),
     ("manrope-regular", 40), ("manrope-regular", 48), ("manrope-regular", 54),
     ("manrope-bold", 20), ("manrope-bold", 32), ("manrope-bold", 36),
+    # Manrope 600 (2026-11-25) is the SAME typeface at the weight the design mockup sets its top
+    # navigation in, so it carries the same capital F proportion the 400 and 700 cuts are already
+    # accepted for — one solid pixel of bar over stem, not a hinting change. Nothing in the product
+    # draws this face above 17px, but the sweep is the ladder, not the call sites.
+    ("manrope-medium", 20), ("manrope-medium", 22), ("manrope-medium", 28),
+    ("manrope-medium", 32), ("manrope-medium", 48),
 }
 
 
