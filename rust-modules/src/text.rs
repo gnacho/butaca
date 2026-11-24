@@ -111,6 +111,11 @@ pub(crate) enum FontRole {
     Display = 1,
     InterfaceMedium = 2,
     Brand = 3,
+    /// The clock's cut: Manrope 700 with its tabular figures BAKED INTO THE CMAP, so every digit
+    /// advances the same 10.54px at 17 and `21:34` measures the reference's 47.98 whatever the
+    /// time says. The mockup asks for `font-variant-numeric: tabular-nums`, which is a GSUB
+    /// single substitution SDL_ttf has no way to ask for; at cut time it is one cmap remap.
+    Clock = 4,
 }
 
 impl FontRole {
@@ -125,6 +130,7 @@ impl FontRole {
             FontRole::InterfaceMedium => ("appfont-manrope-600.ttf", "appfont-manrope-600.ttf"),
             // Ditto: the brand has one optical size and one weight.
             FontRole::Brand => ("appfont-brand-700.ttf", "appfont-brand-700.ttf"),
+            FontRole::Clock => ("appfont-clock-700.ttf", "appfont-clock-700.ttf"),
         }
     }
 }
@@ -132,6 +138,12 @@ impl FontRole {
 /// The shipped fonts, addressed relative to wherever the ipk actually got installed
 /// (`crate::paths` explains why this cannot be a literal). Built once; `TTF_OpenFont` wants a
 /// `*const c_char` that outlives the call, so these are leaked `CString`s rather than temporaries.
+/// The shipped file a role is drawn from — the ONE place the mapping is written, for the modules
+/// that read a face's own tables rather than rasterize it ([`crate::kern`]).
+pub(crate) fn role_file(role: FontRole) -> &'static str {
+    role.files().0
+}
+
 fn app_font(role: FontRole, bold: bool) -> &'static CStr {
     let (regular, heavy) = role.files();
     let name = if bold { heavy } else { regular };
@@ -289,7 +301,7 @@ static mut FONTS_B: [[*mut TtfFont; FONT_SLOTS]; FONT_ROLES] =
 /// How many [`FontRole`] variants exist — the arrays above index by discriminant, so this is the
 /// one place the count is written and `font_at`'s bound is a debug assertion rather than a panic on
 /// the set (it was a hard index when a fourth role arrived, 2026-11-25).
-const FONT_ROLES: usize = 4;
+const FONT_ROLES: usize = 5;
 /// The retained Inter fallback face, one per pixel size, per weight. Shared by both roles behind
 /// their own primary face, so a role never opens it until a codepoint actually needs it.
 static mut FONTS_INTER: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
@@ -752,7 +764,7 @@ unsafe fn font_at(role: FontRole, sz: c_int, bold: c_int) -> *mut TtfFont {
             // the whole pill row and the track around it come out wider than the reference. With
             // hinting off the advances are the reference's to 0.3px (see `TAB_TEXT_ROLE`).
             let hinting = match role {
-                FontRole::InterfaceMedium | FontRole::Brand => TTF_HINTING_NONE,
+                FontRole::InterfaceMedium | FontRole::Brand | FontRole::Clock => TTF_HINTING_NONE,
                 _ => TTF_HINTING_LIGHT,
             };
             TTF_SetFontHinting(arr[sz], hinting);

@@ -1457,7 +1457,7 @@ ALLOWED = {"Inter", "Arimo", "Roboto", "Noto Sans", "Source Sans 3", "Noto Sans 
            "Manrope", "Fraunces"}
 for f in ("pkg/appfont.ttf", "pkg/appfont-bold.ttf", "pkg/appfont-cjk.ttf",
           "pkg/appfont-manrope-400.ttf", "pkg/appfont-manrope-600.ttf", "pkg/appfont-manrope-700.ttf",
-          "pkg/appfont-brand-700.ttf",
+          "pkg/appfont-brand-700.ttf", "pkg/appfont-clock-700.ttf",
           "pkg/appfont-fraunces-600.ttf", "pkg/appfont-fraunces-700.ttf"):
     fam = font_family(ROOT / f)
     check(fam in ALLOWED, f"{f} family={fam!r} is redistributable (allowed: {sorted(ALLOWED)})")
@@ -1539,7 +1539,7 @@ expected = {
     # Japanese and Chinese title in the library becomes tofu, which is LG checklist #6 and #48.
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf",
     "appfont-manrope-400.ttf", "appfont-manrope-600.ttf", "appfont-manrope-700.ttf",
-    "appfont-brand-700.ttf",
+    "appfont-brand-700.ttf", "appfont-clock-700.ttf",
     "appfont-fraunces-600.ttf", "appfont-fraunces-700.ttf", "OFL.txt",
     "THIRD-PARTY-NOTICES.md", "LICENSE", "LICENSING.md", "TRADEMARKS.md", *NEEDED_LICENCES,
 }

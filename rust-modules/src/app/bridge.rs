@@ -1295,8 +1295,11 @@ impl Rig<AppHost> for Bridge {
             crate::ui::widgets::CLOCK_W,
             crate::ui::widgets::CHIP_D,
         );
+        // `font-variant-numeric: tabular-nums`, which SDL_ttf cannot ask for: the cut the clock is
+        // set in has the tabular figures baked into its cmap, so `21:34` measures the reference's
+        // 47.98 whatever the time is and the box never breathes.
         crate::ui::label::Label::new(clock.as_ptr(), 17, crate::ui::theme::CHROME_MUTED)
-            .bold()
+            .face(crate::text::FontRole::Clock)
             .h(crate::ui::label::HAlign::Right)
             .draw(p, clock_frame);
         // The idle gear is the mockup's `--muted` glyph at full strength on its own 55% disc: the

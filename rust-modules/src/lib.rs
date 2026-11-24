@@ -29,6 +29,7 @@ mod egl; // boot-time EGL capability probe (extensions, swap behaviour, buffer a
 mod ff; // THE demuxer — the FFmpeg 9.0 this app BUNDLES and pins (majors 63/63/61), dlopen'd by absolute path beside the binary, never the television's
 mod focusprobe; // dev: one diffable line naming everything app.rs's key ladder can move, logged when it changes
 mod fontcov; // which codepoints a font file can draw, read from its cmap — text.rs's fallback chain, and the host gate that stops tofu shipping
+mod kern; // the pair kerning a face carries, applied to LAYOUT — See its module doc for why FreeType will not
 mod gfx;
 mod grant; // credential transport authority and consented plaintext grants
 #[cfg(feature = "devtriggers")]

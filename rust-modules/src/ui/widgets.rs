@@ -6484,8 +6484,11 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
 /// input geometry; the capability keeps host fixtures independent of a loaded SDL font.
 pub(crate) fn tab_widths(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
-    tab_metrics_from(labels, icons,
-        |word| measure.width_role(word, TAB_TEXT_SZ, false, TAB_TEXT_ROLE)).1
+    tab_metrics_from(labels, icons, |word| {
+        let base = measure.width_role(word, TAB_TEXT_SZ, false, TAB_TEXT_ROLE);
+        crate::kern::advance(TAB_TEXT_ROLE, &word.to_string_lossy(), TAB_TEXT_SZ, base)
+    })
+    .1
 }
 
 /// Publish control geometry from the strip's actual scroll and its current destination. Keys
@@ -6547,8 +6550,10 @@ fn with_tab_metrics_for<R>(data: TabLabels<'_>, f: impl FnOnce(&[CString], &[f32
         // identical glyph widths on both paths.
         use crate::ui::machine::Measure as _;
         let measure = LegacyMeasure;
-        let (labels, widths) = tab_metrics_from(data.labels, data.icons,
-            |l| measure.width_role(l, TAB_TEXT_SZ, false, TAB_TEXT_ROLE));
+        let (labels, widths) = tab_metrics_from(data.labels, data.icons, |l| {
+            let base = measure.width_role(l, TAB_TEXT_SZ, false, TAB_TEXT_ROLE);
+            crate::kern::advance(TAB_TEXT_ROLE, &l.to_string_lossy(), TAB_TEXT_SZ, base)
+        });
         // The Search pill, last. It carries an EMPTY label so nothing here has to special-case a
         // missing entry — `labels.len()` stays the pill count, which is what the draw and the hit
         // test both walk — and a fixed square width, because a mark is not measured like a word.

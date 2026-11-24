@@ -188,20 +188,22 @@ for a trademark note that applies to some of them.
 
 ### 2.3 Fonts
 
-**Manrope** — `appfont-manrope-400.ttf`, `appfont-manrope-600.ttf`, `appfont-manrope-700.ttf`
+**Manrope** — `appfont-manrope-400.ttf`, `appfont-manrope-600.ttf`, `appfont-manrope-700.ttf`, `appfont-clock-700.ttf`
 Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope), per the font's
 own name table.
 Licence: **SIL Open Font License 1.1** — the full text ships in this package as `OFL.txt`.
 Provenance: downloaded from the Google Fonts repository `google/fonts`, path
 `ofl/manrope/Manrope[wght].ttf` at commit `b31870aff700ab7a1d74fa0c6887d95beb9e0037`.
-*Modified*: static instances at weight 400 / 600 / 700, instantiated with fontTools 4.68.0.
+*Modified*: static instances at weight 400 / 600 / 700, instantiated with fontTools 4.68.0. `appfont-clock-700.ttf` is weight 700 with the font's own `tnum` (tabular figures) single substitutions applied to the cmap, which is what the mockup's `font-variant-numeric: tabular-nums` asks a browser for.
+The reference cuts (`600`, `clock`) and the wordmark's also carry the face's GPOS pairs flattened into a legacy `kern` table, because SDL_ttf has no way to ask for GPOS and the app applies them itself at layout time.
 `appfont-manrope-600.ttf` is the cut the top navigation is set in: the supplied design mockup
 specifies `font: 600 17px Manrope` for `#mainnav button` and its clock, and the 400/700 pair the
 app already shipped is a weight away from it in either direction.
 Checksums: `appfont-manrope-400.ttf`
 `d37c889f1aabea0eb8adf78c4ce1682466890cdfda762bf94af8391d10e306bb`; `appfont-manrope-600.ttf`
 `d566a435052b77f0c8f29830d4ec663bc92483973706dd295330734e48e0daa7`; `appfont-manrope-700.ttf`
-`9b5d326141885b08315c77f7251c1d6638f3a0b39fcd380245d9d2e99773055f`.
+`9b5d326141885b08315c77f7251c1d6638f3a0b39fcd380245d9d2e99773055f`; `appfont-clock-700.ttf`
+`3c1636a0c37f4f858dc5fa2d0a5abe7fb9c91a58ea8caaaed12f9454bd06138a`.
 The Manrope copyright statement declares **no Reserved Font Name**, so OFL §3 imposes no rename.
 
 **Fraunces** — `appfont-fraunces-600.ttf`, `appfont-fraunces-700.ttf`, `appfont-brand-700.ttf`
