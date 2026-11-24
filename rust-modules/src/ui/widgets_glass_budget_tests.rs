@@ -27,7 +27,7 @@ use super::test_support::*;
 #[test]
 fn the_band_budget_restated_here_is_the_measured_one() {
     assert_eq!(BAND_REGION_BUDGET, crate::gfx::GLASS_REGION_BUDGET);
-    let (h, y) = (TAB_PILL_H + 2.0 * TAB_TRACK_PAD, TOP_BAR_Y - TAB_TRACK_PAD);
+    let (h, y) = (TAB_PILL_H + 2.0 * TAB_TRACK_PAD, TAB_PILL_Y - TAB_TRACK_PAD);
     let reg = crate::gfx::blur_region(0.0, y, crate::ui::consts::SCR_W, h);
     assert_eq!(reg[3], BAND_REGION_H, "the band's real region height");
 }

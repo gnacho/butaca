@@ -13,7 +13,7 @@ fn keyed_tab_geometry_uses_the_same_centered_lattice_for_draw_and_target() {
     tab_members_at(&widths, &keys, 17.0, 43.0, &mut members);
     assert_eq!(members.iter().map(|m| m.elem).collect::<Vec<_>>(), keys);
     let content = widths.iter().sum::<f32>() + 2.0 * TAB_GAP;
-    let left = (crate::ui::consts::SCR_W - content) * 0.5 + 31.0;
+    let left = TAB_ROW_X;
     assert_eq!(members[0].drawn.x, left - 17.0);
     assert_eq!(members[0].target.x, left - 43.0);
     for (i, member) in members.iter().enumerate() {
@@ -133,10 +133,12 @@ fn the_profile_chip_is_hit_where_it_is_drawn_and_sits_left_of_the_pills() {
         "…and a pixel outside it is not"
     );
     assert!(!profile_chip_at(r.cx(), r.y + r.h + 1.0), "…on either axis");
-    // it shares the bar's line with the pills: one control height, one top edge
-    assert_eq!(r.y, TOP_BAR_Y);
-    // The mockup gives the avatar its own 46px diameter inside a 43px pill row; both share the
-    // same top edge and read as one chrome band.
+    // It stands on the bar's own line (`#topbar`'s centred 46px items), which is 6.5px below the
+    // track's top edge — the mockup centres a 46px control in a 59px band; it does not sit on the
+    // track's y.
+    assert_eq!(r.y, TOP_BAR_LINE_Y);
+    assert_eq!(r.y, TOP_BAR_Y + (TAB_PILL_H + 2.0 * TAB_TRACK_PAD) * 0.5 - CHIP_D * 0.5);
+    // The mockup gives the avatar its own 46px diameter inside the 45px pill row.
     assert_eq!(r.h, 46.0);
     assert_eq!(r.h, CHIP_D);
 

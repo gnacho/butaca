@@ -72,6 +72,21 @@ impl Label {
     }
     /// Draw in the Fraunces display face — the wordmark and the Settings display title. Ordinary
     /// labels stay on the Manrope interface face unless this is called.
+    /// Draw in an explicitly named face (see [`crate::text::FontRole`]).
+    pub fn face(mut self, role: crate::text::FontRole) -> Self {
+        self.role = role;
+        self
+    }
+    /// The mockup's own navigation/clock cut: Manrope 600. See [`crate::text::FontRole`].
+    pub fn medium(mut self) -> Self {
+        self.role = crate::text::FontRole::InterfaceMedium;
+        self
+    }
+    /// The wordmark's cut: Fraunces 700 at optical size 30. See [`crate::text::FontRole`].
+    pub fn brand(mut self) -> Self {
+        self.role = crate::text::FontRole::Brand;
+        self
+    }
     pub fn display(mut self) -> Self {
         self.role = crate::text::FontRole::Display;
         self

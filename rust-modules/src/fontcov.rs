@@ -391,6 +391,8 @@ pub(crate) fn shipped(name: &str) -> &'static Result<Coverage, String> {
     static MANROPE_BOLD: OnceLock<Result<Coverage, String>> = OnceLock::new();
     static FRAUNCES_SEMI: OnceLock<Result<Coverage, String>> = OnceLock::new();
     static FRAUNCES_BOLD: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static MANROPE_MEDIUM: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static BRAND: OnceLock<Result<Coverage, String>> = OnceLock::new();
     let slot = match name {
         "appfont.ttf" => &REG,
         "appfont-bold.ttf" => &BOLD,
@@ -399,6 +401,8 @@ pub(crate) fn shipped(name: &str) -> &'static Result<Coverage, String> {
         "appfont-manrope-700.ttf" => &MANROPE_BOLD,
         "appfont-fraunces-600.ttf" => &FRAUNCES_SEMI,
         "appfont-fraunces-700.ttf" => &FRAUNCES_BOLD,
+        "appfont-manrope-600.ttf" => &MANROPE_MEDIUM,
+        "appfont-brand-700.ttf" => &BRAND,
         other => panic!("no shipped-font slot for {other:?} — add one beside the others"),
     };
     slot.get_or_init(|| {

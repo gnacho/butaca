@@ -372,6 +372,35 @@ pub const FIELD_WAITING_INK: [f32; 4] = WHITE;
 
 /// Idle (unfocused) control disc/pill fill — solid dark, faintly translucent.
 pub const CONTROL_IDLE_FILL: [f32; 4] = with_a(NEUTRAL_600, 0.92);
+/// **The supplied mockup's top-chrome palette, read from its own computed styles** at 1920x1080
+/// (2026-11-25). The bar is the one surface the owner held against the reference pixel for pixel, so
+/// it names the reference's tokens rather than re-deriving them from the app's roles: `--text-hi`
+/// for the active label and the wordmark's stem, `--muted` for the idle labels, the clock and the
+/// gear, `--text`/`#2a160c` for the focus capsule and its ink, and the peach rim weights for the
+/// track and the gear disc.
+pub const CHROME_INK: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
+/// `--accent`, the wordmark's `ca` and the page's own red.
+pub const CHROME_ACCENT: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
+pub const CHROME_TEXT: [f32; 4] = rgb8(0xff, 0xce, 0xa3);
+pub const CHROME_MUTED: [f32; 4] = rgb8(0xa0, 0x84, 0x6c);
+pub const CHROME_INK_ON_LIT: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
+/// `#mainnav button.current { background: rgba(255,206,163,.12) }`.
+pub const CHROME_SELECTED_FILL: [f32; 4] = with_a(CHROME_TEXT, 0.12);
+/// `#mainnav { border: 1px solid rgba(255,206,163,.09) }`.
+pub const CHROME_TRACK_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.09);
+/// `.iconbtn { border: 1px solid rgba(255,206,163,.16) }`.
+pub const CHROME_GEAR_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.16);
+/// `#mainnav`, `.iconbtn` ground: `rgba(19,11,7,.55)` — the reference's own page brown.
+pub const CHROME_GROUND: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
+pub const CHROME_GROUND_A: f32 = 0.55;
+/// `#avatar`: `linear-gradient(135deg,#ed3e35,#8a2f5c)`, `border: 2px solid rgba(255,206,163,.25)`,
+/// ink `#fff3e4` at `font-weight:800; font-size:19px`.
+pub const CHROME_AVATAR_TOP: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
+pub const CHROME_AVATAR_BOT: [f32; 4] = rgb8(0x8a, 0x2f, 0x5c);
+pub const CHROME_AVATAR_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.25);
+pub const CHROME_AVATAR_RIM_W: f32 = 2.0;
+pub const CHROME_AVATAR_INK: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
+pub const CHROME_AVATAR_SZ: std::os::raw::c_int = 19;
 /// The mockup's initial-avatar fallback: its red-to-plum gradient and cream ink.
 pub const PROFILE_FALLBACK_TOP: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
 pub const PROFILE_FALLBACK_BOT: [f32; 4] = rgb8(0x8a, 0x2f, 0x5c);

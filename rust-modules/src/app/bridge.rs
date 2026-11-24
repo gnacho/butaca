@@ -1247,23 +1247,33 @@ impl Rig<AppHost> for Bridge {
         // the bar is still the bar; only the wordmark goes.
         let brand = crate::ui::widgets::brand_alpha(nav.page_scroll);
         if brand > 0.004 {
-            // The Fraunces wordmark, drawn as display-role text beside the profile chip. It
-            // replaces the old rasterised PNG (`pkg/butaca-name.png` was never in APP_FILES), so a
-            // shipped typeface rather than a missing asset is what renders the brand.
-            let wordmark = c"butaca";
-            let frame = crate::ui::Rect::new(
-                crate::ui::widgets::CHIP_FRAME.x + crate::ui::widgets::CHIP_D + 20.0,
-                crate::ui::widgets::TOP_BAR_Y - 8.0,
-                320.0,
-                crate::ui::widgets::CHIP_D,
-            );
-            crate::ui::label::Label::new(wordmark.as_ptr(), 30,
-                crate::ui::theme::TEXT_PRIMARY)
-                .bold()
-                .display()
+            // The mockup's wordmark is TWO runs, not one string: `buta` in `--text-hi` and `ca` in
+            // `--accent`, set in Fraunces at the optical size a browser picks for 30px (700 opsz
+            // 30 — see [`crate::text::FontRole::Brand`]). Drawn beside the profile chip, 20px off it.
+            let stem = c"buta";
+            let tail = c"ca";
+            let line = crate::ui::widgets::TOP_BAR_LINE_Y;
+            let d = crate::ui::widgets::CHIP_D;
+            let x = crate::ui::widgets::CHIP_FRAME.x + d + 20.0;
+            let face = crate::text::FontRole::Brand;
+            let boxed = |x: f32| crate::ui::Rect::new(x, line, 200.0, d);
+            crate::ui::label::Label::new(stem.as_ptr(), 30, crate::ui::theme::CHROME_INK)
+                .face(face)
                 .h(crate::ui::label::HAlign::Left)
                 .v(crate::ui::label::VAlign::Middle)
-                .draw(p.alpha(brand), frame);
+                .draw(p.alpha(brand), boxed(x));
+            // + the mockup's own `.01em` tracking (0.3px over four glyphs) and the 2px flex gap
+            // between its two runs, so `ca` lands on the reference's 192.33 rather than on the
+            // advance alone.
+            {
+                use crate::ui::machine::Measure as _;
+                let stem_w = crate::ui::widgets::LegacyMeasure.width_role(stem, 30, false, face);
+                crate::ui::label::Label::new(tail.as_ptr(), 30, crate::ui::theme::CHROME_ACCENT)
+                    .face(face)
+                    .h(crate::ui::label::HAlign::Left)
+                    .v(crate::ui::label::VAlign::Middle)
+                    .draw(p.alpha(brand), boxed(x + stem_w + 1.2 + 2.0));
+            }
         }
         if let Some(instance) = self.chrome.instance().map(|label| label.as_ptr()) {
             let badge = crate::ui::widgets::CircleButton::new(instance)
@@ -1275,25 +1285,27 @@ impl Rig<AppHost> for Bridge {
         self.strip.draw(chrome.labels, p, glass.tab_band_mut());
         let bar_face = glass.tab_face();
         crate::ui::widgets::profile_chip_with(p, chrome.profile, chrome.chip_expand, bar_face);
+        // The mockup's clock: 17px/700 `--muted`, right-aligned on the 56px margin (`1864`) and
+        // centred on the bar's line. It sits 18px right of the gear, which is what puts the gear's
+        // own left edge at `GEAR_X`.
         let clock = clock_text();
         let clock_frame = crate::ui::Rect::new(
-            1818.0,
-            crate::ui::widgets::SETTINGS_GEAR_FRAME.y,
-            46.0,
-            crate::ui::widgets::SETTINGS_GEAR_FRAME.h,
+            crate::ui::consts::SCR_W - crate::ui::widgets::CHROME_MARGIN_X - crate::ui::widgets::CLOCK_W,
+            crate::ui::widgets::TOP_BAR_LINE_Y,
+            crate::ui::widgets::CLOCK_W,
+            crate::ui::widgets::CHIP_D,
         );
-        crate::ui::label::Label::new(clock.as_ptr(), 17,
-            crate::ui::theme::TEXT_SECONDARY).bold()
+        crate::ui::label::Label::new(clock.as_ptr(), 17, crate::ui::theme::CHROME_MUTED)
+            .bold()
             .h(crate::ui::label::HAlign::Right)
             .draw(p, clock_frame);
-        let gear = crate::ui::widgets::CircleButton::new(std::ptr::null())
-            .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
-            .icon(crate::ui::icons::Icon::Settings)
-            .focused(self.strip.gear_focused());
-        // Idle gear sits back at a partial alpha (the owner's 2026-11-10 pass: "transparencia al
-        // icono de ajustes"); focused, it comes fully forward.
-        let gear_alpha = if self.strip.gear_focused() { 1.0 } else { 0.55 };
-        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p.alpha(gear_alpha));
+        // The idle gear is the mockup's `--muted` glyph at full strength on its own 55% disc: the
+        // owner's earlier "transparencia al icono de ajustes" predates this reference.
+        crate::ui::widgets::draw_settings_gear(
+            p,
+            crate::ui::widgets::SETTINGS_GEAR_FRAME,
+            self.strip.gear_focused(),
+        );
     }
     /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — a scrim lift borrows the SAME
     /// captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher adds this

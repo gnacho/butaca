@@ -1007,7 +1007,7 @@ impl RouteLayout {
         let w = word_w.max(h).min(crate::ui::consts::SAFE.w);
         let right = crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X
             - crate::ui::widgets::TAB_TRACK_PAD;
-        Rect::new(right - w, crate::ui::widgets::TOP_BAR_Y, w, h)
+        Rect::new(right - w, crate::ui::widgets::TOP_BAR_LINE_Y, w, h)
     }
 
     /// The crumb as it is DRAWN. `focused` is the D-pad's: the crumb is a focus stop on every

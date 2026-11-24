@@ -87,12 +87,30 @@ const DROIDSANS: &CStr = c"/usr/share/fonts/DroidSans.ttf";
 /// `Display` is Fraunces, the wordmark and the Settings display title. Both retain Inter, the
 /// bundled CJK face and the system face as script fallbacks behind them, so the role changes the
 /// FIRST link of the chain and nothing else.
+///
+/// `InterfaceMedium` and `Brand` exist because TWO cuts the supplied mockup specifies are not
+/// instances of the faces the app already shipped, and a weight that is off by one notch is
+/// visible in a bar that must match it pixel for pixel:
+///
+/// - **`InterfaceMedium`** is Manrope **600**, the mockup's `#mainnav button { font: 600 17px }`
+///   and its clock. `Interface` regular is 400 and its bold is 700, so 600 had no slot: every nav
+///   label would have come out ~1.5px wide or narrow, and five of those drift the pill row and the
+///   whole track that encloses it off the reference.
+/// - **`Brand`** is Fraunces **700 instanced at optical size 30**, which is what a browser picks
+///   for `#logo { font-size: 30px }` out of the `opsz 9..144` axis. The Display bold the app ships
+///   is the 72pt optical size, 10% narrower at 30px: the wordmark came out 94px wide against the
+///   mockup's 104.
+///
+/// Both are drawn from the same files Google Fonts serves the mockup, so once the role is picked
+/// the advances are the reference's own rather than an approximation of them.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub(crate) enum FontRole {
     #[default]
     Interface = 0,
     Display = 1,
+    InterfaceMedium = 2,
+    Brand = 3,
 }
 
 impl FontRole {
@@ -103,6 +121,10 @@ impl FontRole {
         match self {
             FontRole::Interface => ("appfont-manrope-400.ttf", "appfont-manrope-700.ttf"),
             FontRole::Display => ("appfont-fraunces-600.ttf", "appfont-fraunces-700.ttf"),
+            // One cut, so a bold run keeps the same 600 rather than jumping to Manrope 700.
+            FontRole::InterfaceMedium => ("appfont-manrope-600.ttf", "appfont-manrope-600.ttf"),
+            // Ditto: the brand has one optical size and one weight.
+            FontRole::Brand => ("appfont-brand-700.ttf", "appfont-brand-700.ttf"),
         }
     }
 }
@@ -122,8 +144,9 @@ fn inter_font(bold: bool) -> &'static CStr {
 }
 
 fn app_font_named(name: &'static str) -> &'static CStr {
-    // One leaked CString per distinct shipped face. `name` is always one of the four constants, so
-    // the map stays small and bounded by the face count rather than the call rate.
+    // One leaked CString per distinct shipped face. `name` is always one of the constants
+    // `FontRole::files` names, so the map stays small and bounded by the face count rather than
+    // the call rate.
     use std::collections::HashMap;
     static NAMES: std::sync::OnceLock<std::sync::Mutex<HashMap<&'static str, &'static CStr>>> =
         std::sync::OnceLock::new();
@@ -148,6 +171,9 @@ const GL_TEXTURE_2D: c_uint = 0x0DE1;
 const GL_TRIANGLE_STRIP: c_uint = 0x0005;
 const TTF_STYLE_BOLD: c_int = 0x01;
 const TTF_HINTING_LIGHT: c_int = 1;
+/// SDL_ttf's `TTF_HINTING_NONE` — the browser's own behaviour, and what the two reference cuts are
+/// drawn with (see `font_at`).
+const TTF_HINTING_NONE: c_int = 0;
 
 enum TtfFont {}
 
@@ -252,10 +278,18 @@ static mut TLF_VBOT: c_int = 0;
 /// One opened face per pixel size, per array. 80 covers the whole `theme::size` ladder; the
 /// simulator's supersampled rendering (`surface::render_scale`, up to 4x) rasterises at up to 4x it.
 const FONT_SLOTS: usize = if cfg!(feature = "hostsim") { 320 } else { 80 };
-/// One opened base face per pixel size, per role (Interface=Manrope, Display=Fraunces). 80 covers
-/// the whole `theme::size` ladder; the simulator's supersampled rendering rasterises at up to 4x it.
-static mut FONTS: [[*mut TtfFont; FONT_SLOTS]; 2] = [[std::ptr::null_mut(); FONT_SLOTS]; 2];
-static mut FONTS_B: [[*mut TtfFont; FONT_SLOTS]; 2] = [[std::ptr::null_mut(); FONT_SLOTS]; 2];
+/// One opened base face per pixel size, per role (Interface=Manrope, Display=Fraunces,
+/// InterfaceMedium=Manrope 600, Brand=Fraunces @opsz30). 80 covers the whole `theme::size` ladder;
+/// the simulator's supersampled rendering rasterises at up to 4x it. The outer length is
+/// [`FONT_ROLES`] and indexes by `role as usize`.
+static mut FONTS: [[*mut TtfFont; FONT_SLOTS]; FONT_ROLES] =
+    [[std::ptr::null_mut(); FONT_SLOTS]; FONT_ROLES];
+static mut FONTS_B: [[*mut TtfFont; FONT_SLOTS]; FONT_ROLES] =
+    [[std::ptr::null_mut(); FONT_SLOTS]; FONT_ROLES];
+/// How many [`FontRole`] variants exist — the arrays above index by discriminant, so this is the
+/// one place the count is written and `font_at`'s bound is a debug assertion rather than a panic on
+/// the set (it was a hard index when a fourth role arrived, 2026-11-25).
+const FONT_ROLES: usize = 4;
 /// The retained Inter fallback face, one per pixel size, per weight. Shared by both roles behind
 /// their own primary face, so a role never opens it until a codepoint actually needs it.
 static mut FONTS_INTER: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
@@ -683,7 +717,8 @@ unsafe fn font_at(role: FontRole, sz: c_int, bold: c_int) -> *mut TtfFont {
     } else {
         &mut *addr_of_mut!(FONTS)
     };
-    let arr = &mut arr[role as usize];
+    debug_assert!((role as usize) < FONT_ROLES, "font role {role:?} has no face array slot");
+    let arr = &mut arr[(role as usize).min(FONT_ROLES - 1)];
     if arr[sz].is_null() {
         arr[sz] = TTF_OpenFont(app_font(role, bold != 0).as_ptr(), sz as c_int);
         if arr[sz].is_null() {
@@ -709,7 +744,18 @@ unsafe fn font_at(role: FontRole, sz: c_int, bold: c_int) -> *mut TtfFont {
             // NORMAL hinting) rounds horizontal bars UP — at bold 26 that draws 4px bars over
             // 3px stems, inverting the design's stem>bar weight — so every size token had to
             // dodge "unlucky" px values. Light keeps the whole theme::size scale design-true.
-            TTF_SetFontHinting(arr[sz], TTF_HINTING_LIGHT);
+            //
+            // **The two reference cuts are the exception, and the reason is measured.** The
+            // supplied mockup is a BROWSER: it lays out with fractional advances and draws
+            // unhinted. Light hinting snaps every advance to a whole pixel, which at 17px costs
+            // +1.28px on `Inicio` and +1.9 on `Favoritos` — 8px across the five nav labels, i.e.
+            // the whole pill row and the track around it come out wider than the reference. With
+            // hinting off the advances are the reference's to 0.3px (see `TAB_TEXT_ROLE`).
+            let hinting = match role {
+                FontRole::InterfaceMedium | FontRole::Brand => TTF_HINTING_NONE,
+                _ => TTF_HINTING_LIGHT,
+            };
+            TTF_SetFontHinting(arr[sz], hinting);
         }
     }
     arr[sz]
