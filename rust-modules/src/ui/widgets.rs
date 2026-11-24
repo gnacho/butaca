@@ -2349,7 +2349,7 @@ pub(crate) fn hero_ground(
 /// The profile chip's diameter: ONE control height with the tab pills and the circle-button
 /// family, so the focused chip's capsule — the avatar plus [`TAB_TRACK_PAD`] all round — is
 /// exactly the tab-bar track's band, and the two sit concentric on the top chrome line.
-pub(crate) const CHIP_D: f32 = TAB_PILL_H;
+pub(crate) const CHIP_D: f32 = 46.0;
 /// Avatar → name air inside the expanded chip, and the capsule's tail past the name. The tail is
 /// bigger so the name isn't crowded against the round end (the tab track reads the same: its own
 /// 8px inset plus the end pill's 18px label padding).
@@ -5163,7 +5163,7 @@ pub(crate) fn draw_strip(
             continue;
         }
         let (fm, sm) = strip.mixes((pill.x, pill.w));
-        TabPill::new(lay.label.as_ptr(), theme::size::CAPTION, pill)
+        TabPill::new(lay.label.as_ptr(), TAB_TEXT_SZ, pill)
             .plated()
             .mix(fm, sm)
             .draw(&env, p);
@@ -5449,14 +5449,16 @@ pub(crate) const TOP_BAR_Y: f32 = 28.0;
 /// SAME element, SAME geometry as the detail season tabs (user directive): one control height
 /// (the 60px circle-button CD family) and the season tabs' ±18 label padding — the two rows
 /// must be indistinguishable as a control.
-pub(crate) const TAB_PILL_H: f32 = 44.0;
-const TAB_PILL_PAD: f32 = 18.0;
+pub(crate) const TAB_PILL_H: f32 = 43.0;
+/// The supplied mockup's own navigation type rung and control padding.
+pub(crate) const TAB_TEXT_SZ: std::os::raw::c_int = 17;
+const TAB_PILL_PAD: f32 = 24.0;
 /// UNIFORM inset from the tab-bar track to the pills inside it, on every side: the pill (r=30) and
 /// the track (r=38) stay CONCENTRIC (outer radius = inner radius + gap), so an end pill's corner
 /// gap reads even all the way around — 16px ends against 8px verticals looked lopsided on the
 /// selected Home pill. The focused [`profile_chip_with`] wraps itself in the same inset, which is what
 /// makes its capsule and this track one band.
-pub(crate) const TAB_TRACK_PAD: f32 = 8.0;
+pub(crate) const TAB_TRACK_PAD: f32 = 6.0;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
@@ -5498,7 +5500,7 @@ pub(crate) fn brand_alpha(scroll: f32) -> f32 {
 /// Inter-pill air ≈ the season tabs' rhythm (their `TAB_ADVANCE` 52 minus the 2×18 pad the pills
 /// here already carry — pill edge to pill edge reads the same). Doubles as the scroll-into-view
 /// context margin, exactly as the season tabs use their advance.
-const TAB_GAP: f32 = 16.0;
+const TAB_GAP: f32 = 6.0;
 /// How wide the pill strip may grow before it starts scrolling. The row stays CENTERED, but it
 /// must never reach the profile chip (a focus stop of its own at `MARGIN_X`), so the viewport is
 /// the screen less a symmetric chip-clearing margin, less the track's own inset on both ends.
@@ -6359,7 +6361,7 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
 /// input geometry; the capability keeps host fixtures independent of a loaded SDL font.
 pub(crate) fn tab_widths(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
-    tab_metrics_from(labels, icons, |word| measure.width(word, theme::size::CAPTION, true)).1
+    tab_metrics_from(labels, icons, |word| measure.width(word, TAB_TEXT_SZ, true)).1
 }
 
 /// Publish control geometry from the strip's actual scroll and its current destination. Keys
@@ -6422,7 +6424,7 @@ fn with_tab_metrics_for<R>(data: TabLabels<'_>, f: impl FnOnce(&[CString], &[f32
         use crate::ui::machine::Measure as _;
         let measure = LegacyMeasure;
         let (labels, widths) = tab_metrics_from(data.labels, data.icons,
-            |l| measure.width(l, theme::size::CAPTION, true));
+            |l| measure.width(l, TAB_TEXT_SZ, true));
         // The Search pill, last. It carries an EMPTY label so nothing here has to special-case a
         // missing entry — `labels.len()` stays the pill count, which is what the draw and the hit
         // test both walk — and a fixed square width, because a mark is not measured like a word.
@@ -6469,7 +6471,9 @@ impl TabGeometry<'_> {
 /// The one geometry expression consumed by both paint and the container's keyed members.
 fn tab_geometry(widths: &[f32], scroll: f32) -> TabGeometry<'_> {
     let view_w = tab_view_w(widths);
-    let x0 = (crate::ui::consts::SCR_W - view_w) * 0.5;
+    // The supplied mockup's navigation is optically centred 34px right of the canvas centre,
+    // because the brand and profile group is wider than the clock and settings group.
+    let x0 = (crate::ui::consts::SCR_W - view_w) * 0.5 + 34.0;
     let clip = Rect::new(x0, TOP_BAR_Y, view_w, TAB_PILL_H);
     TabGeometry {
         widths,
@@ -6807,7 +6811,7 @@ impl StripRender {
                     let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + (r.h - d) * 0.5, d, d);
                     crate::ui::icons::draw(p, icon, ir, TabPill::mixed_ink(fm, sm));
                 } else {
-                    TabPill::new(labels[i].as_ptr(), theme::size::CAPTION, r)
+                    TabPill::new(labels[i].as_ptr(), TAB_TEXT_SZ, r)
                         .mix(fm, sm)
                         .draw(&env, p);
                 }

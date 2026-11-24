@@ -1257,7 +1257,7 @@ impl Rig<AppHost> for Bridge {
                 320.0,
                 crate::ui::widgets::TAB_PILL_H,
             );
-            crate::ui::label::Label::new(wordmark.as_ptr(), crate::ui::theme::size::TITLE,
+            crate::ui::label::Label::new(wordmark.as_ptr(), 30,
                 crate::ui::theme::TEXT_PRIMARY)
                 .bold()
                 .display()
@@ -1282,7 +1282,7 @@ impl Rig<AppHost> for Bridge {
             130.0,
             crate::ui::widgets::SETTINGS_GEAR_FRAME.h,
         );
-        crate::ui::label::Label::new(clock.as_ptr(), crate::ui::theme::size::BODY,
+        crate::ui::label::Label::new(clock.as_ptr(), 17,
             crate::ui::theme::TEXT_SECONDARY).bold()
             .h(crate::ui::label::HAlign::Right)
             .draw(p, clock_frame);
