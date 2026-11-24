@@ -1255,7 +1255,7 @@ impl Rig<AppHost> for Bridge {
                 crate::ui::widgets::CHIP_FRAME.x + crate::ui::widgets::CHIP_D + 20.0,
                 crate::ui::widgets::TOP_BAR_Y,
                 320.0,
-                crate::ui::widgets::TAB_PILL_H,
+                crate::ui::widgets::CHIP_D,
             );
             crate::ui::label::Label::new(wordmark.as_ptr(), 30,
                 crate::ui::theme::TEXT_PRIMARY)

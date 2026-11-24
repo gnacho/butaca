@@ -5449,7 +5449,9 @@ pub(crate) const TOP_BAR_Y: f32 = 28.0;
 /// SAME element, SAME geometry as the detail season tabs (user directive): one control height
 /// (the 60px circle-button CD family) and the season tabs' ±18 label padding — the two rows
 /// must be indistinguishable as a control.
-pub(crate) const TAB_PILL_H: f32 = 43.0;
+pub(crate) const TAB_PILL_H: f32 = 42.0;
+/// The mockup's button row begins inside the track's 6px padding and 1px border.
+pub(crate) const TAB_PILL_Y: f32 = 35.0;
 /// The supplied mockup's own navigation type rung and control padding.
 pub(crate) const TAB_TEXT_SZ: std::os::raw::c_int = 17;
 const TAB_PILL_PAD: f32 = 24.0;
@@ -5458,7 +5460,7 @@ const TAB_PILL_PAD: f32 = 24.0;
 /// gap reads even all the way around — 16px ends against 8px verticals looked lopsided on the
 /// selected Home pill. The focused [`profile_chip_with`] wraps itself in the same inset, which is what
 /// makes its capsule and this track one band.
-pub(crate) const TAB_TRACK_PAD: f32 = 6.0;
+pub(crate) const TAB_TRACK_PAD: f32 = 7.0;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
@@ -5521,7 +5523,7 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
         "top tab track (widest)",
         Rect::new(
             (crate::ui::consts::SCR_W - tw) * 0.5,
-            TOP_BAR_Y - TAB_TRACK_PAD,
+            TAB_PILL_Y - TAB_TRACK_PAD,
             tw,
             TAB_PILL_H + 2.0 * TAB_TRACK_PAD,
         ),
@@ -5530,7 +5532,7 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
         "top tab pill row",
         Rect::new(
             (crate::ui::consts::SCR_W - TAB_VIEW_MAX) * 0.5,
-            TOP_BAR_Y,
+            TAB_PILL_Y,
             TAB_VIEW_MAX,
             TAB_PILL_H,
         ),
@@ -6461,7 +6463,7 @@ impl TabGeometry<'_> {
     fn pill(&self, i: usize) -> Rect {
         Rect::new(
             self.clip.x + tab_pill_x(self.widths, i) - self.scroll,
-            TOP_BAR_Y,
+            TAB_PILL_Y,
             self.widths.get(i).copied().unwrap_or(0.0),
             TAB_PILL_H,
         )
@@ -6473,15 +6475,15 @@ fn tab_geometry(widths: &[f32], scroll: f32) -> TabGeometry<'_> {
     let view_w = tab_view_w(widths);
     // The supplied mockup's navigation is optically centred 34px right of the canvas centre,
     // because the brand and profile group is wider than the clock and settings group.
-    let x0 = (crate::ui::consts::SCR_W - view_w) * 0.5 + 34.0;
-    let clip = Rect::new(x0, TOP_BAR_Y, view_w, TAB_PILL_H);
+    let x0 = (crate::ui::consts::SCR_W - view_w) * 0.5 + 31.0;
+    let clip = Rect::new(x0, TAB_PILL_Y, view_w, TAB_PILL_H);
     TabGeometry {
         widths,
         scroll,
         clip,
         track: Rect::new(
             x0 - TAB_TRACK_PAD,
-            TOP_BAR_Y - TAB_TRACK_PAD,
+            TAB_PILL_Y - TAB_TRACK_PAD,
             view_w + 2.0 * TAB_TRACK_PAD,
             TAB_PILL_H + 2.0 * TAB_TRACK_PAD,
         ),
@@ -6782,7 +6784,7 @@ impl StripRender {
         let cp = p.translate(x0 - sx, 0.0);
         self.top_strip.draw(
             cp,
-            TOP_BAR_Y,
+            TAB_PILL_Y,
             TAB_PILL_H,
             TabGround::Tracked { glass: glass_on },
         );

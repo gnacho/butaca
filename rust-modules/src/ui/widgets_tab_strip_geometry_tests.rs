@@ -13,7 +13,7 @@ fn keyed_tab_geometry_uses_the_same_centered_lattice_for_draw_and_target() {
     tab_members_at(&widths, &keys, 17.0, 43.0, &mut members);
     assert_eq!(members.iter().map(|m| m.elem).collect::<Vec<_>>(), keys);
     let content = widths.iter().sum::<f32>() + 2.0 * TAB_GAP;
-    let left = (crate::ui::consts::SCR_W - content) * 0.5 + 34.0;
+    let left = (crate::ui::consts::SCR_W - content) * 0.5 + 31.0;
     assert_eq!(members[0].drawn.x, left - 17.0);
     assert_eq!(members[0].target.x, left - 43.0);
     for (i, member) in members.iter().enumerate() {
