@@ -92,7 +92,10 @@ impl ChromeSnapshot {
             // The supplied mockup names every destination in the strip. Keep the stable keys and
             // measured labels while leaving the mark channel empty.
             self.labels.push(crate::i18n::msg::browse_chrome_home().into());
-            self.icons.push(None);
+            // **The second comp marks three destinations and names two.** Inicio, Favoritos and
+            // Buscar are icon items there (house, heart, magnifier); the two library kinds keep
+            // their words.
+            self.icons.push(Some(crate::ui::icons::Icon::Home));
             self.keys.push(STRIP_BASE);
             for i in 0..directory.tab_count() {
                 let Some(kind) = directory.tab_kind(i) else { continue };
@@ -109,10 +112,10 @@ impl ChromeSnapshot {
                 });
             }
             self.labels.push(crate::i18n::msg::browse_kind_favorites().into());
-            self.icons.push(None);
+            self.icons.push(Some(crate::ui::icons::Icon::Heart));
             self.keys.push(STRIP_BASE + 6);
             self.labels.push(crate::i18n::msg::browse_chrome_search().into());
-            self.icons.push(None);
+            self.icons.push(Some(crate::ui::icons::Icon::Search));
             self.keys.push(STRIP_BASE + 3);
             self.widths = widgets::tab_widths(&self.labels, &self.icons, measure);
             self.tabs_generation = Some(generation);
@@ -311,8 +314,18 @@ mod tests {
         assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3]);
         assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Favorites", "Search"],
             "the supplied mockup names every destination");
-        assert!(snapshot.icons.iter().all(Option::is_none),
-            "the supplied mockup uses words, not destination marks");
+        let marks: Vec<_> = snapshot.icons.iter().map(|i| i.map(|i| format!("{i:?}"))).collect();
+        assert_eq!(
+            marks,
+            [
+                Some("Home".to_string()),
+                None,
+                None,
+                Some("Heart".to_string()),
+                Some("Search".to_string()),
+            ],
+            "the second comp marks Inicio, Favoritos and Buscar; the library kinds keep their words"
+        );
         let mut members = Vec::new();
         snapshot.members(0, None, 0.0, &mut members);
         assert_eq!(members.iter().map(|member| member.elem).collect::<Vec<_>>(),
@@ -333,8 +346,20 @@ mod tests {
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
         assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 5, STRIP_BASE + 6, STRIP_BASE + 3]);
         assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Other Videos", "Favorites", "Search"]);
-        assert!(snapshot.icons.iter().all(Option::is_none),
-            "every fixed destination is a word in the supplied mockup");
+        // **The second comp marks three of the six**: Inicio, Favoritos and Buscar are icon items
+        // there, the three library kinds keep their words.
+        let marks: Vec<_> = snapshot.icons.iter().map(|i| i.map(|i| format!("{i:?}"))).collect();
+        assert_eq!(
+            marks,
+            [
+                Some("Home".to_string()),
+                None,
+                None,
+                None,
+                Some("Heart".to_string()),
+                Some("Search".to_string()),
+            ],
+        );
         assert_eq!(pill_at(directory.view(), 3), Pill::Section(SecKind::Video));
         assert_eq!(pill_of(directory.view(), Pill::Section(SecKind::Video)), Some(3));
         assert_eq!(snapshot.library_selection(SecKind::Video), 3);

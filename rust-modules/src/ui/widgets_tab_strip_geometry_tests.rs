@@ -4,49 +4,50 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-/// **The bar's numbers ARE the supplied mockup's, measured off its DOM at 1920x1080.**
+/// **The bar's numbers ARE the second comp's, measured off its DOM at 1920x1080.**
 ///
-/// Every value here was read from `getBoundingClientRect()` and `getComputedStyle()` on the
-/// reference itself (2026-11-25), not eyeballed from a screenshot: `#topbar { padding: 28px 56px
-/// 22px }`, `#avatar` 46px at (56, 34.5), `#mainnav` content box at x 707.84 inside a 59px track on
-/// 28, `#mainnav button { padding: 11px 24px }` around a 17px label (45 tall at y 35), the gear at
-/// 1752.02 and the clock right-aligned on 1864. This is the one assertion that catches a later
-/// "small tweak" walking the bar off the reference again, which is exactly how the avatar ended up
-/// 40px inboard (the page margin 96 was read where the bar's own 56 belongs).
+/// `#topbar { height:79px; padding:16px 48px }`, `#avatar` 46px at (48,16), `#mainnav` starting 20px
+/// to its right (114) with `gap:4px` and NO track (`#mainnav` has no background, border or
+/// padding, which is why `TAB_TRACK_PAD` is 0), its labelled buttons 43 tall at y 17.5 with
+/// `padding:10px 18px` around a 17px/600 label, the icon buttons 45x39, and the gear on the same
+/// line at 1760 with the clock right-aligned on the 48px margin.
+///
+/// The FIRST comp's numbers (`56` / `34.5` / `707.84` / a 59px track at 28) are gone on purpose:
+/// the owner replaced the comp, and this is the one place that says so.
 #[test]
 fn the_top_bar_is_the_supplied_mockups_own_geometry() {
-    assert_eq!(crate::ui::widgets::CHROME_MARGIN_X, 56.0);
-    assert_eq!(TOP_BAR_Y, 28.0);
-    assert_eq!(TAB_PILL_Y, 35.0);
-    assert_eq!(TAB_PILL_H, 45.0);
-    assert_eq!(TAB_TRACK_PAD, 7.0);
-    assert_eq!(TAB_ROW_X, 707.84);
+    assert_eq!(CHROME_MARGIN_X, 48.0);
+    assert_eq!(TOP_BAR_H, 79.0);
+    assert_eq!(TOP_BAR_LINE_Y, 16.0);
+    assert_eq!(TAB_ROW_X, 114.0);
+    assert_eq!(TAB_PILL_Y, 17.5);
+    assert_eq!(TAB_PILL_H, 43.0);
+    assert_eq!(TAB_TRACK_PAD, 0.0);
+    assert_eq!(TAB_GAP, 4.0);
     assert_eq!(CHIP_D, 46.0);
     let same = |r: Rect, x: f32, y: f32, w: f32, h: f32| {
         (r.x - x).abs() < 0.01 && (r.y - y).abs() < 0.01 && (r.w - w).abs() < 0.01
             && (r.h - h).abs() < 0.01
     };
-    assert!(same(CHIP_FRAME, 56.0, 34.5, 46.0, 46.0), "chip {:?}", CHIP_FRAME);
+    assert!(same(CHIP_FRAME, 48.0, 16.0, 46.0, 46.0), "chip {:?}", CHIP_FRAME);
     assert!(
-        same(SETTINGS_GEAR_FRAME, 1752.02, 34.5, 46.0, 46.0),
+        same(SETTINGS_GEAR_FRAME, 1760.0, 16.0, 46.0, 46.0),
         "gear {:?}",
         SETTINGS_GEAR_FRAME
     );
-    // The clock's right edge is the same 56px margin the avatar's left edge is, mirrored.
+    // The clock's right edge is the same 48px margin the avatar's left edge is, mirrored.
     let clock_right = crate::ui::consts::SCR_W - CHROME_MARGIN_X;
-    assert_eq!(clock_right, 1864.0);
-    assert_eq!(clock_right - CLOCK_W, 1816.0);
-    assert_eq!(SETTINGS_GEAR_FRAME.x + CHIP_D + CLOCK_GAP, 1816.02);
+    assert_eq!(clock_right, 1872.0);
+    assert_eq!(clock_right - CLOCK_W, 1824.0);
+    assert_eq!(SETTINGS_GEAR_FRAME.x + CHIP_D + CLOCK_GAP, 1824.0);
 
-    // The track the five reference labels lay out inside, to a hundredth of a pixel.
+    // The row begins 20px right of the avatar and runs with no inset at all.
     let widths = [91.72, 121.09, 99.41, 122.09, 104.0];
     let g = tab_geometry(&widths, 0.0);
-    assert!((g.track.x - 700.84).abs() < 0.01, "track x {}", g.track.x);
-    assert!((g.track.y - 28.0).abs() < 0.01);
-    assert!((g.track.w - 576.31).abs() < 0.01, "track w {}", g.track.w);
-    assert!((g.track.h - 59.0).abs() < 0.01);
-    assert!((g.clip.x - 707.84).abs() < 0.01);
-    assert!((g.clip.y - 35.0).abs() < 0.01);
+    assert!((g.clip.x - 114.0).abs() < 0.01, "row x {}", g.clip.x);
+    assert!((g.clip.y - 17.5).abs() < 0.01);
+    assert!((g.track.x - g.clip.x).abs() < 0.01, "no inset left of the row any more");
+    assert!((g.track.w - g.clip.w).abs() < 0.01, "and none around it");
 }
 
 #[test]
@@ -178,22 +179,21 @@ fn the_profile_chip_is_hit_where_it_is_drawn_and_sits_left_of_the_pills() {
         "…and a pixel outside it is not"
     );
     assert!(!profile_chip_at(r.cx(), r.y + r.h + 1.0), "…on either axis");
-    // It stands on the bar's own line (`#topbar`'s centred 46px items), which is 6.5px below the
-    // track's top edge — the mockup centres a 46px control in a 59px band; it does not sit on the
-    // track's y.
+    // It stands on the bar's own 16px line, and the row starts 20px to its right: the second comp
+    // has no band to centre a control in any more, so the 46px disc IS the line's height.
     assert_eq!(r.y, TOP_BAR_LINE_Y);
-    assert_eq!(r.y, TOP_BAR_Y + (TAB_PILL_H + 2.0 * TAB_TRACK_PAD) * 0.5 - CHIP_D * 0.5);
-    // The mockup gives the avatar its own 46px diameter inside the 45px pill row.
+    assert_eq!(r.x + r.w + 20.0, TAB_ROW_X);
     assert_eq!(r.h, 46.0);
     assert_eq!(r.h, CHIP_D);
 
-    // the widest strip the row will ever lay out, centred: its left edge must clear the chip
+    // the widest strip the row will ever lay out still starts to the chip's right: the row is
+    // anchored at `TAB_ROW_X`, not centred, so this is now a property of that one number.
     for n in 1..=16usize {
-        let w = widths_for(n);
-        let track_l = (crate::ui::consts::SCR_W - tab_view_w(&w)) * 0.5 - TAB_TRACK_PAD;
+        let _ = widths_for(n);
+        let row_l = TAB_ROW_X - TAB_TRACK_PAD;
         assert!(
-            track_l > r.x + r.w,
-            "n={n}: the tab track reaches x={track_l}, over a chip ending at {}",
+            row_l >= r.x + r.w,
+            "n={n}: the row reaches x={row_l}, over a chip ending at {}",
             r.x + r.w
         );
     }

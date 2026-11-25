@@ -1240,62 +1240,35 @@ impl Rig<AppHost> for Bridge {
         if !Self::draws_chrome_for(arg) { return; }
         let Some(glass) = glass else { return };
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
-        // **The band's own plate, first.** The mockup's `#topbar` carries
-        // `linear-gradient(180deg, rgba(19,11,7,.85), transparent)` over its whole 109px, under
-        // everything else — the track included. Without it the chrome floats on raw artwork, which
-        // is what made a bright hero read straight through the bar.
+        // **The second comp's bar is a SLAB, not a band**: `#topbar { height:79px;
+        // background: rgba(16,16,16,.82); border-bottom:1px solid rgba(255,255,255,.07) }`. One
+        // even plate with a hairline under it, where the first comp had 109px of gradient fading
+        // into the artwork — and NO wordmark: the row starts with the avatar and the nav, so
+        // nothing up here fades with the page any more.
+        let plate = crate::ui::theme::with_a(
+            crate::ui::theme::CHROME_GROUND,
+            crate::ui::theme::CHROME_GROUND_A,
+        );
         p.rect(
-            crate::ui::Rect::new(0.0, 0.0, crate::ui::consts::SCR_W, crate::ui::widgets::TOP_BAR_BAND_H),
+            crate::ui::Rect::new(0.0, 0.0, crate::ui::consts::SCR_W, crate::ui::widgets::TOP_BAR_H),
             0.0,
-            crate::ui::theme::with_a(crate::ui::theme::CHROME_GROUND, 0.85),
-            crate::ui::theme::with_a(crate::ui::theme::CHROME_GROUND, 0.0),
+            plate,
+            plate,
             0.0,
         );
-        // **The brand leaves with the page** (owner, 2026-11-10). It is drawn outside every page's
-        // own frame, so it cannot ride the page's alpha: the page states how far it has left its
-        // head in its own `DrawFrame` (`DrawFrame::scrolled_to`), the dispatcher carries that into
-        // this presentation, and this is the one reader. The strip, the clock and the gear stay -
-        // the bar is still the bar; only the wordmark goes.
-        let brand = crate::ui::widgets::brand_alpha(nav.page_scroll);
-        if brand > 0.004 {
-            // The mockup's wordmark is TWO runs, not one string: `buta` in `--text-hi` and `ca` in
-            // `--accent`, set in Fraunces at the optical size a browser picks for 30px (700 opsz
-            // 30 — see [`crate::text::FontRole::Brand`]). Drawn beside the profile chip, 20px off it.
-            let stem = c"buta";
-            let tail = c"ca";
-            // The reference's wordmark baseline, measured on the 1920x1080 captures: its `b` stem
-            // ends on 66 and ours on 67 with the box on the bar's line, so the runs ride one pixel
-            // up. (The avatar, the gear and the pills stay where they are: this is the display
-            // face's cap band, not the bar's line.)
-            let line = crate::ui::widgets::TOP_BAR_LINE_Y - 1.0;
-            let d = crate::ui::widgets::CHIP_D;
-            let x = crate::ui::widgets::CHIP_FRAME.x + d + 20.0;
-            let face = crate::text::FontRole::Brand;
-            let boxed = |x: f32| crate::ui::Rect::new(x, line, 200.0, d);
-            crate::ui::label::Label::new(stem.as_ptr(), 30, crate::ui::theme::CHROME_INK)
-                .face(face)
-                .h(crate::ui::label::HAlign::Left)
-                .v(crate::ui::label::VAlign::Middle)
-                .draw(p.alpha(brand), boxed(x));
-            // + the mockup's own `.01em` tracking (0.3px over four glyphs) and the 2px flex gap
-            // between its two runs, so `ca` lands on the reference's 192.33 rather than on the
-            // advance alone.
-            {
-                use crate::ui::machine::Measure as _;
-                // The stem's advance from the FACE, not from the rasterizer: hinting snaps a
-                // measured string's advance to whole pixels and moved this by 2px (the two runs are
-                // placed from it), so `ca` landed at 191 against the reference's 192.33. The face's
-                // own `hmtx` sum is what the browser advances by, and hinting cannot touch it.
-                let stem_w = crate::kern::layout_width(face, stem, 30, || {
-                    crate::ui::widgets::LegacyMeasure.width_role(stem, 30, false, face)
-                });
-                crate::ui::label::Label::new(tail.as_ptr(), 30, crate::ui::theme::CHROME_ACCENT)
-                    .face(face)
-                    .h(crate::ui::label::HAlign::Left)
-                    .v(crate::ui::label::VAlign::Middle)
-                    .draw(p.alpha(brand), boxed(x + stem_w + 1.2 + 2.0));
-            }
-        }
+        let hair = crate::ui::theme::with_a(crate::ui::theme::CHROME_INK, 0.07);
+        p.rect(
+            crate::ui::Rect::new(
+                0.0,
+                crate::ui::widgets::TOP_BAR_H - 1.0,
+                crate::ui::consts::SCR_W,
+                1.0,
+            ),
+            0.0,
+            hair,
+            hair,
+            0.0,
+        );
         if let Some(instance) = self.chrome.instance().map(|label| label.as_ptr()) {
             let badge = crate::ui::widgets::CircleButton::new(instance)
                 .frame(crate::ui::widgets::INSTANCE_FRAME)

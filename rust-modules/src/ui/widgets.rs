@@ -2650,21 +2650,10 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
                 theme::scrim_black(theme::TAB_TRACK_A_BOT),
             );
         }
-        // the name rides in on the TAIL of the widening, so the glyphs land in a capsule that has
-        // already made room for them instead of smearing across the grow
-        let na = ((e - 0.55) / 0.45).clamp(0.0, 1.0);
-        if na > 0.004 {
-            let ty = crate::text::text_vcenter_y(theme::size::BODY, 1, r.cy());
-            p.alpha(na).text(
-                name_c.as_ptr(),
-                r.x + d + CHIP_NAME_GAP,
-                ty,
-                theme::size::BODY,
-                theme::TEXT_PRIMARY,
-                0,
-                1,
-            );
-        }
+        // **The second comp's avatar is a bare disc: no unfurl, no name.** The first comp grew a
+        // capsule carrying the profile name on focus; this one keeps the row to one 46px circle and
+        // lets the nav start 20px to its right, so there is nothing here to widen into.
+        let _ = (name_c, CHIP_NAME_GAP);
     }
     // resting shadow + perimeter stroke always; lift the shadow with the focus (same as shelf tiles)
     p.focus_shadow(r, d * 0.5, e);
@@ -5602,7 +5591,7 @@ pub(crate) const TOP_BAR_Y: f32 = 28.0;
 /// It is NOT the page's [`crate::ui::consts::MARGIN_X`] (96): the reference pulls the chrome out to
 /// 56 while its page copy keeps the wider gutter, and reading the page margin here put the avatar
 /// 40px inboard of the reference and the clock over its own gear.
-pub(crate) const CHROME_MARGIN_X: f32 = 56.0;
+pub(crate) const CHROME_MARGIN_X: f32 = 48.0;
 /// **The bar's own plate height** — the mockup's `#topbar` is 109 tall (`28 + 59 + 22`) and wears a
 /// full-width `linear-gradient(180deg, rgba(19,11,7,.85), transparent)` behind everything in it, the
 /// nav track included. That plate is what makes the reference's chrome read as a band over the
@@ -5613,13 +5602,16 @@ pub(crate) const TOP_BAR_BAND_H: f32 = 109.0;
 /// **The line the bar's 46px controls stand on**, centred in the mockup's 59px content band
 /// (`#topbar` is 109 tall, 28 top + 22 bottom): 28 + (59 - 46)/2. The avatar, the wordmark's box and
 /// the gear all sit on it; the pills sit [`TAB_PILL_Y`] down because they live inside the track.
-pub(crate) const TOP_BAR_LINE_Y: f32 = 34.5;
+pub(crate) const TOP_BAR_LINE_Y: f32 = 16.0;
+/// **The second comp's bar height** — `#topbar { height: 79px }`, one slab with a 1px hairline under
+/// it. The first comp's 109px gradient band is gone.
+pub(crate) const TOP_BAR_H: f32 = 79.0;
 /// **The mockup's `#mainnav` content box, left edge** — measured off its DOM at 1920x1080
 /// (`nav.x` 700.84 + 1px border + 6px padding). The reference places the row with
 /// `justify-content: space-between`, so this number IS the brand group's width against the clock
 /// group's; it is written down rather than re-derived because the app's two sides are measured at
 /// draw and a 0.5px drift there would move the whole row.
-pub(crate) const TAB_ROW_X: f32 = 707.84;
+pub(crate) const TAB_ROW_X: f32 = 114.0;
 /// The mockup's `#clock` box — 48 wide (its `21:34` at 17px/700 with tabular figures) and
 /// right-aligned on the 56px margin, 18px left of the gear.
 pub(crate) const CLOCK_W: f32 = 48.0;
@@ -5627,28 +5619,28 @@ pub(crate) const CLOCK_W: f32 = 48.0;
 pub(crate) const CLOCK_GAP: f32 = 18.0;
 /// **The gear's left edge** — the mockup's `.iconbtn` at `x 1752.02`: the clock's right edge is the
 /// `56px` margin (`1864`), the clock is 48 wide, then the right group's 18px gap.
-pub(crate) const GEAR_X: f32 = 1752.02;
+pub(crate) const GEAR_X: f32 = 1760.0;
 /// SAME element, SAME geometry as the detail season tabs (user directive): one control height
 /// (the 60px circle-button CD family) and the season tabs' ±18 label padding — the two rows
 /// must be indistinguishable as a control.
 /// The mockup's `#mainnav button`: `padding: 11px 24px` around a 17px/600 label, i.e. 45 tall.
-pub(crate) const TAB_PILL_H: f32 = 45.0;
+pub(crate) const TAB_PILL_H: f32 = 43.0;
 /// The mockup's button row begins inside the track's 6px padding and 1px border.
-pub(crate) const TAB_PILL_Y: f32 = 35.0;
+pub(crate) const TAB_PILL_Y: f32 = 17.5;
 /// The supplied mockup's own navigation type rung and control padding.
 pub(crate) const TAB_TEXT_SZ: std::os::raw::c_int = 17;
 /// …and the face it is set in: the mockup's `font: 600 17px Manrope`. Manrope 700 (the interface
 /// bold) is a notch too heavy and ~1.5px wider per label, which walks the pill row and the track
 /// that encloses it off the reference, so the 600 cut has a role of its own.
 pub(crate) const TAB_TEXT_ROLE: crate::text::FontRole = crate::text::FontRole::InterfaceMedium;
-const TAB_PILL_PAD: f32 = 24.0;
+const TAB_PILL_PAD: f32 = 18.0;
 /// UNIFORM inset from the tab-bar track to the pills inside it, on every side: the pill (r=30) and
 /// the track (r=38) stay CONCENTRIC (outer radius = inner radius + gap), so an end pill's corner
 /// gap reads even all the way around — 16px ends against 8px verticals looked lopsided on the
 /// selected Home pill. The focused [`profile_chip_with`] wraps itself in the same inset, which is what
 /// makes its capsule and this track one band.
 /// 6px of `#mainnav` padding plus its 1px border: the track's outer edge sits 7px from a pill.
-pub(crate) const TAB_TRACK_PAD: f32 = 7.0;
+pub(crate) const TAB_TRACK_PAD: f32 = 0.0;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
@@ -5690,7 +5682,8 @@ pub(crate) fn brand_alpha(scroll: f32) -> f32 {
 /// Inter-pill air ≈ the season tabs' rhythm (their `TAB_ADVANCE` 52 minus the 2×18 pad the pills
 /// here already carry — pill edge to pill edge reads the same). Doubles as the scroll-into-view
 /// context margin, exactly as the season tabs use their advance.
-const TAB_GAP: f32 = 6.0;
+/// The second comp's `#mainnav { gap: 4px }`.
+const TAB_GAP: f32 = 4.0;
 /// How wide the pill strip may grow before it starts scrolling. The row stays CENTERED, but it
 /// must never reach the profile chip (a focus stop of its own at `MARGIN_X`), so the viewport is
 /// the screen less a symmetric chip-clearing margin, less the track's own inset on both ends.
@@ -6813,6 +6806,10 @@ impl StripRender {
         // The track is the strip's width until the strip outgrows the screen, then it caps and the
         // pills scroll inside it — the track itself never moves.
         let x0 = geometry.clip.x;
+        // **No track.** The second comp dropped the capsule the first one wrapped this row in
+        // (`#mainnav` has no background, border or padding): its items stand straight on the bar's
+        // slab, and only the CURRENT one wears a plate of its own, which the selection capsule
+        // below already draws. `TAB_TRACK_PAD` is 0 so the geometry has no inset left to give.
         let track = geometry.track;
         // The dispatcher owns the whole chrome band as one z layer. This widget has no
         // source-pass or modal exclusion: declaration, source and visible walks share this draw.
@@ -6828,7 +6825,9 @@ impl StripRender {
         // that is about to draw FLAT (a popover is up, `flattabs` is armed, or the strip is wider
         // than `GLASS_TRACK_MAX`) must not pay for a number only the glass path consumes. It did,
         // on every screen wearing the bar, for as long as the app was open.
-        let glass_on = tab_glass_on(track.w);
+        // **The second comp has no track**, so nothing is solved, sampled or glass-plated for one:
+        // the row's items are its only surface. `TAB_TRACK_PAD` is the flag (`0` = no track).
+        let glass_on = TAB_TRACK_PAD > 0.0 && tab_glass_on(track.w);
         let groundlog = ground_log_armed();
         // …and FASTER while a polarity is being decided: the decision is gated on two independent
         // readings, so the sampler's rate is the decision's rate, and every frame of it is spent
@@ -6979,14 +6978,16 @@ impl StripRender {
             // was a reported bug twice over: the write clobbered a value the spring owned, so the
             // next frame cut it back, and the hysteresis read the same clobbered value and walked
             // the committed polarity across with it. Both are gone with the polarity itself.
-            p.rect_rimmed(
-                track,
-                track.h * 0.5,
-                theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
-                theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
-                theme::CHROME_TRACK_RIM,
-                0.0,
-            );
+            if TAB_TRACK_PAD > 0.0 {
+                p.rect_rimmed(
+                    track,
+                    track.h * 0.5,
+                    theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
+                    theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
+                    theme::CHROME_TRACK_RIM,
+                    0.0,
+                );
+            }
         }
         // A strip wider than its track is a bounded panel, not a scrolling document, so this is the
         // scissor case (see the ui/CLAUDE.md clipping rule): a pill leaving the row is cut at the

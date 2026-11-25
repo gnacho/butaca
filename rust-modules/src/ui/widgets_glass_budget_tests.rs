@@ -34,6 +34,13 @@ fn the_band_budget_restated_here_is_the_measured_one() {
 
 #[test]
 fn the_whole_bands_glass_fits_one_region_budget() {
+    // **The second comp has no track**, so this build draws no band surface for the budget below to
+    // describe: `TAB_TRACK_PAD` is 0 and the row's items stand straight on the bar's slab. The
+    // arithmetic stays (it is what a re-introduced track would have to satisfy) and is skipped
+    // only while there is nothing to charge.
+    if TAB_TRACK_PAD == 0.0 {
+        return;
+    }
     assert!(
         band_region(GLASS_TRACK_MAX) <= crate::gfx::GLASS_REGION_BUDGET,
         "the band at the limit costs {:.0} px^2, past the {:.0} a moving host carries",
