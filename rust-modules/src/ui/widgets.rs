@@ -5460,6 +5460,7 @@ impl TabStrip {
     /// Call this BEFORE the pill loop: the capsules are the pills' ground, and a label drawn under an
     /// opaque focus capsule is a label nobody can read.
     pub(crate) fn draw(&self, p: Painter, top: f32, h: f32, ground: TabGround) {
+        let plated_now = matches!(ground, TabGround::Plated { .. });
         let cap = |c: &Capsule, col: [f32; 4], rim: Option<[f32; 4]>, scale: f32, cast: bool| {
             let (x, w) = c.span();
             let a = c.alpha();
@@ -5468,8 +5469,16 @@ impl TabStrip {
                 // The pop + press dip, about the capsule's own centre — 1.0 for a tracked strip,
                 // which never scales. The RADIUS stays keyed to the drawn height so a scaled capsule
                 // is still a capsule rather than a rounded rectangle.
-                let r = Rect::new(x, top, w, h).scaled(scale);
-                let h = r.h;
+                // **The second comp's tab plates are rounded SQUARES, not capsules**: its
+                // `#mainnav button` is a 45x39 box at `border-radius:10px` inside a 43px row, so a
+                // tracked strip insets the plate 2px vertically and pins its radius. The season
+                // strip (plated) keeps the capsule it has always drawn.
+                let (r, rad) = if plated_now {
+                    (Rect::new(x, top, w, h).scaled(scale), h * 0.5)
+                } else {
+                    let r = Rect::new(x, top + 2.0, w, (h - 4.0).max(1.0)).scaled(scale);
+                    (r, TAB_PILL_RAD)
+                };
                 // The lift every other focused control face wears (`control_cast`, via
                 // `Button::plate`) — owner correction, 2026-09-06: a plated strip's focused pill IS
                 // a control face (this fn's own doc says so, two paragraphs down) and a control face
@@ -5478,7 +5487,7 @@ impl TabStrip {
                 // for a TRACKED pill or the selection plate — see the call sites' own comments for
                 // why each of those stays flat.
                 if cast {
-                    control_cast(p, r, h * 0.5);
+                    control_cast(p, r, rad);
                 }
                 match rim {
                     // On a GLASS track the selection plate is a piece of the same material, not a
@@ -5494,13 +5503,13 @@ impl TabStrip {
                     // the same expression `control_rim` makes.
                     Some(rc) => p.alpha(a).rect_rimmed(
                         r,
-                        h * 0.5,
+                        rad,
                         col,
                         col,
                         rc,
                         theme::GLASS_RIM_LIGHT[3] - rc[3],
                     ),
-                    None => p.alpha(a).rrect(r, h * 0.5, h * 0.5, col),
+                    None => p.alpha(a).rrect(r, rad, rad, col),
                 }
             }
         };
@@ -5646,6 +5655,9 @@ const TAB_PILL_PAD: f32 = 18.0;
 /// makes its capsule and this track one band.
 /// 6px of `#mainnav` padding plus its 1px border: the track's outer edge sits 7px from a pill.
 pub(crate) const TAB_TRACK_PAD: f32 = 0.0;
+/// `#mainnav button { border-radius: 10px }` — the second comp's tab plates are rounded squares, and
+/// this is the radius the tracked strip draws them at (the season strip keeps its capsule).
+pub(crate) const TAB_PILL_RAD: f32 = 10.0;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
