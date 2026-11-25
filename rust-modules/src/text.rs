@@ -120,6 +120,16 @@ pub(crate) enum FontRole {
     /// bold is 700, so the ExtraBold cut is its own file rather than synthetic emboldening — one
     /// letter, and at 19px the difference is the stroke, which is the whole of what the disc shows.
     Avatar = 5,
+    /// **Manrope 500** — the reference's own body weight for a card's subtitle (`.sm-server .who
+    /// span`), which the app's ladder did not have: it jumps 400 → 600. Drawn at 16 on the add
+    /// card, where the reference sets it at the button's size.
+    InterfaceSub = 6,
+    /// **Manrope 500, prescaled by 29/30.** SDL_ttf takes an INTEGER point size and the firmware's
+    /// 2.0.10/2.0.14 expose neither `TTF_SetFontSize` nor any DPI setter, so a CSS size of 14.5px
+    /// is unreachable by asking. This cut's outlines and advances are multiplied by 29/30 instead,
+    /// so drawing it at 15 renders 14.5px — the reference's subtitle exactly — and at 14 renders
+    /// 13.53, its 13.5px card line. One file, two exact sizes.
+    InterfaceSubTight = 7,
 }
 
 impl FontRole {
@@ -136,6 +146,10 @@ impl FontRole {
             FontRole::Brand => ("appfont-brand-700.ttf", "appfont-brand-700.ttf"),
             FontRole::Clock => ("appfont-clock-700.ttf", "appfont-clock-700.ttf"),
             FontRole::Avatar => ("appfont-manrope-800.ttf", "appfont-manrope-800.ttf"),
+            FontRole::InterfaceSub => ("appfont-manrope-500.ttf", "appfont-manrope-500.ttf"),
+            FontRole::InterfaceSubTight => {
+                ("appfont-manrope-500-sub.ttf", "appfont-manrope-500-sub.ttf")
+            }
         }
     }
 }
@@ -303,7 +317,7 @@ static mut FONTS_B: [[*mut TtfFont; FONT_SLOTS]; FONT_ROLES] =
 /// How many [`FontRole`] variants exist — the arrays above index by discriminant, so this is the
 /// one place the count is written and `font_at`'s bound is a debug assertion rather than a panic on
 /// the set (it was a hard index when a fourth role arrived, 2026-11-25).
-const FONT_ROLES: usize = 6;
+const FONT_ROLES: usize = 8;
 /// The retained Inter fallback face, one per pixel size, per weight. Shared by both roles behind
 /// their own primary face, so a role never opens it until a codepoint actually needs it.
 static mut FONTS_INTER: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];

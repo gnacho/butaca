@@ -100,7 +100,7 @@ const PANEL_BORDER: f32 = 1.0;
 const ROW_PAD_X: f32 = 20.0 + PANEL_BORDER;
 /// The row's `.who` block, from the card's top edge: the name's line box, then 3.06, then the
 /// detail's — 44.88 tall in all, centred in the 82px card.
-const NAME_Y: f32 = 19.0;
+const NAME_Y: f32 = 22.0;
 const DETAIL_Y: f32 = 44.0;
 const DOT_D: f32 = 10.0;
 const DOT_GAP: f32 = 16.0;
@@ -109,10 +109,18 @@ const SUB_SZ: std::os::raw::c_int = 15;
 const NAME_SZ: std::os::raw::c_int = 16;
 const DETAIL_SZ: std::os::raw::c_int = 14;
 const TAG_SZ: std::os::raw::c_int = 12;
+/// `.sm-server .tag { letter-spacing: .1em }` at 12px.
+const TAG_TRACK: f32 = 1.2;
 const TITLE_H: f32 = 37.0;
 const TITLE_GAP: f32 = 6.0;
 const SUB_H: f32 = 38.0;
 const SUB_GAP: f32 = 24.0;
+/// The subtitle's LINE BOX is the reference's (its top is 78 from the panel, and the rows start off
+/// that number), but this cut's ascent sits 2px higher inside an equal box than Chrome's does — the
+/// prescaled 500 carries the reference's size, not its baseline. The ink is what is matched here.
+const SUB_INK_DY: f32 = 2.0;
+/// Same story for the tag's run, whose ink lands 2px high in the card.
+const TAG_INK_DY: f32 = 2.0;
 /// Content offset from the panel's OUTER edge, and the width it leaves.
 const PANEL_INSET: f32 = PANEL_PAD + PANEL_BORDER;
 const PANEL_INNER_W: f32 = PANEL_W - 2.0 * PANEL_INSET;
@@ -203,6 +211,46 @@ fn server_line(url: &str) -> String {
             format!("{url} · Jellyfin {short}")
         }
         None => url.to_string(),
+    }
+}
+
+/// **A run at a tracked pitch, right-aligned** — the reference's `letter-spacing` on the tag.
+///
+/// SDL_ttf composes a string at the font's own advances, so a tracked run has to be placed glyph by
+/// glyph: [`crate::kern::glyphs`] gives each one's offset inside the run, and the pitch is that
+/// offset plus `tracking` for every gap before it. The same per-glyph path the top bar's labels use
+/// (`TabPill::draw_kerned`), which exists because FreeType's `kern` is ignored on this toolchain.
+fn draw_tracked(
+    p: crate::ui::Painter,
+    text: &str,
+    sz: std::os::raw::c_int,
+    ink: [f32; 4],
+    right: f32,
+    cy: f32,
+    tracking: f32,
+) {
+    let role = crate::text::FontRole::Interface;
+    let Some((total, glyphs)) = crate::kern::glyphs(role, text, sz) else {
+        return;
+    };
+    let n = glyphs.len().saturating_sub(1) as f32;
+    let width = total + tracking * n;
+    let x0 = right - width;
+    for (i, g) in glyphs.iter().enumerate() {
+        let Some(bytes) = text.as_bytes().get(g.at..g.at + g.len) else {
+            return;
+        };
+        let mut buf = [0u8; 8];
+        if bytes.len() >= buf.len() || buf.get_mut(..bytes.len()).is_none() {
+            return;
+        }
+        buf[..bytes.len()].copy_from_slice(bytes);
+        crate::ui::label::Label::new(buf.as_ptr() as *const std::os::raw::c_char, sz, ink)
+            .face(role)
+            .bold()
+            .h(crate::ui::label::HAlign::Left)
+            .v(crate::ui::label::VAlign::Middle)
+            .draw(p, Rect::new(x0 + g.dx + i as f32 * tracking, cy - 10.0, 60.0, 20.0));
     }
 }
 
@@ -585,8 +633,9 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
         ) {
             let cs = std::ffi::CString::new(line).unwrap_or_default();
             crate::ui::label::Label::new(cs.as_ptr(), SUB_SZ, crate::ui::theme::CHROME_MUTED)
+                .face(crate::text::FontRole::InterfaceSubTight)
                 .h(crate::ui::label::HAlign::Left)
-                .draw(p, Rect::new(r.x + PANEL_INSET, line_y, PANEL_INNER_W, 19.0));
+                .draw(p, Rect::new(r.x + PANEL_INSET, line_y + SUB_INK_DY, PANEL_INNER_W, 19.0));
             line_y += 19.0;
         }
         let _ = sub;
@@ -646,17 +695,30 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
                     RowFace::Add { .. } => DETAIL_Y - 1.0,
                     _ => DETAIL_Y,
                 };
+                let detail_face = match &face {
+                    RowFace::Add { .. } => crate::text::FontRole::InterfaceSub,
+                    _ => crate::text::FontRole::InterfaceSubTight,
+                };
                 crate::ui::label::Label::new(dcs.as_ptr(), detail_sz, crate::ui::theme::CHROME_MUTED)
+                    .face(detail_face)
                     .h(crate::ui::label::HAlign::Left)
                     .draw(p, Rect::new(x, q.y + detail_y, q.x + q.w - ROW_PAD_X - x, 20.0));
             }
             if tag {
                 let t = crate::i18n::msg::settings_servers_active_tag().to_uppercase();
-                let tcs = std::ffi::CString::new(t).unwrap_or_default();
-                crate::ui::label::Label::new(tcs.as_ptr(), TAG_SZ, crate::ui::theme::CHROME_GOLD)
-                    .bold()
-                    .h(crate::ui::label::HAlign::Right)
-                    .draw(p, Rect::new(q.x, q.cy() - 10.0, q.w - ROW_PAD_X, 20.0));
+                // `.sm-server .tag` sets `letter-spacing:.1em` — 1.2px at its 12px size. SDL_ttf has
+                // no tracking, so the run is drawn glyph by glyph at the reference's own pitch,
+                // right-aligned: measuring it as one string leaves the tag 9px narrow.
+                let right = q.x + q.w - ROW_PAD_X;
+                draw_tracked(
+                    p,
+                    &t,
+                    TAG_SZ,
+                    crate::ui::theme::CHROME_GOLD,
+                    right,
+                    q.cy() + TAG_INK_DY,
+                    TAG_TRACK,
+                );
                 let _ = active;
             }
         }

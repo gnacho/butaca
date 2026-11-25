@@ -1458,6 +1458,7 @@ ALLOWED = {"Inter", "Arimo", "Roboto", "Noto Sans", "Source Sans 3", "Noto Sans 
 for f in ("pkg/appfont.ttf", "pkg/appfont-bold.ttf", "pkg/appfont-cjk.ttf",
           "pkg/appfont-manrope-400.ttf", "pkg/appfont-manrope-600.ttf", "pkg/appfont-manrope-700.ttf",
           "pkg/appfont-brand-700.ttf", "pkg/appfont-clock-700.ttf", "pkg/appfont-manrope-800.ttf",
+          "pkg/appfont-manrope-500.ttf", "pkg/appfont-manrope-500-sub.ttf",
           "pkg/appfont-fraunces-600.ttf", "pkg/appfont-fraunces-700.ttf"):
     fam = font_family(ROOT / f)
     check(fam in ALLOWED, f"{f} family={fam!r} is redistributable (allowed: {sorted(ALLOWED)})")
@@ -1540,6 +1541,7 @@ expected = {
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf",
     "appfont-manrope-400.ttf", "appfont-manrope-600.ttf", "appfont-manrope-700.ttf",
     "appfont-brand-700.ttf", "appfont-clock-700.ttf", "appfont-manrope-800.ttf",
+    "appfont-manrope-500.ttf", "appfont-manrope-500-sub.ttf",
     "appfont-fraunces-600.ttf", "appfont-fraunces-700.ttf", "OFL.txt",
     "THIRD-PARTY-NOTICES.md", "LICENSE", "LICENSING.md", "TRADEMARKS.md", *NEEDED_LICENCES,
 }

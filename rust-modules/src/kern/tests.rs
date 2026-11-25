@@ -77,3 +77,15 @@ fn the_clock_digits_are_tabular() {
         "tabular digits make every HH:MM the reference's 47.98: {widths:?}"
     );
 }
+
+/// The dialog's tag is the one run drawn in the BODY weight at a tracked pitch, so `Interface` has
+/// to be a parsed face like the reference cuts are. It answers `None` for a role this module never
+/// parsed, and a caller that draws glyph by glyph then draws nothing at all.
+#[test]
+fn the_body_face_lays_out_a_tracked_run() {
+    let (total, glyphs) = glyphs(FontRole::Interface, "ACTIVO", 12).expect("Interface kern table");
+    assert_eq!(glyphs.len(), 6);
+    assert!(total > 30.0 && total < 60.0, "six capitals at 12px: {total}");
+    assert_eq!(glyphs[0].dx, 0.0);
+    assert!(glyphs[5].dx > glyphs[0].dx);
+}

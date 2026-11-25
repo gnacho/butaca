@@ -61,13 +61,21 @@ fn table(role: FontRole) -> Option<&'static Kern> {
     static CACHE: OnceLock<HashMap<u8, Option<Kern>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| {
         let mut map = HashMap::new();
-        for role in [FontRole::InterfaceMedium, FontRole::Brand, FontRole::Clock] {
+        // `Interface` is here for the one run that needs a tracked pitch in the body's own weight:
+        // the account dialog's `ACTIVO` tag (`.tag { letter-spacing:.1em }`). Asking for a role
+        // this list does not name answers `None`, and the caller then draws nothing at all — which
+        // is how the tag vanished from the dialog the first time it was drawn glyph by glyph.
+        for role in [
+            FontRole::Interface,
+            FontRole::InterfaceMedium,
+            FontRole::Brand,
+            FontRole::Clock,
+        ] {
             let parsed = face_bytes(role).as_deref().and_then(parse);
             if parsed.is_none() {
                 crate::log(&format!(
-                    "kern: {role:?} has no readable kern table — that row will lay out {}px wide \
-                     per unkerned glyph advance",
-                    "a little"
+                    "kern: {role:?} face cannot be read — that row lays out from the rasterizer's \
+                     own advances"
                 ));
             }
             map.insert(role as u8, parsed);
@@ -141,8 +149,14 @@ fn parse(b: &[u8]) -> Option<Kern> {
     }
     let (cmap_off, cmap_len) = table_range(b, b"cmap")?;
     let cmap = parse_cmap(b.get(cmap_off..cmap_off + cmap_len)?)?;
-    let (kern_off, kern_len) = table_range(b, b"kern")?;
-    let pairs = parse_kern(b.get(kern_off..kern_off + kern_len)?)?;
+    // **A face without a `kern` table still lays out**, at its own `hmtx` advances and no pairs.
+    // Only the brand cut carries a baked table; the rest of the shipped faces keep their kerning in
+    // `GPOS` (which FreeType ignores here, recorded in the module doc). Answering `None` for them
+    // made `glyphs` unusable for the body face, which is what a tracked run needs.
+    let pairs = match table_range(b, b"kern") {
+        Some((kern_off, kern_len)) => parse_kern(b.get(kern_off..kern_off + kern_len)?)?,
+        None => HashMap::new(),
+    };
     let (hhea, _) = table_range(b, b"hhea")?;
     let metrics = u16_at(b, hhea + 34)? as usize;
     let (hmtx, hmtx_len) = table_range(b, b"hmtx")?;
