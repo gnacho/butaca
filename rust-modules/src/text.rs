@@ -845,17 +845,23 @@ static mut FONTS_CJK: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_S
 static mut FONTS_SYS: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 /// Per-(role, link) coverage, read from the file's cmap on FIRST NEED and never again. `None`
 /// after `COV_TRIED` means the file is absent or unreadable, i.e. the link is empty.
-static mut COV: [Option<crate::fontcov::Coverage>; 5] = [None, None, None, None, None];
-static mut COV_TRIED: [bool; 5] = [false; 5];
+/// One slot per role's BASE face plus the three shared fallbacks. **Sized from [`FONT_ROLES`], not
+/// written out**: the table used to be five flat entries with `Inter`/`Cjk`/`Sys` at fixed 2, 3, 4,
+/// which silently made role 5 (the avatar's ExtraBold) index past the end the first time a screen
+/// drew with it — a panic in `link_covers`, on the television, at paint time. The fallbacks live
+/// above the roles now so adding a role cannot collide with them.
+const COV_SLOTS: usize = FONT_ROLES + 3;
+static mut COV: [Option<crate::fontcov::Coverage>; COV_SLOTS] = [const { None }; COV_SLOTS];
+static mut COV_TRIED: [bool; COV_SLOTS] = [false; COV_SLOTS];
 
 /// The flat [`COV`] index for `(role, link)`. `Base` is the only role-dependent slot; Inter, Cjk
-/// and Sys are shared and keep one slot each.
+/// and Sys are shared and sit AFTER every role.
 fn cov_index(role: FontRole, link: Link) -> usize {
     match link {
         Link::Base => role as usize,
-        Link::Inter => 2,
-        Link::Cjk => 3,
-        Link::Sys => 4,
+        Link::Inter => FONT_ROLES,
+        Link::Cjk => FONT_ROLES + 1,
+        Link::Sys => FONT_ROLES + 2,
     }
 }
 

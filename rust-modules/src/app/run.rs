@@ -1987,9 +1987,6 @@ fn loop_requests(app: &mut App) {
             crate::screens::registry::LoopReq::AccountSignIn => {
                 super::bridge::nav_root(&mut app.pages, AppArg::Login);
             }
-            crate::screens::registry::LoopReq::AccountSignOut => {
-                jellyfin_disconnect_server(app);
-            }
             // The host route does NOT move: Settings is a surface presented over the same page,
             // and its Privacy, Legal and Favourite-libraries children are pages of that surface's
             // own inner stack. The account sheet's dismissal and this presentation are two parked

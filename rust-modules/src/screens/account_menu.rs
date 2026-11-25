@@ -30,7 +30,6 @@ use crate::ui::Rect;
 pub(crate) enum Action {
     None,
     SignIn,
-    SignOut,
     /// **Settings** — the reachable owner of Home sources, Privacy, Legal notices and About
     /// ([`crate::screens::registry::AppArg::Settings`]). Offered in EVERY build and in **both**
     /// account states:
@@ -65,7 +64,6 @@ impl Action {
         match self {
             Action::None => 0,
             Action::SignIn => 1,
-            Action::SignOut => 2,
             Action::Settings => 3,
             Action::SendDiagnostics => 4,
             Action::SwitchServer(i) => SERVER_BASE + i as u32,
@@ -87,8 +85,23 @@ const PANEL_PAD: f32 = 34.0;
 const PANEL_RAD: f32 = 24.0;
 const ROW_RAD: f32 = 16.0;
 const ROW_H: f32 = 82.0;
+/// **The add card is 84, not 82.** The reference's `.who span` rule does not reach that row, so its
+/// subtitle renders at the button's own 16px instead of 13.5 — a taller line box, a taller card. It
+/// is the whole of why the mockup's three-row panel measures 453 and two-thirds of why ours used to
+/// measure 451.
+const ROW_H_ADD: f32 = 84.0;
+/// And its subtitle's size, for the same reason: 16, not the server rows' 13.5.
+const DETAIL_SZ_ADD: std::os::raw::c_int = 16;
 const ROW_GAP: f32 = 10.0;
-const ROW_PAD_X: f32 = 20.0;
+/// `.sm-panel` and `.sm-server` both carry a 1px border, and the reference's padding is measured
+/// INSIDE it: its content starts 35 from the panel's outer edge (`.sm-panel` x 680, its `h2` 715)
+/// and 21 from the card's (`x 715`, its `.dot` 736). The row's own box is 490 wide, not 492.
+const PANEL_BORDER: f32 = 1.0;
+const ROW_PAD_X: f32 = 20.0 + PANEL_BORDER;
+/// The row's `.who` block, from the card's top edge: the name's line box, then 3.06, then the
+/// detail's — 44.88 tall in all, centred in the 82px card.
+const NAME_Y: f32 = 19.0;
+const DETAIL_Y: f32 = 44.0;
 const DOT_D: f32 = 10.0;
 const DOT_GAP: f32 = 16.0;
 const TITLE_SZ: std::os::raw::c_int = 30;
@@ -100,20 +113,29 @@ const TITLE_H: f32 = 37.0;
 const TITLE_GAP: f32 = 6.0;
 const SUB_H: f32 = 38.0;
 const SUB_GAP: f32 = 24.0;
-const PANEL_INNER_W: f32 = PANEL_W - 2.0 * PANEL_PAD;
+/// Content offset from the panel's OUTER edge, and the width it leaves.
+const PANEL_INSET: f32 = PANEL_PAD + PANEL_BORDER;
+const PANEL_INNER_W: f32 = PANEL_W - 2.0 * PANEL_INSET;
 
 pub(crate) const SHAPE: &str = "AccountMenu{header:str,rows:[u32],sel:u32}";
 
-/// The rows for a Jellyfin account state, in order, BELOW the configured-server list. Signed out
-/// offers sign-in; signed in offers sign-out. Settings and the compile-time lab action are
-/// independent of account state.
+/// The rows BELOW the configured-server list. **While an account is live: none.** The supplied
+/// mockup's dialog is the servers and *Add server*, so this is the whole of it — the panel measures
+/// 453px at three rows because nothing else is in it.
+///
+/// Neither door is lost by not repeating them here: *Sign out* is Settings' own **Desconectar** row
+/// (`LoopReq::JfDisconnectServer`) and Settings opens from the bar's gear, which every bar-wearing
+/// surface carries.
+///
+/// Signed OUT the menu still offers *Sign in*, and Settings beside it. The reference draws no
+/// signed-out dialog, and the login gate is the only other home that press has.
 fn rows_for(signed_in: bool) -> Vec<Action> {
     let mut rows = Vec::new();
-    match (signed_in, crate::lab::menu_row_enabled()) {
-        (false, false) => rows.extend([Action::SignIn, Action::Settings]),
-        (false, true) => rows.extend([Action::SignIn, Action::Settings, Action::SendDiagnostics]),
-        (true, false) => rows.extend([Action::SignOut, Action::Settings]),
-        (true, true) => rows.extend([Action::SignOut, Action::Settings, Action::SendDiagnostics]),
+    if !signed_in {
+        rows.extend([Action::SignIn, Action::Settings]);
+    }
+    if crate::lab::menu_row_enabled() {
+        rows.push(Action::SendDiagnostics);
     }
     rows
 }
@@ -166,22 +188,32 @@ fn wrap_words(text: &str, budget: f32, sz: std::os::raw::c_int, measure: &dyn cr
     lines
 }
 
+/// **A server's address as the reference writes it**: `192.168.1.10 · Jellyfin 10.9` — the url, the
+/// separator, and the server's own version cut to major.minor. The version is the one the last
+/// connection learned ([`crate::jellyfin::known_server_version`]); a server this process has not
+/// talked to yet says only its address, because inventing a version would be a lie in the row.
+fn server_line(url: &str) -> String {
+    match crate::jellyfin::known_server_version(url) {
+        Some(v) => {
+            let mut parts = v.split('.');
+            let short = match (parts.next(), parts.next()) {
+                (Some(major), Some(minor)) => format!("{major}.{minor}"),
+                _ => v.clone(),
+            };
+            format!("{url} · Jellyfin {short}")
+        }
+        None => url.to_string(),
+    }
+}
+
 fn label(a: Action) -> &'static str {
     match a {
         Action::SignIn => crate::i18n::msg::settings_account_sign_in(),
-        Action::SignOut => crate::i18n::msg::settings_account_sign_out(),
         Action::Settings => crate::i18n::msg::settings_account_settings(),
         Action::SendDiagnostics => crate::i18n::msg::settings_account_diagnostics(),
         Action::AddServer => crate::i18n::msg::settings_servers_add_password(),
         Action::None | Action::SwitchServer(_) => "",
     }
-}
-
-/// Rows whose action ends something in place. Never where the menu's focus starts
-/// ([`crate::ui::table::TableView::opening_row`]): *Sign out* is the FIRST row while signed in,
-/// and a stray OK on a freshly opened menu must not sign anyone out.
-fn destructive(a: Action) -> bool {
-    matches!(a, Action::SignOut)
 }
 
 /// The row list IS the mapping — a selection outside it (an empty menu, a stale index) is `None`
@@ -197,36 +229,45 @@ fn action_at(rows: &[Action], sel: i32) -> Action {
 /// The account sheet as the mockup's centred server dialog: a fixed-width panel centred on the
 /// canvas, clear of the overscan frame. It is a dialog now, not a chip-tucked corner sheet, because
 /// it lists every configured server — the same content `ServersPage` presents full-screen.
-fn panel_rect(rows: usize) -> Rect {
-    let ph = rows_height(rows);
+fn panel_rect(heights: &[f32]) -> Rect {
+    let ph = rows_height(heights);
     let px = (crate::surface::LOGICAL_W - PANEL_W) * 0.5;
     let py = (crate::surface::LOGICAL_H - ph) * 0.5;
     Rect::new(px, py, PANEL_W, ph)
 }
 
 /// The dialog's own height: title, subtitle and the row stack inside the reference's padding.
-fn rows_height(rows: usize) -> f32 {
+fn rows_height(heights: &[f32]) -> f32 {
     // Every row carries its own 10px foot, the last one included — that is why the reference's
-    // 3-row panel measures 453 and not 439 (`452.68 + 3*82 + 3*10 + 34`).
-    let n = rows.max(1) as f32;
-    2.0 + 2.0 * PANEL_PAD + TITLE_H + TITLE_GAP + SUB_H + SUB_GAP + n * (ROW_H + ROW_GAP)
+    // 3-row panel measures 453 and not 443.
+    let n = heights.len().max(1) as f32;
+    2.0 * (PANEL_BORDER + PANEL_PAD)
+        + TITLE_H
+        + TITLE_GAP
+        + SUB_H
+        + SUB_GAP
+        + heights.iter().sum::<f32>()
+        + n * ROW_GAP
 }
 
 /// Row `i`'s RESTING rect — the one focus and the hit map use. The focused row is drawn at
 /// `.sm-server.is-focused`'s `scale(1.02)` about this rect's centre.
-fn row_rect_in(panel: Rect, i: usize) -> Rect {
-    let y0 = panel.y + PANEL_PAD + TITLE_H + TITLE_GAP + SUB_H + SUB_GAP;
+fn row_rect_in(panel: Rect, heights: &[f32], i: usize) -> Rect {
+    let mut y = panel.y + PANEL_INSET + TITLE_H + TITLE_GAP + SUB_H + SUB_GAP;
+    for h in heights.iter().take(i) {
+        y += h + ROW_GAP;
+    }
     Rect::new(
-        panel.x + PANEL_PAD,
-        y0 + i as f32 * (ROW_H + ROW_GAP),
+        panel.x + PANEL_INSET,
+        y,
         PANEL_INNER_W,
-        ROW_H,
+        heights.get(i).copied().unwrap_or(ROW_H),
     )
 }
 
 /// What a row says: a server, the add door, or one of the app's own actions.
 enum RowFace<'a> {
-    Server { name: &'a str, detail: &'a str, active: bool },
+    Server { name: &'a str, detail: String, active: bool },
     Add { name: &'a str, detail: &'a str },
     Action { name: &'a str },
 }
@@ -236,10 +277,11 @@ enum RowFace<'a> {
 /// in and the height comes from a `TableView` no host test can measure.
 #[cfg(test)]
 pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, crate::ui::Rect)>) {
-    let r = panel_rect(3);
+    let heights = [ROW_H, ROW_H, ROW_H, ROW_H_ADD];
+    let r = panel_rect(&heights);
     out.push((
         "account menu panel",
-        crate::ui::Rect::new(r.x, r.y, r.w, rows_height(4)),
+        crate::ui::Rect::new(r.x, r.y, r.w, rows_height(&heights)),
     ));
 }
 
@@ -297,8 +339,8 @@ impl AccountMenuScreen {
         self.header = crate::i18n::msg::settings_servers_change().to_string();
 
         // The reference's dialog has no scrollable list: it is a short stack of cards, and the
-        // panel's height comes from the row count. Selection lands on the row that is safe to press
-        // (never "Sign out"), exactly as the table's opening row did.
+        // panel's height comes from the row count. Selection lands on the row that is safe to press:
+        // the ACTIVE server, never *Add server*.
         self.sel = match self.rows.iter().position(|a| *a == selected) {
             Some(row) => row as i32,
             None => self.opening_row(),
@@ -309,8 +351,18 @@ impl AccountMenuScreen {
         self.rows.iter().position(|action| action.key() == elem)
     }
 
+    /// Each row's height, in order: the reference's own (82 for a server card, 84 for the add one).
+    fn heights(&self) -> Vec<f32> {
+        (0..self.rows.len())
+            .map(|i| match self.face(i) {
+                RowFace::Add { .. } => ROW_H_ADD,
+                _ => ROW_H,
+            })
+            .collect()
+    }
+
     fn frame(&self) -> Rect {
-        panel_rect(self.rows.len())
+        panel_rect(&self.heights())
     }
 
     /// Commit the focused row. **Every action dismisses**, exactly as the legacy `on_ok` did by
@@ -319,7 +371,6 @@ impl AccountMenuScreen {
         let act = self.row_of(elem).map_or(Action::None, |row| self.rows[row]);
         let req = match act {
             Action::SignIn => Some(LoopReq::AccountSignIn),
-            Action::SignOut => Some(LoopReq::AccountSignOut),
             Action::Settings => Some(LoopReq::AccountSettings),
             Action::SendDiagnostics => Some(LoopReq::AccountSendDiagnostics),
             Action::SwitchServer(i) => Some(LoopReq::JfSwitchServer(i)),
@@ -338,11 +389,13 @@ impl AccountMenuScreen {
         action_at(&self.rows, self.opening_row())
     }
 
-    /// The row a freshly opened dialog lands on: the first one that is not destructive.
+    /// The row a freshly opened dialog lands on: the ACTIVE server's, which is the card the
+    /// reference draws `.is-focused` on (`.sm-server.is-focused` is the `data-server` the screens
+    /// are showing). A dialog with no configured server falls to the first row.
     fn opening_row(&self) -> i32 {
         self.rows
             .iter()
-            .position(|a| !destructive(*a))
+            .position(|a| matches!(a, Action::SwitchServer(i) if *i == self.active))
             .unwrap_or(0) as i32
     }
 
@@ -353,7 +406,7 @@ impl AccountMenuScreen {
                 let server = self.servers.get(*idx);
                 RowFace::Server {
                     name: server.map_or("", |s| s.user.as_str()),
-                    detail: server.map_or("", |s| s.url.as_str()),
+                    detail: server.map_or(String::new(), |s| server_line(&s.url)),
                     active: *idx == self.active,
                 }
             }
@@ -449,14 +502,15 @@ impl<H: AppLike> Focusable<H> for AccountMenuScreen {
     }
     fn place(&self, elem: &u32, _: &Cx<'_, H>, _: At) -> Option<Placed> {
         let row = self.row_of(*elem)?;
-        let rest = row_rect_in(self.frame(), row);
+        let frame = self.frame();
+        let rest = row_rect_in(frame, &self.heights(), row);
         // `.sm-server.is-focused { transform: scale(1.02) }` — a static transform about the card's
         // own centre, not a spring: the reference's row grows in place the moment it holds focus.
         let rect = if self.sel == row as i32 { rest.scaled(1.02) } else { rest };
         Some(Placed {
             rect,
             rest_rect: rest,
-            clip: self.frame(),
+            clip: frame,
             index: Some(row as u32),
         })
     }
@@ -518,10 +572,10 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
         crate::ui::label::Label::new(title.as_ptr(), TITLE_SZ, crate::ui::theme::CHROME_INK)
             .display()
             .h(crate::ui::label::HAlign::Left)
-            .draw(p, Rect::new(r.x + PANEL_PAD, r.y + PANEL_PAD, PANEL_INNER_W, TITLE_H));
+            .draw(p, Rect::new(r.x + PANEL_INSET, r.y + PANEL_INSET, PANEL_INNER_W, TITLE_H));
         let sub = std::ffi::CString::new(crate::i18n::msg::settings_servers_change_detail())
             .unwrap_or_default();
-        let sub_y = r.y + PANEL_PAD + TITLE_H + TITLE_GAP;
+        let sub_y = r.y + PANEL_INSET + TITLE_H + TITLE_GAP;
         let mut line_y = sub_y;
         for line in wrap_words(
             crate::i18n::msg::settings_servers_change_detail(),
@@ -532,13 +586,14 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
             let cs = std::ffi::CString::new(line).unwrap_or_default();
             crate::ui::label::Label::new(cs.as_ptr(), SUB_SZ, crate::ui::theme::CHROME_MUTED)
                 .h(crate::ui::label::HAlign::Left)
-                .draw(p, Rect::new(r.x + PANEL_PAD, line_y, PANEL_INNER_W, 19.0));
+                .draw(p, Rect::new(r.x + PANEL_INSET, line_y, PANEL_INNER_W, 19.0));
             line_y += 19.0;
         }
         let _ = sub;
         // ---- the row stack -------------------------------------------------------------------
+        let heights = self.heights();
         for i in 0..self.rows.len() {
-            let rest = row_rect_in(r, i);
+            let rest = row_rect_in(r, &heights, i);
             let focused = self.sel == i as i32;
             let q = if focused { rest.scaled(1.02) } else { rest };
             let (fill, rim) = if focused {
@@ -563,7 +618,9 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
                 _ => {}
             }
             let (name, detail, active, tag) = match &face {
-                RowFace::Server { name, detail, active } => (*name, Some(*detail), *active, *active),
+                RowFace::Server { name, detail, active } => {
+                    (*name, Some(detail.as_str()), *active, *active)
+                }
                 RowFace::Add { name, detail } => (*name, Some(*detail), false, false),
                 RowFace::Action { name } => (*name, None, false, false),
             };
@@ -572,15 +629,26 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
                 _ => name.to_string(),
             };
             let name_cs = std::ffi::CString::new(name_text).unwrap_or_default();
+            // `.sm-server .who b` computes to **900** — Manrope's ExtraBold cut, one notch above the
+            // avatar's 800 and two above the interface's 700. It is the heaviest cut the reference
+            // asks for anywhere and the one that makes a server name read as a heading.
             crate::ui::label::Label::new(name_cs.as_ptr(), NAME_SZ, crate::ui::theme::CHROME_INK)
-                .medium()
+                .face(crate::text::FontRole::Avatar)
                 .h(crate::ui::label::HAlign::Left)
-                .draw(p, Rect::new(x, q.y + 18.0, q.x + q.w - ROW_PAD_X - x, 22.0));
+                .draw(p, Rect::new(x, q.y + NAME_Y, q.x + q.w - ROW_PAD_X - x, 22.0));
             if let Some(detail) = detail.filter(|d| !d.is_empty()) {
                 let dcs = std::ffi::CString::new(detail).unwrap_or_default();
-                crate::ui::label::Label::new(dcs.as_ptr(), DETAIL_SZ, crate::ui::theme::CHROME_MUTED)
+                let detail_sz = match &face {
+                    RowFace::Add { .. } => DETAIL_SZ_ADD,
+                    _ => DETAIL_SZ,
+                };
+                let detail_y = match &face {
+                    RowFace::Add { .. } => DETAIL_Y - 1.0,
+                    _ => DETAIL_Y,
+                };
+                crate::ui::label::Label::new(dcs.as_ptr(), detail_sz, crate::ui::theme::CHROME_MUTED)
                     .h(crate::ui::label::HAlign::Left)
-                    .draw(p, Rect::new(x, q.y + 18.0 + 22.0 + 2.0, q.x + q.w - ROW_PAD_X - x, 19.0));
+                    .draw(p, Rect::new(x, q.y + detail_y, q.x + q.w - ROW_PAD_X - x, 20.0));
             }
             if tag {
                 let t = crate::i18n::msg::settings_servers_active_tag().to_uppercase();
@@ -640,8 +708,8 @@ mod tests {
         crate::jellyfin::uninstall();
         let mut menu = AccountMenuScreen::new(EntryId(0));
         menu.build();
+        // The reference's dialog plus the one press a signed-out menu has nowhere else.
         assert_eq!(menu.rows, vec![Action::AddServer, Action::SignIn, Action::Settings]);
-        assert!(!menu.rows.contains(&Action::SignOut));
     }
 
     #[test]
@@ -659,10 +727,47 @@ mod tests {
         menu.build();
         assert!(menu.built);
         assert_eq!(menu.header, crate::i18n::msg::settings_servers_change());
-        assert_eq!(menu.rows, vec![Action::AddServer, Action::SignOut, Action::Settings]);
+        // **Signed in, the dialog is exactly the mockup's**: the server cards and *Add server*.
+        // `Cerrar sesión` and `Ajustes` are not rows here — they live in Settings, off the gear.
+        assert_eq!(menu.rows, vec![Action::AddServer]);
 
         crate::jellyfin::uninstall();
         let _ = server.finish();
+    }
+
+    /// **The reference's own panel arithmetic**, from its DOM at 1920x1080: `.sm-panel` is
+    /// `2*1px border + 2*34 padding + 37 h2 + 6 + 38 sub + 24` = 175, then every card is 82 tall and
+    /// carries a 10px foot — the last one included — which is why the mockup's three-row dialog
+    /// measures **453** and not 439.
+    #[test]
+    fn the_dialog_is_the_references_measured_panel() {
+        let heights = [ROW_H, ROW_H, ROW_H_ADD];
+        assert_eq!(rows_height(&heights), 453.0);
+        // Centred: the mockup's own panel lands at x 680, y 313.5 on the 1920x1080 canvas.
+        let three = panel_rect(&heights);
+        assert_eq!((three.x, three.y, three.w, three.h), (680.0, 313.5, 560.0, 453.0));
+        // Rows start 35 in from the panel's outer edge (1px border + 34 padding) and are 490 wide,
+        // and the first one begins directly under the subtitle's 24px foot.
+        let first = row_rect_in(three, &heights, 0);
+        assert_eq!((first.x, first.y, first.w, first.h), (715.0, 453.5, 490.0, 82.0));
+        let third = row_rect_in(three, &heights, 2);
+        assert_eq!((third.y, third.h), (453.5 + 2.0 * (82.0 + 10.0), 84.0));
+    }
+
+    /// A server's row says its address and the server's own version, the way the reference's do
+    /// (`192.168.1.10 · Jellyfin 10.9`), with the process's memo consulted — never a probe from a
+    /// paint pass. An unknown server says only its address rather than inventing a version.
+    #[test]
+    fn a_server_row_carries_the_version_its_last_connection_learned() {
+        let unknown = "http://never-contacted.invalid:8096";
+        assert_eq!(server_line(unknown), unknown);
+        crate::jellyfin::note_server_version(unknown, "10.10.7");
+        assert_eq!(server_line(unknown), format!("{unknown} · Jellyfin 10.10"));
+        crate::jellyfin::note_server_version("http://no-minor.invalid", "11");
+        assert_eq!(
+            server_line("http://no-minor.invalid"),
+            "http://no-minor.invalid · Jellyfin 11"
+        );
     }
 
     #[test]
@@ -672,9 +777,11 @@ mod tests {
         assert_eq!(action_at(&signed_out, 1), Action::Settings);
         assert_eq!(action_at(&signed_out, 2), Action::None);
         let signed_in = rows_for(true);
-        assert_eq!(action_at(&signed_in, 0), Action::SignOut);
-        assert_eq!(action_at(&signed_in, 1), Action::Settings);
-        assert_eq!(action_at(&signed_in, 2), Action::None);
+        assert!(
+            signed_in.is_empty(),
+            "signed in, the mockup's dialog adds nothing below its server cards"
+        );
+        assert_eq!(action_at(&signed_in, 0), Action::None);
         assert_eq!(action_at(&signed_in, -1), Action::None);
     }
 }

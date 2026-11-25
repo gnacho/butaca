@@ -337,6 +337,33 @@ impl JfClient {
         Ok(ok)
     }
 
+    /// **Fetch and REMEMBER the server's own dotted version**, for the row copy beside a server's
+    /// address (`192.168.1.10 · Jellyfin 10.9`).
+    ///
+    /// `GET /System/Info/Public` is unauthenticated by design, so this needs no token. Called from
+    /// the connection paths — the boot probe and the sign-in form — never from a draw pass: the
+    /// answer lands in [`super::note_server_version`], and the dialog reads it there.
+    pub(crate) fn learn_server_version(&self, url: &str) {
+        let _anchor = super::SigninAnchor::enter(&self.origin);
+        let Some(reply) = http::request(
+            &self.origin,
+            "/System/Info/Public",
+            http::Method::Get,
+            &[crate::http::ACCEPT_JSON],
+            None,
+        ) else {
+            return;
+        };
+        if !reply.ok() {
+            return;
+        }
+        if let Ok(info) = serde_json::from_slice::<super::dto::PublicInfo>(&reply.body) {
+            if !info.version.is_empty() {
+                super::note_server_version(url, &info.version);
+            }
+        }
+    }
+
     /// Whether this server can answer Quick Connect (added in Jellyfin 10.8.0). Reads the public
     /// system info WITHOUT a token — `GET /System/Info/Public` is unauthenticated by design — and
     /// compares the reported version against the floor. A malformed or absent version answers

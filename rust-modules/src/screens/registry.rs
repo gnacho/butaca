@@ -1170,7 +1170,6 @@ pub(crate) enum LoopReq {
     /// which is the legacy `on_ok`'s own "close, then return the action" in the order a container
     /// can express it.
     AccountSignIn,
-    AccountSignOut,
     /// PRESENTS the Settings surface over the same page, so the host route does not move.
     /// Reachable signed OUT as well: a person who cannot sign in has still received a copy of this
     /// software, and LG requires the privacy notice to be readable in the app rather than only on
