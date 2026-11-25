@@ -82,17 +82,25 @@ updated: "2026-11-25"
 
   | element | mockup | app | dx0 | dy0 | dw |
   |---|---|---|---|---|---|
-  | `Inicio` ink | 733,51..775,64 | 734,52..774,64 | +1 | +1 | -2 |
-  | `Películas` ink | 831,51..902,64 | 832,50..902,64 | +1 | -1 | -1 |
+  | `Inicio` ink | 733,51..775,64 | 734,51..774,64 | +1 | 0 | -2 |
+  | `Películas` ink | 831,51..902,64 | 831,50..902,64 | 0 | -1 | 0 |
   | `Series` ink | 958,51..1007,64 | 958,51..1007,64 | 0 | 0 | 0 |
   | `Favoritos` ink | 1063,51..1135,64 | 1063,51..1135,64 | 0 | 0 | 0 |
   | `Buscar` ink | 1192,51..1245,64 | 1191,51..1246,64 | -1 | 0 | +2 |
-  | wordmark `buta` | 123,45..189,68 | 124,46..188,68 | +1 | +1 | -2 |
-  | wordmark `ca` | 194,53..224,68 | 193,52..222,68 | -1 | -1 | -1 |
-  | avatar disc | 56,35..102,81 | 55,34..102,81 | -1 | -1 | +1 |
-  | avatar initial | 74,51..85,65 | 75,51..85,65 | +1 | 0 | -1 |
-  | clock ink | 1817,52..1860,64 | 1819,52..1862,64 | +2 | 0 | 0 |
+  | wordmark `buta` | 123,45..189,68 | 123,46..188,68 | 0 | +1 | -1 |
+  | wordmark `ca` | 194,53..224,68 | 194,54..222,68 | 0 | +1 | -2 |
+  | avatar disc | 56,35..102,81 | 56,34..102,81 | 0 | -1 | 0 |
+  | avatar initial | 74,51..84,65 | 75,51..85,65 | +1 | 0 | 0 |
+  | clock ink | 1817,52..1863,64 | 1817,51..1862,64 | 0 | -1 | -1 |
 
+  Every element starts on the reference's x (within 1px), shares its vertical band, and the two exact
+  rows are exact. What is left is the renderer's grid — SDL_ttf snaps each glyph origin to a whole
+  pixel where the reference lays out fractional advances — plus the JPEG's chroma bleed in these
+  captures, which moves a high-contrast edge by about a pixel against a bright hero.
+
+  **The band's own plate** was missing entirely until this pass: the mockup's `#topbar` carries
+  `linear-gradient(180deg, rgba(19,11,7,.85), transparent)` over its 109px, under the track. The bar
+  draws it now, which is also why the app's chrome stopped floating on bright artwork.
   The avatar's initial is the mockup's own weight: `#avatar { font-weight: 800 }`, so the ExtraBold
   cut is a role of its own rather than synthetic emboldening (core ink pixels 75 in the reference,
   70 here, on the same box).

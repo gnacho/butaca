@@ -1240,6 +1240,17 @@ impl Rig<AppHost> for Bridge {
         if !Self::draws_chrome_for(arg) { return; }
         let Some(glass) = glass else { return };
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
+        // **The band's own plate, first.** The mockup's `#topbar` carries
+        // `linear-gradient(180deg, rgba(19,11,7,.85), transparent)` over its whole 109px, under
+        // everything else — the track included. Without it the chrome floats on raw artwork, which
+        // is what made a bright hero read straight through the bar.
+        p.rect(
+            crate::ui::Rect::new(0.0, 0.0, crate::ui::consts::SCR_W, crate::ui::widgets::TOP_BAR_BAND_H),
+            0.0,
+            crate::ui::theme::with_a(crate::ui::theme::CHROME_GROUND, 0.85),
+            crate::ui::theme::with_a(crate::ui::theme::CHROME_GROUND, 0.0),
+            0.0,
+        );
         // **The brand leaves with the page** (owner, 2026-11-10). It is drawn outside every page's
         // own frame, so it cannot ride the page's alpha: the page states how far it has left its
         // head in its own `DrawFrame` (`DrawFrame::scrolled_to`), the dispatcher carries that into

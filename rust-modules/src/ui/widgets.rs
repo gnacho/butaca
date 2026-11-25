@@ -5603,6 +5603,13 @@ pub(crate) const TOP_BAR_Y: f32 = 28.0;
 /// 56 while its page copy keeps the wider gutter, and reading the page margin here put the avatar
 /// 40px inboard of the reference and the clock over its own gear.
 pub(crate) const CHROME_MARGIN_X: f32 = 56.0;
+/// **The bar's own plate height** — the mockup's `#topbar` is 109 tall (`28 + 59 + 22`) and wears a
+/// full-width `linear-gradient(180deg, rgba(19,11,7,.85), transparent)` behind everything in it, the
+/// nav track included. That plate is what makes the reference's chrome read as a band over the
+/// artwork rather than as three objects floating on it, and nothing in this app drew it until
+/// 2026-11-25.
+pub(crate) const TOP_BAR_BAND_H: f32 = 109.0;
+
 /// **The line the bar's 46px controls stand on**, centred in the mockup's 59px content band
 /// (`#topbar` is 109 tall, 28 top + 22 bottom): 28 + (59 - 46)/2. The avatar, the wordmark's box and
 /// the gear all sit on it; the pills sit [`TAB_PILL_Y`] down because they live inside the track.
