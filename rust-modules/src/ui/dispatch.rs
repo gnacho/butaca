@@ -1669,15 +1669,12 @@ where
                 f.page_alpha = s.motion.appear;
                 f.underlay = Some(field);
                 backdrop::draw_span("surf", || inst.screen.draw(&mut f));
-                if inst.screen.back_chrome() == super::screen::BackChrome::Shared {
-                    let focused = crate::ui::widgets::back_control_focused(&f);
-                    crate::ui::widgets::draw_back_control(f.painter.alpha(f.page_alpha), focused);
-                    crate::ui::widgets::back_control_stop(
-                        &mut f,
-                        s.entry.id,
-                        H::Elem::of_index(super::table_screen::CRUMB_ELEM),
-                    );
-                }
+                // **The second comp has no Back control in the bar.** Its chrome is the avatar and
+                // the nav, unchanged whether or not a surface is open — a surface dismisses with the
+                // remote's BACK, which every one of them answers through the machine, never through
+                // a 46px disc drawn over the profile chip. The shared one is therefore not painted
+                // and not registered as a stop; nothing here is the only way out.
+                let _ = inst.screen.back_chrome();
                 report.drawn.push(inst.id);
                 stops.extend(f.into_stops());
                 // (b) is a count of THIS SURFACE's own backing renders, asked of the surface —
