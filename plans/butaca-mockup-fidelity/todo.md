@@ -60,6 +60,20 @@ updated: "2026-11-25"
   app's contrast floor over bright artwork while a dark ground draws the reference's exact weight.
 - `the_top_bar_is_the_supplied_mockups_own_geometry` asserts every one of those numbers, so a later
   "small tweak" cannot walk the bar off the reference again.
+- Kerning and tabular figures closed the last two measured residuals. FreeType 2.15 answers
+  `FT_Get_Kerning` with 0 even for a face carrying valid pairs (measured against DejaVu Sans Bold on
+  this host), so the fonts' GPOS pairs are baked into the shipped cuts as legacy `kern` tables and
+  `src/kern.rs` applies them to LAYOUT: the five navigation advances land on the reference's DOM
+  numbers to 0.03px (`Favoritos` was 1.61px wide before), and `kern`'s test asserts the reference's
+  own values. The clock swaps to a Manrope 700 cut with the `tnum` substitutions baked into the
+  cmap, so any `HH:MM` measures the reference's 47.98 and the box never breathes.
+- Measured against the reference at 1920x1080, the bar's boxes are now exact: avatar
+  (56, 34.5, 46, 46), track (700.84, 28, 576.31, 59), the five pills (707.84/805.56/932.66/
+  1038.06/1166.16 at y 35, 45 tall) and the gear (1752.02, 34.5, 46, 46) all land within 0.01px.
+  What remains is the rasterizer's own floor: SDL_ttf paints the unkerned advance inside the kerned
+  box and snaps each glyph to a whole pixel, so a label's INK sits within 3px of the reference
+  (all five share its baseline, y 51..64), and the track's alpha is the reference's .55 only over a
+  dark ground — over a bright hero the solve raises it to keep the app's contrast floor.
 
 ### 2026-11-23
 

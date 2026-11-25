@@ -868,7 +868,10 @@ def metric_strings(doc):
     kind = query.get("kind")
     base = {"kind", "sz"}
     if "role" in query:
-        if query["role"] not in ("Interface", "Display"):
+        # The five variants of rust-modules/src/text.rs FontRole, by source: the two the product
+        # has always had, plus the three cuts the supplied design mockup is set in (its navigation,
+        # its wordmark and its tabular-figure clock).
+        if query["role"] not in ("Interface", "Display", "InterfaceMedium", "Brand", "Clock"):
             return False, []
         base.add("role")
     if kind == "Width":
