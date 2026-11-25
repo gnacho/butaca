@@ -1146,7 +1146,7 @@ pub const TAB_TRACK_BOT: [f32; 4] = scrim_black(TAB_TRACK_A_BOT);
 /// walks up from this stop until the idle labels clear `TRACK_INK_CONTRAST`, so what changed is
 /// only how much of the artwork a DARK page shows through, which is the ask. The pinned exposure
 /// in `widgets_tab_capsule_motion_tests` moved 1.86 → 1.77 as a consequence.
-pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.18);
+pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.55);
 /// **The material's LIGHT FLOOR — the amount of itself the glass shows where the page shows
 /// nothing.** Two numbers, both measured against the real thing rather than chosen.
 ///
@@ -1172,7 +1172,7 @@ pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.18);
 pub const TAB_GLASS_LIFT_FLOOR: f32 = 0.045;
 /// The glass track's bottom stop — see [`TAB_GLASS_TOP`]. The authored spread stays 0.16
 /// (`tab_glass_stops` derives its taper from it), so the floor's move carries the bottom with it.
-pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.34);
+pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.55);
 /// The track material's two weights, exposed as alphas because the focused **profile chip** wears
 /// the same material and FADES it in with its unfurl (`scrim_black(A * e)`) — one material and one
 /// pair of weights whether it is painted at full strength or on the way in, which is what keeps the
@@ -1198,9 +1198,9 @@ pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.34);
 /// make this bar lighter is [`super::widgets::TRACK_INK_CONTRAST`] — the 4:1 promise is what puts
 /// the density where it is, and `the_lift_never_spends_the_labels_contrast` marks the boundary: the
 /// guarantee survives a ceiling of .62 and dies at .60.
-pub const TAB_TRACK_A_TOP: f32 = 0.72;
+pub const TAB_TRACK_A_TOP: f32 = 0.55;
 /// See [`TAB_TRACK_A_TOP`].
-pub const TAB_TRACK_A_BOT: f32 = 0.82;
+pub const TAB_TRACK_A_BOT: f32 = 0.55;
 /// A PLATED tab segment's fill — the detail page's season tabs, which sit bare on the backdrop rather
 /// than inside the top bar's track and so provide their own ground
 /// ([`crate::ui::widgets::TabPill::plated`], `Details Screen.dc.html`). The selected one is a step up

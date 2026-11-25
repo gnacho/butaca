@@ -183,9 +183,6 @@ const GL_TEXTURE_2D: c_uint = 0x0DE1;
 const GL_TRIANGLE_STRIP: c_uint = 0x0005;
 const TTF_STYLE_BOLD: c_int = 0x01;
 const TTF_HINTING_LIGHT: c_int = 1;
-/// SDL_ttf's `TTF_HINTING_NONE` — the browser's own behaviour, and what the two reference cuts are
-/// drawn with (see `font_at`).
-const TTF_HINTING_NONE: c_int = 0;
 
 enum TtfFont {}
 
@@ -763,11 +760,13 @@ unsafe fn font_at(role: FontRole, sz: c_int, bold: c_int) -> *mut TtfFont {
             // +1.28px on `Inicio` and +1.9 on `Favoritos` — 8px across the five nav labels, i.e.
             // the whole pill row and the track around it come out wider than the reference. With
             // hinting off the advances are the reference's to 0.3px (see `TAB_TEXT_ROLE`).
-            let hinting = match role {
-                FontRole::InterfaceMedium | FontRole::Brand | FontRole::Clock => TTF_HINTING_NONE,
-                _ => TTF_HINTING_LIGHT,
-            };
-            TTF_SetFontHinting(arr[sz], hinting);
+            // Every face, including the mockup's cuts: the bar's BOXES no longer read a rasterizer
+            // advance (they read `crate::kern`'s own, from the face's `hmtx` and pairs), so the
+            // only thing left for hinting to decide is the SHAPE of a glyph — and the reference is
+            // a browser on this same host, which hints. Unhinted shapes came out wider than the
+            // reference's and their ink ran 2-3px long inside a box that was already exact.
+            let _ = role;
+            TTF_SetFontHinting(arr[sz], TTF_HINTING_LIGHT);
         }
     }
     arr[sz]

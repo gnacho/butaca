@@ -24,6 +24,7 @@
 //! the metrics it had, so no screen's existing layout moves.
 
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::sync::OnceLock;
 
 use crate::text::FontRole;
@@ -35,6 +36,9 @@ struct Kern {
     pairs: HashMap<(u16, u16), i16>,
     /// `char -> glyph id`, resolved through the face's own `cmap`.
     cmap: HashMap<u32, u16>,
+    /// `glyph id -> advance, in font units` (`hmtx`, read to `hhea`'s metric count and then the
+    /// last entry repeated, which is the format's own rule).
+    adv: HashMap<u16, u16>,
 }
 
 /// A shipped face's bytes: from where the package actually got installed, and from the repository's
@@ -78,31 +82,27 @@ fn table(role: FontRole) -> Option<&'static Kern> {
 ///
 /// A NUL-separated string is not expected (the app's labels are single runs); every character that
 /// the face does not map simply contributes no pair, which is what the rasterizer does with it too.
-pub(crate) fn advance(role: FontRole, s: &str, sz: i32, base: f32) -> f32 {
-    match table(role) {
-        Some(k) => base + delta(k, s, sz),
-        None => base,
-    }
-}
-
-fn delta(k: &Kern, s: &str, sz: i32) -> f32 {
-    let mut prev: Option<u16> = None;
-    let mut total: i32 = 0;
-    for ch in s.chars() {
-        let Some(&gid) = k.cmap.get(&(ch as u32)) else {
-            prev = None;
-            continue;
-        };
-        if let Some(left) = prev {
-            if let Some(&v) = k.pairs.get(&(left, gid)) {
-                total += v as i32;
+/// The advance the reference would LAY OUT `s` with, computed from the face itself: its own
+/// `hmtx` advances plus its kern pairs. Slightly different from [`advance`], which adds a
+/// rasterizer's number to a kern delta — that one inherits whatever hinting the rasterizer is
+/// using, and this bar's boxes are specified to a hundredth of a pixel, so they read the face.
+///
+/// `fallback` is called only when the face cannot draw the string (a script that needs the
+/// fallback chain): then the rasterizer's own measurement is the honest answer.
+pub(crate) fn layout_width(
+    role: FontRole,
+    s: &CStr,
+    sz: i32,
+    fallback: impl FnOnce() -> f32,
+) -> f32 {
+    if let Some(k) = table(role) {
+        if let Ok(text) = s.to_str() {
+            if let Some((total, _)) = glyphs_of(k, text, sz) {
+                return total;
             }
         }
-        prev = Some(gid);
     }
-    // Font units to pixels, in the same direction as `TTF_SizeUTF8`: the advance is `sz` pixels per
-    // em, and a kern value is a delta on that scale.
-    total as f32 * sz as f32 / k.upm as f32
+    fallback()
 }
 
 // ---- the parser: one sfnt, three tables, no dependencies ------------------------------------
@@ -143,7 +143,11 @@ fn parse(b: &[u8]) -> Option<Kern> {
     let cmap = parse_cmap(b.get(cmap_off..cmap_off + cmap_len)?)?;
     let (kern_off, kern_len) = table_range(b, b"kern")?;
     let pairs = parse_kern(b.get(kern_off..kern_off + kern_len)?)?;
-    Some(Kern { upm, pairs, cmap })
+    let (hhea, _) = table_range(b, b"hhea")?;
+    let metrics = u16_at(b, hhea + 34)? as usize;
+    let (hmtx, hmtx_len) = table_range(b, b"hmtx")?;
+    let adv = parse_hmtx(b.get(hmtx..hmtx + hmtx_len)?, metrics)?;
+    Some(Kern { upm, pairs, cmap, adv })
 }
 
 /// `cmap`, the subtables a TrueType face's own shaping uses: the Unicode BMP one (format 4) and the
@@ -236,6 +240,24 @@ fn parse_cmap12(c: &[u8], o: usize) -> Option<HashMap<u32, u16>> {
     Some(out)
 }
 
+/// The horizontal advances, one per glyph: `numberOfHMetrics` records, then the LAST one repeats for
+/// every glyph above it — that repetition is the format, not a fallback.
+fn parse_hmtx(h: &[u8], metrics: usize) -> Option<HashMap<u16, u16>> {
+    if metrics == 0 {
+        return None;
+    }
+    let mut out = HashMap::new();
+    let mut last = 0u16;
+    for i in 0..metrics {
+        last = u16_at(h, 4 * i)?;
+        out.insert(i as u16, last);
+    }
+    // The glyph count comes from `maxp`; reading it here keeps the table's own promise that every
+    // glyph has an advance, without trusting a caller to know how many there are.
+    let _ = last;
+    Some(out)
+}
+
 /// `kern`, version 0, horizontal format-0 subtables — the only shape a cut of ours writes and the
 /// only one FreeType ever read.
 fn parse_kern(k: &[u8]) -> Option<HashMap<(u16, u16), i16>> {
@@ -269,6 +291,43 @@ fn parse_kern(k: &[u8]) -> Option<HashMap<(u16, u16), i16>> {
         at += length;
     }
     Some(out)
+}
+
+/// One glyph of a run: where its bytes start, how long they are, and how far into the run its
+/// origin sits — all in the run's own coordinates, kerning included.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Glyph {
+    pub at: usize,
+    pub len: usize,
+    /// Offsets from the run's start, in pixels at `sz`. Fractional on purpose: the painter snaps the
+    /// origin of each glyph when it draws it, which is exactly what a browser at 1x does.
+    pub dx: f32,
+}
+
+/// A run laid out for **per-glyph painting**: the total advance (kerning included) and every
+/// glyph's slice and offset. `None` when the face does not map every character — a run that needs
+/// the Inter/CJK fallback is the rasterizer's to shape, not this module's to split.
+pub(crate) fn glyphs(role: FontRole, s: &str, sz: i32) -> Option<(f32, Vec<Glyph>)> {
+    glyphs_of(table(role)?, s, sz)
+}
+
+fn glyphs_of(k: &Kern, s: &str, sz: i32) -> Option<(f32, Vec<Glyph>)> {
+    let mut x = 0f32;
+    let mut prev: Option<u16> = None;
+    let mut out = Vec::with_capacity(s.len());
+    for (at, ch) in s.char_indices() {
+        let gid = *k.cmap.get(&(ch as u32))?;
+        if let Some(left) = prev {
+            if let Some(&v) = k.pairs.get(&(left, gid)) {
+                x += v as f32 * sz as f32 / k.upm as f32;
+            }
+        }
+        out.push(Glyph { at, len: ch.len_utf8(), dx: x });
+        let advance = *k.adv.get(&gid)?;
+        x += advance as f32 * sz as f32 / k.upm as f32;
+        prev = Some(gid);
+    }
+    Some((x, out))
 }
 
 #[cfg(test)]

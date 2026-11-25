@@ -4767,6 +4767,10 @@ pub struct TabPill {
     /// interface regular the rest of the app draws in.
     role: crate::text::FontRole,
     inks: StripInks,
+    /// Paint this pill's label one glyph at a time at its KERNED origins — see
+    /// [`TabPill::draw_kerned`]. Set by the shared top bar, whose row is laid out from the same
+    /// kerned advances the reference uses.
+    kerned: bool,
 }
 impl TabPill {
     /// Width from the actual bold glyph advances, shared by paint and hit geometry.
@@ -4787,6 +4791,7 @@ impl TabPill {
             ground: ControlGround::Keyed,
             role: crate::text::FontRole::Interface,
             inks: StripInks::DEFAULT,
+            kerned: false,
         }
     }
     pub fn focused(mut self, f: bool) -> Self {
@@ -4885,6 +4890,11 @@ impl TabPill {
         self.role = role;
         self
     }
+    /// Paint the label glyph by glyph at its kerned origins ([`Self::draw_kerned`]).
+    pub(crate) fn kerned(mut self, on: bool) -> Self {
+        self.kerned = on;
+        self
+    }
     /// Ink this pill through a named trio rather than the design system's own.
     pub(crate) fn inks(mut self, inks: StripInks) -> Self {
         self.inks = inks;
@@ -4966,6 +4976,47 @@ impl TabPill {
         }
     }
 }
+impl TabPill {
+    /// **The label, painted one glyph at a time at its KERNED origins.**
+    ///
+    /// The reference is a browser: it lays a run out with the font's kerned metric and puts each
+    /// glyph on a whole pixel. SDL_ttf advances a whole STRING by the unkerned metric and snaps each
+    /// glyph, which inside a pill laid out from the kerned width pulled the run ~1.6px wide and put
+    /// every gap a pixel off (`Favoritos`/`Buscar` measured +3px of ink against the reference).
+    /// Splitting the run — each glyph its own one-glyph run, at the offset [`crate::kern::glyphs`]
+    /// gives — makes the painting agree with the box it stands in.
+    ///
+    /// `None` when the face cannot draw every character of the string (a script that needs the
+    /// Inter/CJK fallback): then the rasterizer's own shaping is the only correct one, and the
+    /// caller draws the run whole.
+    fn draw_kerned(&self, p: Painter, ink: [f32; 4], bold: bool, frame: Rect) -> Option<f32> {
+        if self.label.is_null() {
+            return None;
+        }
+        let text = unsafe { std::ffi::CStr::from_ptr(self.label) }.to_str().ok()?;
+        let (total, glyphs) = crate::kern::glyphs(self.role, text, self.sz)?;
+        let x0 = frame.x + (frame.w - total) * 0.5;
+        for g in glyphs {
+            let bytes = text.as_bytes().get(g.at..g.at + g.len)?;
+            // One UTF-8 scalar at most; the buffer is the C string the painter needs, alive for
+            // the length of this call and never handed anywhere that outlives it.
+            let mut buf = [0u8; 8];
+            if bytes.len() >= buf.len() {
+                return None;
+            }
+            buf.get_mut(..bytes.len())?.copy_from_slice(bytes);
+            let mut lab = Label::new(buf.as_ptr() as *const c_char, self.sz, ink)
+                .face(self.role)
+                .h(HAlign::Left)
+                .v(VAlign::Middle);
+            if bold {
+                lab = lab.bold();
+            }
+            lab.draw(p, Rect::new(x0 + g.dx, frame.y, frame.w, frame.h));
+        }
+        Some(total)
+    }
+}
 impl View for TabPill {
     fn draw(&self, _e: &Env, p: Painter) {
         let r = self.frame;
@@ -5005,6 +5056,11 @@ impl View for TabPill {
         let nw = Self::note_w(self.note);
         let frame = Rect::new(r.x, r.y, r.w - nw, r.h);
         let run = |p: Painter, bold: bool| {
+            if self.kerned {
+                if let Some(w) = self.draw_kerned(p, ink, bold, frame) {
+                    return w;
+                }
+            }
             let mut lab = Label::new(self.label, self.sz, ink).h(HAlign::Center).face(self.role);
             if bold {
                 lab = lab.bold();
@@ -6485,8 +6541,9 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
 pub(crate) fn tab_widths(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
     tab_metrics_from(labels, icons, |word| {
-        let base = measure.width_role(word, TAB_TEXT_SZ, false, TAB_TEXT_ROLE);
-        crate::kern::advance(TAB_TEXT_ROLE, &word.to_string_lossy(), TAB_TEXT_SZ, base)
+        crate::kern::layout_width(TAB_TEXT_ROLE, word, TAB_TEXT_SZ, || {
+            measure.width_role(word, TAB_TEXT_SZ, false, TAB_TEXT_ROLE)
+        })
     })
     .1
 }
@@ -6551,8 +6608,9 @@ fn with_tab_metrics_for<R>(data: TabLabels<'_>, f: impl FnOnce(&[CString], &[f32
         use crate::ui::machine::Measure as _;
         let measure = LegacyMeasure;
         let (labels, widths) = tab_metrics_from(data.labels, data.icons, |l| {
-            let base = measure.width_role(l, TAB_TEXT_SZ, false, TAB_TEXT_ROLE);
-            crate::kern::advance(TAB_TEXT_ROLE, &l.to_string_lossy(), TAB_TEXT_SZ, base)
+            crate::kern::layout_width(TAB_TEXT_ROLE, l, TAB_TEXT_SZ, || {
+                measure.width_role(l, TAB_TEXT_SZ, false, TAB_TEXT_ROLE)
+            })
         });
         // The Search pill, last. It carries an EMPTY label so nothing here has to special-case a
         // missing entry — `labels.len()` stays the pill count, which is what the draw and the hit
@@ -6819,8 +6877,20 @@ impl StripRender {
             // which is the legibility floor this app has always kept (`TRACK_INK_CONTRAST`) and
             // the reference never had to.
             let face = {
+                // **The bar's weight is the reference's, full stop** (owner's decision, 2026-11-25,
+                // recorded rather than implied). The solve is still stepped — it owns the band's
+                // density spring and the groundlog — but its span is now the reference's own .55 at
+                // both ends (`TAB_GLASS_TOP`, `TAB_TRACK_A_TOP/BOT`), so what it returns IS .55 and
+                // the bar cannot darken with the artwork.
+                //
+                // What that costs is measured and accepted: the reference's `--muted` ink over a
+                // white ground sits at ~3.9:1, and no alpha short of ~0.97 (a black slab) would
+                // reach the app's old 4.5:1 floor against an ink this mid-toned. The old floor was
+                // reachable only because the old material paired a LIGHT ink with a light lift —
+                // the light lift is what washed this bar out against the reference. The mockup is
+                // the contract for this bar; contrast over a bright hero is the mockup's own.
                 let (gt, _gb) = tab_glass_stops(ground, &mut band.density);
-                let a = gt[3].max(theme::CHROME_GROUND_A);
+                let a = gt[3];
                 let ink = theme::with_a(theme::CHROME_GROUND, a);
                 crate::gfx::GlassFace {
                     scrim_top: ink,
@@ -6964,6 +7034,7 @@ impl StripRender {
                 } else {
                     TabPill::new(labels[i].as_ptr(), TAB_TEXT_SZ, r)
                         .role(TAB_TEXT_ROLE)
+                        .kerned(true)
                         .inks(StripInks::MOCKUP)
                         .mix(fm, sm)
                         .draw(&env, p);

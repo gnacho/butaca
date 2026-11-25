@@ -6,25 +6,24 @@
 //! sits beside it, so a change in the cut or in the table shows up as a number that moved.
 use super::*;
 
-fn delta_of(role: FontRole, s: &str, sz: i32) -> f32 {
+fn width_of(role: FontRole, s: &str, sz: i32) -> f32 {
     let k = table(role).expect("the reference cut ships a kern table");
-    delta(k, s, sz)
+    glyphs_of(k, s, sz).expect("the face draws this string").0
 }
 
 #[test]
 fn the_navigation_advances_are_the_references_own() {
-    for (label, want, raw) in [
-        ("Inicio", 43.72f32, 43.98f32),
-        ("Películas", 73.09, 73.22),
-        ("Series", 51.41, 51.41),
-        ("Favoritos", 74.09, 75.70),
-        ("Buscar", 56.00, 56.12),
+    for (label, want) in [
+        ("Inicio", 43.72f32),
+        ("Películas", 73.09),
+        ("Series", 51.41),
+        ("Favoritos", 74.09),
+        ("Buscar", 56.00),
     ] {
-        let d = delta_of(FontRole::InterfaceMedium, label, 17);
-        let got = raw + d;
+        let got = width_of(FontRole::InterfaceMedium, label, 17);
         assert!(
             (got - want).abs() < 0.03,
-            "{label}: {raw} + {d:.3} = {got:.3}, the reference measures {want}"
+            "{label}: the face lays the run out {got:.3} wide, the reference measures {want}"
         );
     }
 }
@@ -41,22 +40,40 @@ fn the_reference_cuts_carry_pairs_and_the_others_do_not_need_to() {
     assert!(!k.pairs.contains_key(&(0, 0)), "notdef is never a kern partner");
 }
 
-/// **The wordmark is unkerned in Fraunces, and the two-run split depends on it.** `buta` advances by
-/// exactly what the rasterizer says, which is why `bridge` places the second run (`ca`) at
-/// `stem_w + tracking + gap` and lands on the reference's 192.33. If this ever gains a pair, that
-/// placement has to read this module instead of the painted width.
+/// **The wordmark's runs carry no pairs in Fraunces**, which is what lets `bridge` place the second
+/// run (`ca`) from the PAINTED advance of the first and still land on the reference's 192.33: with no
+/// pair between them, the face's own layout sum and the rasterizer's advance are the same number.
 #[test]
-fn the_wordmark_runs_are_unkerned_at_layout_time() {
-    for s in ["buta", "ca", "butaca"] {
-        assert_eq!(delta_of(FontRole::Brand, s, 30), 0.0, "{s} gained a kern pair");
+fn the_wordmark_runs_carry_no_pairs() {
+    let k = table(FontRole::Brand).expect("the wordmark's cut");
+    for word in ["buta", "ca", "butaca"] {
+        let (total, glyphs) = glyphs_of(k, word, 30).expect("the face draws it");
+        let sum: f32 = word
+            .chars()
+            .map(|ch| {
+                let gid = k.cmap[&(ch as u32)];
+                k.adv[&gid] as f32 * 30.0 / k.upm as f32
+            })
+            .sum();
+        assert!(
+            (total - sum).abs() < 0.02,
+            "{word}: laid out {total}, its own advances sum {sum} — a pair appeared"
+        );
+        assert_eq!(glyphs.len(), word.chars().count());
     }
 }
 
 #[test]
 fn the_clock_digits_are_tabular() {
     let k = table(FontRole::Clock).expect("clock cut");
+    let _ = k;
     assert!(k.cmap.get(&('0' as u32)).is_some() && k.cmap.get(&('9' as u32)).is_some());
+    let mut widths = Vec::new();
     for s in ["21:34", "00:00", "07:58", "11:11"] {
-        assert!(delta(k, s, 17).abs() < 4.0, "{s} kerning out of range");
+        widths.push(width_of(FontRole::Clock, s, 17));
     }
+    assert!(
+        widths.iter().all(|w| (w - 47.98).abs() < 0.03),
+        "tabular digits make every HH:MM the reference's 47.98: {widths:?}"
+    );
 }
