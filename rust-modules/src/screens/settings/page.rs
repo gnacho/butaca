@@ -34,13 +34,61 @@ use crate::ui::screen::{
     At, Dir, DrawFrame, Enter, FocusSource, FocusTarget, Focusable, GroupSpec, HitSource, Placed,
     RenderStrategy, Screen, ScreenEvent, Step,
 };
-use crate::ui::table::{Row, Section, TableView};
+use crate::ui::table::{CardGrid, Row, Section, TableView};
 use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::{theme, Painter, Rect};
 
 use super::super::family::{table_focus, InnerHost, SettingsPage, ALERT_GROUP};
 use super::super::registry::{word, AppFx, PreferenceCmd, ALERT};
 use super::preference_name;
+
+/// **The Settings page's own geometry, measured off the redesign mockup's DOM at 1920x1080.**
+///
+/// The mockup sets this page at 17/14/15.5 with a 13px gold group header, while the app's couch
+/// ladder runs 32/24/26 — a television read from three metres needs the ladder, and the comp does
+/// not. This page is held against the comp pixel for pixel, so it wears the comp's numbers: that
+/// trade is recorded in the plan with the top bar's material, and the pack keeps it to ONE page.
+///
+/// The vertical rhythm is the comp's too: a group's label sits 8px into its 38px band, its first
+/// card 18px under the label, consecutive cards 12 apart, and the next label 42 under a card.
+fn mockup_grid() -> CardGrid {
+    use crate::ui::{theme, table::CardGrid};
+    CardGrid {
+        side: 0.0,
+        col_gap: 26.0,
+        row_gap: 12.0,
+        row_h: 87.0,
+        rad: 18.0,
+        pad: 24.0,
+        top_pad: 0.0,
+        header_h: 38.0,
+        div_h: 28.0,
+        // The comp's label box starts 8 into the band and its caps sit ~4.5 into that box, so the
+        // cap-top the painter draws lands at 243 from the page's top.
+        header_inset: 12.5,
+        fill: theme::with_a(theme::CHROME_TEXT, 0.043),
+        ring: theme::with_a(theme::CHROME_TEXT, 0.08),
+        focus_fill: theme::with_a(theme::CHROME_TEXT, 0.14),
+        focus_ring: theme::with_a(theme::CHROME_TEXT, 0.35),
+        focus_scale: 1.012,
+        dot_w: 9.0,
+        header_sz: 13,
+        header_ink: theme::CHROME_GOLD,
+        // `.set-group` is **800** and `.set-row .sl span` is **500**: the app's ladder has neither.
+        header_role: crate::text::FontRole::Avatar,
+        detail_role: crate::text::FontRole::InterfaceSub,
+        title_sz: 17,
+        title_ink: theme::CHROME_INK,
+        detail_sz: 14,
+        detail_ink: theme::CHROME_MUTED,
+        value_sz: 16,
+        value_ink: theme::CHROME_TEXT,
+    }
+}
+
+/// `.page-title { font-size:44px }` and `.page-sub { font-size:16px }` — the comp's own rungs.
+const MOCKUP_TITLE_SZ: std::os::raw::c_int = 44;
+const MOCKUP_COPY_SZ: std::os::raw::c_int = 16;
 
 /// The page's recorded shape. It was `PreferencesV2` when this was *Video & playback*; the page
 /// now carries the server and interface rows as well, and which page the surface's stack has at
@@ -356,7 +404,8 @@ impl RootPage {
         let layout = Self::layout();
         TableScreen::new(
             Header::new(layout, None, title, self.header_copy(level))
-            .with_title_size(crate::ui::theme::size::DISPLAY)
+            .with_title_size(MOCKUP_TITLE_SZ)
+            .with_copy_size(MOCKUP_COPY_SZ)
             .with_title_display()
             .with_back_disc(),
             table,
@@ -723,7 +772,7 @@ impl RootPage {
         // every row is its own plate. The PICKER stays a one-column list, because a popover of
         // options is one column on one ground.
         self.table.grid(2);
-        self.table.cards(true);
+        self.table.card_grid(mockup_grid());
         self.table.set_sections(vec![server, playback, audio, interface], list_sel, false);
         if let Some(field) = self.state.picker {
             let current = self.current_value(field);
@@ -1563,10 +1612,15 @@ mod tests {
             .expect("the opening row has a rect");
         let frame = page.picker_frame();
         assert_eq!(frame.w, 520.0, "the mockup's compact selector width");
+        // The panel hangs off the row that opened it: under it when there is room, above it at the
+        // screen foot — and pinned to the screen's own edge when neither fits, which the measured
+        // 87px cards now make the case for the first playback rows.
+        let under = frame.y == anchor.y + anchor.h + crate::ui::theme::space::MD;
+        let above = frame.y + frame.h + crate::ui::theme::space::MD == anchor.y;
+        let pinned = frame.y == crate::ui::theme::space::XL;
         assert!(
-            frame.y == anchor.y + anchor.h + crate::ui::theme::space::MD
-                || frame.y + frame.h + crate::ui::theme::space::MD == anchor.y,
-            "the panel hangs directly under its row, or above it at the screen foot"
+            under || above || pinned,
+            "the panel hangs off its row, or is pinned to the screen edge: anchor {anchor:?} frame {frame:?}"
         );
         assert_eq!(page.view().table.frame.y, frame.y,
             "focus geometry follows the anchored panel, not the old full-level frame");
@@ -1583,8 +1637,11 @@ mod tests {
         assert!(copy.contains(crate::server::identity::VERSION),
             "the running build version is real");
         let view = page.view_at(None);
-        assert_eq!(view.header.title_size, crate::ui::theme::size::DISPLAY,
-            "the mockup's Settings title is the display rung, not the HERO rung");
+        assert_eq!(
+            view.header.title_size, MOCKUP_TITLE_SZ,
+            "the mockup sets this page's title at 44, not at the ladder's DISPLAY 48: the comp is \
+             the contract for this one page"
+        );
         assert_eq!(view.header.copy, page.root_copy,
             "the root draws its captured real subtitle rather than the old generic paragraph");
         assert!(view.header.copy.contains(crate::server::identity::VERSION));

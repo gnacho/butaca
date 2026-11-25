@@ -551,18 +551,30 @@ fn the_bar_keeps_the_references_weight_on_every_ground() {
     // so a change of mind is one token (`TAB_GLASS_TOP`/`TAB_TRACK_A_TOP`), not an archaeology.
     let bright = [1.0f32, 1.0f32, 1.0f32];
     let a = track_alpha_for(bright);
-    let ink = theme::CHROME_GROUND;
+    let ground = theme::CHROME_GROUND;
     let face = [
-        bright[0] * (1.0 - a) + ink[0] * a,
-        bright[1] * (1.0 - a) + ink[1] * a,
-        bright[2] * (1.0 - a) + ink[2] * a,
+        bright[0] * (1.0 - a) + ground[0] * a,
+        bright[1] * (1.0 - a) + ground[1] * a,
+        bright[2] * (1.0 - a) + ground[2] * a,
         1.0,
     ];
-    let c = contrast(theme::CHROME_MUTED, face);
+    // **Mockup 2 changed the pair, and this pins ITS number.** The first comp paired a mid-tone
+    // `--muted` with a light lift, which is why the product's floor was waived for this bar at
+    // ~1.4:1. The second comp's bar is neutral dark at 82% and its ink is WHITE at 55%, so the pair
+    // composites to ~4.6:1 over a white hero — the floor is met, and a re-solve in either direction
+    // (a lighter bar, a dimmer ink) breaks it here rather than in a photograph.
+    let ka = theme::CHROME_MUTED[3];
+    let ink = [
+        face[0] * (1.0 - ka) + theme::CHROME_MUTED[0] * ka,
+        face[1] * (1.0 - ka) + theme::CHROME_MUTED[1] * ka,
+        face[2] * (1.0 - ka) + theme::CHROME_MUTED[2] * ka,
+        1.0,
+    ];
+    let c = contrast(ink, face);
     assert!(
-        c < 1.6,
-        "the reference's muted ink over a white ground reads {c:.2}:1 — if this rose, the bar \
-         stopped being the reference's .55"
+        c >= TRACK_INK_CONTRAST,
+        "the bar's muted ink over a white ground reads {c:.2}:1 — below the {TRACK_INK_CONTRAST} \
+         floor the second comp's neutral bar clears"
     );
     // The chip's NAME is still the product's light ink, and THAT keeps the floor on the same face.
     assert!(
