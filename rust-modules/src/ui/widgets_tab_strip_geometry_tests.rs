@@ -343,3 +343,26 @@ fn the_bar_brand_rides_one_linear_ramp_from_head_to_gone() {
     assert_eq!(super::brand_alpha(f32::NAN), 1.0);
     assert_eq!(super::brand_scroll(f32::NAN), 0.0);
 }
+
+/// **The current pill's ink is its own.** A tracked strip binds two capsules; the pill they cover
+/// wears `selected`/`focused` ink, and a MARK (the second comp's Inicio, Favoritos and Buscar) reads
+/// the same mix the labels do. This pins the coverage the draw depends on: with the selection on
+/// pill 0, `mixes` must answer ~1 for it — the failure mode otherwise is a plate drawn on the pill
+/// while its glyph keeps the idle muted ink, which is exactly what a device capture showed.
+#[test]
+fn the_selected_pill_wears_the_selected_ink() {
+    use crate::ui::icons::Icon;
+    let widths = [TAB_ICON_PILL_W, 120.0, 100.0];
+    let mut strip = TabStrip::new();
+    let span = |i: usize| widths.get(i).map(|w| (tab_pill_x(&widths, i), *w));
+    for _ in 0..120 {
+        strip.update(0, -1, span, SelMark::Travels, 1.0 / 60.0);
+    }
+    let (focus, selected) = strip.mixes((tab_pill_x(&widths, 0), widths[0]));
+    assert!(selected > 0.95, "selection coverage on the current pill: {selected}");
+    assert!(focus < 0.05, "focus is off the row, so its mix stays quiet: {focus}");
+    let ink = TabPill::mixed_ink_with(StripInks::MOCKUP, focus, selected);
+    assert_eq!(ink, theme::CHROME_INK, "the current pill's label and mark read white");
+    let _ = Icon::Home;
+}
+

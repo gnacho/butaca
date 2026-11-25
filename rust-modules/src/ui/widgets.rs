@@ -4729,9 +4729,18 @@ impl StripInks {
         selected: theme::CHROME_INK,
         focused: theme::CHROME_INK_ON_LIT,
     };
+    /// The pill's ink at mixes `(focus, selected)`.
+    ///
+    /// **`cross`, not `mix`** — and that was the bug behind a bar whose current tab kept the idle
+    /// grey. `theme::mix` deliberately keeps the FIRST colour's alpha ("a tint has one opacity and
+    /// two hues"), and these three roles have three different ones: `--muted` is white at .55,
+    /// `--text-hi` is white, and the focused ink is opaque. Mixing toward the selected role with
+    /// `mix` therefore moved the hue and left the opacity at .55, so `ACTIVO`-white arrived on screen
+    /// as the same grey it was supposed to leave. A cross-fade between two ROLES is exactly what
+    /// `theme::cross` is documented for.
     fn ink(self, focus: f32, selected: f32) -> [f32; 4] {
-        theme::mix(
-            theme::mix(self.idle, self.selected, selected.clamp(0.0, 1.0)),
+        theme::cross(
+            theme::cross(self.idle, self.selected, selected.clamp(0.0, 1.0)),
             self.focused,
             focus.clamp(0.0, 1.0),
         )
