@@ -1252,7 +1252,11 @@ impl Rig<AppHost> for Bridge {
             // 30 — see [`crate::text::FontRole::Brand`]). Drawn beside the profile chip, 20px off it.
             let stem = c"buta";
             let tail = c"ca";
-            let line = crate::ui::widgets::TOP_BAR_LINE_Y;
+            // The reference's wordmark baseline, measured on the 1920x1080 captures: its `b` stem
+            // ends on 66 and ours on 67 with the box on the bar's line, so the runs ride one pixel
+            // up. (The avatar, the gear and the pills stay where they are: this is the display
+            // face's cap band, not the bar's line.)
+            let line = crate::ui::widgets::TOP_BAR_LINE_Y - 1.0;
             let d = crate::ui::widgets::CHIP_D;
             let x = crate::ui::widgets::CHIP_FRAME.x + d + 20.0;
             let face = crate::text::FontRole::Brand;
@@ -1267,7 +1271,13 @@ impl Rig<AppHost> for Bridge {
             // advance alone.
             {
                 use crate::ui::machine::Measure as _;
-                let stem_w = crate::ui::widgets::LegacyMeasure.width_role(stem, 30, false, face);
+                // The stem's advance from the FACE, not from the rasterizer: hinting snaps a
+                // measured string's advance to whole pixels and moved this by 2px (the two runs are
+                // placed from it), so `ca` landed at 191 against the reference's 192.33. The face's
+                // own `hmtx` sum is what the browser advances by, and hinting cannot touch it.
+                let stem_w = crate::kern::layout_width(face, stem, 30, || {
+                    crate::ui::widgets::LegacyMeasure.width_role(stem, 30, false, face)
+                });
                 crate::ui::label::Label::new(tail.as_ptr(), 30, crate::ui::theme::CHROME_ACCENT)
                     .face(face)
                     .h(crate::ui::label::HAlign::Left)

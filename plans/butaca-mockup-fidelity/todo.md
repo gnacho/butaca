@@ -74,9 +74,28 @@ updated: "2026-11-25"
   advances a whole STRING by the unkerned metric inside a pill sized from the kerned one. The bar now
   paints its labels glyph by glyph at the offsets the face's own `hmtx` advances and pairs give
   (`kern::glyphs`), and its BOXES read that same module rather than a rasterizer advance — which also
-  lets the glyphs go back to light hinting, the shapes this host's browser draws. Measured on the
-  1920x1080 captures: `Series` and `Favoritos` are exact, `Inicio` +1/-1, `Películas` +1/0 and
-  `Buscar` -1/+1, all on the reference's baseline (y 51..64); the clock keeps its right edge.
+  lets the glyphs go back to light hinting, the shapes this host's browser draws. The wordmark then had
+  the same bug in its two-run split (the hinted stem advance put `ca` 2px left), so its `ca` is placed
+  from the face too and the runs ride 1px up to the reference's baseline.
+- **Measured on the 1920x1080 captures, whole bar, tight windows** (`mockup-home.png` against
+  `ux-home-hero.jpg`; ink bboxes x0,y0..x1,y1, deltas are app − reference):
+
+  | element | mockup | app | dx0 | dy0 | dw |
+  |---|---|---|---|---|---|
+  | `Inicio` ink | 733,51..775,64 | 734,52..774,64 | +1 | +1 | -2 |
+  | `Películas` ink | 831,51..902,64 | 832,50..902,64 | +1 | -1 | -1 |
+  | `Series` ink | 958,51..1007,64 | 958,51..1007,64 | 0 | 0 | 0 |
+  | `Favoritos` ink | 1063,51..1135,64 | 1063,51..1135,64 | 0 | 0 | 0 |
+  | `Buscar` ink | 1192,51..1245,64 | 1191,51..1246,64 | -1 | 0 | +2 |
+  | wordmark `buta` | 123,45..189,68 | 124,46..188,68 | +1 | +1 | -2 |
+  | wordmark `ca` | 194,53..224,68 | 193,52..222,68 | -1 | -1 | -1 |
+  | avatar disc | 56,35..102,81 | 55,34..102,81 | -1 | -1 | +1 |
+  | clock ink | 1817,52..1860,64 | 1819,52..1862,64 | +2 | 0 | 0 |
+
+  The `b` stem's own column reads 45..66 in the reference and 46..66 here: the BASELINE is exact and
+  the 1px at the top is the JPEG's bleed over a bright sky. The disc keeps its right/bottom edges and
+  the clock its ink band; the clock's +2 on the left is its digits (a real time is not `20:11`) over a
+  box that is exact for any `HH:MM`.
 - **The track is the mockup's fixed `.55` on every ground** (owner's call, recorded in
   `widgets_tab_capsule_motion_tests::the_bar_keeps_the_references_weight_on_every_ground`). The
   solve's LIGHT LIFT is what washed the bar out over a bright hero, so its span is now `[.55, .55]`.
