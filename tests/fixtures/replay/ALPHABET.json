@@ -22,7 +22,9 @@
   "font_roles": "rust-modules/src/text.rs FontRole serializes its Interface, Display, InterfaceMedium, Brand and Clock variants into every role-aware MetricKey, so the role names join the closed vocabulary by source rather than from a recording. InterfaceMedium and Brand are the cuts the supplied design mockup's top bar is set in; Clock is the tabular-figure cut its clock is set in.",
   "settings_native_rows": "locales/en/settings.json settings.library.recently_added and its .detail, settings.playback.idle_screen and its .detail are the four existing native Settings rows the refreshed font metrics now measure.",
   "chrome_text_destinations": "app/chrome.rs names every top-bar destination from locales/en/browse.json; browse.chrome.home, browse.chrome.search and browse.kind.favorites supply the fixed words Home, Search and Favorites beside the server-provided library names.",
-  "settings_one_page": "locales/en/settings.json names the one Settings page of the owner's redesign mockup: its four group headers, the server row's value when nothing is signed in (settings.audio.not_set), the add-another-server row and its detail, and one short detail line per playback knob, plus the two playback values the old root never drew (skip intro and credits, Ask me). Each is the label or the detail line the table MEASURES through the Width metric records, so they join the alphabet by source-backed name rather than by harvesting the recording."
+  "settings_one_page": "locales/en/settings.json names the one Settings page of the owner's redesign mockup: its four group headers, the server row's value when nothing is signed in (settings.audio.not_set), the add-another-server row and its detail, and one short detail line per playback knob, plus the two playback values the old root never drew (skip intro and credits, Ask me). Each is the label or the detail line the table MEASURES through the Width metric records, so they join the alphabet by source-backed name rather than by harvesting the recording.",
+  "account_dialog": "locales/es|en|be/settings.json settings.servers.change, settings.servers.change.detail, settings.servers.active_tag (drawn uppercased), settings.servers.add (drawn with the mockup's leading plus) and settings.servers.add.detail: the design mockup's own server dialog, which is the account menu's only content.",
+  "settings_subtitle_rows": "locales/en/settings.json settings.playback.subtitle_size, its .detail, settings.playback.subtitle_position, its .detail, settings.playback.subtitle_background and its .detail, plus the Smaller/Bottom edge values of the two pickers: the Settings page's subtitle rows that the 6-settings-family recording now reaches and measures."
  },
  "patterns": [
   "/library/metadata/people/[0-9]+/thumb/1",
@@ -72,7 +74,8 @@
   "pat:(checker|lines|hbars|hue|rainbow)(:[0-9]+(\\.[0-9]+)?)?",
   "pat:solid:[0-9]+(\\.[0-9]+)?(:[0-9]+(\\.[0-9]+)?)?",
   "txt:s[0-9a-f]{8}(\\+s[0-9a-f]{8})*",
-  "press phase=(idle|down|up) live=[01] active=[01] long=[01]"
+  "press phase=(idle|down|up) live=[01] active=[01] long=[01]",
+  "[0-9]+ hr [0-9]+ min left"
  ],
  "literals": [
   "",
@@ -476,6 +479,20 @@
   "Intros and credits the server marks.",
   "InterfaceMedium",
   "Brand",
-  "Clock"
+  "Clock",
+  "Cambiar de servidor",
+  "Las pantallas muestran el servidor activo. Cada uno guarda su propio inicio de sesión.",
+  "ACTIVO",
+  "Añadir servidor",
+  "+ Añadir servidor",
+  "Dirección y cuenta de Jellyfin",
+  "Subtitle size",
+  "Subtitle position",
+  "Subtitle background",
+  "Smaller",
+  "Bottom edge",
+  "How high they appear.",
+  "Size of the subtitle text.",
+  "Box behind the text."
  ]
 }
