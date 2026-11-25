@@ -116,6 +116,10 @@ pub(crate) enum FontRole {
     /// time says. The mockup asks for `font-variant-numeric: tabular-nums`, which is a GSUB
     /// single substitution SDL_ttf has no way to ask for; at cut time it is one cmap remap.
     Clock = 4,
+    /// The avatar's initial: the mockup's `#avatar { font-weight: 800; font-size: 19px }`. Manrope's
+    /// bold is 700, so the ExtraBold cut is its own file rather than synthetic emboldening — one
+    /// letter, and at 19px the difference is the stroke, which is the whole of what the disc shows.
+    Avatar = 5,
 }
 
 impl FontRole {
@@ -131,6 +135,7 @@ impl FontRole {
             // Ditto: the brand has one optical size and one weight.
             FontRole::Brand => ("appfont-brand-700.ttf", "appfont-brand-700.ttf"),
             FontRole::Clock => ("appfont-clock-700.ttf", "appfont-clock-700.ttf"),
+            FontRole::Avatar => ("appfont-manrope-800.ttf", "appfont-manrope-800.ttf"),
         }
     }
 }
@@ -298,7 +303,7 @@ static mut FONTS_B: [[*mut TtfFont; FONT_SLOTS]; FONT_ROLES] =
 /// How many [`FontRole`] variants exist — the arrays above index by discriminant, so this is the
 /// one place the count is written and `font_at`'s bound is a debug assertion rather than a panic on
 /// the set (it was a hard index when a fourth role arrived, 2026-11-25).
-const FONT_ROLES: usize = 5;
+const FONT_ROLES: usize = 6;
 /// The retained Inter fallback face, one per pixel size, per weight. Shared by both roles behind
 /// their own primary face, so a role never opens it until a codepoint actually needs it.
 static mut FONTS_INTER: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];

@@ -2701,14 +2701,18 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
             );
         } else {
             let ty = crate::text::text_vcenter_y(theme::CHROME_AVATAR_SZ, 1, r.y + d * 0.5);
-            p.text(
+            // The reference's initial is Manrope **800** at 19px (`#avatar { font-weight: 800 }`),
+            // not the interface bold: the ExtraBold cut has a role of its own so the disc's one
+            // letter is its own weight rather than a notch light.
+            p.text_role(
+                crate::text::FontRole::Avatar,
                 initial_c.as_ptr(),
                 r.x + d * 0.5,
                 ty,
                 theme::CHROME_AVATAR_SZ,
                 theme::CHROME_AVATAR_INK,
                 1,
-                1,
+                0,
             );
         }
     }

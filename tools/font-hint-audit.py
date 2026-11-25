@@ -55,6 +55,8 @@ FONTS = {
     "fraunces-brand": os.path.join(REPO, "pkg", "appfont-brand-700.ttf"),
     # Manrope 700 with its tabular figures baked into the cmap: the clock's cut.
     "manrope-clock": os.path.join(REPO, "pkg", "appfont-clock-700.ttf"),
+    # Manrope 800: the avatar initial's weight, the mockup's `#avatar { font-weight: 800 }`.
+    "manrope-extrabold": os.path.join(REPO, "pkg", "appfont-manrope-800.ttf"),
 }
 # Named carve-outs living outside the ladder (see theme.rs's size-module doc).
 CARVEOUTS = {54: "HUD_TITLE_SZ (bold)", 36: "subtitle caption (bold)"}
@@ -81,6 +83,10 @@ ACCEPTED = {
     # The clock's tabular cut is the same Manrope 700 the app already ships, with the digits
     # remapped, so it lands on the same accepted rungs the 700 cut does.
     ("manrope-clock", 20), ("manrope-clock", 32), ("manrope-clock", 36),
+    # Manrope 800 is the same typeface one notch heavier still, so it carries the same capital-F
+    # proportion the 400/600/700 cuts are accepted for. The product draws it at exactly one size.
+    ("manrope-extrabold", 22), ("manrope-extrabold", 28), ("manrope-extrabold", 32),
+    ("manrope-extrabold", 48),
 }
 
 

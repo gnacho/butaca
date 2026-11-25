@@ -90,8 +90,12 @@ updated: "2026-11-25"
   | wordmark `buta` | 123,45..189,68 | 124,46..188,68 | +1 | +1 | -2 |
   | wordmark `ca` | 194,53..224,68 | 193,52..222,68 | -1 | -1 | -1 |
   | avatar disc | 56,35..102,81 | 55,34..102,81 | -1 | -1 | +1 |
+  | avatar initial | 74,51..85,65 | 75,51..85,65 | +1 | 0 | -1 |
   | clock ink | 1817,52..1860,64 | 1819,52..1862,64 | +2 | 0 | 0 |
 
+  The avatar's initial is the mockup's own weight: `#avatar { font-weight: 800 }`, so the ExtraBold
+  cut is a role of its own rather than synthetic emboldening (core ink pixels 75 in the reference,
+  70 here, on the same box).
   The `b` stem's own column reads 45..66 in the reference and 46..66 here: the BASELINE is exact and
   the 1px at the top is the JPEG's bleed over a bright sky. The disc keeps its right/bottom edges and
   the clock its ink band; the clock's +2 on the left is its digits (a real time is not `20:11`) over a
