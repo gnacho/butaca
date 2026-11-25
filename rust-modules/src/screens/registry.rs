@@ -2298,7 +2298,10 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // its place in the inventory. A schema transition, not a rebaseline: a recording taken before it
 // hashed the root as a selection over four door-cards, and nothing about the page's pickers, its
 // confirmed values or its switches was in it. Re-record the replay fixtures.
-const SCREEN_SHAPES_PIN: u64 = 0xdba0_45fe_5fa2_8532;
+/// **Bumped 2026-11-25** for the account menu: the design mockup's server dialog has no
+/// scrollable list, so `AccountMenu`'s shape lost its `TableViewMotion` — a schema transition, and
+/// the replay fixtures were re-recorded with it.
+const SCREEN_SHAPES_PIN: u64 = 0x25d8_c79f_d788_c47b;
 
 #[cfg(test)]
 mod arg_tests {

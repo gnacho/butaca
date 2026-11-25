@@ -392,6 +392,16 @@ pub const CHROME_TRACK_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.09);
 pub const CHROME_GEAR_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.16);
 /// `#mainnav`, `.iconbtn` ground: `rgba(19,11,7,.55)` — the reference's own page brown.
 pub const CHROME_GROUND: [f32; 4] = rgb8(0x13, 0x0b, 0x07);
+/// `.sm-panel` — the server dialog's OPAQUE card (`#241611`), its 14% peach hairline, the row's 16%
+/// fill, the active server's `--ok` dot and the `ACTIVO` tag's `--gold`.
+pub const CHROME_PANEL: [f32; 4] = rgb8(0x24, 0x16, 0x11);
+pub const CHROME_PANEL_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.14);
+pub const CHROME_ROW_FILL: [f32; 4] = with_a(CHROME_TEXT, 0.05);
+pub const CHROME_ROW_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.14);
+pub const CHROME_ROW_FOCUS: [f32; 4] = with_a(CHROME_TEXT, 0.16);
+pub const CHROME_ROW_FOCUS_RIM: [f32; 4] = with_a(CHROME_TEXT, 0.40);
+pub const CHROME_OK: [f32; 4] = rgb8(0x7f, 0xb0, 0x69);
+pub const CHROME_GOLD: [f32; 4] = rgb8(0xe8, 0xa0, 0x4c);
 pub const CHROME_GROUND_A: f32 = 0.55;
 /// `#avatar`: `linear-gradient(135deg,#ed3e35,#8a2f5c)`, `border: 2px solid rgba(255,206,163,.25)`,
 /// ink `#fff3e4` at `font-weight:800; font-size:19px`.

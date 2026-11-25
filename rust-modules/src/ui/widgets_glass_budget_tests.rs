@@ -406,9 +406,12 @@ fn no_popover_panel_uses_the_blur_path_and_every_one_stands_on_the_field() {
     );
 
     // …and every panel that used to frost one now stands on the field.
+    // NOT `screens/account_menu.rs`: the supplied mockup's server dialog is an OPAQUE `#241611`
+    // card (`.sm-panel`), not a frosted plate, and it is held against that reference pixel for
+    // pixel — the same exception the top bar's fixed material already carries. It draws
+    // `theme::CHROME_PANEL` itself; see `account_menu`'s spec block.
     for rel in [
         "screens/item_menu.rs",
-        "screens/account_menu.rs",
         "screens/alt_sources.rs",
         "screens/about_panel.rs",
         "screens/tracks_panel.rs",

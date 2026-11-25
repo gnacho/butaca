@@ -23,7 +23,6 @@ use crate::ui::screen::{
     Activate, At, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, Focusable, GroupKind, GroupSpec,
     Hover, Placed, RenderStrategy, Screen, ScreenEvent, Scrim, Seat, Step, Stop,
 };
-use crate::ui::table::{Row, Section, TableView};
 use crate::ui::Rect;
 
 /// What the highlighted row does on OK.
@@ -76,11 +75,34 @@ impl Action {
 }
 
 
-/// The pinned ~24px corner radius.
+/// **The supplied mockup's server dialog, measured off its DOM at 1920x1080** (2026-11-25):
+/// `.sm-panel{width:560px;padding:34px;border-radius:24px}`, its `h2` `Fraunces 600 30px`, its `.sub`
+/// `500 14.5px`, and `.sm-server{height 82, border-radius:16px, padding:18px 20px, gap:16px}` with a
+/// 10px `.dot`, a `600 16px` name over a `500 13.5px` line, and a right-hand `.tag` in
+/// `700 12px` with `.1em` tracking. The type is the reference's, not the app's couch ladder — the
+/// same call this bar already makes, recorded in the plan.
+const PANEL_W: f32 = 560.0;
+const PANEL_PAD: f32 = 34.0;
+/// `.sm-panel`'s corner, and the row's.
 const PANEL_RAD: f32 = 24.0;
+const ROW_RAD: f32 = 16.0;
+const ROW_H: f32 = 82.0;
+const ROW_GAP: f32 = 10.0;
+const ROW_PAD_X: f32 = 20.0;
+const DOT_D: f32 = 10.0;
+const DOT_GAP: f32 = 16.0;
+const TITLE_SZ: std::os::raw::c_int = 30;
+const SUB_SZ: std::os::raw::c_int = 15;
+const NAME_SZ: std::os::raw::c_int = 16;
+const DETAIL_SZ: std::os::raw::c_int = 14;
+const TAG_SZ: std::os::raw::c_int = 12;
+const TITLE_H: f32 = 37.0;
+const TITLE_GAP: f32 = 6.0;
+const SUB_H: f32 = 38.0;
+const SUB_GAP: f32 = 24.0;
+const PANEL_INNER_W: f32 = PANEL_W - 2.0 * PANEL_PAD;
 
-pub(crate) const SHAPE: &str =
-    "AccountMenu{header:str,rows:[u32],sel:u32,table:TableViewMotion}";
+pub(crate) const SHAPE: &str = "AccountMenu{header:str,rows:[u32],sel:u32}";
 
 /// The rows for a Jellyfin account state, in order, BELOW the configured-server list. Signed out
 /// offers sign-in; signed in offers sign-out. Settings and the compile-time lab action are
@@ -120,6 +142,30 @@ pub(crate) fn chip_label(acc: &Account) -> String {
     }
 }
 
+/// The reference's subtitle wraps to the dialog's inner width; this splits on spaces and measures
+/// with the frame's own capability, so the two lines land where the mockup puts them.
+fn wrap_words(text: &str, budget: f32, sz: std::os::raw::c_int, measure: &dyn crate::ui::machine::Measure) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let mut probe = cur.clone();
+        if !probe.is_empty() { probe.push(' '); }
+        probe.push_str(word);
+        let w = match std::ffi::CString::new(probe.clone()) {
+            Ok(c) => measure.width(&c, sz, false),
+            Err(_) => break,
+        };
+        if w > budget && !cur.is_empty() {
+            lines.push(std::mem::take(&mut cur));
+            cur.push_str(word);
+        } else {
+            cur = probe;
+        }
+    }
+    if !cur.is_empty() { lines.push(cur); }
+    lines
+}
+
 fn label(a: Action) -> &'static str {
     match a {
         Action::SignIn => crate::i18n::msg::settings_account_sign_in(),
@@ -129,11 +175,6 @@ fn label(a: Action) -> &'static str {
         Action::AddServer => crate::i18n::msg::settings_servers_add_password(),
         Action::None | Action::SwitchServer(_) => "",
     }
-}
-
-/// Rows that leave for another screen carry the drill-in chevron; "Sign out" acts in place.
-fn drills_in(a: Action) -> bool {
-    matches!(a, Action::SignIn | Action::Settings | Action::AddServer)
 }
 
 /// Rows whose action ends something in place. Never where the menu's focus starts
@@ -156,12 +197,38 @@ fn action_at(rows: &[Action], sel: i32) -> Action {
 /// The account sheet as the mockup's centred server dialog: a fixed-width panel centred on the
 /// canvas, clear of the overscan frame. It is a dialog now, not a chip-tucked corner sheet, because
 /// it lists every configured server — the same content `ServersPage` presents full-screen.
-fn panel_rect(table: &TableView) -> Rect {
-    let pw = 560.0f32;
-    let px = (crate::surface::LOGICAL_W - pw) * 0.5;
-    let ph = table.measured_height().clamp(120.0, 520.0);
+fn panel_rect(rows: usize) -> Rect {
+    let ph = rows_height(rows);
+    let px = (crate::surface::LOGICAL_W - PANEL_W) * 0.5;
     let py = (crate::surface::LOGICAL_H - ph) * 0.5;
-    Rect::new(px, py, pw, ph)
+    Rect::new(px, py, PANEL_W, ph)
+}
+
+/// The dialog's own height: title, subtitle and the row stack inside the reference's padding.
+fn rows_height(rows: usize) -> f32 {
+    // Every row carries its own 10px foot, the last one included — that is why the reference's
+    // 3-row panel measures 453 and not 439 (`452.68 + 3*82 + 3*10 + 34`).
+    let n = rows.max(1) as f32;
+    2.0 + 2.0 * PANEL_PAD + TITLE_H + TITLE_GAP + SUB_H + SUB_GAP + n * (ROW_H + ROW_GAP)
+}
+
+/// Row `i`'s RESTING rect — the one focus and the hit map use. The focused row is drawn at
+/// `.sm-server.is-focused`'s `scale(1.02)` about this rect's centre.
+fn row_rect_in(panel: Rect, i: usize) -> Rect {
+    let y0 = panel.y + PANEL_PAD + TITLE_H + TITLE_GAP + SUB_H + SUB_GAP;
+    Rect::new(
+        panel.x + PANEL_PAD,
+        y0 + i as f32 * (ROW_H + ROW_GAP),
+        PANEL_INNER_W,
+        ROW_H,
+    )
+}
+
+/// What a row says: a server, the add door, or one of the app's own actions.
+enum RowFace<'a> {
+    Server { name: &'a str, detail: &'a str, active: bool },
+    Add { name: &'a str, detail: &'a str },
+    Action { name: &'a str },
 }
 
 /// The panel at its TALLEST, for the overscan audit ([`crate::ui::consts::SAFE`]) — the clamp
@@ -169,10 +236,10 @@ fn panel_rect(table: &TableView) -> Rect {
 /// in and the height comes from a `TableView` no host test can measure.
 #[cfg(test)]
 pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, crate::ui::Rect)>) {
-    let r = panel_rect(&TableView::new());
+    let r = panel_rect(3);
     out.push((
         "account menu panel",
-        crate::ui::Rect::new(r.x, r.y, r.w, 440.0),
+        crate::ui::Rect::new(r.x, r.y, r.w, rows_height(4)),
     ));
 }
 
@@ -183,7 +250,8 @@ pub(crate) struct AccountMenuScreen {
     /// The configured servers, in the same order as the rows (server rows first, one per server).
     servers: Vec<crate::jellyfin::boot::ServerEntry>,
     active: usize,
-    table: TableView,
+    /// The highlighted row, as an index into [`Self::rows`].
+    sel: i32,
     built: bool,
 }
 
@@ -191,11 +259,11 @@ impl AccountMenuScreen {
     pub(crate) fn new(entry: EntryId) -> Self {
         Self {
             entry,
-            header: crate::i18n::msg::settings_servers_select().to_string(),
+            header: crate::i18n::msg::settings_servers_change().to_string(),
             rows: Vec::new(),
             servers: Vec::new(),
             active: 0,
-            table: TableView::new(),
+            sel: 0,
             built: false,
         }
     }
@@ -207,7 +275,7 @@ impl AccountMenuScreen {
             return;
         }
         self.built = true;
-        let selected = action_at(&self.rows, self.table.sel);
+        let selected = action_at(&self.rows, self.sel);
         let name = crate::jellyfin::client().and_then(|client| client.user_name());
         let signed_in = name.is_some();
         // The real server list, exactly as `ServersPage` reads it: one row per configured server
@@ -226,30 +294,15 @@ impl AccountMenuScreen {
         // The native additions follow, below the server choices: sign-in/sign-out, Settings, and
         // the compile-time lab action.
         self.rows.extend(rows_for(signed_in));
-        self.header = crate::i18n::msg::settings_servers_select().to_string();
+        self.header = crate::i18n::msg::settings_servers_change().to_string();
 
-        let mut sec = Section::new(self.header.clone());
-        for (i, a) in self.rows.iter().enumerate() {
-            let row = match a {
-                Action::SwitchServer(idx) => {
-                    let server = self.servers.get(*idx);
-                    Row::new(server.map_or_else(String::new, |s| s.user.clone()))
-                        .detail(server.map_or_else(String::new, |s| s.url.clone()))
-                        .checked(*idx == self.active)
-                }
-                _ => Row::new(label(*a).to_string())
-                    .chevron(drills_in(*a))
-                    .destructive(destructive(*a)),
-            };
-            sec = sec.row(row);
-            let _ = i;
-        }
-        self.table.compact = true;
-        match self.rows.iter().position(|a| *a == selected) {
-            Some(row) => self.table.set_sections(vec![sec], row as i32, false),
-            None => self.table.open_sections(vec![sec]),
-        }
-        debug_assert_eq!(self.rows.len() as i32, self.table.n_rows());
+        // The reference's dialog has no scrollable list: it is a short stack of cards, and the
+        // panel's height comes from the row count. Selection lands on the row that is safe to press
+        // (never "Sign out"), exactly as the table's opening row did.
+        self.sel = match self.rows.iter().position(|a| *a == selected) {
+            Some(row) => row as i32,
+            None => self.opening_row(),
+        };
     }
 
     fn row_of(&self, elem: u32) -> Option<usize> {
@@ -257,7 +310,7 @@ impl AccountMenuScreen {
     }
 
     fn frame(&self) -> Rect {
-        panel_rect(&self.table)
+        panel_rect(self.rows.len())
     }
 
     /// Commit the focused row. **Every action dismisses**, exactly as the legacy `on_ok` did by
@@ -282,12 +335,40 @@ impl AccountMenuScreen {
     /// The action a focus with nowhere better to go lands on — the table's opening row, which is
     /// never a destructive one while any other is on offer.
     fn opening_action(&self) -> Action {
-        action_at(&self.rows, self.table.opening_row())
+        action_at(&self.rows, self.opening_row())
+    }
+
+    /// The row a freshly opened dialog lands on: the first one that is not destructive.
+    fn opening_row(&self) -> i32 {
+        self.rows
+            .iter()
+            .position(|a| !destructive(*a))
+            .unwrap_or(0) as i32
+    }
+
+    /// What a row says, from the state — the paint and the tests read the same answer.
+    fn face(&self, i: usize) -> RowFace<'_> {
+        match self.rows.get(i) {
+            Some(Action::SwitchServer(idx)) => {
+                let server = self.servers.get(*idx);
+                RowFace::Server {
+                    name: server.map_or("", |s| s.user.as_str()),
+                    detail: server.map_or("", |s| s.url.as_str()),
+                    active: *idx == self.active,
+                }
+            }
+            Some(Action::AddServer) => RowFace::Add {
+                name: crate::i18n::msg::settings_servers_add(),
+                detail: crate::i18n::msg::settings_servers_add_detail(),
+            },
+            Some(a) => RowFace::Action { name: label(*a) },
+            None => RowFace::Action { name: "" },
+        }
     }
 
     /// The highlighted row, for the focus probe — a READ of the cursor the engine moves.
     pub(crate) fn sel(&self) -> i32 {
-        self.table.sel
+        self.sel
     }
 }
 
@@ -301,16 +382,16 @@ impl<H: AppLike> Machine<H> for AccountMenuScreen {
                     self.build();
                     fx.invalidate(crate::ui::present::Provenance::Landing(crate::ui::machine::MachineId::Session));
                 }
-                self.table.sel = cx
+                self.sel = cx
                     .focus
                     .current
                     .filter(|key| key.entry == self.entry)
                     .and_then(|key| self.row_of(key.elem).map(|row| row as i32))
-                    .unwrap_or(self.table.sel);
-                self.table.update(tick.dt(), self.frame().h);
+                    .unwrap_or(self.sel);
+                let _ = tick;
             }
             ScreenEvent::FocusMoved { to, .. } => {
-                if let Some(row) = self.row_of(to.elem) { self.table.sel = row as i32; }
+                if let Some(row) = self.row_of(to.elem) { self.sel = row as i32; }
             }
             ScreenEvent::Activate(elem) => self.activate(*elem, fx),
             ScreenEvent::PressCommit(_) => {
@@ -368,10 +449,13 @@ impl<H: AppLike> Focusable<H> for AccountMenuScreen {
     }
     fn place(&self, elem: &u32, _: &Cx<'_, H>, _: At) -> Option<Placed> {
         let row = self.row_of(*elem)?;
-        let rect = self.table.row_frame(self.frame(), row as i32)?;
+        let rest = row_rect_in(self.frame(), row);
+        // `.sm-server.is-focused { transform: scale(1.02) }` — a static transform about the card's
+        // own centre, not a spring: the reference's row grows in place the moment it holds focus.
+        let rect = if self.sel == row as i32 { rest.scaled(1.02) } else { rest };
         Some(Placed {
             rect,
-            rest_rect: rect,
+            rest_rect: rest,
             clip: self.frame(),
             index: Some(row as u32),
         })
@@ -389,7 +473,7 @@ impl<H: AppLike> Focusable<H> for AccountMenuScreen {
     fn seat(&self, _: GroupId, _: Placed, _: &Cx<'_, H>) -> FocusKey<u32> {
         FocusKey {
             entry: self.entry,
-            elem: action_at(&self.rows, self.table.sel).key(),
+            elem: action_at(&self.rows, self.sel).key(),
         }
     }
 }
@@ -419,10 +503,95 @@ impl<H: AppLike> Screen<H> for AccountMenuScreen {
         let p = f.painter.alpha(f.page_alpha);
         let r = self.frame();
         let measure = f.measure;
-        crate::ui::widgets::panel_ground(p, r, PANEL_RAD, f.underlay);
-        crate::ui::profile::phase("glass.foreground", || {
-            self.table.draw(p, r, measure);
-        });
+        // ---- the reference's card: opaque, warm, 24px, one 14% hairline ----------------------
+        p.focus_shadow(r, PANEL_RAD, 1.0);
+        p.rect_rimmed(
+            r,
+            PANEL_RAD,
+            crate::ui::theme::CHROME_PANEL,
+            crate::ui::theme::CHROME_PANEL,
+            crate::ui::theme::CHROME_PANEL_RIM,
+            0.0,
+        );
+        // ---- title (Fraunces 600 30) and the line under it ----------------------------------
+        let title = std::ffi::CString::new(self.header.as_str()).unwrap_or_default();
+        crate::ui::label::Label::new(title.as_ptr(), TITLE_SZ, crate::ui::theme::CHROME_INK)
+            .display()
+            .h(crate::ui::label::HAlign::Left)
+            .draw(p, Rect::new(r.x + PANEL_PAD, r.y + PANEL_PAD, PANEL_INNER_W, TITLE_H));
+        let sub = std::ffi::CString::new(crate::i18n::msg::settings_servers_change_detail())
+            .unwrap_or_default();
+        let sub_y = r.y + PANEL_PAD + TITLE_H + TITLE_GAP;
+        let mut line_y = sub_y;
+        for line in wrap_words(
+            crate::i18n::msg::settings_servers_change_detail(),
+            PANEL_INNER_W,
+            SUB_SZ,
+            measure,
+        ) {
+            let cs = std::ffi::CString::new(line).unwrap_or_default();
+            crate::ui::label::Label::new(cs.as_ptr(), SUB_SZ, crate::ui::theme::CHROME_MUTED)
+                .h(crate::ui::label::HAlign::Left)
+                .draw(p, Rect::new(r.x + PANEL_PAD, line_y, PANEL_INNER_W, 19.0));
+            line_y += 19.0;
+        }
+        let _ = sub;
+        // ---- the row stack -------------------------------------------------------------------
+        for i in 0..self.rows.len() {
+            let rest = row_rect_in(r, i);
+            let focused = self.sel == i as i32;
+            let q = if focused { rest.scaled(1.02) } else { rest };
+            let (fill, rim) = if focused {
+                (crate::ui::theme::CHROME_ROW_FOCUS, crate::ui::theme::CHROME_ROW_FOCUS_RIM)
+            } else {
+                (crate::ui::theme::CHROME_ROW_FILL, crate::ui::theme::CHROME_ROW_RIM)
+            };
+            p.rect_rimmed(q, ROW_RAD, fill, fill, rim, 0.0);
+            let face = self.face(i);
+            let mut x = q.x + ROW_PAD_X;
+            match &face {
+                RowFace::Server { active, .. } => {
+                    let dot = Rect::new(x, q.cy() - DOT_D * 0.5, DOT_D, DOT_D);
+                    let col = if *active {
+                        crate::ui::theme::CHROME_OK
+                    } else {
+                        crate::ui::theme::with_a(crate::ui::theme::CHROME_OK, 0.25)
+                    };
+                    p.rrect(dot, DOT_D * 0.5, DOT_D * 0.5, col);
+                    x += DOT_D + DOT_GAP;
+                }
+                _ => {}
+            }
+            let (name, detail, active, tag) = match &face {
+                RowFace::Server { name, detail, active } => (*name, Some(*detail), *active, *active),
+                RowFace::Add { name, detail } => (*name, Some(*detail), false, false),
+                RowFace::Action { name } => (*name, None, false, false),
+            };
+            let name_text = match &face {
+                RowFace::Add { .. } => format!("+ {name}"),
+                _ => name.to_string(),
+            };
+            let name_cs = std::ffi::CString::new(name_text).unwrap_or_default();
+            crate::ui::label::Label::new(name_cs.as_ptr(), NAME_SZ, crate::ui::theme::CHROME_INK)
+                .medium()
+                .h(crate::ui::label::HAlign::Left)
+                .draw(p, Rect::new(x, q.y + 18.0, q.x + q.w - ROW_PAD_X - x, 22.0));
+            if let Some(detail) = detail.filter(|d| !d.is_empty()) {
+                let dcs = std::ffi::CString::new(detail).unwrap_or_default();
+                crate::ui::label::Label::new(dcs.as_ptr(), DETAIL_SZ, crate::ui::theme::CHROME_MUTED)
+                    .h(crate::ui::label::HAlign::Left)
+                    .draw(p, Rect::new(x, q.y + 18.0 + 22.0 + 2.0, q.x + q.w - ROW_PAD_X - x, 19.0));
+            }
+            if tag {
+                let t = crate::i18n::msg::settings_servers_active_tag().to_uppercase();
+                let tcs = std::ffi::CString::new(t).unwrap_or_default();
+                crate::ui::label::Label::new(tcs.as_ptr(), TAG_SZ, crate::ui::theme::CHROME_GOLD)
+                    .bold()
+                    .h(crate::ui::label::HAlign::Right)
+                    .draw(p, Rect::new(q.x, q.cy() - 10.0, q.w - ROW_PAD_X, 20.0));
+                let _ = active;
+            }
+        }
         for action in &self.rows {
             let elem = action.key();
             if let Some(placed) = <Self as Focusable<H>>::place(self, &elem, f.cx, At::Drawn) {
@@ -454,8 +623,7 @@ impl LogicalState for AccountMenuScreen {
         for a in &self.rows {
             c.u32(a.key());
         }
-        c.u32(self.table.sel as u32);
-        self.table.write_motion(c);
+        c.u32(self.sel as u32);
     }
     fn probe(&self, out: &mut String) {
         out.push_str("account_menu");
@@ -490,7 +658,7 @@ mod tests {
         let mut menu = AccountMenuScreen::new(EntryId(0));
         menu.build();
         assert!(menu.built);
-        assert_eq!(menu.header, crate::i18n::msg::settings_servers_select());
+        assert_eq!(menu.header, crate::i18n::msg::settings_servers_change());
         assert_eq!(menu.rows, vec![Action::AddServer, Action::SignOut, Action::Settings]);
 
         crate::jellyfin::uninstall();
