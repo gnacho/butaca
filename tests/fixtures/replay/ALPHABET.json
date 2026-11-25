@@ -493,6 +493,14 @@
   "Bottom edge",
   "How high they appear.",
   "Size of the subtitle text.",
-  "Box behind the text."
+  "Box behind the text.",
+  "Change server",
+  "+ Change server",
+  "The screens show the active server. Each one keeps its own sign-in.",
+  "ACTIVE",
+  "Add server",
+  "+ Add server",
+  "Jellyfin address and account",
+  "Active"
  ]
 }
