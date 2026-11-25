@@ -2231,18 +2231,18 @@ mod tests {
     use crate::fontcov;
 
     /// The real shipped cmaps, parsed once for the whole test binary (see `fontcov::shipped`),
-    /// indexed by [`cov_index`] for the Interface role's chain: Manrope (0) -> Inter (2) ->
-    /// bundled CJK (3). Slot 1 (the Display base) is `None` because no Interface split asks it, and
-    /// slot 4 (`Link::Sys`) is `None` on purpose: the television's DroidSansFallback does not exist
-    /// on a build host, so this is also the "the chain is SHORT" configuration under test.
-    fn chain() -> [Option<&'static fontcov::Coverage>; 5] {
-        [
-            fontcov::shipped("appfont-manrope-400.ttf").as_ref().ok(),
-            None,
-            fontcov::shipped("appfont.ttf").as_ref().ok(),
-            fontcov::shipped("appfont-cjk.ttf").as_ref().ok(),
-            None,
-        ]
+    /// indexed by [`cov_index`] for the Interface role's chain: Manrope (its BASE slot) -> Inter ->
+    /// bundled CJK. Every other role's base is `None`, and `Link::Sys` is `None` on purpose: the
+    /// television's DroidSansFallback does not exist on a build host, so this is also the "the
+    /// chain is SHORT" configuration under test.
+    fn chain() -> [Option<&'static fontcov::Coverage>; COV_SLOTS] {
+        let mut cov: [Option<&'static fontcov::Coverage>; COV_SLOTS] = [None; COV_SLOTS];
+        cov[FontRole::Interface as usize] = fontcov::shipped("appfont-manrope-400.ttf").as_ref().ok();
+        cov[cov_index(FontRole::Interface, Link::Inter)] =
+            fontcov::shipped("appfont.ttf").as_ref().ok();
+        cov[cov_index(FontRole::Interface, Link::Cjk)] =
+            fontcov::shipped("appfont-cjk.ttf").as_ref().ok();
+        cov
     }
 
     fn split(s: &str) -> Option<Runs> {
