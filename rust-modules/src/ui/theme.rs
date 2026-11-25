@@ -310,6 +310,11 @@ pub mod logo {
 /// the page ground so a lit control separates from it without going white.
 pub const CHROME_LIT: [f32; 4] = rgb8(0x73, 0x73, 0xcb);
 pub const ACCENT: [f32; 4] = WARM_100;
+/// **The focus plate a table row wears** — the second comp's `rgba(255,255,255,.16)`, which is what
+/// its server cards and its settings cards both light with. White rather than a hue: the comp keeps
+/// its violet and its blue for MARKS (the avatar's gradient, the `ACTIVO` tag) and lights every
+/// surface it can focus the same way.
+pub const ROW_FOCUS_FILL: [f32; 4] = [1.0, 1.0, 1.0, 0.16];
 /// Near-black ink/glyphs drawn over [`ACCENT`].
 pub const ACCENT_INK: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
 /// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this

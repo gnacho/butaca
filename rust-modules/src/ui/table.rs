@@ -1085,7 +1085,10 @@ impl TableView {
         // **The lit row is the chrome's one tone.** It was `ACCENT` — the warm off-white of the old
         // mockup — which is why every menu's hover still read #FFCEA3 after the palette moved
         // (the owner's 2026-11-10 pass: "el hover del menú ... debería tener #7373CB").
-        self.draw_with_selection_fill(p, frame, measure, theme::CHROME_LIT);
+        // **The second comp's focus plate is white at 16%** (`.sm-server.is-focused`, and the same
+        // weight on its cards), not the violet `#7373cb` the app lit its menus with. One token for
+        // every table in the app: a menu, a picker and a list all light the same way.
+        self.draw_with_selection_fill(p, frame, measure, theme::ROW_FOCUS_FILL);
     }
 
     /// Draw with an owner-supplied selected-row fill, keeping all other table states shared.
