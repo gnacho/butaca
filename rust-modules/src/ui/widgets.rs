@@ -5573,10 +5573,15 @@ impl TabStrip {
 /// The Search pill is SQUARE: 60×60, the icon's own air rather than a word's, so a mark does not
 /// wear the padding a label needs (`ui_kits/tv-app/SearchScreen.jsx`). Every other pill keeps
 /// [`TAB_PILL_PAD`].
-const TAB_ICON_PILL_W: f32 = TAB_PILL_H;
+/// The second comp's icon buttons are 45 wide in a 39px-tall box inside the 43px row
+/// (`#mainnav button.icon-only { padding: 10px 13px }`), and that 45 is what puts the labelled
+/// items where its DOM has them.
+const TAB_ICON_PILL_W: f32 = 45.0;
 /// The mark inside it, at 1.15× the strip's own type rung (BODY 28 → 32) — the design system's
 /// `--btn-icon-ratio`, the same ratio every icon-and-label control in the app uses.
-const TAB_ICON_D: f32 = 32.0;
+/// The mark's own box: the comp draws a 24px viewBox at 18px inside that button (its ink measures
+/// 17x15 on the capture), not the 32 the app's icon ratio would give a 60px pill.
+const TAB_ICON_D: f32 = 18.0;
 /// The top chrome band's y — the chip and the pills sit on it (Home and Library alike).
 ///
 /// **Derived from the overscan safe area, not chosen.** It was a bare `44.0` until 2026-08-23, which
