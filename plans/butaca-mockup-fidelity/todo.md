@@ -70,10 +70,20 @@ updated: "2026-11-25"
 - Measured against the reference at 1920x1080, the bar's boxes are now exact: avatar
   (56, 34.5, 46, 46), track (700.84, 28, 576.31, 59), the five pills (707.84/805.56/932.66/
   1038.06/1166.16 at y 35, 45 tall) and the gear (1752.02, 34.5, 46, 46) all land within 0.01px.
-  What remains is the rasterizer's own floor: SDL_ttf paints the unkerned advance inside the kerned
-  box and snaps each glyph to a whole pixel, so a label's INK sits within 3px of the reference
-  (all five share its baseline, y 51..64), and the track's alpha is the reference's .55 only over a
-  dark ground — over a bright hero the solve raises it to keep the app's contrast floor.
+- **The ink was not at the floor yet, and the fix was the one that had been called impossible.** SDL_ttf
+  advances a whole STRING by the unkerned metric inside a pill sized from the kerned one. The bar now
+  paints its labels glyph by glyph at the offsets the face's own `hmtx` advances and pairs give
+  (`kern::glyphs`), and its BOXES read that same module rather than a rasterizer advance — which also
+  lets the glyphs go back to light hinting, the shapes this host's browser draws. Measured on the
+  1920x1080 captures: `Series` and `Favoritos` are exact, `Inicio` +1/-1, `Películas` +1/0 and
+  `Buscar` -1/+1, all on the reference's baseline (y 51..64); the clock keeps its right edge.
+- **The track is the mockup's fixed `.55` on every ground** (owner's call, recorded in
+  `widgets_tab_capsule_motion_tests::the_bar_keeps_the_references_weight_on_every_ground`). The
+  solve's LIGHT LIFT is what washed the bar out over a bright hero, so its span is now `[.55, .55]`.
+  Measured on the demo hero: the reference's track interior reads `[35,17,13]` and the app's
+  `[49,22,13]`, i.e. the reference's `--muted` label sits at 5.19:1 there and 4.82:1 in the app. The
+  worst case is a pure white frame (~1.4:1), which no hero is, and it is the number the reference
+  itself would have.
 
 ### 2026-11-23
 
