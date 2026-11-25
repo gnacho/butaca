@@ -385,6 +385,9 @@ pub const CONTROL_IDLE_FILL: [f32; 4] = with_a(NEUTRAL_600, 0.92);
 pub const CHROME_INK: [f32; 4] = rgb8(0xff, 0xff, 0xff);
 /// The comp's `--accent`, the avatar gradient's warm end and the app's own red.
 pub const CHROME_ACCENT: [f32; 4] = rgb8(0xaa, 0x5c, 0xc3);
+/// `#mainnav button.is-focused { background: var(--accent) }` — the bar's focused tab, which is this
+/// violet and not the app's warm `ACCENT` (#ffcea3). Its ink is white (`color:#fff`).
+pub const TAB_FOCUS_FILL: [f32; 4] = rgb8(0xaa, 0x5c, 0xc3);
 pub const CHROME_TEXT: [f32; 4] = rgb8(0xff, 0xff, 0xff);
 pub const CHROME_MUTED: [f32; 4] = [1.0, 1.0, 1.0, 0.55];
 pub const CHROME_INK_ON_LIT: [f32; 4] = rgb8(0xff, 0xff, 0xff);

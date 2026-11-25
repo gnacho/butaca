@@ -2642,21 +2642,17 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
         let cap = chip_cap(e, name_w);
         // the tab track's own material — literally the same material: glass when the track
         // resolved glass this frame, the flat capsule when it did not.
-        if !chip_capsule(p, cap, 1.0, bar_material) {
-            p.rect_sheened(
-                cap,
-                cap.h * 0.5,
-                theme::scrim_black(theme::TAB_TRACK_A_TOP),
-                theme::scrim_black(theme::TAB_TRACK_A_BOT),
-            );
-        }
+        // **The second comp's `#avatar` has no focus face at all**: no capsule to widen into, no
+        // ring, no lift — the disc IS the control, and the comp gives it no `:hover` rule to wear.
+        // What used to be drawn here was the first comp's unfurling name capsule.
+        let _ = (cap, bar_material);
         // **The second comp's avatar is a bare disc: no unfurl, no name.** The first comp grew a
         // capsule carrying the profile name on focus; this one keeps the row to one 46px circle and
         // lets the nav start 20px to its right, so there is nothing here to widen into.
         let _ = (name_c, CHIP_NAME_GAP);
     }
-    // resting shadow + perimeter stroke always; lift the shadow with the focus (same as shelf tiles)
-    p.focus_shadow(r, d * 0.5, e);
+    // No lift: the comp's avatar is a flat disc with no focus face (see above).
+    let _ = (e,);
     let mut drew = false;
     if !thumb_s.is_empty() {
         let (t, tw, th) = resolve_tex_wh_on(crate::registry::current(), thumb_s, 128, 128, 0);
@@ -2877,8 +2873,10 @@ pub(crate) fn draw_settings_gear(p: Painter, frame: Rect, focused: bool) {
     let rad = r.h * 0.5;
     let glyph = r.inset(GEAR_ICON_INSET);
     if focused {
+        // `.iconbtn.is-focused { background: var(--text); color:#101010; transform: scale(1.1) }` —
+        // a WHITE plate with the comp's own ground for ink, not the white ink the bar's tabs wear.
         p.rrect(r, rad, rad, theme::CHROME_TEXT);
-        crate::ui::icons::draw(p, crate::ui::icons::Icon::Settings, glyph, theme::CHROME_INK_ON_LIT);
+        crate::ui::icons::draw(p, crate::ui::icons::Icon::Settings, glyph, theme::CHROME_GROUND);
     } else {
         let ground = theme::scrim_black(theme::CHROME_GROUND_A);
         p.rect_rimmed(r, rad, ground, ground, theme::CHROME_GEAR_RIM, 0.0);
@@ -5564,7 +5562,13 @@ impl TabStrip {
             TabGround::Plated { pop } => {
                 cap(&self.foc, theme::CHROME_LIT, Some(theme::CARD_SHEEN), pop, true)
             }
-            TabGround::Tracked { .. } => cap(&self.foc, theme::CHROME_TEXT, None, 1.0, false),
+            // **The second comp's focused tab is the ACCENT**, not a white wash: `#mainnav
+            // button.is-focused { background: var(--accent); color:#fff; transform:scale(1.07);
+            // box-shadow:0 6px 24px -6px rgba(170,92,195,.6) }`. The white at 16% is the MENUS'
+            // focus face (server cards, settings cards); the bar's row lights in its accent.
+            TabGround::Tracked { .. } => {
+                cap(&self.foc, theme::TAB_FOCUS_FILL, None, TAB_FOCUS_SCALE, false)
+            }
         }
     }
     /// The `(focus, selected)` mixes pill `pill` (content-space `(x, w)`) should ink itself with —
@@ -5667,6 +5671,8 @@ pub(crate) const TAB_TRACK_PAD: f32 = 0.0;
 /// `#mainnav button { border-radius: 10px }` — the second comp's tab plates are rounded squares, and
 /// this is the radius the tracked strip draws them at (the season strip keeps its capsule).
 pub(crate) const TAB_PILL_RAD: f32 = 10.0;
+/// `#mainnav button.is-focused { transform: scale(1.07) }`.
+const TAB_FOCUS_SCALE: f32 = 1.07;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
