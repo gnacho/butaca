@@ -166,6 +166,7 @@ pub(crate) fn sign_in(entry: &ServerEntry) -> Option<JfClient> {
                     "jellyfin: signed in as {} — stored token",
                     user.user_name
                 ));
+                client.learn_server_version(&entry.url);
                 return Some(client);
             }
             Err(AuthError::Unauthorized) => {
@@ -188,6 +189,7 @@ pub(crate) fn sign_in(entry: &ServerEntry) -> Option<JfClient> {
                 ok.user_name, ok.server_id
             ));
             remember_token(entry, &ok.token);
+            client.learn_server_version(&entry.url);
             Some(client)
         }
         Err(AuthError::Unauthorized) => {

@@ -188,6 +188,43 @@ for a trademark note that applies to some of them.
 
 ### 2.3 Fonts
 
+**Manrope** — `appfont-manrope-400.ttf`, `appfont-manrope-600.ttf`, `appfont-manrope-700.ttf`, `appfont-manrope-800.ttf`, `appfont-clock-700.ttf`
+Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope), per the font's
+own name table.
+Licence: **SIL Open Font License 1.1** — the full text ships in this package as `OFL.txt`.
+Provenance: downloaded from the Google Fonts repository `google/fonts`, path
+`ofl/manrope/Manrope[wght].ttf` at commit `b31870aff700ab7a1d74fa0c6887d95beb9e0037`.
+*Modified*: static instances at weight 400 / 600 / 700 / 800, instantiated with fontTools 4.68.0. `appfont-manrope-800.ttf` is the avatar's initial — the design mockup's `#avatar { font-weight: 800 }`. `appfont-clock-700.ttf` is weight 700 with the font's own `tnum` (tabular figures) single substitutions applied to the cmap, which is what the mockup's `font-variant-numeric: tabular-nums` asks a browser for.
+The reference cuts (`600`, `clock`) and the wordmark's also carry the face's GPOS pairs flattened into a legacy `kern` table, because SDL_ttf has no way to ask for GPOS and the app applies them itself at layout time.
+`appfont-manrope-600.ttf` is the cut the top navigation is set in: the supplied design mockup
+specifies `font: 600 17px Manrope` for `#mainnav button` and its clock, and the 400/700 pair the
+app already shipped is a weight away from it in either direction.
+Checksums: `appfont-manrope-400.ttf`
+`d37c889f1aabea0eb8adf78c4ce1682466890cdfda762bf94af8391d10e306bb`; `appfont-manrope-600.ttf`
+`d566a435052b77f0c8f29830d4ec663bc92483973706dd295330734e48e0daa7`; `appfont-manrope-700.ttf`
+`9b5d326141885b08315c77f7251c1d6638f3a0b39fcd380245d9d2e99773055f`; `appfont-clock-700.ttf`
+`3c1636a0c37f4f858dc5fa2d0a5abe7fb9c91a58ea8caaaed12f9454bd06138a`; `appfont-manrope-800.ttf`
+`c1053365079f3fa68811983eae164dabb698dc46b980b7b09f438df001cd6a3f`.
+The Manrope copyright statement declares **no Reserved Font Name**, so OFL §3 imposes no rename.
+
+**Fraunces** — `appfont-fraunces-600.ttf`, `appfont-fraunces-700.ttf`, `appfont-brand-700.ttf`
+Copyright 2020 The Fraunces Project Authors (https://github.com/undercasetype/Fraunces), per the
+font's own name table.
+Licence: **SIL Open Font License 1.1** — the full text ships in this package as `OFL.txt`.
+Provenance: downloaded from the Google Fonts repository `google/fonts`, path
+`ofl/fraunces/Fraunces[SOFT,WONK,opsz,wght].ttf` at commit
+`ac502d8eff76ef4d9477cdcc8ef7d0c84fde5372`.
+*Modified*: static instances at weight 600 / 700, optical size 72, SOFT 0, WONK 0, instantiated
+with fontTools 4.68.0. `appfont-brand-700.ttf` is the wordmark's cut: weight 700 instanced at
+optical size **30**, which is the optical size a browser selects for the mockup's
+`#logo { font-size: 30px }` out of the font's `opsz 9..144` axis. The 72pt instance the app
+shipped is about 10% narrower at 30px, so the wordmark came out 94px wide against the design's 104.
+Checksums: `appfont-fraunces-600.ttf`
+`924063c7375c2d328aca04b6000f7004f924dbc36e64e9cf7dd0ec3433515b7b`; `appfont-fraunces-700.ttf`
+`0d63f1f9df608dc8146a37fc4720937852b3c6f93ab0cca9038bc911ec53194d`; `appfont-brand-700.ttf`
+`1b43219365f2888274eb8532b43afb1d2f76ef27882dfc311605ce77dd831360`.
+The Fraunces copyright statement declares **no Reserved Font Name**, so OFL §3 imposes no rename.
+
 **Inter** — `appfont.ttf`, `appfont-bold.ttf`
 Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter), per the fonts' own
 name table; the licence file shipped with this package states "Copyright 2020". Version
@@ -475,10 +512,10 @@ runtime notices listed below:
 | `licenses/FreeType.txt` | FreeType's elected FTL and contributed module notices (§1.2) |
 | `licenses/HarfBuzz-Old-MIT.txt` | HarfBuzz and its copyright holders (§1.2) |
 
-`OFL.txt` (SIL Open Font License 1.1, for **Inter and Noto Sans CJK KR** — §2.3) already ships at
-the root of this package. Keep it there; do not add a second copy under `licenses/`, and do not
-add a second copy for the second font: the two upstream licence bodies are byte-identical, and
-what differs between them (the copyright statement and the Reserved Font Name) is reproduced in
+`OFL.txt` (SIL Open Font License 1.1, for **Manrope, Fraunces, Inter and Noto Sans CJK KR** — §2.3)
+already ships at the root of this package. Keep it there; do not add a second copy under
+`licenses/`, and do not add a second copy per font: the upstream licence bodies are byte-identical,
+and what differs between them (the copyright statement and the Reserved Font Name) is reproduced in
 §2.3 and carried inside each font's own name table.
 
 No BSD-3-Clause text is required because Apache-2.0 is elected for `moxcms` and `pxfm`. The full GPLv3 text is supplied at the package root as `LICENSE`; `LICENSING.md` states

@@ -310,6 +310,11 @@ pub mod logo {
 /// the page ground so a lit control separates from it without going white.
 pub const CHROME_LIT: [f32; 4] = rgb8(0x73, 0x73, 0xcb);
 pub const ACCENT: [f32; 4] = WARM_100;
+/// **The focus plate a table row wears** — the second comp's `rgba(255,255,255,.16)`, which is what
+/// its server cards and its settings cards both light with. White rather than a hue: the comp keeps
+/// its violet and its blue for MARKS (the avatar's gradient, the `ACTIVO` tag) and lights every
+/// surface it can focus the same way.
+pub const ROW_FOCUS_FILL: [f32; 4] = [1.0, 1.0, 1.0, 0.16];
 /// Near-black ink/glyphs drawn over [`ACCENT`].
 pub const ACCENT_INK: [f32; 4] = rgb8(0x2a, 0x16, 0x0c);
 /// Alias for [`ACCENT_INK`] read from the "ink over accent" intent. The one legitimate alias in this
@@ -372,6 +377,53 @@ pub const FIELD_WAITING_INK: [f32; 4] = WHITE;
 
 /// Idle (unfocused) control disc/pill fill — solid dark, faintly translucent.
 pub const CONTROL_IDLE_FILL: [f32; 4] = with_a(NEUTRAL_600, 0.92);
+/// **The supplied mockup's chrome palette, read from its own computed styles** at 1920x1080
+/// (2026-11-25, the second revision of the comp). Neutral dark, not the warm brown the first one
+/// used: `--bg #101010`, `--text #fff`, `--muted rgba(255,255,255,.55)` and, for the mark that is
+/// still spelled `--gold` in its stylesheet, `#00a4dc` — Jellyfin blue. Every rim and fill in the
+/// mockup is white at an alpha, which is why most of these are `with_a(WHITE, …)`.
+pub const CHROME_INK: [f32; 4] = rgb8(0xff, 0xff, 0xff);
+/// The comp's `--accent`, the avatar gradient's warm end and the app's own red.
+pub const CHROME_ACCENT: [f32; 4] = rgb8(0xaa, 0x5c, 0xc3);
+/// `#mainnav button.is-focused { background: var(--accent) }` — the bar's focused tab, which is this
+/// violet and not the app's warm `ACCENT` (#ffcea3). Its ink is white (`color:#fff`).
+pub const TAB_FOCUS_FILL: [f32; 4] = rgb8(0xaa, 0x5c, 0xc3);
+pub const CHROME_TEXT: [f32; 4] = rgb8(0xff, 0xff, 0xff);
+pub const CHROME_MUTED: [f32; 4] = [1.0, 1.0, 1.0, 0.55];
+pub const CHROME_INK_ON_LIT: [f32; 4] = rgb8(0xff, 0xff, 0xff);
+/// `#mainnav button.current { background: rgba(255,255,255,.09) }`.
+pub const CHROME_SELECTED_FILL: [f32; 4] = [1.0, 1.0, 1.0, 0.09];
+/// The comp has no capsule track; what is left of that idea is its hairline weight.
+pub const CHROME_TRACK_RIM: [f32; 4] = [1.0, 1.0, 1.0, 0.07];
+/// `.iconbtn` stands on the bar with no plate of its own.
+pub const CHROME_GEAR_RIM: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
+/// `#topbar { background: rgba(16,16,16,.82) }`.
+pub const CHROME_GROUND: [f32; 4] = rgb8(0x10, 0x10, 0x10);
+/// `.sm-panel` — the server dialog's OPAQUE card (`#1b1b1e`), its 14% white hairline, the row's
+/// fills and rims, the active server's `--ok` dot and the `ACTIVO` tag.
+pub const CHROME_PANEL: [f32; 4] = rgb8(0x1b, 0x1b, 0x1e);
+pub const CHROME_PANEL_RIM: [f32; 4] = [1.0, 1.0, 1.0, 0.14];
+pub const CHROME_ROW_FILL: [f32; 4] = [1.0, 1.0, 1.0, 0.05];
+pub const CHROME_ROW_RIM: [f32; 4] = [1.0, 1.0, 1.0, 0.10];
+pub const CHROME_ROW_FOCUS: [f32; 4] = [1.0, 1.0, 1.0, 0.16];
+pub const CHROME_ROW_FOCUS_RIM: [f32; 4] = [1.0, 1.0, 1.0, 0.40];
+pub const CHROME_OK: [f32; 4] = rgb8(0x4c, 0xaf, 0x50);
+/// The comp still spells this token `--gold`; its value is Jellyfin blue, and it is what the
+/// `ACTIVO` tag and the interface's own accent marks are set in.
+pub const CHROME_GOLD: [f32; 4] = rgb8(0x00, 0xa4, 0xdc);
+pub const CHROME_GROUND_A: f32 = 0.82;
+/// `#avatar`: `linear-gradient(135deg,#aa5cc3,#00a4dc)`, no rim, ink `#fff3e4` at
+/// `font-weight:800; font-size:19px`.
+pub const CHROME_AVATAR_TOP: [f32; 4] = rgb8(0xaa, 0x5c, 0xc3);
+pub const CHROME_AVATAR_BOT: [f32; 4] = rgb8(0x00, 0xa4, 0xdc);
+pub const CHROME_AVATAR_RIM: [f32; 4] = [1.0, 1.0, 1.0, 0.0];
+pub const CHROME_AVATAR_RIM_W: f32 = 0.0;
+pub const CHROME_AVATAR_INK: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
+pub const CHROME_AVATAR_SZ: std::os::raw::c_int = 19;
+/// The mockup's initial-avatar fallback: its red-to-plum gradient and cream ink.
+pub const PROFILE_FALLBACK_TOP: [f32; 4] = rgb8(0xed, 0x3e, 0x35);
+pub const PROFILE_FALLBACK_BOT: [f32; 4] = rgb8(0x8a, 0x2f, 0x5c);
+pub const PROFILE_FALLBACK_INK: [f32; 4] = rgb8(0xff, 0xf3, 0xe4);
 /// White glyph/label over an idle control. Both grounds ink it the same: the design system states
 /// one `--control-idle-ink`, and the UNKEYED face below is a white film over a black ramp, which is
 /// still a dark surface — see [`CONTROL_IDLE_FILL_UNKEYED`].
@@ -1113,7 +1165,9 @@ pub const TAB_TRACK_BOT: [f32; 4] = scrim_black(TAB_TRACK_A_BOT);
 /// walks up from this stop until the idle labels clear `TRACK_INK_CONTRAST`, so what changed is
 /// only how much of the artwork a DARK page shows through, which is the ask. The pinned exposure
 /// in `widgets_tab_capsule_motion_tests` moved 1.86 → 1.77 as a consequence.
-pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.18);
+/// **Mockup 2's own bar weight**: `#topbar { background: rgba(16,16,16,.82) }`. The first comp's
+/// track was .55; this one is a heavier slab, and the neutral ink it carries is why.
+pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.82);
 /// **The material's LIGHT FLOOR — the amount of itself the glass shows where the page shows
 /// nothing.** Two numbers, both measured against the real thing rather than chosen.
 ///
@@ -1139,7 +1193,9 @@ pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.18);
 pub const TAB_GLASS_LIFT_FLOOR: f32 = 0.045;
 /// The glass track's bottom stop — see [`TAB_GLASS_TOP`]. The authored spread stays 0.16
 /// (`tab_glass_stops` derives its taper from it), so the floor's move carries the bottom with it.
-pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.34);
+/// **The second comp's bar is one slab, not a gradient**: `rgba(16,16,16,.82)` over the whole 79px,
+/// so the two stops are the same weight and the material's spread is zero.
+pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.82);
 /// The track material's two weights, exposed as alphas because the focused **profile chip** wears
 /// the same material and FADES it in with its unfurl (`scrim_black(A * e)`) — one material and one
 /// pair of weights whether it is painted at full strength or on the way in, which is what keeps the
@@ -1165,9 +1221,9 @@ pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.34);
 /// make this bar lighter is [`super::widgets::TRACK_INK_CONTRAST`] — the 4:1 promise is what puts
 /// the density where it is, and `the_lift_never_spends_the_labels_contrast` marks the boundary: the
 /// guarantee survives a ceiling of .62 and dies at .60.
-pub const TAB_TRACK_A_TOP: f32 = 0.72;
+pub const TAB_TRACK_A_TOP: f32 = 0.82;
 /// See [`TAB_TRACK_A_TOP`].
-pub const TAB_TRACK_A_BOT: f32 = 0.82;
+pub const TAB_TRACK_A_BOT: f32 = 0.55;
 /// A PLATED tab segment's fill — the detail page's season tabs, which sit bare on the backdrop rather
 /// than inside the top bar's track and so provide their own ground
 /// ([`crate::ui::widgets::TabPill::plated`], `Details Screen.dc.html`). The selected one is a step up

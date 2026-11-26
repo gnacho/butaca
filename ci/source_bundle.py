@@ -21,6 +21,9 @@ ROOT_FILES = {'Makefile', 'LICENSE', 'LICENSING.md', 'THIRD-PARTY-NOTICES.md',
               'TRADEMARKS.md', '.gitignore', 'AGENTS.md', 'CLAUDE.md'}
 ROOT_DIRS = {'src', 'include', 'rust-modules', 'assets', 'ci', 'tools', 'docs', 'tests', 'licenses', 'locales', '.agents'}
 PKG_FILES = {'OFL.txt', 'appfont.ttf', 'appfont-bold.ttf', 'appfont-cjk.ttf',
+             'appfont-manrope-400.ttf', 'appfont-manrope-600.ttf', 'appfont-manrope-700.ttf',
+             'appfont-brand-700.ttf', 'appfont-clock-700.ttf', 'appfont-manrope-800.ttf', 'appfont-manrope-500.ttf', 'appfont-manrope-500-sub.ttf',
+             'appfont-fraunces-600.ttf', 'appfont-fraunces-700.ttf',
              'appinfo.json', 'icon.png', 'icon160.png', 'icon320.png', 'icon400.png',
              'largeIcon.png', 'splash.png'}
 PRIVATE_NAMES = {'.tv-host', '.tv-mac', '.tv-dpad-pass', '.tv-remote-url',

@@ -866,8 +866,16 @@ def metric_strings(doc):
     if not isinstance(query, dict):
         return False, []
     kind = query.get("kind")
+    base = {"kind", "sz"}
+    if "role" in query:
+        # The five variants of rust-modules/src/text.rs FontRole, by source: the two the product
+        # has always had, plus the three cuts the supplied design mockup is set in (its navigation,
+        # its wordmark and its tabular-figure clock).
+        if query["role"] not in ("Interface", "Display", "InterfaceMedium", "Brand", "Clock"):
+            return False, []
+        base.add("role")
     if kind == "Width":
-        if set(query) != {"kind", "text", "sz", "bold"}:
+        if set(query) != base | {"text", "bold"}:
             return False, []
         text = query["text"]
         if (not isinstance(text, list) or len(text) > MAX_METRIC_TEXT_BYTES
@@ -881,7 +889,7 @@ def metric_strings(doc):
         except UnicodeDecodeError:
             return False, []
     if kind in ("Cap", "Line"):
-        if set(query) != {"kind", "sz"} or not _canonical_int(query["sz"], I32_MIN, I32_MAX):
+        if set(query) != base or not _canonical_int(query["sz"], I32_MIN, I32_MAX):
             return False, []
         return True, []
     return False, []

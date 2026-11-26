@@ -30,17 +30,29 @@ impl LegacyMeasure {
     pub(crate) fn bounds(&self, s: &CStr, sz: c_int, bold: bool) -> (f32,f32) {
         crate::text::text_bounds(s.as_ptr(),sz,bold as c_int)
     }
+    pub(crate) fn bounds_role(&self, role: crate::text::FontRole, s: &CStr, sz: c_int, bold: bool) -> (f32,f32) {
+        crate::text::text_bounds_role(role, s.as_ptr(), sz, bold as c_int)
+    }
 }
 
 impl crate::ui::machine::Measure for LegacyMeasure {
     fn width(&self, s: &CStr, sz: c_int, bold: bool) -> f32 {
         crate::text::text_width(s.as_ptr(), sz, bold as c_int)
     }
+    fn width_role(&self, s: &CStr, sz: c_int, bold: bool, role: crate::text::FontRole) -> f32 {
+        crate::text::text_width_role(role, s.as_ptr(), sz, bold as c_int)
+    }
     fn cap_h(&self, sz: c_int) -> f32 {
         crate::text::cap_h(sz, 0)
     }
+    fn cap_h_role(&self, sz: c_int, role: crate::text::FontRole) -> f32 {
+        crate::text::cap_h_role(role, sz, 0)
+    }
     fn line_h(&self, sz: c_int) -> f32 {
         crate::text::text_height(sz, 0)
+    }
+    fn line_h_role(&self, sz: c_int, role: crate::text::FontRole) -> f32 {
+        crate::text::text_height_role(role, sz, 0)
     }
     fn live_font(&self) -> bool {
         true
@@ -2337,7 +2349,7 @@ pub(crate) fn hero_ground(
 /// The profile chip's diameter: ONE control height with the tab pills and the circle-button
 /// family, so the focused chip's capsule — the avatar plus [`TAB_TRACK_PAD`] all round — is
 /// exactly the tab-bar track's band, and the two sit concentric on the top chrome line.
-pub(crate) const CHIP_D: f32 = TAB_PILL_H;
+pub(crate) const CHIP_D: f32 = 46.0;
 /// Avatar → name air inside the expanded chip, and the capsule's tail past the name. The tail is
 /// bigger so the name isn't crowded against the round end (the tab track reads the same: its own
 /// 8px inset plus the end pill's 18px label padding).
@@ -2360,8 +2372,8 @@ const CHIP_NAME_MAX: f32 = 320.0;
 /// its pills. Written as `MARGIN_X` flat until 2026-08-23, which put the focused capsule's left edge
 /// at 88, i.e. 8px into the overscan exclusion zone, on the three screens that wear this bar.
 pub(crate) const CHIP_FRAME: Rect = Rect::new(
-    crate::ui::consts::MARGIN_X + TAB_TRACK_PAD,
-    TOP_BAR_Y,
+    CHROME_MARGIN_X,
+    TOP_BAR_LINE_Y,
     CHIP_D,
     CHIP_D,
 );
@@ -2369,15 +2381,15 @@ pub(crate) const CHIP_FRAME: Rect = Rect::new(
 /// The active server's badge, immediately right of the Butaca wordmark. Hidden with one source.
 pub(crate) const INSTANCE_FRAME: Rect = Rect::new(
     crate::ui::consts::MARGIN_X + 190.0,
-    TOP_BAR_Y,
+    TOP_BAR_LINE_Y,
     CHIP_D,
     CHIP_D,
 );
 
 /// The Settings gear mirrors the profile chip at the right safe-area edge.
 pub(crate) const SETTINGS_GEAR_FRAME: Rect = Rect::new(
-    crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X - TAB_TRACK_PAD - CHIP_D,
-    TOP_BAR_Y,
+    GEAR_X,
+    TOP_BAR_LINE_Y,
     CHIP_D,
     CHIP_D,
 );
@@ -2621,38 +2633,26 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
     // band is priced as the union of both surfaces at rest — `band_region`, `BAND_REGION_X0` —
     // and measured on the set with the surround up: `home-hero` and `home-fold` both clear 50.
     let e = expand.clamp(0.0, 1.0);
-    {
+    // **At rest the avatar stands bare**, which is what the mockup draws: `#avatar` is a 46px disc
+    // with a 2px rim and no surround. The capsule is the FOCUSED control's own material, so it
+    // arrives with the unfurl instead of always being there — see `chip_cap`.
+    if e > 0.002 {
         // The rect comes from [`chip_cap`] rather than being built here, because it is also what
         // [`GLASS_TRACK_MAX`] is solved against — see there.
         let cap = chip_cap(e, name_w);
         // the tab track's own material — literally the same material: glass when the track
         // resolved glass this frame, the flat capsule when it did not.
-        if !chip_capsule(p, cap, 1.0, bar_material) {
-            p.rect_sheened(
-                cap,
-                cap.h * 0.5,
-                theme::scrim_black(theme::TAB_TRACK_A_TOP),
-                theme::scrim_black(theme::TAB_TRACK_A_BOT),
-            );
-        }
-        // the name rides in on the TAIL of the widening, so the glyphs land in a capsule that has
-        // already made room for them instead of smearing across the grow
-        let na = ((e - 0.55) / 0.45).clamp(0.0, 1.0);
-        if na > 0.004 {
-            let ty = crate::text::text_vcenter_y(theme::size::BODY, 1, r.cy());
-            p.alpha(na).text(
-                name_c.as_ptr(),
-                r.x + d + CHIP_NAME_GAP,
-                ty,
-                theme::size::BODY,
-                theme::TEXT_PRIMARY,
-                0,
-                1,
-            );
-        }
+        // **The second comp's `#avatar` has no focus face at all**: no capsule to widen into, no
+        // ring, no lift — the disc IS the control, and the comp gives it no `:hover` rule to wear.
+        // What used to be drawn here was the first comp's unfurling name capsule.
+        let _ = (cap, bar_material);
+        // **The second comp's avatar is a bare disc: no unfurl, no name.** The first comp grew a
+        // capsule carrying the profile name on focus; this one keeps the row to one 46px circle and
+        // lets the nav start 20px to its right, so there is nothing here to widen into.
+        let _ = (name_c, CHIP_NAME_GAP);
     }
-    // resting shadow + perimeter stroke always; lift the shadow with the focus (same as shelf tiles)
-    p.focus_shadow(r, d * 0.5, e);
+    // No lift: the comp's avatar is a flat disc with no focus face (see above).
+    let _ = (e,);
     let mut drew = false;
     if !thumb_s.is_empty() {
         let (t, tw, th) = resolve_tex_wh_on(crate::registry::current(), thumb_s, 128, 128, 0);
@@ -2665,11 +2665,15 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
         }
     }
     if !drew {
-        p.rect_sheened(
+        // The mockup's `#avatar`: a 135deg red→plum disc under a 2px 25% peach rim.
+        p.rect_rimmed_w(
             r,
             d * 0.5,
-            theme::CONTROL_IDLE_FILL,
-            theme::CONTROL_IDLE_FILL,
+            theme::CHROME_AVATAR_TOP,
+            theme::CHROME_AVATAR_BOT,
+            theme::CHROME_AVATAR_RIM,
+            0.0,
+            theme::CHROME_AVATAR_RIM_W,
         );
         if initial_c.to_bytes().is_empty() {
             // nobody to name — signed out, or signed in with no roster landed yet. A generic
@@ -2681,15 +2685,19 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
                 theme::TEXT_SECONDARY,
             );
         } else {
-            let ty = crate::text::text_vcenter_y(theme::size::HEADLINE, 1, r.y + d * 0.5);
-            p.text(
+            let ty = crate::text::text_vcenter_y(theme::CHROME_AVATAR_SZ, 1, r.y + d * 0.5);
+            // The reference's initial is Manrope **800** at 19px (`#avatar { font-weight: 800 }`),
+            // not the interface bold: the ExtraBold cut has a role of its own so the disc's one
+            // letter is its own weight rather than a notch light.
+            p.text_role(
+                crate::text::FontRole::Avatar,
                 initial_c.as_ptr(),
                 r.x + d * 0.5,
                 ty,
-                theme::size::HEADLINE,
-                theme::TEXT_PRIMARY,
+                theme::CHROME_AVATAR_SZ,
+                theme::CHROME_AVATAR_INK,
                 1,
-                1,
+                0,
             );
         }
     }
@@ -2850,6 +2858,30 @@ pub(crate) fn detail_back_frame() -> Rect {
 
 pub(crate) fn draw_back_control(p: Painter, focused: bool) {
     draw_back_control_at(p, focused, CHIP_FRAME);
+}
+
+/// **The mockup's settings gear, drawn from its own numbers.** `.iconbtn` is a 46px disc on
+/// `rgba(19,11,7,.55)` under a 1px `rgba(255,206,163,.16)` rim, with a 21px gear in `--muted`;
+/// focused it becomes a solid `--text` plate with `#2a160c` ink and the `.is-focused` 1.1 pop.
+/// The shared [`CircleButton`] is close and is NOT the same object: its idle face is the 92% keyed
+/// plate and its edge is the design system's white rim, which is a visible difference on a bar the
+/// owner compares against the reference.
+pub(crate) fn draw_settings_gear(p: Painter, frame: Rect, focused: bool) {
+    /// (disc 46 - the mockup's 21px icon) / 2.
+    const GEAR_ICON_INSET: f32 = 12.5;
+    let r = if focused { frame.scaled(1.1) } else { frame };
+    let rad = r.h * 0.5;
+    let glyph = r.inset(GEAR_ICON_INSET);
+    if focused {
+        // `.iconbtn.is-focused { background: var(--text); color:#101010; transform: scale(1.1) }` —
+        // a WHITE plate with the comp's own ground for ink, not the white ink the bar's tabs wear.
+        p.rrect(r, rad, rad, theme::CHROME_TEXT);
+        crate::ui::icons::draw(p, crate::ui::icons::Icon::Settings, glyph, theme::CHROME_GROUND);
+    } else {
+        let ground = theme::scrim_black(theme::CHROME_GROUND_A);
+        p.rect_rimmed(r, rad, ground, ground, theme::CHROME_GEAR_RIM, 0.0);
+        crate::ui::icons::draw(p, crate::ui::icons::Icon::Settings, glyph, theme::CHROME_MUTED);
+    }
 }
 
 /// [`draw_back_control`] in an explicit box — the detail page's Back sits at the very top of the
@@ -4672,6 +4704,48 @@ const NOTE_TICK_D: f32 = NOTE_SZ as f32;
 /// unselected segment) while never competing with the label.
 const NOTE_INK_A: f32 = 0.75;
 
+/// The three inks a strip inks its pills with, in the order selection and focus compose them.
+/// The DEFAULT trio is the app's design-system one; [`StripInks::MOCKUP`] is the supplied
+/// mockup's own, which the shared top bar wears because the owner holds that bar against the
+/// reference. A strip passes its trio down, so the two rows cannot borrow each other's inks.
+#[derive(Clone, Copy)]
+pub(crate) struct StripInks {
+    pub idle: [f32; 4],
+    pub selected: [f32; 4],
+    pub focused: [f32; 4],
+}
+
+impl StripInks {
+    pub(crate) const DEFAULT: Self = Self {
+        idle: theme::TEXT_READING,
+        selected: theme::TEXT_PRIMARY,
+        focused: crate::ui::ACCENT_INK,
+    };
+    /// `#mainnav button` idle `--muted`, `.current` `--text-hi`, `.is-focused` `#2a160c`.
+    pub(crate) const MOCKUP: Self = Self {
+        idle: theme::CHROME_MUTED,
+        selected: theme::CHROME_INK,
+        focused: theme::CHROME_INK_ON_LIT,
+    };
+    /// The pill's ink at mixes `(focus, selected)`.
+    ///
+    /// **`cross`, not `mix`** — and that was the bug behind a bar whose current tab kept the idle
+    /// grey. `theme::mix` deliberately keeps the FIRST colour's alpha ("a tint has one opacity and
+    /// two hues"), and these three roles have three different ones: `--muted` is white at .55,
+    /// `--text-hi` is white, and the focused ink is opaque. Mixing toward the selected role with
+    /// `mix` therefore moved the hue and left the opacity at .55, so `ACTIVO`-white arrived on screen
+    /// as the same grey it was supposed to leave. A cross-fade between two ROLES is exactly what
+    /// `theme::cross` is documented for.
+    fn ink(self, focus: f32, selected: f32) -> [f32; 4] {
+        theme::cross(
+            theme::cross(self.idle, self.selected, selected.clamp(0.0, 1.0)),
+            self.focused,
+            focus.clamp(0.0, 1.0),
+        )
+    }
+}
+
+
 // ---- TabPill: a rounded pill with a centered label, in one of two state models (TabStyle). ----
 pub struct TabPill {
     pub frame: Rect,
@@ -4688,6 +4762,15 @@ pub struct TabPill {
     mix: Option<(f32, f32)>,
     /// see [`TabPill::ground`] — reaches [`TabStyle::Button`] and nothing else.
     ground: ControlGround,
+    /// The face the label is measured and drawn in. The shared top bar's labels are the mockup's
+    /// Manrope 600 ([`crate::text::FontRole::InterfaceMedium`]); every other strip keeps the
+    /// interface regular the rest of the app draws in.
+    role: crate::text::FontRole,
+    inks: StripInks,
+    /// Paint this pill's label one glyph at a time at its KERNED origins — see
+    /// [`TabPill::draw_kerned`]. Set by the shared top bar, whose row is laid out from the same
+    /// kerned advances the reference uses.
+    kerned: bool,
 }
 impl TabPill {
     /// Width from the actual bold glyph advances, shared by paint and hit geometry.
@@ -4706,6 +4789,9 @@ impl TabPill {
             plated: false,
             mix: None,
             ground: ControlGround::Keyed,
+            role: crate::text::FontRole::Interface,
+            inks: StripInks::DEFAULT,
+            kerned: false,
         }
     }
     pub fn focused(mut self, f: bool) -> Self {
@@ -4773,6 +4859,15 @@ impl TabPill {
     /// says the labels "dim when I move", shaping this one call (`focus.powi(2)`, a smoothstep) is the
     /// whole fix — but do it HERE, not with a second spring, or the ink starts leading the fill.
     pub(crate) fn mixed_ink(focus: f32, selected: f32) -> [f32; 4] {
+        StripInks::DEFAULT.ink(focus, selected)
+    }
+    /// [`mixed_ink`](Self::mixed_ink) in a named trio (the shared top bar's mockup inks).
+    pub(crate) fn mixed_ink_with(inks: StripInks, focus: f32, selected: f32) -> [f32; 4] {
+        inks.ink(focus, selected)
+    }
+    /// The old body, kept as the expression the two wrappers above share.
+    #[allow(dead_code)]
+    fn mixed_ink_body(focus: f32, selected: f32) -> [f32; 4] {
         // **The idle ink is `TEXT_READING`, one rung brighter than the `TEXT_TERTIARY` this row wore
         // for most of its life, and it is what pays for the whole material.** The scrim is solved so
         // this ink clears [`TRACK_INK_CONTRAST`]: a muted grey needs .61 of black over the Office
@@ -4789,6 +4884,21 @@ impl TabPill {
             crate::ui::ACCENT_INK,
             focus.clamp(0.0, 1.0),
         )
+    }
+    /// Draw and measure this pill's label in an explicit face — the top bar's mockup 600.
+    pub(crate) fn role(mut self, role: crate::text::FontRole) -> Self {
+        self.role = role;
+        self
+    }
+    /// Paint the label glyph by glyph at its kerned origins ([`Self::draw_kerned`]).
+    pub(crate) fn kerned(mut self, on: bool) -> Self {
+        self.kerned = on;
+        self
+    }
+    /// Ink this pill through a named trio rather than the design system's own.
+    pub(crate) fn inks(mut self, inks: StripInks) -> Self {
+        self.inks = inks;
+        self
     }
     /// attach a trailing [`TabNote`] (the watched tick).
     pub fn note(mut self, note: TabNote) -> Self {
@@ -4819,7 +4929,7 @@ impl TabPill {
         match self.mix {
             Some((fm, sm)) => {
                 let (fm, sm) = (fm.clamp(0.0, 1.0), sm.clamp(0.0, 1.0));
-                let ink = Self::mixed_ink(fm, sm);
+                let ink = self.inks.ink(fm, sm);
                 // The plated strip's idle ground stays the PILL's, because it is a constant per pill
                 // rather than a state — but it must not lie on top of the OPAQUE focus capsule the
                 // strip drew under it (0.08 of white over `ACCENT` is a ~2/255 lift and a bright rim
@@ -4866,6 +4976,47 @@ impl TabPill {
         }
     }
 }
+impl TabPill {
+    /// **The label, painted one glyph at a time at its KERNED origins.**
+    ///
+    /// The reference is a browser: it lays a run out with the font's kerned metric and puts each
+    /// glyph on a whole pixel. SDL_ttf advances a whole STRING by the unkerned metric and snaps each
+    /// glyph, which inside a pill laid out from the kerned width pulled the run ~1.6px wide and put
+    /// every gap a pixel off (`Favoritos`/`Buscar` measured +3px of ink against the reference).
+    /// Splitting the run — each glyph its own one-glyph run, at the offset [`crate::kern::glyphs`]
+    /// gives — makes the painting agree with the box it stands in.
+    ///
+    /// `None` when the face cannot draw every character of the string (a script that needs the
+    /// Inter/CJK fallback): then the rasterizer's own shaping is the only correct one, and the
+    /// caller draws the run whole.
+    fn draw_kerned(&self, p: Painter, ink: [f32; 4], bold: bool, frame: Rect) -> Option<f32> {
+        if self.label.is_null() {
+            return None;
+        }
+        let text = unsafe { std::ffi::CStr::from_ptr(self.label) }.to_str().ok()?;
+        let (total, glyphs) = crate::kern::glyphs(self.role, text, self.sz)?;
+        let x0 = frame.x + (frame.w - total) * 0.5;
+        for g in glyphs {
+            let bytes = text.as_bytes().get(g.at..g.at + g.len)?;
+            // One UTF-8 scalar at most; the buffer is the C string the painter needs, alive for
+            // the length of this call and never handed anywhere that outlives it.
+            let mut buf = [0u8; 8];
+            if bytes.len() >= buf.len() {
+                return None;
+            }
+            buf.get_mut(..bytes.len())?.copy_from_slice(bytes);
+            let mut lab = Label::new(buf.as_ptr() as *const c_char, self.sz, ink)
+                .face(self.role)
+                .h(HAlign::Left)
+                .v(VAlign::Middle);
+            if bold {
+                lab = lab.bold();
+            }
+            lab.draw(p, Rect::new(x0 + g.dx, frame.y, frame.w, frame.h));
+        }
+        Some(total)
+    }
+}
 impl View for TabPill {
     fn draw(&self, _e: &Env, p: Painter) {
         let r = self.frame;
@@ -4905,7 +5056,12 @@ impl View for TabPill {
         let nw = Self::note_w(self.note);
         let frame = Rect::new(r.x, r.y, r.w - nw, r.h);
         let run = |p: Painter, bold: bool| {
-            let mut lab = Label::new(self.label, self.sz, ink).h(HAlign::Center);
+            if self.kerned {
+                if let Some(w) = self.draw_kerned(p, ink, bold, frame) {
+                    return w;
+                }
+            }
+            let mut lab = Label::new(self.label, self.sz, ink).h(HAlign::Center).face(self.role);
             if bold {
                 lab = lab.bold();
             }
@@ -4930,10 +5086,11 @@ impl View for TabPill {
             // `text_width` this line called directly.
             {
                 use crate::ui::machine::Measure as _;
-                LegacyMeasure.width(
+                LegacyMeasure.width_role(
                     unsafe { std::ffi::CStr::from_ptr(self.label) },
                     self.sz,
                     true,
+                    self.role,
                 )
             }
         };
@@ -5151,7 +5308,7 @@ pub(crate) fn draw_strip(
             continue;
         }
         let (fm, sm) = strip.mixes((pill.x, pill.w));
-        TabPill::new(lay.label.as_ptr(), theme::size::BODY, pill)
+        TabPill::new(lay.label.as_ptr(), TAB_TEXT_SZ, pill)
             .plated()
             .mix(fm, sm)
             .draw(&env, p);
@@ -5310,6 +5467,7 @@ impl TabStrip {
     /// Call this BEFORE the pill loop: the capsules are the pills' ground, and a label drawn under an
     /// opaque focus capsule is a label nobody can read.
     pub(crate) fn draw(&self, p: Painter, top: f32, h: f32, ground: TabGround) {
+        let plated_now = matches!(ground, TabGround::Plated { .. });
         let cap = |c: &Capsule, col: [f32; 4], rim: Option<[f32; 4]>, scale: f32, cast: bool| {
             let (x, w) = c.span();
             let a = c.alpha();
@@ -5318,8 +5476,16 @@ impl TabStrip {
                 // The pop + press dip, about the capsule's own centre — 1.0 for a tracked strip,
                 // which never scales. The RADIUS stays keyed to the drawn height so a scaled capsule
                 // is still a capsule rather than a rounded rectangle.
-                let r = Rect::new(x, top, w, h).scaled(scale);
-                let h = r.h;
+                // **The second comp's tab plates are rounded SQUARES, not capsules**: its
+                // `#mainnav button` is a 45x39 box at `border-radius:10px` inside a 43px row, so a
+                // tracked strip insets the plate 2px vertically and pins its radius. The season
+                // strip (plated) keeps the capsule it has always drawn.
+                let (r, rad) = if plated_now {
+                    (Rect::new(x, top, w, h).scaled(scale), h * 0.5)
+                } else {
+                    let r = Rect::new(x, top + 2.0, w, (h - 4.0).max(1.0)).scaled(scale);
+                    (r, TAB_PILL_RAD)
+                };
                 // The lift every other focused control face wears (`control_cast`, via
                 // `Button::plate`) — owner correction, 2026-09-06: a plated strip's focused pill IS
                 // a control face (this fn's own doc says so, two paragraphs down) and a control face
@@ -5328,7 +5494,7 @@ impl TabStrip {
                 // for a TRACKED pill or the selection plate — see the call sites' own comments for
                 // why each of those stays flat.
                 if cast {
-                    control_cast(p, r, h * 0.5);
+                    control_cast(p, r, rad);
                 }
                 match rim {
                     // On a GLASS track the selection plate is a piece of the same material, not a
@@ -5344,21 +5510,24 @@ impl TabStrip {
                     // the same expression `control_rim` makes.
                     Some(rc) => p.alpha(a).rect_rimmed(
                         r,
-                        h * 0.5,
+                        rad,
                         col,
                         col,
                         rc,
                         theme::GLASS_RIM_LIGHT[3] - rc[3],
                     ),
-                    None => p.alpha(a).rrect(r, h * 0.5, h * 0.5, col),
+                    None => p.alpha(a).rrect(r, rad, rad, col),
                 }
             }
         };
         let plated = matches!(ground, TabGround::Plated { .. });
+        // A TRACKED strip is the shared top bar, and its two capsules are the mockup's own:
+        // `button.current` is a 12% --text wash, `button.is-focused` a solid --text with dark ink.
+        // A PLATED strip stands bare on artwork and keeps the design system's plate story.
         let sel_col = if plated {
             theme::TAB_PLATE_SELECTED_OVER
         } else {
-            theme::OVERLAY_FOCUS_PILL
+            theme::CHROME_SELECTED_FILL
         };
         // The SELECTION capsule never scales, on either strip. It marks which season you are
         // browsing, which is a fact about the page and not about the control under your thumb — and
@@ -5393,7 +5562,28 @@ impl TabStrip {
             TabGround::Plated { pop } => {
                 cap(&self.foc, theme::CHROME_LIT, Some(theme::CARD_SHEEN), pop, true)
             }
-            TabGround::Tracked { .. } => cap(&self.foc, theme::CHROME_LIT, None, 1.0, false),
+            // **The second comp's focused tab is the ACCENT**, not a white wash: `#mainnav
+            // button.is-focused { background: var(--accent); color:#fff; transform:scale(1.07);
+            // box-shadow:0 6px 24px -6px rgba(170,92,195,.6) }`. The white at 16% is the MENUS'
+            // focus face (server cards, settings cards); the bar's row lights in its accent.
+            TabGround::Tracked { .. } => {
+                // `box-shadow: 0 6px 24px -6px rgba(170,92,195,.6)` — the comp lifts its focused
+                // tab on a violet penumbra, which is what makes the plate read as sitting OVER the
+                // bar rather than being a flat swatch of it.
+                let (fx, fw) = self.foc.span();
+                let a = self.foc.alpha();
+                if a > 0.004 && fw > 0.5 {
+                    let r = Rect::new(fx, top + 2.0, fw, (h - 4.0).max(1.0)).scaled(TAB_FOCUS_SCALE);
+                    p.alpha(a).shadow(
+                        r,
+                        TAB_PILL_RAD,
+                        TAB_FOCUS_GLOW_BLUR,
+                        TAB_FOCUS_GLOW_DY,
+                        theme::with_a(theme::TAB_FOCUS_FILL, TAB_FOCUS_GLOW_A),
+                    );
+                }
+                cap(&self.foc, theme::TAB_FOCUS_FILL, None, TAB_FOCUS_SCALE, false)
+            }
         }
     }
     /// The `(focus, selected)` mixes pill `pill` (content-space `(x, w)`) should ink itself with —
@@ -5420,10 +5610,15 @@ impl TabStrip {
 /// The Search pill is SQUARE: 60×60, the icon's own air rather than a word's, so a mark does not
 /// wear the padding a label needs (`ui_kits/tv-app/SearchScreen.jsx`). Every other pill keeps
 /// [`TAB_PILL_PAD`].
-const TAB_ICON_PILL_W: f32 = TAB_PILL_H;
+/// The second comp's icon buttons are 45 wide in a 39px-tall box inside the 43px row
+/// (`#mainnav button.icon-only { padding: 10px 13px }`), and that 45 is what puts the labelled
+/// items where its DOM has them.
+const TAB_ICON_PILL_W: f32 = 45.0;
 /// The mark inside it, at 1.15× the strip's own type rung (BODY 28 → 32) — the design system's
 /// `--btn-icon-ratio`, the same ratio every icon-and-label control in the app uses.
-const TAB_ICON_D: f32 = 32.0;
+/// The mark's own box: the comp draws a 24px viewBox at 18px inside that button (its ink measures
+/// 17x15 on the capture), not the 32 the app's icon ratio would give a 60px pill.
+const TAB_ICON_D: f32 = 18.0;
 /// The top chrome band's y — the chip and the pills sit on it (Home and Library alike).
 ///
 /// **Derived from the overscan safe area, not chosen.** It was a bare `44.0` until 2026-08-23, which
@@ -5431,23 +5626,81 @@ const TAB_ICON_D: f32 = 32.0;
 /// exclusion zone — on the three screens that wear this bar, i.e. exactly the "main page" LG's
 /// checklist item #2 names. The band is measured from its OUTERMOST ink (the track, not the pills),
 /// so the whole control clears the frame rather than only the part you press.
-pub(crate) const TOP_BAR_Y: f32 = crate::ui::consts::MARGIN_Y + TAB_TRACK_PAD;
+/// The supplied mockup's top chrome line. The owner explicitly authorized this literal mockup
+/// position on 2026-11-23; page content keeps the LG safe area.
+pub(crate) const TOP_BAR_Y: f32 = 28.0;
+/// **The bar's own inline margin — 56px, the mockup's `#topbar { padding: 28px 56px 22px }`.**
+/// It is NOT the page's [`crate::ui::consts::MARGIN_X`] (96): the reference pulls the chrome out to
+/// 56 while its page copy keeps the wider gutter, and reading the page margin here put the avatar
+/// 40px inboard of the reference and the clock over its own gear.
+pub(crate) const CHROME_MARGIN_X: f32 = 48.0;
+/// **The bar's own plate height** — the mockup's `#topbar` is 109 tall (`28 + 59 + 22`) and wears a
+/// full-width `linear-gradient(180deg, rgba(19,11,7,.85), transparent)` behind everything in it, the
+/// nav track included. That plate is what makes the reference's chrome read as a band over the
+/// artwork rather than as three objects floating on it, and nothing in this app drew it until
+/// 2026-11-25.
+pub(crate) const TOP_BAR_BAND_H: f32 = 109.0;
+
+/// **The line the bar's 46px controls stand on**, centred in the mockup's 59px content band
+/// (`#topbar` is 109 tall, 28 top + 22 bottom): 28 + (59 - 46)/2. The avatar, the wordmark's box and
+/// the gear all sit on it; the pills sit [`TAB_PILL_Y`] down because they live inside the track.
+pub(crate) const TOP_BAR_LINE_Y: f32 = 16.0;
+/// **The second comp's bar height** — `#topbar { height: 79px }`, one slab with a 1px hairline under
+/// it. The first comp's 109px gradient band is gone.
+pub(crate) const TOP_BAR_H: f32 = 79.0;
+/// **The mockup's `#mainnav` content box, left edge** — measured off its DOM at 1920x1080
+/// (`nav.x` 700.84 + 1px border + 6px padding). The reference places the row with
+/// `justify-content: space-between`, so this number IS the brand group's width against the clock
+/// group's; it is written down rather than re-derived because the app's two sides are measured at
+/// draw and a 0.5px drift there would move the whole row.
+pub(crate) const TAB_ROW_X: f32 = 114.0;
+/// The mockup's `#clock` box — 48 wide (its `21:34` at 17px/700 with tabular figures) and
+/// right-aligned on the 56px margin, 18px left of the gear.
+pub(crate) const CLOCK_W: f32 = 48.0;
+/// `#topbar`'s right group `gap: 18px`, between the gear and the clock.
+pub(crate) const CLOCK_GAP: f32 = 18.0;
+/// **The gear's left edge** — the mockup's `.iconbtn` at `x 1752.02`: the clock's right edge is the
+/// `56px` margin (`1864`), the clock is 48 wide, then the right group's 18px gap.
+pub(crate) const GEAR_X: f32 = 1760.0;
 /// SAME element, SAME geometry as the detail season tabs (user directive): one control height
 /// (the 60px circle-button CD family) and the season tabs' ±18 label padding — the two rows
 /// must be indistinguishable as a control.
-pub(crate) const TAB_PILL_H: f32 = 60.0;
+/// The mockup's `#mainnav button`: `padding: 11px 24px` around a 17px/600 label, i.e. 45 tall.
+pub(crate) const TAB_PILL_H: f32 = 43.0;
+/// The mockup's button row begins inside the track's 6px padding and 1px border.
+pub(crate) const TAB_PILL_Y: f32 = 17.5;
+/// The supplied mockup's own navigation type rung and control padding.
+pub(crate) const TAB_TEXT_SZ: std::os::raw::c_int = 17;
+/// …and the face it is set in: the mockup's `font: 600 17px Manrope`. Manrope 700 (the interface
+/// bold) is a notch too heavy and ~1.5px wider per label, which walks the pill row and the track
+/// that encloses it off the reference, so the 600 cut has a role of its own.
+pub(crate) const TAB_TEXT_ROLE: crate::text::FontRole = crate::text::FontRole::InterfaceMedium;
 const TAB_PILL_PAD: f32 = 18.0;
 /// UNIFORM inset from the tab-bar track to the pills inside it, on every side: the pill (r=30) and
 /// the track (r=38) stay CONCENTRIC (outer radius = inner radius + gap), so an end pill's corner
 /// gap reads even all the way around — 16px ends against 8px verticals looked lopsided on the
 /// selected Home pill. The focused [`profile_chip_with`] wraps itself in the same inset, which is what
 /// makes its capsule and this track one band.
-pub(crate) const TAB_TRACK_PAD: f32 = 8.0;
+/// 6px of `#mainnav` padding plus its 1px border: the track's outer edge sits 7px from a pill.
+pub(crate) const TAB_TRACK_PAD: f32 = 0.0;
+/// `#mainnav button { border-radius: 10px }` — the second comp's tab plates are rounded squares, and
+/// this is the radius the tracked strip draws them at (the season strip keeps its capsule).
+pub(crate) const TAB_PILL_RAD: f32 = 10.0;
+/// `#mainnav button.is-focused { transform: scale(1.07) }`.
+const TAB_FOCUS_SCALE: f32 = 1.07;
+/// …and its `box-shadow: 0 6px 24px -6px rgba(170,92,195,.6)`, as one soft violet penumbra.
+const TAB_FOCUS_GLOW_BLUR: f32 = 24.0;
+const TAB_FOCUS_GLOW_DY: f32 = 6.0;
+const TAB_FOCUS_GLOW_A: f32 = 0.6;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
 /// host test instead of leaving it to a device capture.
-pub(crate) const TOP_BAR_BOTTOM: f32 = TOP_BAR_Y + TAB_PILL_H + TAB_TRACK_PAD; // 130
+/// The content clearance stays the television's original band even though the owner explicitly
+/// moved the VISIBLE mockup bar upward. Page copy keeps its legibility and safe-area contract.
+pub(crate) const TOP_BAR_BOTTOM: f32 = 130.0;
+/// The visible bar's own foot, for renderer regions that follow the ink rather than page content.
+const TOP_BAR_VISUAL_BOTTOM: f32 = TAB_PILL_Y + TAB_PILL_H + TAB_TRACK_PAD;
 
 /// **How far a page scrolls before the shared bar's brand has left it** - the owner's "el logo de
 /// Butaca que desaparezca en cuanto hacemos scroll" (2026-11-10).
@@ -5480,11 +5733,12 @@ pub(crate) fn brand_alpha(scroll: f32) -> f32 {
 /// Inter-pill air ≈ the season tabs' rhythm (their `TAB_ADVANCE` 52 minus the 2×18 pad the pills
 /// here already carry — pill edge to pill edge reads the same). Doubles as the scroll-into-view
 /// context margin, exactly as the season tabs use their advance.
-const TAB_GAP: f32 = 16.0;
+/// The second comp's `#mainnav { gap: 4px }`.
+const TAB_GAP: f32 = 4.0;
 /// How wide the pill strip may grow before it starts scrolling. The row stays CENTERED, but it
 /// must never reach the profile chip (a focus stop of its own at `MARGIN_X`), so the viewport is
 /// the screen less a symmetric chip-clearing margin, less the track's own inset on both ends.
-const TAB_SIDE_CLEAR: f32 = CHIP_FRAME.x + CHIP_D + theme::space::MD;
+const TAB_SIDE_CLEAR: f32 = crate::ui::consts::MARGIN_X + CHIP_D + theme::space::MD;
 const TAB_VIEW_MAX: f32 = crate::ui::consts::SCR_W - 2.0 * (TAB_SIDE_CLEAR + TAB_TRACK_PAD);
 /// **The shared top bar's outermost drawn chrome, for the overscan audit**
 /// ([`crate::ui::consts::SAFE`]) — the one band Home, the Library and Search all wear, i.e. the
@@ -5501,7 +5755,7 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
         "top tab track (widest)",
         Rect::new(
             (crate::ui::consts::SCR_W - tw) * 0.5,
-            TOP_BAR_Y - TAB_TRACK_PAD,
+            TAB_PILL_Y - TAB_TRACK_PAD,
             tw,
             TAB_PILL_H + 2.0 * TAB_TRACK_PAD,
         ),
@@ -5510,7 +5764,7 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
         "top tab pill row",
         Rect::new(
             (crate::ui::consts::SCR_W - TAB_VIEW_MAX) * 0.5,
-            TOP_BAR_Y,
+            TAB_PILL_Y,
             TAB_VIEW_MAX,
             TAB_PILL_H,
         ),
@@ -6230,7 +6484,7 @@ const GLASS_TRACK_TOUCH_MAX: f32 = crate::ui::consts::SCR_W - 2.0 * (CHIP_CAP_MA
 /// `0 .. TOP_BAR_BOTTOM + BLUR_MARGIN`. If the bar ever drops far enough that the top stops
 /// clamping, this over-states the region and [`the_whole_bands_glass_fits_one_region_budget`] (which
 /// asks `gfx::blur_region` itself, not this) is what will say so.
-const BAND_REGION_H: f32 = TOP_BAR_BOTTOM + crate::gfx::BLUR_MARGIN;
+const BAND_REGION_H: f32 = TOP_BAR_VISUAL_BOTTOM + crate::gfx::BLUR_MARGIN;
 
 /// [`crate::gfx::GLASS_REGION_BUDGET`], restated here because that constant is `cfg(test)` on a
 /// deliberate argument — *"a number the shipping build never reads should not pretend to"* — and
@@ -6341,7 +6595,12 @@ fn tab_metrics_from(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
 /// input geometry; the capability keeps host fixtures independent of a loaded SDL font.
 pub(crate) fn tab_widths(labels: &[String], icons: &[Option<crate::ui::icons::Icon>],
     measure: &dyn crate::ui::machine::Measure) -> Vec<f32> {
-    tab_metrics_from(labels, icons, |word| measure.width(word, theme::size::BODY, true)).1
+    tab_metrics_from(labels, icons, |word| {
+        crate::kern::layout_width(TAB_TEXT_ROLE, word, TAB_TEXT_SZ, || {
+            measure.width_role(word, TAB_TEXT_SZ, false, TAB_TEXT_ROLE)
+        })
+    })
+    .1
 }
 
 /// Publish control geometry from the strip's actual scroll and its current destination. Keys
@@ -6403,8 +6662,11 @@ fn with_tab_metrics_for<R>(data: TabLabels<'_>, f: impl FnOnce(&[CString], &[f32
         // identical glyph widths on both paths.
         use crate::ui::machine::Measure as _;
         let measure = LegacyMeasure;
-        let (labels, widths) = tab_metrics_from(data.labels, data.icons,
-            |l| measure.width(l, theme::size::BODY, true));
+        let (labels, widths) = tab_metrics_from(data.labels, data.icons, |l| {
+            crate::kern::layout_width(TAB_TEXT_ROLE, l, TAB_TEXT_SZ, || {
+                measure.width_role(l, TAB_TEXT_SZ, false, TAB_TEXT_ROLE)
+            })
+        });
         // The Search pill, last. It carries an EMPTY label so nothing here has to special-case a
         // missing entry — `labels.len()` stays the pill count, which is what the draw and the hit
         // test both walk — and a fixed square width, because a mark is not measured like a word.
@@ -6441,7 +6703,7 @@ impl TabGeometry<'_> {
     fn pill(&self, i: usize) -> Rect {
         Rect::new(
             self.clip.x + tab_pill_x(self.widths, i) - self.scroll,
-            TOP_BAR_Y,
+            TAB_PILL_Y,
             self.widths.get(i).copied().unwrap_or(0.0),
             TAB_PILL_H,
         )
@@ -6451,15 +6713,15 @@ impl TabGeometry<'_> {
 /// The one geometry expression consumed by both paint and the container's keyed members.
 fn tab_geometry(widths: &[f32], scroll: f32) -> TabGeometry<'_> {
     let view_w = tab_view_w(widths);
-    let x0 = (crate::ui::consts::SCR_W - view_w) * 0.5;
-    let clip = Rect::new(x0, TOP_BAR_Y, view_w, TAB_PILL_H);
+    let x0 = TAB_ROW_X;
+    let clip = Rect::new(x0, TAB_PILL_Y, view_w, TAB_PILL_H);
     TabGeometry {
         widths,
         scroll,
         clip,
         track: Rect::new(
             x0 - TAB_TRACK_PAD,
-            TOP_BAR_Y - TAB_TRACK_PAD,
+            TAB_PILL_Y - TAB_TRACK_PAD,
             view_w + 2.0 * TAB_TRACK_PAD,
             TAB_PILL_H + 2.0 * TAB_TRACK_PAD,
         ),
@@ -6595,6 +6857,10 @@ impl StripRender {
         // The track is the strip's width until the strip outgrows the screen, then it caps and the
         // pills scroll inside it — the track itself never moves.
         let x0 = geometry.clip.x;
+        // **No track.** The second comp dropped the capsule the first one wrapped this row in
+        // (`#mainnav` has no background, border or padding): its items stand straight on the bar's
+        // slab, and only the CURRENT one wears a plate of its own, which the selection capsule
+        // below already draws. `TAB_TRACK_PAD` is 0 so the geometry has no inset left to give.
         let track = geometry.track;
         // The dispatcher owns the whole chrome band as one z layer. This widget has no
         // source-pass or modal exclusion: declaration, source and visible walks share this draw.
@@ -6610,7 +6876,9 @@ impl StripRender {
         // that is about to draw FLAT (a popover is up, `flattabs` is armed, or the strip is wider
         // than `GLASS_TRACK_MAX`) must not pay for a number only the glass path consumes. It did,
         // on every screen wearing the bar, for as long as the app was open.
-        let glass_on = tab_glass_on(track.w);
+        // **The second comp has no track**, so nothing is solved, sampled or glass-plated for one:
+        // the row's items are its only surface. `TAB_TRACK_PAD` is the flag (`0` = no track).
+        let glass_on = TAB_TRACK_PAD > 0.0 && tab_glass_on(track.w);
         let groundlog = ground_log_armed();
         // …and FASTER while a polarity is being decided: the decision is gated on two independent
         // readings, so the sampler's rate is the decision's rate, and every frame of it is spent
@@ -6658,14 +6926,41 @@ impl StripRender {
             // Hoisted out of the call, because it is now the BAND's face and not just this
             // surface's: [`profile_chip_with`] draws the other half of it from this same `bar_material`
             // field, at the same stops and the same rim weight, off this one solve. See [`BarMaterial`].
+            // **The mockup's INKS, at the solver's weight — not a different material.**
+            // `#mainnav` is `rgba(19,11,7,.55)` behind a 1px `rgba(255,206,163,.09)` rim with a
+            // 14px backdrop blur. Two things in the old face were wrong against the reference:
+            // the ink was `g = track_lift(...)` — a LIGHT grey over a light ground, which is what
+            // washed this bar out over the demo library's sunset — and the rim was white.
+            //
+            // So the ink is the reference's warm brown and the rim is its peach, while the ALPHA
+            // keeps the solve with the reference's .55 as its floor: over the reference's own dark
+            // art the bar is .55 to the bit, and over a bright hero it darkens a touch further,
+            // which is the legibility floor this app has always kept (`TRACK_INK_CONTRAST`) and
+            // the reference never had to.
             let face = {
-                let (gt, gb) = tab_glass_stops(ground, &mut band.density);
-                let (rim, rim_lit) = track_rim(gt[3]);
+                // **The bar's weight is the reference's, full stop** (owner's decision, 2026-11-25,
+                // recorded rather than implied). The solve is still stepped — it owns the band's
+                // density spring and the groundlog — but its span is now the reference's own .55 at
+                // both ends (`TAB_GLASS_TOP`, `TAB_TRACK_A_TOP/BOT`), so what it returns IS .55 and
+                // the bar cannot darken with the artwork.
+                //
+                // What that costs is measured and accepted: the reference's `--muted` ink over a
+                // white ground sits at ~3.9:1, and no alpha short of ~0.97 (a black slab) would
+                // reach the app's old 4.5:1 floor against an ink this mid-toned. The old floor was
+                // reachable only because the old material paired a LIGHT ink with a light lift —
+                // the light lift is what washed this bar out against the reference. The mockup is
+                // the contract for this bar; contrast over a bright hero is the mockup's own.
+                let (gt, _gb) = tab_glass_stops(ground, &mut band.density);
+                let a = gt[3];
+                let ink = theme::with_a(theme::CHROME_GROUND, a);
                 crate::gfx::GlassFace {
-                    scrim_top: gt,
-                    scrim_bot: gb,
-                    rim,
-                    rim_lit,
+                    scrim_top: ink,
+                    scrim_bot: ink,
+                    rim: theme::CHROME_TRACK_RIM,
+                    rim_lit: theme::with_a(
+                        theme::CHROME_TEXT,
+                        theme::CHROME_TRACK_RIM[3].max(track_rim(gt[3]).1[3]),
+                    ),
                     rim_w: 1.0,
                 }
             };
@@ -6711,11 +7006,13 @@ impl StripRender {
             } else {
                 // …and the same here: the chain refused, so the flat dark material is what draws —
                 // said to the spring, not to the value the spring publishes. See the note below.
-                p.rect_sheened(
+                p.rect_rimmed(
                     track,
                     track.h * 0.5,
-                    theme::TAB_TRACK_TOP,
-                    theme::TAB_TRACK_BOT,
+                    theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
+                    theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
+                    theme::CHROME_TRACK_RIM,
+                    0.0,
                 );
             }
         } else {
@@ -6732,12 +7029,16 @@ impl StripRender {
             // was a reported bug twice over: the write clobbered a value the spring owned, so the
             // next frame cut it back, and the hysteresis read the same clobbered value and walked
             // the committed polarity across with it. Both are gone with the polarity itself.
-            p.rect_sheened(
-                track,
-                track.h * 0.5,
-                theme::TAB_TRACK_TOP,
-                theme::TAB_TRACK_BOT,
-            );
+            if TAB_TRACK_PAD > 0.0 {
+                p.rect_rimmed(
+                    track,
+                    track.h * 0.5,
+                    theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
+                    theme::with_a(theme::CHROME_GROUND, theme::CHROME_GROUND_A),
+                    theme::CHROME_TRACK_RIM,
+                    0.0,
+                );
+            }
         }
         // A strip wider than its track is a bounded panel, not a scrolling document, so this is the
         // scissor case (see the ui/CLAUDE.md clipping rule): a pill leaving the row is cut at the
@@ -6760,7 +7061,7 @@ impl StripRender {
         let cp = p.translate(x0 - sx, 0.0);
         self.top_strip.draw(
             cp,
-            TOP_BAR_Y,
+            TAB_PILL_Y,
             TAB_PILL_H,
             TabGround::Tracked { glass: glass_on },
         );
@@ -6787,9 +7088,17 @@ impl StripRender {
                     // pill the widths were laid out for, at the strip's own icon ratio.
                     let d = TAB_ICON_D;
                     let ir = Rect::new(r.x + (r.w - d) * 0.5, r.y + (r.h - d) * 0.5, d, d);
-                    crate::ui::icons::draw(p, icon, ir, TabPill::mixed_ink(fm, sm));
+                    crate::ui::icons::draw(
+                        p,
+                        icon,
+                        ir,
+                        TabPill::mixed_ink_with(StripInks::MOCKUP, fm, sm),
+                    );
                 } else {
-                    TabPill::new(labels[i].as_ptr(), theme::size::BODY, r)
+                    TabPill::new(labels[i].as_ptr(), TAB_TEXT_SZ, r)
+                        .role(TAB_TEXT_ROLE)
+                        .kerned(true)
+                        .inks(StripInks::MOCKUP)
                         .mix(fm, sm)
                         .draw(&env, p);
                 }

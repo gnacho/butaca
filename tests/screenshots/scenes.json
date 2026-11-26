@@ -39,6 +39,8 @@
     },
     {
       "name": "account-menu",
+      "free_regions": [[740, 468, 360, 42]],
+      "tolerance_reason": "The mock server's loopback port is ephemeral and the centered server dialog renders that complete address under the active profile. Only its text box may move; the dialog title, selection, actions, profile chip and page behind still grade at 1.",
       "state": "The account menu open over a LANDED Home (the menu waits for 800 ms of rest, so the hero backdrop is in).",
       "triggers": {"heropin": "0", "acct": "800"},
       "expect": ["home: hero pinned at slot 0", "coldopen screen=account"],
@@ -139,6 +141,35 @@
       "tolerance_reason": "Measured over four capture pairs: about one run in three, the rim of the Next Episode button (its glass edge, sampled at 3x) comes back 2 levels apart on some 1400 pixels; every other pixel stays within 1.",
       "expect": ["next=S1E3", "clockstop: clock held at 175750 ms"],
       "outputs": [{"file": "closeup-player.jpg", "dest": "site", "crop": [1250, 570, 640, 388], "size": "1440x873"}]
+    },
+    {
+      "name": "settings",
+      "free_regions": [[220, 440, 360, 50], [1635, 50, 110, 70]],
+      "max_delta": 3,
+      "tolerance_reason": "Two ephemeral facts are free: the mock server listens on a new loopback port in each capture, and the status clock is wall time. Only the server address box and clock box are free; every Settings pixel, including the title, cards, focus and synthetic ground, still grades at 3 or better.",
+      "state": "The Settings root on the synthetic flat capture ground: the display title in Fraunces, the real profile/version subtitle, and the four groups as two-column cards. The shared bar with its textual destinations and profile chip sits above. The synthetic ground makes this state byte-identical between captures and is not the product's ambient palette.",
+      "triggers": {"heropin": "0", "testpat": "flat:4", "settings": "root"},
+      "expect": ["coldopen screen=settings"],
+      "outputs": [{"file": "settings.jpg", "size": "1920x1080"}]
+    },
+    {
+      "name": "settings-quality",
+      "free_regions": [[220, 440, 360, 50], [1635, 50, 110, 70]],
+      "max_delta": 3,
+      "tolerance_reason": "Two ephemeral facts are free: the mock server listens on a new loopback port in each capture, and the status clock is wall time. Only the server address box and clock box are free; the anchored quality picker and every other Settings pixel still grade at 3 or better.",
+      "state": "The Settings root on the synthetic flat capture ground, with the playback quality picker anchored to its row, opened through the real D-pad/OK path. The synthetic ground makes this state byte-identical between captures and is not the product's ambient palette.",
+      "triggers": {"heropin": "0", "testpat": "flat:4", "settingspicker": "quality"},
+      "expect": ["coldopen screen=settings", "settingspicker: opened quality"],
+      "outputs": [{"file": "settings-quality.jpg", "size": "1920x1080"}]
+    },
+    {
+      "name": "settings-subtitle-size",
+      "free_regions": [[220, 440, 360, 50], [1635, 50, 110, 70]],
+      "tolerance_reason": "Two ephemeral facts are free: the mock server listens on a new loopback port in each capture, and the status clock is wall time. Only the server address box and clock box are free; the anchored subtitle-size picker and every other Settings pixel still grade at 1.",
+      "state": "The Settings root on the synthetic flat capture ground, with the subtitle-size picker anchored to its row, opened through the real D-pad/OK path. The synthetic ground makes this state byte-identical between captures and is not the product's ambient palette.",
+      "triggers": {"heropin": "0", "testpat": "flat:4", "settingspicker": "subtitle-size"},
+      "expect": ["coldopen screen=settings", "settingspicker: opened subtitle-size"],
+      "outputs": [{"file": "settings-subtitle-size.jpg", "size": "1920x1080"}]
     }
   ]
 }

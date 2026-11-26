@@ -387,11 +387,27 @@ pub(crate) fn shipped(name: &str) -> &'static Result<Coverage, String> {
     static REG: OnceLock<Result<Coverage, String>> = OnceLock::new();
     static BOLD: OnceLock<Result<Coverage, String>> = OnceLock::new();
     static CJK: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static MANROPE_REG: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static MANROPE_BOLD: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static FRAUNCES_SEMI: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static FRAUNCES_BOLD: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static MANROPE_MEDIUM: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static BRAND: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static CLOCK: OnceLock<Result<Coverage, String>> = OnceLock::new();
+    static AVATAR: OnceLock<Result<Coverage, String>> = OnceLock::new();
     let slot = match name {
         "appfont.ttf" => &REG,
         "appfont-bold.ttf" => &BOLD,
         "appfont-cjk.ttf" => &CJK,
-        other => panic!("no shipped-font slot for {other:?} — add one beside the other three"),
+        "appfont-manrope-400.ttf" => &MANROPE_REG,
+        "appfont-manrope-700.ttf" => &MANROPE_BOLD,
+        "appfont-fraunces-600.ttf" => &FRAUNCES_SEMI,
+        "appfont-fraunces-700.ttf" => &FRAUNCES_BOLD,
+        "appfont-manrope-600.ttf" => &MANROPE_MEDIUM,
+        "appfont-brand-700.ttf" => &BRAND,
+        "appfont-clock-700.ttf" => &CLOCK,
+        "appfont-manrope-800.ttf" => &AVATAR,
+        other => panic!("no shipped-font slot for {other:?} — add one beside the others"),
     };
     slot.get_or_init(|| {
         // The fonts are repository payload, not crate data — `pkg/` sits beside `rust-modules/`.
@@ -737,10 +753,15 @@ mod tests {
     }
 
     /// The whole point: the chain, not any one link. This is the assertion that would have
-    /// failed on 2026-08-22 and passed on 2026-08-23.
+    /// failed on 2026-08-22 and passed on 2026-08-23. The Interface chain is now Manrope -> Inter
+    /// -> CJK, so a Cyrillic title lands on Manrope, a sung line's ♪ on Inter and a Han title on CJK.
     #[test]
     fn the_shipped_chain_can_draw_every_sample_string() {
-        let links = [cov("appfont.ttf"), cov("appfont-cjk.ttf")];
+        let links = [
+            cov("appfont-manrope-400.ttf"),
+            cov("appfont.ttf"),
+            cov("appfont-cjk.ttf"),
+        ];
         for &(script, s) in SAMPLES {
             let bad: Vec<char> = s
                 .chars()
@@ -749,6 +770,65 @@ mod tests {
             assert!(
                 bad.is_empty(),
                 "{script}: the shipped chain cannot draw {bad:?} in {s:?}"
+            );
+        }
+    }
+
+    /// Manrope is the Interface primary face: it must cover the ASCII, Latin-1, Cyrillic and Greek
+    /// the product's own chrome and libraries emit, plus the punctuation. The rarer Latin
+    /// Extended-A letters (and U+2669..U+266C) stay the retained Inter link's job — that is the
+    /// whole point of the fallback chain, and Inter's own gate above still asserts them. Fraunces
+    /// is the Display primary face and only needs the Latin the wordmark and Settings title use.
+    #[test]
+    fn new_primary_faces_cover_their_declared_latin_sets() {
+        let manrope = cov("appfont-manrope-400.ttf");
+        let mut gaps = Vec::new();
+        for (name, lo, hi) in [
+            ("ASCII printable", 0x0020u32, 0x007Eu32),
+            ("Latin-1 letters", 0x00C0, 0x00FF),
+            ("Greek and Coptic (before U+03A2)", 0x0391, 0x03A1),
+            ("Greek and Coptic (after U+03A2)", 0x03A3, 0x03CE),
+            ("Cyrillic", 0x0400, 0x045F),
+        ] {
+            let m = missing(&manrope, lo, hi);
+            if !m.is_empty() {
+                gaps.push(format!("Manrope {name} (U+{lo:04X}..U+{hi:04X}) is missing {m:04X?}"));
+            }
+        }
+        for &(name, ch) in LINK1_CHARS {
+            if !manrope.contains(ch as u32) {
+                gaps.push(format!("Manrope {name} (U+{:04X})", ch as u32));
+            }
+        }
+        assert!(gaps.is_empty(), "appfont-manrope-400.ttf:\n  {}", gaps.join("\n  "));
+
+        // Fraunces covers ASCII, Latin-1 and the punctuation, but not Cyrillic or Greek: those
+        // fall to Inter behind the Display role.
+        let fraunces = cov("appfont-fraunces-600.ttf");
+        assert!(fraunces.contains('A' as u32) && fraunces.contains('z' as u32));
+        for ch in ['É', 'é', '·', '—', '…'] {
+            assert!(fraunces.contains(ch as u32), "Fraunces is missing U+{:04X}", ch as u32);
+        }
+        assert!(
+            !fraunces.contains('И' as u32) && !fraunces.contains('Θ' as u32),
+            "Fraunces should leave Cyrillic/Greek to the Inter fallback"
+        );
+    }
+
+    /// Each new primary face ships a separate bold cut that must not rot on its own.
+    #[test]
+    fn new_primary_bold_faces_match_their_regular() {
+        for (regular, bold) in [
+            ("appfont-manrope-400.ttf", "appfont-manrope-700.ttf"),
+            ("appfont-fraunces-600.ttf", "appfont-fraunces-700.ttf"),
+        ] {
+            let (r, b) = (cov(regular), cov(bold));
+            assert_eq!(
+                r.len(),
+                b.len(),
+                "{regular} covers {} codepoints, {bold} {}",
+                r.len(),
+                b.len()
             );
         }
     }
@@ -770,7 +850,12 @@ mod tests {
     /// Pass for RTL content on the strength of this unit.**
     #[test]
     fn rtl_is_out_of_scope_and_stays_that_way() {
-        for name in ["appfont.ttf", "appfont-cjk.ttf"] {
+        for name in [
+            "appfont.ttf",
+            "appfont-cjk.ttf",
+            "appfont-manrope-400.ttf",
+            "appfont-fraunces-600.ttf",
+        ] {
             let c = cov(name);
             for (script, lo, hi) in [("Hebrew", 0x05D0u32, 0x05EAu32), ("Arabic", 0x0620, 0x064A)] {
                 let n = count(&c, lo, hi);

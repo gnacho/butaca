@@ -27,23 +27,31 @@ use super::test_support::*;
 #[test]
 fn the_band_budget_restated_here_is_the_measured_one() {
     assert_eq!(BAND_REGION_BUDGET, crate::gfx::GLASS_REGION_BUDGET);
-    let (h, y) = (TAB_PILL_H + 2.0 * TAB_TRACK_PAD, TOP_BAR_Y - TAB_TRACK_PAD);
+    let (h, y) = (TAB_PILL_H + 2.0 * TAB_TRACK_PAD, TAB_PILL_Y - TAB_TRACK_PAD);
     let reg = crate::gfx::blur_region(0.0, y, crate::ui::consts::SCR_W, h);
     assert_eq!(reg[3], BAND_REGION_H, "the band's real region height");
 }
 
 #[test]
 fn the_whole_bands_glass_fits_one_region_budget() {
+    // **The second comp has no track**, so this build draws no band surface for the budget below to
+    // describe: `TAB_TRACK_PAD` is 0 and the row's items stand straight on the bar's slab. The
+    // arithmetic stays (it is what a re-introduced track would have to satisfy) and is skipped
+    // only while there is nothing to charge.
+    if TAB_TRACK_PAD == 0.0 {
+        return;
+    }
     assert!(
         band_region(GLASS_TRACK_MAX) <= crate::gfx::GLASS_REGION_BUDGET,
         "the band at the limit costs {:.0} px^2, past the {:.0} a moving host carries",
         band_region(GLASS_TRACK_MAX),
         crate::gfx::GLASS_REGION_BUDGET,
     );
+    let past = GLASS_TRACK_MAX + 600.0;
     assert!(
-        band_region(940.0) > crate::gfx::GLASS_REGION_BUDGET,
-        "940 was the TRACK's own limit and must be outside the BAND's: {:.0} px^2",
-        band_region(940.0),
+        band_region(past) > crate::gfx::GLASS_REGION_BUDGET,
+        "a track 600px past the accepted limit must leave the band's budget: {:.0} px^2",
+        band_region(past),
     );
 }
 
@@ -121,8 +129,9 @@ fn the_unfurled_chip_never_reaches_the_glass_track() {
          (touch {touch}, budget {budget})",
     );
     assert!(
-        budget < touch,
-        "the BUDGET is what binds today — if that flips, so does the note above"
+        budget >= touch,
+        "the touch rule is what binds at the mockup bar's shorter blur region; if the budget \
+         drops below it, {touch} is no longer the honest cap"
     );
     // the capsule only ever grows RIGHTWARD off a fixed edge, which is what lets one number
     // stand for the band at every point of the unfurl (see `band_region`).
@@ -404,9 +413,12 @@ fn no_popover_panel_uses_the_blur_path_and_every_one_stands_on_the_field() {
     );
 
     // …and every panel that used to frost one now stands on the field.
+    // NOT `screens/account_menu.rs`: the supplied mockup's server dialog is an OPAQUE `#241611`
+    // card (`.sm-panel`), not a frosted plate, and it is held against that reference pixel for
+    // pixel — the same exception the top bar's fixed material already carries. It draws
+    // `theme::CHROME_PANEL` itself; see `account_menu`'s spec block.
     for rel in [
         "screens/item_menu.rs",
-        "screens/account_menu.rs",
         "screens/alt_sources.rs",
         "screens/about_panel.rs",
         "screens/tracks_panel.rs",

@@ -1768,6 +1768,15 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                 self.content(fx, ContentReq::Back);
                 Handled::Yes
             }
+            // The shared bar's destinations and profile chip, drawn over Detail. A pill becomes
+            // `LoopReq::ChromeTab`, the chip `LoopReq::ChromeAccount` — the page itself has no
+            // `AppArg` to flip, so the request rides the loop exactly as the top pages' do.
+            ScreenEvent::Activate(elem) if *elem >= crate::ui::dispatch::STRIP_BASE => {
+                if let Some(req) = crate::screens::registry::chrome_element_request(*elem) {
+                    fx.push(Fx::App(AppFx::Loop(req)));
+                }
+                Handled::Yes
+            }
             ScreenEvent::Activate(elem) => {
                 self.activate(*elem, cx, fx);
                 Handled::Yes

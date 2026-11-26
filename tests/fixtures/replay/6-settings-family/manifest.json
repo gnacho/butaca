@@ -39,7 +39,7 @@
     "apply_pending": false,
     "authority": {
      "DevJf": {
-      "origin": "http://127.0.0.1:41131",
+      "origin": "http://127.0.0.1:34225",
       "token": "s00000002",
       "user_id": "s00000003",
       "user_name": "s00000004"
@@ -151,11 +151,11 @@
    ],
    "version": 1
   },
-  "hash": 5167625116742618634,
+  "hash": 12920811683647521898,
   "probe": "controlled=home version=1"
  },
  "schema": 3,
- "state_fp": 14441864012965424308,
+ "state_fp": 11275155068632818821,
  "triggers": [
   "butaca-app-init",
   "butaca-rec",

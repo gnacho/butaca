@@ -1170,7 +1170,6 @@ pub(crate) enum LoopReq {
     /// which is the legacy `on_ok`'s own "close, then return the action" in the order a container
     /// can express it.
     AccountSignIn,
-    AccountSignOut,
     /// PRESENTS the Settings surface over the same page, so the host route does not move.
     /// Reachable signed OUT as well: a person who cannot sign in has still received a copy of this
     /// software, and LG requires the privacy notice to be readable in the app rather than only on
@@ -1195,6 +1194,34 @@ pub(crate) enum LoopReq {
     /// Jellyfin flavor only: the Settings root's *Desconectar* — remove the active server's
     /// credentials and land on the sign-in gate (or switch to the survivor, if any remain).
     JfDisconnectServer,
+    /// A shared-chrome destination was activated (a textual Home/Favorites/Search pill, or a
+    /// library section pill) from a bar-wearing surface that is NOT the Home/Library/Search page —
+    /// Detail and the Settings surface. A page may not name `AppArg`, so the pill becomes this
+    /// request and the loop performs it through `nav_tab`, exactly as the top pages do.
+    ChromeTab(HomeTab),
+    /// The shared-chrome profile chip was activated from a bar-wearing surface — Detail and the
+    /// Settings surface — opening the account menu over that surface. Same page-naming rule as
+    /// [`Self::ChromeTab`].
+    ChromeAccount,
+}
+
+/// The loop request a shared-chrome element on a bar-wearing surface resolves to. The top pages
+/// (Home, Library, Search) already answer their own pills through `HomeReq`/`LibraryReq`; this is
+/// the mapping Detail and the Settings surface use, where a pill is a [`LoopReq::ChromeTab`], the
+/// profile chip is [`LoopReq::ChromeAccount`] and the gear opens Settings. Element keys are the
+/// stable `dispatch::STRIP_BASE + n` identities, never a display position (see `app/chrome.rs`).
+pub(crate) fn chrome_element_request(elem: u32) -> Option<LoopReq> {
+    match elem.wrapping_sub(crate::ui::dispatch::STRIP_BASE) {
+        0 => Some(LoopReq::ChromeTab(HomeTab::Home)),
+        1 => Some(LoopReq::ChromeTab(HomeTab::Movies)),
+        2 => Some(LoopReq::ChromeTab(HomeTab::Shows)),
+        5 => Some(LoopReq::ChromeTab(HomeTab::Videos)),
+        6 => Some(LoopReq::ChromeTab(HomeTab::Favorites)),
+        3 => Some(LoopReq::ChromeTab(HomeTab::Search)),
+        4 => Some(LoopReq::ChromeAccount),
+        7 => Some(LoopReq::AccountSettings),
+        _ => None,
+    }
 }
 
 /// Any host that carries this bundle. The screens under `screens/` are written against it, so the
@@ -1653,12 +1680,15 @@ impl crate::ui::screen::ScreenArg for AppArg {
         match self {
             AppArg::Home | AppArg::Library | AppArg::Search => Chrome::TabBar,
             AppArg::Content(ContentArg::Collection(id)) if id.is_favorites() => Chrome::TabBar,
+            // Detail and the Settings surface also wear the shared bar (mockup fidelity phase 1).
+            // Detail is a top page; Settings is an opaque ModalStack surface whose chrome is drawn
+            // by the dispatcher's surface path rather than the page path.
+            AppArg::Content(ContentArg::Detail { .. }) | AppArg::Settings(_) => Chrome::TabBar,
             AppArg::Login
             | AppArg::Profiles
             | AppArg::Onboard
             | AppArg::Player
             | AppArg::Content(_)
-            | AppArg::Settings(_)
             | AppArg::LibraryMenu(_)
             | AppArg::AccountMenu
             | AppArg::ItemMenu(_)
@@ -2267,7 +2297,10 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // its place in the inventory. A schema transition, not a rebaseline: a recording taken before it
 // hashed the root as a selection over four door-cards, and nothing about the page's pickers, its
 // confirmed values or its switches was in it. Re-record the replay fixtures.
-const SCREEN_SHAPES_PIN: u64 = 0xdba0_45fe_5fa2_8532;
+/// **Bumped 2026-11-25** for the account menu: the design mockup's server dialog has no
+/// scrollable list, so `AccountMenu`'s shape lost its `TableViewMotion` — a schema transition, and
+/// the replay fixtures were re-recorded with it.
+const SCREEN_SHAPES_PIN: u64 = 0x25d8_c79f_d788_c47b;
 
 #[cfg(test)]
 mod arg_tests {
@@ -2334,13 +2367,18 @@ mod arg_tests {
     /// stated as a rule.
     #[test]
     fn the_profile_chip_is_offered_on_exactly_the_bar_wearing_pages() {
-        for r in [AppArg::Home, AppArg::Library, AppArg::Search] {
-            assert!((r.chrome() == Chrome::TabBar), "a bar-wearing page carries the chip");
-        }
         for r in [
+            AppArg::Home,
+            AppArg::Library,
+            AppArg::Search,
             AppArg::Content(crate::screens::registry::ContentArg::Detail {
                 sid: crate::registry::ServerId::UNSET, rk: String::new(),
             }),
+            AppArg::Settings(SettingsPage::Root),
+        ] {
+            assert!((r.chrome() == Chrome::TabBar), "a bar-wearing page carries the chip");
+        }
+        for r in [
             AppArg::Content(crate::screens::registry::ContentArg::Person {
                 sid: crate::registry::ServerId::UNSET, key: String::new(), guid: String::new(),
                 name: String::new(), thumb: String::new(),

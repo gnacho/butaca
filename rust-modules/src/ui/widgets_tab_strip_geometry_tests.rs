@@ -4,6 +4,52 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
+/// **The bar's numbers ARE the second comp's, measured off its DOM at 1920x1080.**
+///
+/// `#topbar { height:79px; padding:16px 48px }`, `#avatar` 46px at (48,16), `#mainnav` starting 20px
+/// to its right (114) with `gap:4px` and NO track (`#mainnav` has no background, border or
+/// padding, which is why `TAB_TRACK_PAD` is 0), its labelled buttons 43 tall at y 17.5 with
+/// `padding:10px 18px` around a 17px/600 label, the icon buttons 45x39, and the gear on the same
+/// line at 1760 with the clock right-aligned on the 48px margin.
+///
+/// The FIRST comp's numbers (`56` / `34.5` / `707.84` / a 59px track at 28) are gone on purpose:
+/// the owner replaced the comp, and this is the one place that says so.
+#[test]
+fn the_top_bar_is_the_supplied_mockups_own_geometry() {
+    assert_eq!(CHROME_MARGIN_X, 48.0);
+    assert_eq!(TOP_BAR_H, 79.0);
+    assert_eq!(TOP_BAR_LINE_Y, 16.0);
+    assert_eq!(TAB_ROW_X, 114.0);
+    assert_eq!(TAB_PILL_Y, 17.5);
+    assert_eq!(TAB_PILL_H, 43.0);
+    assert_eq!(TAB_TRACK_PAD, 0.0);
+    assert_eq!(TAB_GAP, 4.0);
+    assert_eq!(CHIP_D, 46.0);
+    let same = |r: Rect, x: f32, y: f32, w: f32, h: f32| {
+        (r.x - x).abs() < 0.01 && (r.y - y).abs() < 0.01 && (r.w - w).abs() < 0.01
+            && (r.h - h).abs() < 0.01
+    };
+    assert!(same(CHIP_FRAME, 48.0, 16.0, 46.0, 46.0), "chip {:?}", CHIP_FRAME);
+    assert!(
+        same(SETTINGS_GEAR_FRAME, 1760.0, 16.0, 46.0, 46.0),
+        "gear {:?}",
+        SETTINGS_GEAR_FRAME
+    );
+    // The clock's right edge is the same 48px margin the avatar's left edge is, mirrored.
+    let clock_right = crate::ui::consts::SCR_W - CHROME_MARGIN_X;
+    assert_eq!(clock_right, 1872.0);
+    assert_eq!(clock_right - CLOCK_W, 1824.0);
+    assert_eq!(SETTINGS_GEAR_FRAME.x + CHIP_D + CLOCK_GAP, 1824.0);
+
+    // The row begins 20px right of the avatar and runs with no inset at all.
+    let widths = [91.72, 121.09, 99.41, 122.09, 104.0];
+    let g = tab_geometry(&widths, 0.0);
+    assert!((g.clip.x - 114.0).abs() < 0.01, "row x {}", g.clip.x);
+    assert!((g.clip.y - 17.5).abs() < 0.01);
+    assert!((g.track.x - g.clip.x).abs() < 0.01, "no inset left of the row any more");
+    assert!((g.track.w - g.clip.w).abs() < 0.01, "and none around it");
+}
+
 #[test]
 fn keyed_tab_geometry_uses_the_same_centered_lattice_for_draw_and_target() {
     use super::*;
@@ -13,7 +59,7 @@ fn keyed_tab_geometry_uses_the_same_centered_lattice_for_draw_and_target() {
     tab_members_at(&widths, &keys, 17.0, 43.0, &mut members);
     assert_eq!(members.iter().map(|m| m.elem).collect::<Vec<_>>(), keys);
     let content = widths.iter().sum::<f32>() + 2.0 * TAB_GAP;
-    let left = (crate::ui::consts::SCR_W - content) * 0.5;
+    let left = TAB_ROW_X;
     assert_eq!(members[0].drawn.x, left - 17.0);
     assert_eq!(members[0].target.x, left - 43.0);
     for (i, member) in members.iter().enumerate() {
@@ -133,20 +179,21 @@ fn the_profile_chip_is_hit_where_it_is_drawn_and_sits_left_of_the_pills() {
         "…and a pixel outside it is not"
     );
     assert!(!profile_chip_at(r.cx(), r.y + r.h + 1.0), "…on either axis");
-    // it shares the bar's line with the pills: one control height, one top edge
-    assert_eq!(r.y, TOP_BAR_Y);
-    // one control height with the pills, which is also what makes the focused chip's capsule
-    // the tab track's own band — the two read as one strip of chrome rather than as two
-    // objects at different heights (see `CHIP_D`)
-    assert_eq!(r.h, TAB_PILL_H);
+    // It stands on the bar's own 16px line, and the row starts 20px to its right: the second comp
+    // has no band to centre a control in any more, so the 46px disc IS the line's height.
+    assert_eq!(r.y, TOP_BAR_LINE_Y);
+    assert_eq!(r.x + r.w + 20.0, TAB_ROW_X);
+    assert_eq!(r.h, 46.0);
+    assert_eq!(r.h, CHIP_D);
 
-    // the widest strip the row will ever lay out, centred: its left edge must clear the chip
+    // the widest strip the row will ever lay out still starts to the chip's right: the row is
+    // anchored at `TAB_ROW_X`, not centred, so this is now a property of that one number.
     for n in 1..=16usize {
-        let w = widths_for(n);
-        let track_l = (crate::ui::consts::SCR_W - tab_view_w(&w)) * 0.5 - TAB_TRACK_PAD;
+        let _ = widths_for(n);
+        let row_l = TAB_ROW_X - TAB_TRACK_PAD;
         assert!(
-            track_l > r.x + r.w,
-            "n={n}: the tab track reaches x={track_l}, over a chip ending at {}",
+            row_l >= r.x + r.w,
+            "n={n}: the row reaches x={row_l}, over a chip ending at {}",
             r.x + r.w
         );
     }
@@ -296,3 +343,26 @@ fn the_bar_brand_rides_one_linear_ramp_from_head_to_gone() {
     assert_eq!(super::brand_alpha(f32::NAN), 1.0);
     assert_eq!(super::brand_scroll(f32::NAN), 0.0);
 }
+
+/// **The current pill's ink is its own.** A tracked strip binds two capsules; the pill they cover
+/// wears `selected`/`focused` ink, and a MARK (the second comp's Inicio, Favoritos and Buscar) reads
+/// the same mix the labels do. This pins the coverage the draw depends on: with the selection on
+/// pill 0, `mixes` must answer ~1 for it — the failure mode otherwise is a plate drawn on the pill
+/// while its glyph keeps the idle muted ink, which is exactly what a device capture showed.
+#[test]
+fn the_selected_pill_wears_the_selected_ink() {
+    use crate::ui::icons::Icon;
+    let widths = [TAB_ICON_PILL_W, 120.0, 100.0];
+    let mut strip = TabStrip::new();
+    let span = |i: usize| widths.get(i).map(|w| (tab_pill_x(&widths, i), *w));
+    for _ in 0..120 {
+        strip.update(0, -1, span, SelMark::Travels, 1.0 / 60.0);
+    }
+    let (focus, selected) = strip.mixes((tab_pill_x(&widths, 0), widths[0]));
+    assert!(selected > 0.95, "selection coverage on the current pill: {selected}");
+    assert!(focus < 0.05, "focus is off the row, so its mix stays quiet: {focus}");
+    let ink = TabPill::mixed_ink_with(StripInks::MOCKUP, focus, selected);
+    assert_eq!(ink, theme::CHROME_INK, "the current pill's label and mark read white");
+    let _ = Icon::Home;
+}
+

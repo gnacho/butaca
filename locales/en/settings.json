@@ -1,1173 +1,1193 @@
 {
-  "settings.title": {
-    "value": "Settings",
-    "description": "Settings, account, onboarding or privacy UI: settings.title"
-  },
-  "settings.libraries.section": {
-    "value": "Libraries",
-    "description": "Settings, account, onboarding or privacy UI: settings.libraries.section"
-  },
-  "settings.libraries.title": {
-    "value": "Favorite libraries",
-    "description": "Settings, account, onboarding or privacy UI: settings.libraries.title"
-  },
-  "settings.libraries.detail": {
-    "value": "Which libraries this television shows.",
-    "description": "Settings, account, onboarding or privacy UI: settings.libraries.detail"
-  },
-  "settings.privacy.section": {
-    "value": "Privacy",
-    "description": "Settings, account, onboarding or privacy UI: settings.privacy.section"
-  },
-  "settings.privacy.title": {
-    "value": "Privacy & data",
-    "description": "Settings, account, onboarding or privacy UI: settings.privacy.title"
-  },
-  "settings.privacy.detail": {
-    "value": "Optional reports, privacy information and local data.",
-    "description": "Settings, account, onboarding or privacy UI: settings.privacy.detail"
-  },
-  "settings.legal.title": {
-    "value": "Legal notices",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.title"
-  },
-  "settings.legal.detail": {
-    "value": "Privacy, licences, source code, trademarks and contact.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.detail"
-  },
-  "settings.system.section": {
-    "value": "System",
-    "description": "Settings, account, onboarding or privacy UI: settings.system.section"
-  },
-  "settings.auto_sign_in.title": {
-    "value": "Automatically Sign In",
-    "description": "Settings, account, onboarding or privacy UI: settings.auto_sign_in.title"
-  },
-  "settings.auto_sign_in.detail": {
-    "value": "Skip the profile list when the app starts.",
-    "description": "Settings, account, onboarding or privacy UI: settings.auto_sign_in.detail"
-  },
-  "settings.trailers.title": {
-    "value": "Play trailers automatically",
-    "description": "Settings, account, onboarding or privacy UI: settings.trailers.title"
-  },
-  "settings.trailers.detail": {
-    "value": "After a moment on a title, play its trailer with sound.",
-    "description": "Settings, account, onboarding or privacy UI: settings.trailers.detail"
-  },
-  "settings.about.title": {
-    "value": "About Butaca",
-    "description": "Settings, account, onboarding or privacy UI: settings.about.title"
-  },
-  "settings.about.detail": {
-    "value": "Version, copyright and project information.",
-    "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
-  },
-  "settings.libraries.count": {
-    "value": {
-      "one": "{count} favorite",
-      "other": "{count} favorites"
-    },
-    "description": "Settings, account, onboarding or privacy UI: settings.libraries.count",
-    "args": {
-      "count": "i64"
-    }
-  },
-  "settings.account.title": {
-    "value": "Account",
-    "description": "Settings, account, onboarding or privacy UI: settings.account.title"
-  },
-  "settings.account.change_profile": {
-    "value": "Change profile",
-    "description": "Settings, account, onboarding or privacy UI: settings.account.change_profile"
-  },
-  "settings.account.sign_in": {
-    "value": "Sign in",
-    "description": "Settings, account, onboarding or privacy UI: settings.account.sign_in"
-  },
-  "settings.account.sign_out": {
-    "value": "Sign out",
-    "description": "Settings, account, onboarding or privacy UI: settings.account.sign_out"
-  },
-  "settings.account.settings": {
-    "value": "Settings",
-    "description": "Settings, account, onboarding or privacy UI: settings.account.settings"
-  },
-  "settings.account.diagnostics": {
-    "value": "Send diagnostics",
-    "description": "Settings, account, onboarding or privacy UI: settings.account.diagnostics"
-  },
-  "settings.profiles.title": {
-    "value": "Who's watching?",
-    "description": "Settings, account, onboarding or privacy UI: settings.profiles.title"
-  },
-  "settings.profiles.pin": {
-    "value": "Enter {name}'s PIN",
-    "description": "Settings, account, onboarding or privacy UI: settings.profiles.pin",
-    "args": {
-      "name": "str"
-    }
-  },
-  "settings.onboard.title": {
-    "value": "Which libraries do you want?",
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.title"
-  },
-  "settings.onboard.start": {
-    "value": "Start watching",
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.start"
-  },
-  "settings.done": {
-    "value": "Done",
-    "description": "Settings, account, onboarding or privacy UI: settings.done"
-  },
-  "settings.retry": {
-    "value": "Try again",
-    "description": "Settings, account, onboarding or privacy UI: settings.retry"
-  },
-  "settings.onboard.failed": {
-    "value": "Couldn't load libraries",
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.failed"
-  },
-  "settings.onboard.failed_reason": {
-    "value": "Check the connection, then try again.",
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.failed_reason"
-  },
-  "settings.onboard.copy": {
-    "value": "Choose the libraries this television shows. Your favorites fill Home's shelves and the Library's own tabs; Settings lists every one you have.",
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.copy"
-  },
-  "settings.onboard.shared": {
-    "value": {
-      "one": "{names} has shared libraries with you. Pick your favorites — they are what Home and the Library show, and you can change them in Settings whenever you like.",
-      "other": "{names} have shared libraries with you. Pick your favorites — they are what Home and the Library show, and you can change them in Settings whenever you like."
-    },
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.shared",
-    "args": {
-      "count": "i64",
-      "names": "str"
-    }
-  },
-  "settings.onboard.names": {
-    "value": "{names} and {last}",
-    "description": "Settings, account, onboarding or privacy UI: settings.onboard.names",
-    "args": {
-      "last": "str",
-      "names": "str"
-    }
-  },
-  "settings.language.title": {
-    "value": "Language",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.title"
-  },
-  "settings.language.detail": {
-    "value": "Choose the language used by Butaca.",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.detail"
-  },
-  "settings.language.system": {
-    "value": "System default",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.system"
-  },
-  "settings.language.copy": {
-    "value": "Choose the app language for everyone on this television. Changes apply after restarting Butaca.",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.copy"
-  },
-  "settings.language.pending": {
-    "value": "Restart Butaca to apply this change.",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.pending"
-  },
-  "settings.language.save_failed": {
-    "value": "Could not save the language. Try again.",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.save_failed"
-  },
-  "settings.language.help": {
-    "value": "Help translate the app.",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.help"
-  },
-  "settings.language.contribute": {
-    "value": "Contribute on GitHub",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.contribute"
-  },
-  "settings.language.contribute_copy": {
-    "value": "Scan the code with your phone to read the translation guide and contribute on GitHub.",
-    "description": "Settings, account, onboarding or privacy UI: settings.language.contribute_copy"
-  },
-  "settings.language.contribute_body": {
-    "value": "Translation guide",
-    "description": "Caption above the translation guide address; the canonical URL is drawn separately and must never be translated."
-  },
-  "settings.consent.crash.title": {
-    "value": "Share crash reports?",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.title"
-  },
-  "settings.consent.product.title": {
-    "value": "Share product analytics?",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.product.title"
-  },
-  "settings.consent.crash.row": {
-    "value": "Crash reports",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.row"
-  },
-  "settings.consent.crash.detail": {
-    "value": "Optional technical crash reports.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.detail"
-  },
-  "settings.consent.usage.row": {
-    "value": "Product analytics",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.usage.row"
-  },
-  "settings.consent.usage.detail": {
-    "value": "Optional feature and playback outcomes.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.usage.detail"
-  },
-  "settings.consent.crash.document": {
-    "value": "Crashes / Errors",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.document"
-  },
-  "settings.consent.usage.document": {
-    "value": "Analytics / Usage",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.usage.document"
-  },
-  "settings.consent.example": {
-    "value": "See an example report",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.example"
-  },
-  "settings.consent.policy": {
-    "value": "Privacy policy",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.policy"
-  },
-  "settings.consent.analytics_id": {
-    "value": "Analytics ID",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics_id"
-  },
-  "settings.consent.crash_id": {
-    "value": "Crash report ID",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash_id"
-  },
-  "settings.consent.delete": {
-    "value": "Delete all local data",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.delete"
-  },
-  "settings.consent.delete_scope": {
-    "value": "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_scope"
-  },
-  "settings.consent.settings_copy": {
-    "value": "Control optional reporting, review exactly what may be shared, and manage data stored by Butaca on this television.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.settings_copy"
-  },
-  "settings.consent.reporting": {
-    "value": "Reporting",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.reporting"
-  },
-  "settings.consent.information": {
-    "value": "Information",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.information"
-  },
-  "settings.consent.on_tv": {
-    "value": "On this TV",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.on_tv"
-  },
-  "settings.consent.preview_crash": {
-    "value": "Field-by-field preview of the crash/error report.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_crash"
-  },
-  "settings.consent.preview_usage": {
-    "value": "Field-by-field preview of product analytics events.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_usage"
-  },
-  "settings.consent.preview_policy": {
-    "value": "The complete Butaca privacy policy for this build.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_policy"
-  },
-  "settings.consent.preview_errors_id": {
-    "value": "Your crash report identifier and how to have reports deleted.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_errors_id"
-  },
-  "settings.consent.preview_analytics_id": {
-    "value": "The identifier on your analytics, and how to have it deleted.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_analytics_id"
-  },
-  "settings.consent.delete_detail": {
-    "value": "Sign out and remove Butaca data from this TV.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_detail"
-  },
-  "settings.consent.errors_subtitle": {
-    "value": "The random identifier attached to crash and error reports from this sign-in, and how to have those reports deleted.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.errors_subtitle"
-  },
-  "settings.consent.analytics_subtitle": {
-    "value": "The random identifier attached to product analytics from this sign-in, and how to have those events deleted.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics_subtitle"
-  },
-  "settings.consent.crash_subtitle": {
-    "value": "What is actually sent: the exact fields a crash or error report can carry — only when error reporting is on.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash_subtitle"
-  },
-  "settings.consent.usage_subtitle": {
-    "value": "What is actually sent: the exact fields a product analytics event can carry — only when usage reporting is on.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.usage_subtitle"
-  },
-  "settings.consent.share_analytics": {
-    "value": "Share",
-    "description": "Short affirmative action for the consent question above; keep paired actions on one row."
-  },
-  "settings.consent.share_reports": {
-    "value": "Share",
-    "description": "Short affirmative action for the consent question above; keep paired actions on one row."
-  },
-  "settings.consent.do_not_share": {
-    "value": "Don’t share",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.do_not_share"
-  },
-  "settings.consent.delete_question": {
-    "value": "Delete all local data?",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_question"
-  },
-  "settings.cancel": {
-    "value": "Cancel",
-    "description": "Settings, account, onboarding or privacy UI: settings.cancel"
-  },
-  "settings.delete": {
-    "value": "Delete",
-    "description": "Settings, account, onboarding or privacy UI: settings.delete"
-  },
-  "settings.legal.privacy.title": {
-    "value": "Privacy policy",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.title"
-  },
-  "settings.legal.opensource.title": {
-    "value": "Open-source licences",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.title"
-  },
-  "settings.legal.ffmpeg.title": {
-    "value": "FFmpeg & source offer",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.title"
-  },
-  "settings.legal.source.title": {
-    "value": "Butaca source code",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.source.title"
-  },
-  "settings.legal.trademarks.title": {
-    "value": "Trademarks & non-affiliation",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.title"
-  },
-  "settings.legal.contact.title": {
-    "value": "Privacy & security contact",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.title"
-  },
-  "settings.legal.privacy.subtitle": {
-    "value": "How Butaca handles local data and optional reports.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.subtitle"
-  },
-  "settings.legal.opensource.subtitle": {
-    "value": "Components, copyright holders and licence texts.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.subtitle"
-  },
-  "settings.legal.ffmpeg.subtitle": {
-    "value": "LGPL notice, replaceability and corresponding source.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.subtitle"
-  },
-  "settings.legal.source.subtitle": {
-    "value": "Project source, build scripts and release materials.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.source.subtitle"
-  },
-  "settings.legal.trademarks.subtitle": {
-    "value": "Independent-client status and trademark attribution.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.subtitle"
-  },
-  "settings.legal.contact.subtitle": {
-    "value": "How to ask a privacy question or report a vulnerability.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.subtitle"
-  },
-  "settings.legal.section": {
-    "value": "Legal",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.section"
-  },
-  "settings.legal.copy": {
-    "value": "Read the notices that apply to this build, its open-source components and its relationship with LG.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.copy"
-  },
-  "settings.about.subtitle": {
-    "value": "A native media client built for LG webOS.",
-    "description": "Settings, account, onboarding or privacy UI: settings.about.subtitle"
-  },
-  "settings.legal.privacy.responsible": {
-    "value": "RESPONSIBLE FOR BUTACA DATA",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible"
-  },
-  "settings.legal.privacy.responsible_body": {
-    "value": "Gleb Linnik is responsible only for the data Butaca stores locally on this television.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible_body"
-  },
-  "settings.legal.privacy.servers": {
-    "value": "JELLYFIN SERVERS",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers"
-  },
-  "settings.legal.privacy.servers_body": {
-    "value": "To sign you in, browse and play media, report progress and use server features, Butaca talks directly to the Jellyfin server you configure, and to nothing else. Those requests are handled by that server and by whoever operates it. The developer of Butaca receives none of them.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers_body"
-  },
-  "settings.legal.privacy.local": {
-    "value": "ON THIS TELEVISION",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local"
-  },
-  "settings.legal.privacy.local_body": {
-    "value": "Butaca keeps, for each server you sign in to, an access token, the address of that server and a device identifier the server uses to recognise this television. It also keeps your playback preferences, the language of the interface, and local technical logs: a small rotating event log, an append-only crash log and a stderr log. Your password is never stored: it is used once to obtain the token and written nowhere.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local_body"
-  },
-  "settings.legal.privacy.noreports": {
-    "value": "NO REPORTS, NO ANALYTICS",
-    "description": "Section heading in the privacy notice: this build sends no crash reports or analytics."
-  },
-  "settings.legal.privacy.noreports_body": {
-    "value": "This build sends no crash reports, no analytics and no telemetry anywhere. There is no account with the developer, no identifier attached to this television, and no question to answer on first run, because there is nothing to opt into. The only traffic it generates is to the server you configured.",
-    "description": "Body of the no-reports section of the privacy notice: this build sends no telemetry and its only traffic goes to the server the user configured."
-  },
-  "settings.legal.privacy.retention": {
-    "value": "RETENTION",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention"
-  },
-  "settings.legal.privacy.retention_body": {
-    "value": "Your sign-in, the servers registered with it and their tokens, and the device identifier are removed when you sign out. The event log and the stderr log are truncated at every launch, and the crash log only grows until Delete all local data removes it.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention_body"
-  },
-  "settings.legal.privacy.uninstall": {
-    "value": "UNINSTALLING",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall"
-  },
-  "settings.legal.privacy.uninstall_body": {
-    "value": "Removing Butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Your app language preference is also kept there. Use Delete all local data BEFORE uninstalling if you want nothing of Butaca left on this television.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall_body"
-  },
-  "settings.legal.privacy.contact": {
-    "value": "CONTACT",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.contact"
-  },
-  "settings.legal.privacy.contact_body": {
-    "value": "Privacy questions: github.com/gnacho/butaca/issues",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.contact_body"
-  },
-  "settings.legal.ffmpeg.body": {
-    "value": "This software uses libraries from the FFmpeg project under the LGPLv2.1. FFmpeg is copyright (c) the FFmpeg developers; Butaca does not own FFmpeg.\n\nThe FFmpeg libraries are unmodified and loaded dynamically, and may be replaced with an interface-compatible build. The complete corresponding FFmpeg 9.0 source, exact configure line and build script are published with every Butaca release.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.body"
-  },
-  "settings.legal.trademarks.body": {
-    "value": "LG and webOS are trademarks of LG Electronics Inc.\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.body"
-  },
-  "settings.legal.contact.body": {
-    "value": "Privacy questions may be sent to github.com/gnacho/butaca/issues.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for gnacho/butaca. Please do not include access tokens, server addresses or personal media information in a report.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.body"
-  },
-  "settings.legal.opensource.body": {
-    "value": "Butaca is open-source software licensed under GPL-3.0-or-later. Copyright (c) 2026 Gleb Linnik and contributors. You may modify and redistribute it under these terms. There is no warranty, to the extent permitted by law.\n\nThird-party components retain their own licences. The package includes THIRD-PARTY-NOTICES.md and licence texts for the Rust runtime and crates, FFmpeg, NanoSVG, fonts and icons. Platform libraries have separate terms.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.body"
-  },
-  "settings.legal.source.body": {
-    "value": "Source for build {build}:\n\nhttps://github.com/gnacho/butaca/tree/{build}\n\nLocal migration candidates may contain unpublished changes. Their matching source snapshot is provided with the candidate evidence. A published binary must be accompanied by its version-specific complete source bundle and build instructions; a moving branch is not the corresponding-source record. See LICENSING.md in the package.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.source.body",
-    "args": {
-      "build": "str"
-    }
-  },
-  "settings.about.body": {
-    "value": "Version {version}\nBuild {build}\n\nOpen source under GPL-3.0-or-later\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
-    "description": "About page body: version, build, licence, and the unofficial-app notice. Authorship and the source link live in Legal, not here.",
-    "args": {
-      "build": "str",
-      "version": "str"
-    }
-  },
-  "settings.consent.preview.crash_intro": {
-    "value": "Crashes / Errors — what is actually sent to Sentry in Germany, and only when error reporting is on. Random and build-specific values are placeholders; fixed classes below are representative values from the closed domains in the Privacy notice. Nothing else is sent. The crash report identifier is random, is created only when crash reports are enabled, and is shown here as a placeholder.\n\n",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.crash_intro"
-  },
-  "settings.consent.preview.usage_intro": {
-    "value": "Analytics / Usage — what is actually sent to PostHog in Germany, and only when usage reporting is on, with a random Analytics ID. Random and build-specific values are placeholders; fixed classes below are representative values from the closed domains in the Privacy notice. Nothing else is sent. The usage identifier is random and is created only when product analytics is enabled.\n\n",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.usage_intro"
-  },
-  "settings.consent.preview.native": {
-    "value": "Native crash report (only when error reporting is on):\n",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.native"
-  },
-  "settings.consent.preview.fallback": {
-    "value": " (only if native capture is unavailable):\n",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.fallback"
-  },
-  "settings.consent.preview.handled": {
-    "value": "\n\nHandled playback error (only when error reporting is on):\n",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.handled"
-  },
-  "settings.consent.analytics.absent": {
-    "value": "NO ANALYTICS ID\n\nProduct analytics is off, so this installation has no analytics identifier and is sending no analytics events.\n\nAn identifier is created only when you turn product analytics on, and deleting it is what turning it off does. If you had analytics on before and want events from that period deleted, write to {contact} — but note that the identifier they carry was destroyed when analytics was turned off, so it can no longer be looked up from this television.\n\nCrash reports do not use this identifier. They carry a separate Crash report ID, shown on its own row while crash reports are on.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics.absent",
-    "args": {
-      "contact": "str"
-    }
-  },
-  "settings.consent.errors.absent": {
-    "value": "NO CRASH REPORT ID\n\nCrash reports are off, so this installation has no crash report identifier and is sending no crash or error reports.\n\nAn identifier is created only when you turn crash reports on, and deleting it is what turning them off does. If you had crash reports on before and want reports from that period deleted, write to {contact} — but note that the identifier they carry was destroyed when crash reports were turned off, so it can no longer be looked up from this television.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.errors.absent",
-    "args": {
-      "contact": "str"
-    }
-  },
-  "settings.consent.preview.usage_heading": {
-    "value": "Usage events (only when usage reporting is on):\n",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.usage"
-  },
-  "settings.back": {
-    "value": "Back",
-    "description": "Settings, consent or sign-in UI: settings.back"
-  },
-  "settings.profiles.failed": {
-    "value": "Can’t change profile",
-    "description": "Settings, consent or sign-in UI: settings.profiles.failed"
-  },
-  "settings.playback.section": {
-    "value": "Playback",
-    "description": "Settings, consent or sign-in UI: settings.playback.section"
-  },
-  "settings.preferences.section": {
-    "value": "Preferences",
-    "description": "Settings, consent or sign-in UI: settings.preferences.section"
-  },
-  "settings.library.recently_added": {
-    "value": "Show recently added",
-    "description": "Settings, consent or sign-in UI: the switch that leads a library with its recently added shelf."
-  },
-  "settings.library.recently_added.detail": {
-    "value": "Lead Movies and TV Shows with new arrivals.",
-    "description": "Settings, consent or sign-in UI: the show-recently-added switch's detail line."
-  },
-  "settings.playback.idle_screen": {
-    "value": "Screensaver",
-    "description": "Settings, consent or sign-in UI: the switch that lets the OLED idle screen appear when nothing is playing."
-  },
-  "settings.playback.idle_screen.detail": {
-    "value": "Dim clock when nothing plays.",
-    "description": "Settings, consent or sign-in UI: the screensaver row's detail line."
-  },
-  "settings.playback.title": {
-    "value": "Video & playback",
-    "description": "Settings, consent or sign-in UI: settings.playback.title"
-  },
-  "settings.playback.detail": {
-    "value": "Default quality and Direct Play.",
-    "description": "Settings, consent or sign-in UI: settings.playback.detail"
-  },
-  "settings.audio.title": {
-    "value": "Audio & subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.title"
-  },
-  "settings.playback.quality": {
-    "value": "Default quality",
-    "description": "Settings, consent or sign-in UI: settings.playback.quality"
-  },
-  "settings.playback.direct_play": {
-    "value": "Direct Play",
-    "description": "Settings, consent or sign-in UI: settings.playback.direct_play"
-  },
-  "settings.playback.lip_sync": {
-    "value": "Audio sync",
-    "description": "Settings, consent or sign-in UI: settings.playback.lip_sync"
-  },
-  "settings.playback.up_next": {
-    "value": "Next episode",
-    "description": "Settings, consent or sign-in UI: settings.playback.up_next"
-  },
-  "settings.playback.up_next_auto": {
-    "value": "Play automatically",
-    "description": "Settings, consent or sign-in UI: settings.playback.up_next_auto"
-  },
-  "settings.playback.up_next_ask": {
-    "value": "Ask first",
-    "description": "Settings, consent or sign-in UI: settings.playback.up_next_ask"
-  },
-  "settings.playback.up_next_off": {
-    "value": "Do not offer",
-    "description": "Settings, consent or sign-in UI: settings.playback.up_next_off"
-  },
-  "settings.playback.up_next_window": {
-    "value": "Up Next card timing",
-    "description": "Settings, consent or sign-in UI: settings.playback.up_next_window"
-  },
-  "settings.playback.subtitle_size": {
-    "value": "Subtitle size",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size"
-  },
-  "settings.playback.subtitle_size_smaller": {
-    "value": "Smaller",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_smaller"
-  },
-  "settings.playback.subtitle_size_small": {
-    "value": "Small",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_small"
-  },
-  "settings.playback.subtitle_size_normal": {
-    "value": "Normal",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_normal"
-  },
-  "settings.playback.subtitle_size_large": {
-    "value": "Large",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_large"
-  },
-  "settings.playback.subtitle_size_larger": {
-    "value": "Larger",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_larger"
-  },
-  "settings.playback.subtitle_position": {
-    "value": "Subtitle position",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position"
-  },
-  "settings.playback.subtitle_position_bottom": {
-    "value": "Bottom edge",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_bottom"
-  },
-  "settings.playback.subtitle_position_low": {
-    "value": "Low",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_low"
-  },
-  "settings.playback.subtitle_position_middle": {
-    "value": "Middle",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_middle"
-  },
-  "settings.playback.subtitle_position_high": {
-    "value": "High",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_high"
-  },
-  "settings.playback.subtitle_position_top": {
-    "value": "Top edge",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_top"
-  },
-  "settings.playback.subtitle_background": {
-    "value": "Subtitle background",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background"
-  },
-  "settings.playback.subtitle_background_off": {
-    "value": "Off",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_off"
-  },
-  "settings.playback.subtitle_background_half": {
-    "value": "Light box",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_half"
-  },
-  "settings.playback.subtitle_background_solid": {
-    "value": "Solid box",
-    "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_solid"
-  },
-  "settings.audio.language": {
-    "value": "Preferred audio language",
-    "description": "Settings, consent or sign-in UI: settings.audio.language"
-  },
-  "settings.audio.subtitles": {
-    "value": "Subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.subtitles"
-  },
-  "settings.audio.subtitle_language": {
-    "value": "Subtitle language",
-    "description": "Settings, consent or sign-in UI: settings.audio.subtitle_language"
-  },
-  "settings.audio.forced_subtitles": {
-    "value": "Forced subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.forced_subtitles"
-  },
-  "settings.playback.force_body": {
-    "value": "Bypasses playback compatibility checks and always uses original quality. Playback may have no sound, display incorrectly, freeze, or crash the app. Butaca will not automatically switch to compatible playback and may not recover gracefully.\n\nEnable this only if you understand these risks and know how to restart the app and return Direct Play to Auto.",
-    "description": "Settings, consent or sign-in UI: settings.playback.force_body"
-  },
-  "settings.playback.force_note": {
-    "value": "Advanced override. Playback may fail or crash; automatic fallback is off. Return to Auto if problems occur.",
-    "description": "Settings, consent or sign-in UI: settings.playback.force_note"
-  },
-  "settings.playback.copy": {
-    "value": "Playback defaults for this television. Quality is also available in the player's More menu. Changes here apply to the next playback.",
-    "description": "Settings, consent or sign-in UI: settings.playback.copy"
-  },
-  "settings.playback.enable_force": {
-    "value": "Enable Force",
-    "description": "Settings, consent or sign-in UI: settings.playback.enable_force"
-  },
-  "settings.playback.force_question": {
-    "value": "Force Direct Play?",
-    "description": "Settings, consent or sign-in UI: settings.playback.force_question"
-  },
-  "settings.playback.saving": {
-    "value": "Saving playback preference…",
-    "description": "Settings, consent or sign-in UI: settings.playback.saving"
-  },
-  "settings.audio.manual": {
-    "value": "Off (manual selection)",
-    "description": "Settings, consent or sign-in UI: settings.audio.manual"
-  },
-  "settings.audio.foreign": {
-    "value": "When audio isn't in my language",
-    "description": "Settings, consent or sign-in UI: settings.audio.foreign"
-  },
-  "settings.audio.always": {
-    "value": "Always",
-    "description": "Settings, consent or sign-in UI: settings.audio.always"
-  },
-  "settings.audio.prefer_regular": {
-    "value": "Prefer non-forced subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.prefer_regular"
-  },
-  "settings.audio.prefer_forced": {
-    "value": "Prefer forced subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.prefer_forced"
-  },
-  "settings.audio.only_forced": {
-    "value": "Only forced subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.only_forced"
-  },
-  "settings.audio.only_regular": {
-    "value": "Only non-forced subtitles",
-    "description": "Settings, consent or sign-in UI: settings.audio.only_regular"
-  },
-  "settings.audio.original": {
-    "value": "Original",
-    "description": "Settings, consent or sign-in UI: settings.audio.original"
-  },
-  "settings.audio.no_preference": {
-    "value": "No preference",
-    "description": "Settings, consent or sign-in UI: settings.audio.no_preference"
-  },
-  "settings.audio.not_set": {
-    "value": "Not set",
-    "description": "Settings, consent or sign-in UI: settings.audio.not_set"
-  },
-  "settings.playback.overridden": {
-    "value": "Overridden by Force Direct Play: Original quality.",
-    "description": "Settings, consent or sign-in UI: settings.playback.overridden"
-  },
-  "settings.audio.retry": {
-    "value": "Retry",
-    "description": "Settings, consent or sign-in UI: settings.audio.retry"
-  },
-  "settings.audio.retry_detail": {
-    "value": "Try the account request again.",
-    "description": "Settings, consent or sign-in UI: settings.audio.retry_detail"
-  },
-  "settings.playback.save_failed": {
-    "value": "Could not save or load this preference. Please try again.",
-    "description": "Settings, consent or sign-in UI: settings.playback.save_failed"
-  },
-  "settings.playback.auto": {
-    "value": "Auto",
-    "description": "Settings, consent or sign-in UI: settings.playback.auto"
-  },
-  "settings.playback.forced": {
-    "value": "Force Direct Play (advanced)",
-    "description": "Settings, consent or sign-in UI: settings.playback.forced"
-  },
-  "settings.playback.disabled": {
-    "value": "Disabled",
-    "description": "Settings, consent or sign-in UI: settings.playback.disabled"
-  },
-  "settings.plaintext.connect": {
-    "value": "Connect",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.connect"
-  },
-  "settings.plaintext.not_now": {
-    "value": "Not now",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.not_now"
-  },
-  "settings.plaintext.question": {
-    "value": "Connect without encryption?",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.question"
-  },
-  "settings.plaintext.body": {
-    "value": "Your Jellyfin sign-in will travel without encryption over this network, to this server only.",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.body"
-  },
-  "settings.plaintext.section": {
-    "value": "Unencrypted connections",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.section"
-  },
-  "settings.plaintext.denied": {
-    "value": "Not allowed. Only encrypted connections.",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.denied"
-  },
-  "settings.plaintext.connected": {
-    "value": "Allowed on this network. Connected without encryption.",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.connected"
-  },
-  "settings.plaintext.allowed": {
-    "value": "Allowed on this network when a secure connection fails.",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.allowed"
-  },
-  "settings.login.continue_unsaved": {
-    "value": "Continue",
-    "description": "Settings, consent or sign-in UI: settings.login.continue_unsaved"
-  },
-  "settings.login.details": {
-    "value": "Details",
-    "description": "Settings, consent or sign-in UI: settings.login.details"
-  },
-  "settings.login.send_report": {
-    "value": "Send report",
-    "description": "Settings, consent or sign-in UI: settings.login.send_report"
-  },
-  "settings.login.close": {
-    "value": "Close",
-    "description": "Settings, consent or sign-in UI: settings.login.close"
-  },
-  "settings.login.report_question": {
-    "value": "Send a report about this sign-in problem?",
-    "description": "Settings, consent or sign-in UI: settings.login.report_question"
-  },
-  "settings.login.report_body": {
-    "value": "The report says which sign-in step failed and how the connection answered, storage failure stages and error numbers, plus the app version. It never includes your account name, tokens, PIN, sign-in code or network addresses.",
-    "description": "Settings, consent or sign-in UI: settings.login.report_body"
-  },
-  "settings.login.report_sending": {
-    "value": "Sending report…",
-    "description": "Settings, consent or sign-in UI: settings.login.report_sending"
-  },
-  "settings.login.report_sent": {
-    "value": "Report sent. Thank you.",
-    "description": "Settings, consent or sign-in UI: settings.login.report_sent"
-  },
-  "settings.login.report_saved": {
-    "value": "Report saved. It will be sent later.",
-    "description": "Settings, consent or sign-in UI: settings.login.report_saved"
-  },
-  "settings.login.report_failed": {
-    "value": "Report couldn’t be sent.",
-    "description": "Settings, consent or sign-in UI: settings.login.report_failed"
-  },
-  "settings.login.save_failed_title": {
-    "value": "Couldn’t save your sign-in",
-    "description": "Settings, consent or sign-in UI: settings.login.save_failed_title"
-  },
-  "settings.login.save_failed_body": {
-    "value": "Your sign-in couldn’t be saved on this TV. You can continue, but you’ll be asked to sign in again next time.",
-    "description": "Settings, consent or sign-in UI: settings.login.save_failed_body"
-  },
-  "settings.login.unknown_device": {
-    "value": "unknown set",
-    "description": "Settings, consent or sign-in UI: settings.login.unknown_device"
-  },
-  "settings.login.your_servers": {
-    "value": "your servers",
-    "description": "Settings, consent or sign-in UI: settings.login.your_servers"
-  },
-  "settings.language.saving": {
-    "value": "Saving language…",
-    "description": "Settings, consent or sign-in UI: settings.language.saving"
-  },
-  "settings.audio.error_retry": {
-    "value": "{reason} Select Retry.",
-    "description": "Settings, consent or sign-in UI: settings.audio.error_retry",
-    "args": {
-      "reason": "str"
-    }
-  },
-  "settings.login.report_id": {
-    "value": "Report ID: {id}",
-    "description": "Settings, consent or sign-in UI: settings.login.report_id",
-    "args": {
-      "id": "str"
-    }
-  },
-  "settings.legal.privacy.plaintext_body": {
-    "description": "In-app privacy disclosure, aligned with PRIVACY.md.",
-    "value": "Butaca allows an unencrypted connection only to a literal IP address on your local network, never to a hostname or a remote address."
-  },
-  "settings.consent.preview.incident": {
-    "value": "\n\nSign-in problem report (automatically only when error reporting is on; otherwise only when you press Send report, and then without the crash report identifier):\n",
-    "description": "Heading in the crash-report preview above the sign-in problem report sample. Privacy disclosure: keep the conditions exact. 'Send report' names the button."
-  },
-  "settings.consent.placeholder.address": {
-    "value": "address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.flags": {
-    "value": "flags",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.fault_address": {
-    "value": "fault address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.caller_address": {
-    "value": "caller address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.symbol_address": {
-    "value": "symbol address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.compiled_function": {
-    "value": "compiled function",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.source_line": {
-    "value": "source line",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.source_column": {
-    "value": "source column",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.source_location": {
-    "value": "validated compile-time source:line",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.record_id": {
-    "value": "stable id for this crash-log record",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.crashed_build_id": {
-    "value": "crashed ELF build id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.running_build_id": {
-    "value": "running ELF build id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.error_event_id": {
-    "value": "random per-error event id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.crash_event_id": {
-    "value": "random id for this crash",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.message_hash": {
-    "value": "message hash",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.load_address": {
-    "value": "load address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.mapped_bytes": {
-    "value": "mapped bytes",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.kernel_release": {
-    "value": "kernel release",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.kernel_build": {
-    "value": "kernel build suffix",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.debug_id": {
-    "value": "ELF debug id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.build_id": {
-    "value": "ELF build id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.code_id": {
-    "value": "ELF code id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.virtual_address": {
-    "value": "ELF virtual address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.bytes": {
-    "value": "bytes",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.thread_address": {
-    "value": "thread instruction address",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.thread_id": {
-    "value": "thread id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.thread_label": {
-    "value": "internal thread label",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.webos_release": {
-    "value": "webOS release",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.webos_codename": {
-    "value": "webOS release codename",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.webos_api": {
-    "value": "webOS API version",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.soc_class": {
-    "value": "SoC/platform class",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.revision_class": {
-    "value": "hardware revision class",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.model_class": {
-    "value": "device model class",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.crash_time": {
-    "value": "crash time",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.crash_report_id": {
-    "value": "crash report id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.session_id": {
-    "value": "random session id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.event_time": {
-    "value": "event time",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.random_id": {
-    "value": "random id",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.project_key": {
-    "value": "project key",
-    "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
-  },
-  "settings.consent.placeholder.app_version": {
-    "value": "app version",
-    "description": "Placeholder shown inside angle brackets in the data preview, standing for this app's version number."
-  },
-  "settings.consent.placeholder.webos_codename_short": {
-    "value": "webOS codename",
-    "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
-  },
-  "settings.servers.section": {
-    "value": "Servers",
-    "description": "Settings, account, onboarding or privacy UI: the Jellyfin server section header."
-  },
-  "settings.servers.group": {
-   "value": "Server",
-   "description": "Settings: the server group label on the one-page settings screen."
-  },
-  "settings.servers.select": {
-    "value": "Select server",
-    "description": "Settings, account, onboarding or privacy UI: the row that opens the server picker."
-  },
-  "settings.servers.select.detail": {
-    "value": "Choose which server this TV uses.",
-    "description": "Settings, account, onboarding or privacy UI: the server picker row's detail line."
-  },
-  "settings.servers.quick": {
-    "value": "Quick connect",
-    "description": "Settings, account, onboarding or privacy UI: the row that opens the sign-in form to add another server."
-  },
-  "settings.servers.quick.detail": {
-    "value": "Add another Jellyfin server.",
-    "description": "Settings, account, onboarding or privacy UI: the quick-connect row's detail line."
-  },
-  "settings.servers.add_password": {
-    "value": "Add server with a password",
-    "description": "Settings, account, onboarding or privacy UI: the server picker row that opens the password sign-in form to add another server."
-  },
-  "settings.servers.add_password.detail": {
-    "value": "Sign in to another server with a user name and password.",
-    "description": "Settings, account, onboarding or privacy UI: the add-server-by-password row's detail line."
-  },
-  "settings.servers.disconnect": {
-    "value": "Disconnect",
-    "description": "Settings, account, onboarding or privacy UI: the row that signs out of the current server."
-  },
-  "settings.servers.disconnect.detail": {
-    "value": "Sign out of the current server.",
-    "description": "Settings, account, onboarding or privacy UI: the disconnect row's detail line."
-  },
-  "settings.servers.copy": {
-    "value": "Choose which server this television connects to.",
-    "description": "Settings, account, onboarding or privacy UI: the server picker page's subtitle."
-  },
-  "settings.privacy.lan": {
-    "value": "Privacy",
-    "description": "Settings, account, onboarding or privacy UI: the row and page title of the Jellyfin privacy statement."
-  },
-  "settings.privacy.lan.detail": {
-    "value": "Nothing leaves your local network.",
-    "description": "Settings, account, onboarding or privacy UI: the privacy row's detail line."
-  },
-  "settings.privacy.lan.copy": {
-    "value": "How Butaca treats your data.",
-    "description": "Settings, account, onboarding or privacy UI: the privacy page's subtitle."
-  },
-  "settings.privacy.lan.body": {
-    "value": "Nothing leaves your local network. Butaca has no account, no telemetry and no analytics. Your credentials live only on this television. The only server the app talks to is the one you configured.",
-    "description": "Settings, account, onboarding or privacy UI: the Jellyfin flavor's self-contained privacy statement."
-  },
-  "settings.root.jellyfin_copy": {
-    "value": "Manage this television and your Jellyfin servers. Everything stays on your local network: no account, no telemetry, nothing leaves it.",
-    "description": "Settings root left-column intro on the Jellyfin flavor: settings.root.jellyfin_copy"
-  },
-  "settings.playback.skip_markers": {
-    "value": "Skip intro and credits",
-    "description": "Settings, consent or sign-in UI: settings.playback.skip_markers"
-  },
-  "settings.playback.skip_markers_ask": {
-    "value": "Ask me",
-    "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_ask"
-  },
-  "settings.playback.skip_markers_auto": {
-    "value": "Skip automatically",
-    "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_auto"
-  },
-  "settings.interface.section": {
-    "value": "Interface",
-    "description": "Settings root: the group header for the interface rows (language, legal, about)."
-  },
-  "settings.servers.current": {
-    "value": "Jellyfin server",
-    "description": "Settings root: the row naming the server this television is signed in to, with its account as the value and its address underneath."
-  },
-  "settings.servers.add": {
-    "value": "Add another server",
-    "description": "Settings root: the row that opens Quick Connect to sign in to a second server."
-  },
-  "settings.servers.add.detail": {
-    "value": "Keep several and switch here.",
-    "description": "Settings root: the add-another-server row's detail line."
-  },
-  "settings.playback.quality.detail": {
-    "value": "Bitrate limit for playback.",
-    "description": "Settings root: the quality row's detail line."
-  },
-  "settings.playback.direct_play.detail": {
-    "value": "Play untranscoded when the TV allows.",
-    "description": "Settings root: the Direct Play row's detail line."
-  },
-  "settings.playback.lip_sync.detail": {
-    "value": "Audio delay against the picture.",
-    "description": "Settings root: the audio-sync row's detail line."
-  },
-  "settings.playback.up_next.detail": {
-    "value": "What to do when it ends.",
-    "description": "Settings root: the next-episode row's detail line."
-  },
-  "settings.playback.up_next_window.detail": {
-    "value": "How long before the card appears.",
-    "description": "Settings root: the up-next-window row's detail line."
-  },
-  "settings.playback.skip_markers.detail": {
-    "value": "Intros and credits the server marks.",
-    "description": "Settings root: the skip-markers row's detail line."
-  },
-  "settings.playback.subtitle_size.detail": {
-    "value": "Size of the subtitle text.",
-    "description": "Settings root: the subtitle-size row's detail line."
-  },
-  "settings.playback.subtitle_position.detail": {
-    "value": "How high they appear.",
-    "description": "Settings root: the subtitle-position row's detail line."
-  },
-  "settings.playback.subtitle_background.detail": {
-    "value": "Box behind the text.",
-    "description": "Settings root: the subtitle-background row's detail line."
+ "settings.title": {
+  "value": "Settings",
+  "description": "Settings, account, onboarding or privacy UI: settings.title"
+ },
+ "settings.libraries.section": {
+  "value": "Libraries",
+  "description": "Settings, account, onboarding or privacy UI: settings.libraries.section"
+ },
+ "settings.libraries.title": {
+  "value": "Favorite libraries",
+  "description": "Settings, account, onboarding or privacy UI: settings.libraries.title"
+ },
+ "settings.libraries.detail": {
+  "value": "Which libraries this television shows.",
+  "description": "Settings, account, onboarding or privacy UI: settings.libraries.detail"
+ },
+ "settings.privacy.section": {
+  "value": "Privacy",
+  "description": "Settings, account, onboarding or privacy UI: settings.privacy.section"
+ },
+ "settings.privacy.title": {
+  "value": "Privacy & data",
+  "description": "Settings, account, onboarding or privacy UI: settings.privacy.title"
+ },
+ "settings.privacy.detail": {
+  "value": "Optional reports, privacy information and local data.",
+  "description": "Settings, account, onboarding or privacy UI: settings.privacy.detail"
+ },
+ "settings.legal.title": {
+  "value": "Legal notices",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.title"
+ },
+ "settings.legal.detail": {
+  "value": "Privacy, licences, source code, trademarks and contact.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.detail"
+ },
+ "settings.system.section": {
+  "value": "System",
+  "description": "Settings, account, onboarding or privacy UI: settings.system.section"
+ },
+ "settings.auto_sign_in.title": {
+  "value": "Automatically Sign In",
+  "description": "Settings, account, onboarding or privacy UI: settings.auto_sign_in.title"
+ },
+ "settings.auto_sign_in.detail": {
+  "value": "Skip the profile list when the app starts.",
+  "description": "Settings, account, onboarding or privacy UI: settings.auto_sign_in.detail"
+ },
+ "settings.trailers.title": {
+  "value": "Play trailers automatically",
+  "description": "Settings, account, onboarding or privacy UI: settings.trailers.title"
+ },
+ "settings.trailers.detail": {
+  "value": "After a moment on a title, play its trailer with sound.",
+  "description": "Settings, account, onboarding or privacy UI: settings.trailers.detail"
+ },
+ "settings.about.title": {
+  "value": "About Butaca",
+  "description": "Settings, account, onboarding or privacy UI: settings.about.title"
+ },
+ "settings.about.detail": {
+  "value": "Version, copyright and project information.",
+  "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
+ },
+ "settings.libraries.count": {
+  "value": {
+   "one": "{count} favorite",
+   "other": "{count} favorites"
+  },
+  "description": "Settings, account, onboarding or privacy UI: settings.libraries.count",
+  "args": {
+   "count": "i64"
   }
+ },
+ "settings.account.title": {
+  "value": "Account",
+  "description": "Settings, account, onboarding or privacy UI: settings.account.title"
+ },
+ "settings.account.change_profile": {
+  "value": "Change profile",
+  "description": "Settings, account, onboarding or privacy UI: settings.account.change_profile"
+ },
+ "settings.account.sign_in": {
+  "value": "Sign in",
+  "description": "Settings, account, onboarding or privacy UI: settings.account.sign_in"
+ },
+ "settings.account.sign_out": {
+  "value": "Sign out",
+  "description": "Settings, account, onboarding or privacy UI: settings.account.sign_out"
+ },
+ "settings.account.settings": {
+  "value": "Settings",
+  "description": "Settings, account, onboarding or privacy UI: settings.account.settings"
+ },
+ "settings.account.diagnostics": {
+  "value": "Send diagnostics",
+  "description": "Settings, account, onboarding or privacy UI: settings.account.diagnostics"
+ },
+ "settings.profiles.title": {
+  "value": "Who's watching?",
+  "description": "Settings, account, onboarding or privacy UI: settings.profiles.title"
+ },
+ "settings.profiles.pin": {
+  "value": "Enter {name}'s PIN",
+  "description": "Settings, account, onboarding or privacy UI: settings.profiles.pin",
+  "args": {
+   "name": "str"
+  }
+ },
+ "settings.onboard.title": {
+  "value": "Which libraries do you want?",
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.title"
+ },
+ "settings.onboard.start": {
+  "value": "Start watching",
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.start"
+ },
+ "settings.done": {
+  "value": "Done",
+  "description": "Settings, account, onboarding or privacy UI: settings.done"
+ },
+ "settings.retry": {
+  "value": "Try again",
+  "description": "Settings, account, onboarding or privacy UI: settings.retry"
+ },
+ "settings.onboard.failed": {
+  "value": "Couldn't load libraries",
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.failed"
+ },
+ "settings.onboard.failed_reason": {
+  "value": "Check the connection, then try again.",
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.failed_reason"
+ },
+ "settings.onboard.copy": {
+  "value": "Choose the libraries this television shows. Your favorites fill Home's shelves and the Library's own tabs; Settings lists every one you have.",
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.copy"
+ },
+ "settings.onboard.shared": {
+  "value": {
+   "one": "{names} has shared libraries with you. Pick your favorites — they are what Home and the Library show, and you can change them in Settings whenever you like.",
+   "other": "{names} have shared libraries with you. Pick your favorites — they are what Home and the Library show, and you can change them in Settings whenever you like."
+  },
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.shared",
+  "args": {
+   "count": "i64",
+   "names": "str"
+  }
+ },
+ "settings.onboard.names": {
+  "value": "{names} and {last}",
+  "description": "Settings, account, onboarding or privacy UI: settings.onboard.names",
+  "args": {
+   "last": "str",
+   "names": "str"
+  }
+ },
+ "settings.language.title": {
+  "value": "Language",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.title"
+ },
+ "settings.language.detail": {
+  "value": "Choose the language used by Butaca.",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.detail"
+ },
+ "settings.language.system": {
+  "value": "System default",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.system"
+ },
+ "settings.language.copy": {
+  "value": "Choose the app language for everyone on this television. Changes apply after restarting Butaca.",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.copy"
+ },
+ "settings.language.pending": {
+  "value": "Restart Butaca to apply this change.",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.pending"
+ },
+ "settings.language.save_failed": {
+  "value": "Could not save the language. Try again.",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.save_failed"
+ },
+ "settings.language.help": {
+  "value": "Help translate the app.",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.help"
+ },
+ "settings.language.contribute": {
+  "value": "Contribute on GitHub",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.contribute"
+ },
+ "settings.language.contribute_copy": {
+  "value": "Scan the code with your phone to read the translation guide and contribute on GitHub.",
+  "description": "Settings, account, onboarding or privacy UI: settings.language.contribute_copy"
+ },
+ "settings.language.contribute_body": {
+  "value": "Translation guide",
+  "description": "Caption above the translation guide address; the canonical URL is drawn separately and must never be translated."
+ },
+ "settings.consent.crash.title": {
+  "value": "Share crash reports?",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.title"
+ },
+ "settings.consent.product.title": {
+  "value": "Share product analytics?",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.product.title"
+ },
+ "settings.consent.crash.row": {
+  "value": "Crash reports",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.row"
+ },
+ "settings.consent.crash.detail": {
+  "value": "Optional technical crash reports.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.detail"
+ },
+ "settings.consent.usage.row": {
+  "value": "Product analytics",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.usage.row"
+ },
+ "settings.consent.usage.detail": {
+  "value": "Optional feature and playback outcomes.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.usage.detail"
+ },
+ "settings.consent.crash.document": {
+  "value": "Crashes / Errors",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.document"
+ },
+ "settings.consent.usage.document": {
+  "value": "Analytics / Usage",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.usage.document"
+ },
+ "settings.consent.example": {
+  "value": "See an example report",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.example"
+ },
+ "settings.consent.policy": {
+  "value": "Privacy policy",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.policy"
+ },
+ "settings.consent.analytics_id": {
+  "value": "Analytics ID",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics_id"
+ },
+ "settings.consent.crash_id": {
+  "value": "Crash report ID",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.crash_id"
+ },
+ "settings.consent.delete": {
+  "value": "Delete all local data",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.delete"
+ },
+ "settings.consent.delete_scope": {
+  "value": "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_scope"
+ },
+ "settings.consent.settings_copy": {
+  "value": "Control optional reporting, review exactly what may be shared, and manage data stored by Butaca on this television.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.settings_copy"
+ },
+ "settings.consent.reporting": {
+  "value": "Reporting",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.reporting"
+ },
+ "settings.consent.information": {
+  "value": "Information",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.information"
+ },
+ "settings.consent.on_tv": {
+  "value": "On this TV",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.on_tv"
+ },
+ "settings.consent.preview_crash": {
+  "value": "Field-by-field preview of the crash/error report.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_crash"
+ },
+ "settings.consent.preview_usage": {
+  "value": "Field-by-field preview of product analytics events.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_usage"
+ },
+ "settings.consent.preview_policy": {
+  "value": "The complete Butaca privacy policy for this build.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_policy"
+ },
+ "settings.consent.preview_errors_id": {
+  "value": "Your crash report identifier and how to have reports deleted.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_errors_id"
+ },
+ "settings.consent.preview_analytics_id": {
+  "value": "The identifier on your analytics, and how to have it deleted.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview_analytics_id"
+ },
+ "settings.consent.delete_detail": {
+  "value": "Sign out and remove Butaca data from this TV.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_detail"
+ },
+ "settings.consent.errors_subtitle": {
+  "value": "The random identifier attached to crash and error reports from this sign-in, and how to have those reports deleted.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.errors_subtitle"
+ },
+ "settings.consent.analytics_subtitle": {
+  "value": "The random identifier attached to product analytics from this sign-in, and how to have those events deleted.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics_subtitle"
+ },
+ "settings.consent.crash_subtitle": {
+  "value": "What is actually sent: the exact fields a crash or error report can carry — only when error reporting is on.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.crash_subtitle"
+ },
+ "settings.consent.usage_subtitle": {
+  "value": "What is actually sent: the exact fields a product analytics event can carry — only when usage reporting is on.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.usage_subtitle"
+ },
+ "settings.consent.share_analytics": {
+  "value": "Share",
+  "description": "Short affirmative action for the consent question above; keep paired actions on one row."
+ },
+ "settings.consent.share_reports": {
+  "value": "Share",
+  "description": "Short affirmative action for the consent question above; keep paired actions on one row."
+ },
+ "settings.consent.do_not_share": {
+  "value": "Don’t share",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.do_not_share"
+ },
+ "settings.consent.delete_question": {
+  "value": "Delete all local data?",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_question"
+ },
+ "settings.cancel": {
+  "value": "Cancel",
+  "description": "Settings, account, onboarding or privacy UI: settings.cancel"
+ },
+ "settings.delete": {
+  "value": "Delete",
+  "description": "Settings, account, onboarding or privacy UI: settings.delete"
+ },
+ "settings.legal.privacy.title": {
+  "value": "Privacy policy",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.title"
+ },
+ "settings.legal.opensource.title": {
+  "value": "Open-source licences",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.title"
+ },
+ "settings.legal.ffmpeg.title": {
+  "value": "FFmpeg & source offer",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.title"
+ },
+ "settings.legal.source.title": {
+  "value": "Butaca source code",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.source.title"
+ },
+ "settings.legal.trademarks.title": {
+  "value": "Trademarks & non-affiliation",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.title"
+ },
+ "settings.legal.contact.title": {
+  "value": "Privacy & security contact",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.title"
+ },
+ "settings.legal.privacy.subtitle": {
+  "value": "How Butaca handles local data and optional reports.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.subtitle"
+ },
+ "settings.legal.opensource.subtitle": {
+  "value": "Components, copyright holders and licence texts.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.subtitle"
+ },
+ "settings.legal.ffmpeg.subtitle": {
+  "value": "LGPL notice, replaceability and corresponding source.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.subtitle"
+ },
+ "settings.legal.source.subtitle": {
+  "value": "Project source, build scripts and release materials.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.source.subtitle"
+ },
+ "settings.legal.trademarks.subtitle": {
+  "value": "Independent-client status and trademark attribution.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.subtitle"
+ },
+ "settings.legal.contact.subtitle": {
+  "value": "How to ask a privacy question or report a vulnerability.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.subtitle"
+ },
+ "settings.legal.section": {
+  "value": "Legal",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.section"
+ },
+ "settings.legal.copy": {
+  "value": "Read the notices that apply to this build, its open-source components and its relationship with LG.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.copy"
+ },
+ "settings.about.subtitle": {
+  "value": "A native media client built for LG webOS.",
+  "description": "Settings, account, onboarding or privacy UI: settings.about.subtitle"
+ },
+ "settings.legal.privacy.responsible": {
+  "value": "RESPONSIBLE FOR BUTACA DATA",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible"
+ },
+ "settings.legal.privacy.responsible_body": {
+  "value": "Gleb Linnik is responsible only for the data Butaca stores locally on this television.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible_body"
+ },
+ "settings.legal.privacy.servers": {
+  "value": "JELLYFIN SERVERS",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers"
+ },
+ "settings.legal.privacy.servers_body": {
+  "value": "To sign you in, browse and play media, report progress and use server features, Butaca talks directly to the Jellyfin server you configure, and to nothing else. Those requests are handled by that server and by whoever operates it. The developer of Butaca receives none of them.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers_body"
+ },
+ "settings.legal.privacy.local": {
+  "value": "ON THIS TELEVISION",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local"
+ },
+ "settings.legal.privacy.local_body": {
+  "value": "Butaca keeps, for each server you sign in to, an access token, the address of that server and a device identifier the server uses to recognise this television. It also keeps your playback preferences, the language of the interface, and local technical logs: a small rotating event log, an append-only crash log and a stderr log. Your password is never stored: it is used once to obtain the token and written nowhere.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local_body"
+ },
+ "settings.legal.privacy.noreports": {
+  "value": "NO REPORTS, NO ANALYTICS",
+  "description": "Section heading in the privacy notice: this build sends no crash reports or analytics."
+ },
+ "settings.legal.privacy.noreports_body": {
+  "value": "This build sends no crash reports, no analytics and no telemetry anywhere. There is no account with the developer, no identifier attached to this television, and no question to answer on first run, because there is nothing to opt into. The only traffic it generates is to the server you configured.",
+  "description": "Body of the no-reports section of the privacy notice: this build sends no telemetry and its only traffic goes to the server the user configured."
+ },
+ "settings.legal.privacy.retention": {
+  "value": "RETENTION",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention"
+ },
+ "settings.legal.privacy.retention_body": {
+  "value": "Your sign-in, the servers registered with it and their tokens, and the device identifier are removed when you sign out. The event log and the stderr log are truncated at every launch, and the crash log only grows until Delete all local data removes it.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention_body"
+ },
+ "settings.legal.privacy.uninstall": {
+  "value": "UNINSTALLING",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall"
+ },
+ "settings.legal.privacy.uninstall_body": {
+  "value": "Removing Butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Your app language preference is also kept there. Use Delete all local data BEFORE uninstalling if you want nothing of Butaca left on this television.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall_body"
+ },
+ "settings.legal.privacy.contact": {
+  "value": "CONTACT",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.contact"
+ },
+ "settings.legal.privacy.contact_body": {
+  "value": "Privacy questions: github.com/gnacho/butaca/issues",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.contact_body"
+ },
+ "settings.legal.ffmpeg.body": {
+  "value": "This software uses libraries from the FFmpeg project under the LGPLv2.1. FFmpeg is copyright (c) the FFmpeg developers; Butaca does not own FFmpeg.\n\nThe FFmpeg libraries are unmodified and loaded dynamically, and may be replaced with an interface-compatible build. The complete corresponding FFmpeg 9.0 source, exact configure line and build script are published with every Butaca release.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.body"
+ },
+ "settings.legal.trademarks.body": {
+  "value": "LG and webOS are trademarks of LG Electronics Inc.\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.body"
+ },
+ "settings.legal.contact.body": {
+  "value": "Privacy questions may be sent to github.com/gnacho/butaca/issues.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for gnacho/butaca. Please do not include access tokens, server addresses or personal media information in a report.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.body"
+ },
+ "settings.legal.opensource.body": {
+  "value": "Butaca is open-source software licensed under GPL-3.0-or-later. Copyright (c) 2026 Gleb Linnik and contributors. You may modify and redistribute it under these terms. There is no warranty, to the extent permitted by law.\n\nThird-party components retain their own licences. The package includes THIRD-PARTY-NOTICES.md and licence texts for the Rust runtime and crates, FFmpeg, NanoSVG, fonts and icons. Platform libraries have separate terms.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.body"
+ },
+ "settings.legal.source.body": {
+  "value": "Source for build {build}:\n\nhttps://github.com/gnacho/butaca/tree/{build}\n\nLocal migration candidates may contain unpublished changes. Their matching source snapshot is provided with the candidate evidence. A published binary must be accompanied by its version-specific complete source bundle and build instructions; a moving branch is not the corresponding-source record. See LICENSING.md in the package.",
+  "description": "Settings, account, onboarding or privacy UI: settings.legal.source.body",
+  "args": {
+   "build": "str"
+  }
+ },
+ "settings.about.body": {
+  "value": "Version {version}\nBuild {build}\n\nOpen source under GPL-3.0-or-later\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
+  "description": "About page body: version, build, licence, and the unofficial-app notice. Authorship and the source link live in Legal, not here.",
+  "args": {
+   "build": "str",
+   "version": "str"
+  }
+ },
+ "settings.consent.preview.crash_intro": {
+  "value": "Crashes / Errors — what is actually sent to Sentry in Germany, and only when error reporting is on. Random and build-specific values are placeholders; fixed classes below are representative values from the closed domains in the Privacy notice. Nothing else is sent. The crash report identifier is random, is created only when crash reports are enabled, and is shown here as a placeholder.\n\n",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.crash_intro"
+ },
+ "settings.consent.preview.usage_intro": {
+  "value": "Analytics / Usage — what is actually sent to PostHog in Germany, and only when usage reporting is on, with a random Analytics ID. Random and build-specific values are placeholders; fixed classes below are representative values from the closed domains in the Privacy notice. Nothing else is sent. The usage identifier is random and is created only when product analytics is enabled.\n\n",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.usage_intro"
+ },
+ "settings.consent.preview.native": {
+  "value": "Native crash report (only when error reporting is on):\n",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.native"
+ },
+ "settings.consent.preview.fallback": {
+  "value": " (only if native capture is unavailable):\n",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.fallback"
+ },
+ "settings.consent.preview.handled": {
+  "value": "\n\nHandled playback error (only when error reporting is on):\n",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.handled"
+ },
+ "settings.consent.analytics.absent": {
+  "value": "NO ANALYTICS ID\n\nProduct analytics is off, so this installation has no analytics identifier and is sending no analytics events.\n\nAn identifier is created only when you turn product analytics on, and deleting it is what turning it off does. If you had analytics on before and want events from that period deleted, write to {contact} — but note that the identifier they carry was destroyed when analytics was turned off, so it can no longer be looked up from this television.\n\nCrash reports do not use this identifier. They carry a separate Crash report ID, shown on its own row while crash reports are on.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics.absent",
+  "args": {
+   "contact": "str"
+  }
+ },
+ "settings.consent.errors.absent": {
+  "value": "NO CRASH REPORT ID\n\nCrash reports are off, so this installation has no crash report identifier and is sending no crash or error reports.\n\nAn identifier is created only when you turn crash reports on, and deleting it is what turning them off does. If you had crash reports on before and want reports from that period deleted, write to {contact} — but note that the identifier they carry was destroyed when crash reports were turned off, so it can no longer be looked up from this television.",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.errors.absent",
+  "args": {
+   "contact": "str"
+  }
+ },
+ "settings.consent.preview.usage_heading": {
+  "value": "Usage events (only when usage reporting is on):\n",
+  "description": "Settings, account, onboarding or privacy UI: settings.consent.preview.usage"
+ },
+ "settings.back": {
+  "value": "Back",
+  "description": "Settings, consent or sign-in UI: settings.back"
+ },
+ "settings.profiles.failed": {
+  "value": "Can’t change profile",
+  "description": "Settings, consent or sign-in UI: settings.profiles.failed"
+ },
+ "settings.playback.section": {
+  "value": "Playback",
+  "description": "Settings, consent or sign-in UI: settings.playback.section"
+ },
+ "settings.preferences.section": {
+  "value": "Preferences",
+  "description": "Settings, consent or sign-in UI: settings.preferences.section"
+ },
+ "settings.library.recently_added": {
+  "value": "Show recently added",
+  "description": "Settings, consent or sign-in UI: the switch that leads a library with its recently added shelf."
+ },
+ "settings.library.recently_added.detail": {
+  "value": "Lead Movies and TV Shows with new arrivals.",
+  "description": "Settings, consent or sign-in UI: the show-recently-added switch's detail line."
+ },
+ "settings.playback.idle_screen": {
+  "value": "Screensaver",
+  "description": "Settings, consent or sign-in UI: the switch that lets the OLED idle screen appear when nothing is playing."
+ },
+ "settings.playback.idle_screen.detail": {
+  "value": "Dim clock when nothing plays.",
+  "description": "Settings, consent or sign-in UI: the screensaver row's detail line."
+ },
+ "settings.playback.title": {
+  "value": "Video & playback",
+  "description": "Settings, consent or sign-in UI: settings.playback.title"
+ },
+ "settings.playback.detail": {
+  "value": "Default quality and Direct Play.",
+  "description": "Settings, consent or sign-in UI: settings.playback.detail"
+ },
+ "settings.audio.title": {
+  "value": "Audio & subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.title"
+ },
+ "settings.playback.quality": {
+  "value": "Default quality",
+  "description": "Settings, consent or sign-in UI: settings.playback.quality"
+ },
+ "settings.playback.direct_play": {
+  "value": "Direct Play",
+  "description": "Settings, consent or sign-in UI: settings.playback.direct_play"
+ },
+ "settings.playback.lip_sync": {
+  "value": "Audio sync",
+  "description": "Settings, consent or sign-in UI: settings.playback.lip_sync"
+ },
+ "settings.playback.up_next": {
+  "value": "Next episode",
+  "description": "Settings, consent or sign-in UI: settings.playback.up_next"
+ },
+ "settings.playback.up_next_auto": {
+  "value": "Play automatically",
+  "description": "Settings, consent or sign-in UI: settings.playback.up_next_auto"
+ },
+ "settings.playback.up_next_ask": {
+  "value": "Ask first",
+  "description": "Settings, consent or sign-in UI: settings.playback.up_next_ask"
+ },
+ "settings.playback.up_next_off": {
+  "value": "Do not offer",
+  "description": "Settings, consent or sign-in UI: settings.playback.up_next_off"
+ },
+ "settings.playback.up_next_window": {
+  "value": "Up Next card timing",
+  "description": "Settings, consent or sign-in UI: settings.playback.up_next_window"
+ },
+ "settings.playback.subtitle_size": {
+  "value": "Subtitle size",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size"
+ },
+ "settings.playback.subtitle_size_smaller": {
+  "value": "Smaller",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_smaller"
+ },
+ "settings.playback.subtitle_size_small": {
+  "value": "Small",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_small"
+ },
+ "settings.playback.subtitle_size_normal": {
+  "value": "Normal",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_normal"
+ },
+ "settings.playback.subtitle_size_large": {
+  "value": "Large",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_large"
+ },
+ "settings.playback.subtitle_size_larger": {
+  "value": "Larger",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_size_larger"
+ },
+ "settings.playback.subtitle_position": {
+  "value": "Subtitle position",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position"
+ },
+ "settings.playback.subtitle_position_bottom": {
+  "value": "Bottom edge",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_bottom"
+ },
+ "settings.playback.subtitle_position_low": {
+  "value": "Low",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_low"
+ },
+ "settings.playback.subtitle_position_middle": {
+  "value": "Middle",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_middle"
+ },
+ "settings.playback.subtitle_position_high": {
+  "value": "High",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_high"
+ },
+ "settings.playback.subtitle_position_top": {
+  "value": "Top edge",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_position_top"
+ },
+ "settings.playback.subtitle_background": {
+  "value": "Subtitle background",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background"
+ },
+ "settings.playback.subtitle_background_off": {
+  "value": "Off",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_off"
+ },
+ "settings.playback.subtitle_background_half": {
+  "value": "Light box",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_half"
+ },
+ "settings.playback.subtitle_background_solid": {
+  "value": "Solid box",
+  "description": "Settings, consent or sign-in UI: settings.playback.subtitle_background_solid"
+ },
+ "settings.audio.language": {
+  "value": "Preferred audio language",
+  "description": "Settings, consent or sign-in UI: settings.audio.language"
+ },
+ "settings.audio.subtitles": {
+  "value": "Subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.subtitles"
+ },
+ "settings.audio.subtitle_language": {
+  "value": "Subtitle language",
+  "description": "Settings, consent or sign-in UI: settings.audio.subtitle_language"
+ },
+ "settings.audio.forced_subtitles": {
+  "value": "Forced subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.forced_subtitles"
+ },
+ "settings.playback.force_body": {
+  "value": "Bypasses playback compatibility checks and always uses original quality. Playback may have no sound, display incorrectly, freeze, or crash the app. Butaca will not automatically switch to compatible playback and may not recover gracefully.\n\nEnable this only if you understand these risks and know how to restart the app and return Direct Play to Auto.",
+  "description": "Settings, consent or sign-in UI: settings.playback.force_body"
+ },
+ "settings.playback.force_note": {
+  "value": "Advanced override. Playback may fail or crash; automatic fallback is off. Return to Auto if problems occur.",
+  "description": "Settings, consent or sign-in UI: settings.playback.force_note"
+ },
+ "settings.playback.copy": {
+  "value": "Playback defaults for this television. Quality is also available in the player's More menu. Changes here apply to the next playback.",
+  "description": "Settings, consent or sign-in UI: settings.playback.copy"
+ },
+ "settings.playback.enable_force": {
+  "value": "Enable Force",
+  "description": "Settings, consent or sign-in UI: settings.playback.enable_force"
+ },
+ "settings.playback.force_question": {
+  "value": "Force Direct Play?",
+  "description": "Settings, consent or sign-in UI: settings.playback.force_question"
+ },
+ "settings.playback.saving": {
+  "value": "Saving playback preference…",
+  "description": "Settings, consent or sign-in UI: settings.playback.saving"
+ },
+ "settings.audio.manual": {
+  "value": "Off (manual selection)",
+  "description": "Settings, consent or sign-in UI: settings.audio.manual"
+ },
+ "settings.audio.foreign": {
+  "value": "When audio isn't in my language",
+  "description": "Settings, consent or sign-in UI: settings.audio.foreign"
+ },
+ "settings.audio.always": {
+  "value": "Always",
+  "description": "Settings, consent or sign-in UI: settings.audio.always"
+ },
+ "settings.audio.prefer_regular": {
+  "value": "Prefer non-forced subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.prefer_regular"
+ },
+ "settings.audio.prefer_forced": {
+  "value": "Prefer forced subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.prefer_forced"
+ },
+ "settings.audio.only_forced": {
+  "value": "Only forced subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.only_forced"
+ },
+ "settings.audio.only_regular": {
+  "value": "Only non-forced subtitles",
+  "description": "Settings, consent or sign-in UI: settings.audio.only_regular"
+ },
+ "settings.audio.original": {
+  "value": "Original",
+  "description": "Settings, consent or sign-in UI: settings.audio.original"
+ },
+ "settings.audio.no_preference": {
+  "value": "No preference",
+  "description": "Settings, consent or sign-in UI: settings.audio.no_preference"
+ },
+ "settings.audio.not_set": {
+  "value": "Not set",
+  "description": "Settings, consent or sign-in UI: settings.audio.not_set"
+ },
+ "settings.playback.overridden": {
+  "value": "Overridden by Force Direct Play: Original quality.",
+  "description": "Settings, consent or sign-in UI: settings.playback.overridden"
+ },
+ "settings.audio.retry": {
+  "value": "Retry",
+  "description": "Settings, consent or sign-in UI: settings.audio.retry"
+ },
+ "settings.audio.retry_detail": {
+  "value": "Try the account request again.",
+  "description": "Settings, consent or sign-in UI: settings.audio.retry_detail"
+ },
+ "settings.playback.save_failed": {
+  "value": "Could not save or load this preference. Please try again.",
+  "description": "Settings, consent or sign-in UI: settings.playback.save_failed"
+ },
+ "settings.playback.auto": {
+  "value": "Auto",
+  "description": "Settings, consent or sign-in UI: settings.playback.auto"
+ },
+ "settings.playback.forced": {
+  "value": "Force Direct Play (advanced)",
+  "description": "Settings, consent or sign-in UI: settings.playback.forced"
+ },
+ "settings.playback.disabled": {
+  "value": "Disabled",
+  "description": "Settings, consent or sign-in UI: settings.playback.disabled"
+ },
+ "settings.plaintext.connect": {
+  "value": "Connect",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.connect"
+ },
+ "settings.plaintext.not_now": {
+  "value": "Not now",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.not_now"
+ },
+ "settings.plaintext.question": {
+  "value": "Connect without encryption?",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.question"
+ },
+ "settings.plaintext.body": {
+  "value": "Your Jellyfin sign-in will travel without encryption over this network, to this server only.",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.body"
+ },
+ "settings.plaintext.section": {
+  "value": "Unencrypted connections",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.section"
+ },
+ "settings.plaintext.denied": {
+  "value": "Not allowed. Only encrypted connections.",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.denied"
+ },
+ "settings.plaintext.connected": {
+  "value": "Allowed on this network. Connected without encryption.",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.connected"
+ },
+ "settings.plaintext.allowed": {
+  "value": "Allowed on this network when a secure connection fails.",
+  "description": "Settings, consent or sign-in UI: settings.plaintext.allowed"
+ },
+ "settings.login.continue_unsaved": {
+  "value": "Continue",
+  "description": "Settings, consent or sign-in UI: settings.login.continue_unsaved"
+ },
+ "settings.login.details": {
+  "value": "Details",
+  "description": "Settings, consent or sign-in UI: settings.login.details"
+ },
+ "settings.login.send_report": {
+  "value": "Send report",
+  "description": "Settings, consent or sign-in UI: settings.login.send_report"
+ },
+ "settings.login.close": {
+  "value": "Close",
+  "description": "Settings, consent or sign-in UI: settings.login.close"
+ },
+ "settings.login.report_question": {
+  "value": "Send a report about this sign-in problem?",
+  "description": "Settings, consent or sign-in UI: settings.login.report_question"
+ },
+ "settings.login.report_body": {
+  "value": "The report says which sign-in step failed and how the connection answered, storage failure stages and error numbers, plus the app version. It never includes your account name, tokens, PIN, sign-in code or network addresses.",
+  "description": "Settings, consent or sign-in UI: settings.login.report_body"
+ },
+ "settings.login.report_sending": {
+  "value": "Sending report…",
+  "description": "Settings, consent or sign-in UI: settings.login.report_sending"
+ },
+ "settings.login.report_sent": {
+  "value": "Report sent. Thank you.",
+  "description": "Settings, consent or sign-in UI: settings.login.report_sent"
+ },
+ "settings.login.report_saved": {
+  "value": "Report saved. It will be sent later.",
+  "description": "Settings, consent or sign-in UI: settings.login.report_saved"
+ },
+ "settings.login.report_failed": {
+  "value": "Report couldn’t be sent.",
+  "description": "Settings, consent or sign-in UI: settings.login.report_failed"
+ },
+ "settings.login.save_failed_title": {
+  "value": "Couldn’t save your sign-in",
+  "description": "Settings, consent or sign-in UI: settings.login.save_failed_title"
+ },
+ "settings.login.save_failed_body": {
+  "value": "Your sign-in couldn’t be saved on this TV. You can continue, but you’ll be asked to sign in again next time.",
+  "description": "Settings, consent or sign-in UI: settings.login.save_failed_body"
+ },
+ "settings.login.unknown_device": {
+  "value": "unknown set",
+  "description": "Settings, consent or sign-in UI: settings.login.unknown_device"
+ },
+ "settings.login.your_servers": {
+  "value": "your servers",
+  "description": "Settings, consent or sign-in UI: settings.login.your_servers"
+ },
+ "settings.language.saving": {
+  "value": "Saving language…",
+  "description": "Settings, consent or sign-in UI: settings.language.saving"
+ },
+ "settings.audio.error_retry": {
+  "value": "{reason} Select Retry.",
+  "description": "Settings, consent or sign-in UI: settings.audio.error_retry",
+  "args": {
+   "reason": "str"
+  }
+ },
+ "settings.login.report_id": {
+  "value": "Report ID: {id}",
+  "description": "Settings, consent or sign-in UI: settings.login.report_id",
+  "args": {
+   "id": "str"
+  }
+ },
+ "settings.legal.privacy.plaintext_body": {
+  "description": "In-app privacy disclosure, aligned with PRIVACY.md.",
+  "value": "Butaca allows an unencrypted connection only to a literal IP address on your local network, never to a hostname or a remote address."
+ },
+ "settings.consent.preview.incident": {
+  "value": "\n\nSign-in problem report (automatically only when error reporting is on; otherwise only when you press Send report, and then without the crash report identifier):\n",
+  "description": "Heading in the crash-report preview above the sign-in problem report sample. Privacy disclosure: keep the conditions exact. 'Send report' names the button."
+ },
+ "settings.consent.placeholder.address": {
+  "value": "address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.flags": {
+  "value": "flags",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.fault_address": {
+  "value": "fault address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.caller_address": {
+  "value": "caller address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.symbol_address": {
+  "value": "symbol address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.compiled_function": {
+  "value": "compiled function",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.source_line": {
+  "value": "source line",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.source_column": {
+  "value": "source column",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.source_location": {
+  "value": "validated compile-time source:line",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.record_id": {
+  "value": "stable id for this crash-log record",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.crashed_build_id": {
+  "value": "crashed ELF build id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.running_build_id": {
+  "value": "running ELF build id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.error_event_id": {
+  "value": "random per-error event id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.crash_event_id": {
+  "value": "random id for this crash",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.message_hash": {
+  "value": "message hash",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.load_address": {
+  "value": "load address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.mapped_bytes": {
+  "value": "mapped bytes",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.kernel_release": {
+  "value": "kernel release",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.kernel_build": {
+  "value": "kernel build suffix",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.debug_id": {
+  "value": "ELF debug id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.build_id": {
+  "value": "ELF build id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.code_id": {
+  "value": "ELF code id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.virtual_address": {
+  "value": "ELF virtual address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.bytes": {
+  "value": "bytes",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.thread_address": {
+  "value": "thread instruction address",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.thread_id": {
+  "value": "thread id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.thread_label": {
+  "value": "internal thread label",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.webos_release": {
+  "value": "webOS release",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.webos_codename": {
+  "value": "webOS release codename",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.webos_api": {
+  "value": "webOS API version",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.soc_class": {
+  "value": "SoC/platform class",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.revision_class": {
+  "value": "hardware revision class",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.model_class": {
+  "value": "device model class",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.crash_time": {
+  "value": "crash time",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.crash_report_id": {
+  "value": "crash report id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.session_id": {
+  "value": "random session id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.event_time": {
+  "value": "event time",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.random_id": {
+  "value": "random id",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.project_key": {
+  "value": "project key",
+  "description": "Placeholder in the consent screen's payload preview, shown between angle brackets where a real report carries a random or device-specific value. Name what the value is; lower case."
+ },
+ "settings.consent.placeholder.app_version": {
+  "value": "app version",
+  "description": "Placeholder shown inside angle brackets in the data preview, standing for this app's version number."
+ },
+ "settings.consent.placeholder.webos_codename_short": {
+  "value": "webOS codename",
+  "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+ },
+ "settings.servers.section": {
+  "value": "Servers",
+  "description": "Settings, account, onboarding or privacy UI: the Jellyfin server section header."
+ },
+ "settings.servers.group": {
+  "value": "Server",
+  "description": "Settings: the server group label on the one-page settings screen."
+ },
+ "settings.servers.select": {
+  "value": "Select server",
+  "description": "Settings, account, onboarding or privacy UI: the row that opens the server picker."
+ },
+ "settings.servers.select.detail": {
+  "value": "Choose which server this TV uses.",
+  "description": "Settings, account, onboarding or privacy UI: the server picker row's detail line."
+ },
+ "settings.servers.quick": {
+  "value": "Quick connect",
+  "description": "Settings, account, onboarding or privacy UI: the row that opens the sign-in form to add another server."
+ },
+ "settings.servers.quick.detail": {
+  "value": "Add another Jellyfin server.",
+  "description": "Settings, account, onboarding or privacy UI: the quick-connect row's detail line."
+ },
+ "settings.servers.add_password": {
+  "value": "Add server with a password",
+  "description": "Settings, account, onboarding or privacy UI: the server picker row that opens the password sign-in form to add another server."
+ },
+ "settings.servers.add_password.detail": {
+  "value": "Sign in to another server with a user name and password.",
+  "description": "Settings, account, onboarding or privacy UI: the add-server-by-password row's detail line."
+ },
+ "settings.servers.disconnect": {
+  "value": "Disconnect",
+  "description": "Settings, account, onboarding or privacy UI: the row that signs out of the current server."
+ },
+ "settings.servers.disconnect.detail": {
+  "value": "Sign out of the current server.",
+  "description": "Settings, account, onboarding or privacy UI: the disconnect row's detail line."
+ },
+ "settings.servers.copy": {
+  "value": "Choose which server this television connects to.",
+  "description": "Settings, account, onboarding or privacy UI: the server picker page's subtitle."
+ },
+ "settings.privacy.lan": {
+  "value": "Privacy",
+  "description": "Settings, account, onboarding or privacy UI: the row and page title of the Jellyfin privacy statement."
+ },
+ "settings.privacy.lan.detail": {
+  "value": "Nothing leaves your local network.",
+  "description": "Settings, account, onboarding or privacy UI: the privacy row's detail line."
+ },
+ "settings.privacy.lan.copy": {
+  "value": "How Butaca treats your data.",
+  "description": "Settings, account, onboarding or privacy UI: the privacy page's subtitle."
+ },
+ "settings.privacy.lan.body": {
+  "value": "Nothing leaves your local network. Butaca has no account, no telemetry and no analytics. Your credentials live only on this television. The only server the app talks to is the one you configured.",
+  "description": "Settings, account, onboarding or privacy UI: the Jellyfin flavor's self-contained privacy statement."
+ },
+ "settings.root.jellyfin_copy": {
+  "value": "Manage this television and your Jellyfin servers. Everything stays on your local network: no account, no telemetry, nothing leaves it.",
+  "description": "Settings root left-column intro on the Jellyfin flavor: settings.root.jellyfin_copy"
+ },
+ "settings.root.subtitle": {
+  "value": "Profile: {profile} · Butaca {version} · No telemetry: the app only talks to your server",
+  "args": {
+   "profile": "str",
+   "version": "str"
+  },
+  "description": "Settings subtitle under the page title, with the real active profile and app version"
+ },
+ "settings.playback.skip_markers": {
+  "value": "Skip intro and credits",
+  "description": "Settings, consent or sign-in UI: settings.playback.skip_markers"
+ },
+ "settings.playback.skip_markers_ask": {
+  "value": "Ask me",
+  "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_ask"
+ },
+ "settings.playback.skip_markers_auto": {
+  "value": "Skip automatically",
+  "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_auto"
+ },
+ "settings.interface.section": {
+  "value": "Interface",
+  "description": "Settings root: the group header for the interface rows (language, legal, about)."
+ },
+ "settings.servers.current": {
+  "value": "Jellyfin server",
+  "description": "Settings root: the row naming the server this television is signed in to, with its account as the value and its address underneath."
+ },
+ "settings.servers.add": {
+  "value": "Add server",
+  "description": "Settings: the row that opens the add-server form."
+ },
+ "settings.servers.add.detail": {
+  "value": "Jellyfin address and account",
+  "description": "Settings: the line under the add-server row."
+ },
+ "settings.playback.quality.detail": {
+  "value": "Bitrate limit for playback.",
+  "description": "Settings root: the quality row's detail line."
+ },
+ "settings.playback.direct_play.detail": {
+  "value": "Play untranscoded when the TV allows.",
+  "description": "Settings root: the Direct Play row's detail line."
+ },
+ "settings.playback.lip_sync.detail": {
+  "value": "Audio delay against the picture.",
+  "description": "Settings root: the audio-sync row's detail line."
+ },
+ "settings.playback.up_next.detail": {
+  "value": "What to do when it ends.",
+  "description": "Settings root: the next-episode row's detail line."
+ },
+ "settings.playback.up_next_window.detail": {
+  "value": "How long before the card appears.",
+  "description": "Settings root: the up-next-window row's detail line."
+ },
+ "settings.playback.skip_markers.detail": {
+  "value": "Intros and credits the server marks.",
+  "description": "Settings root: the skip-markers row's detail line."
+ },
+ "settings.playback.subtitle_size.detail": {
+  "value": "Size of the subtitle text.",
+  "description": "Settings root: the subtitle-size row's detail line."
+ },
+ "settings.playback.subtitle_position.detail": {
+  "value": "How high they appear.",
+  "description": "Settings root: the subtitle-position row's detail line."
+ },
+ "settings.playback.subtitle_background.detail": {
+  "value": "Box behind the text.",
+  "description": "Settings root: the subtitle-background row's detail line."
+ },
+ "settings.servers.change": {
+  "value": "Change server",
+  "description": "Settings: the account dialog's title, the design mockup's own words."
+ },
+ "settings.servers.active_tag": {
+  "value": "Active",
+  "description": "Settings: the tag on the server the screens are showing."
+ },
+ "settings.servers.change.detail": {
+  "value": "The screens show the active server. Each one keeps its own sign-in.",
+  "description": "Settings: the account dialog's line under its title."
+ }
 }

@@ -299,6 +299,59 @@ pub const BOT_PAD: f32 = 20.0;
 pub const FIRST_HEADER_CAP_OFFSET: f32 = TOP_PAD + HEADER_CAP_INSET;
 const HEADER_CAP_INSET: f32 = 8.0;
 /// Pill (row) inset from the panel's left/right. `pub` for the [`ROW_H`] caller shape.
+/// **The card grid's own geometry** — the Settings page's, measured off the redesign mockup's DOM
+/// at 1920x1080 (`tests/screenshots` compares its captures to it).
+///
+/// Opt-in and OFF everywhere else. The app's couch ladder draws a row title at HEADLINE 32 and its
+/// sub-line at CAPTION 24 because a television is read from three metres; the mockup's own comp is
+/// set at 17 and 14, so this pack carries its numbers for the ONE page that is held against it
+/// pixel for pixel. A table without a pack keeps the ladder, the app's card tokens and the couch
+/// floor.
+#[derive(Clone, Copy, Debug)]
+pub struct CardGrid {
+    /// Frame gutter, the gap between columns, the gap between bands, and one card's height.
+    pub side: f32,
+    pub col_gap: f32,
+    pub row_gap: f32,
+    pub row_h: f32,
+    /// The card's radius and its inner padding (`.set-row { border-radius:18px; padding:20px 24px }`).
+    pub rad: f32,
+    pub pad: f32,
+    /// The list's own air above the first band, and the band a group header occupies — which the
+    /// reference splits as 8px of margin above its 18px label and 12 below it — and the gap between
+    /// groups. `28` between groups and `38` for a header reproduce the mockup's own pitch: a group's
+    /// first card lands 18px under its label and the next label 42px under a card's plate.
+    pub top_pad: f32,
+    pub header_h: f32,
+    pub div_h: f32,
+    /// The header label's own offset inside its band (the reference's 8px margin).
+    pub header_inset: f32,
+    /// Resting plate and its hairline, then the focused plate and its ring — and the scale the
+    /// reference's `.is-focused` transform applies about the card's own centre.
+    pub fill: [f32; 4],
+    pub ring: [f32; 4],
+    pub focus_fill: [f32; 4],
+    pub focus_ring: [f32; 4],
+    pub focus_scale: f32,
+    /// The status dot's diameter (`.sv .dot { width:9px }`).
+    pub dot_w: f32,
+    /// The group header: `.set-group { font:800 13px; letter-spacing:.2em }` in the reference's gold.
+    pub header_sz: std::os::raw::c_int,
+    pub header_ink: [f32; 4],
+    /// The face that size is set in: the comp asks **800**, which is the ExtraBold cut, not the
+    /// interface's 700 and certainly not the 400 a bare `Label` gives.
+    pub header_role: crate::text::FontRole,
+    /// The card's sub-line face: `.sv span` is 500, one rung under the 400 the app's body runs.
+    pub detail_role: crate::text::FontRole,
+    /// The card's three runs: title, sub-line and read-out.
+    pub title_sz: std::os::raw::c_int,
+    pub title_ink: [f32; 4],
+    pub detail_sz: std::os::raw::c_int,
+    pub detail_ink: [f32; 4],
+    pub value_sz: std::os::raw::c_int,
+    pub value_ink: [f32; 4],
+}
+
 pub const SIDE: f32 = 12.0;
 const CONTENT_PAD: f32 = 20.0; // text/check padding inside the pill (mockup rowBase 13px 20px)
 /// Where a row's own content starts, measured from the panel's left edge. Exposed so a panel that
@@ -405,6 +458,9 @@ pub struct TableView {
     /// with its own edge, and a focus wash instead of the solid capsule. Off by default — a menu,
     /// a picker and a library list are one list on the panel, which is what a card would break.
     cards: bool,
+    /// The measured geometry this grid wears, when its page is held against the mockup (see
+    /// [`CardGrid`]). `None` keeps the app's couch ladder and card tokens.
+    grid: Option<CardGrid>,
     /// Semantic ink for section labels. Ambient routes can raise this role for contrast without
     /// replacing the shared table header renderer or changing row/detail hierarchy.
     pub header_ink: [f32; 4],
@@ -420,7 +476,7 @@ impl TableView {
     /// The owner records its row data separately. These fields determine layout, the selected
     /// face and subsequent motion; no text/texture cache or renderer pointer is traversed.
     pub(crate) fn write_motion(&self, c: &mut crate::ui::machine::Canon) {
-        let Self { sections: _, sel, list_focused, compact, tall, cols: _, cards: _, header_ink, hl_top, hl_bot, scroll } = self;
+        let Self { sections: _, sel, list_focused, compact, tall, cols: _, cards: _, grid: _, header_ink, hl_top, hl_bot, scroll } = self;
         c.u32(*sel as u32).bool(*list_focused).bool(*compact).bool(*tall);
         for component in header_ink { c.f32(*component); }
         for spring in [hl_top, hl_bot, scroll] { c.f32(spring.pos).f32(spring.vel); }
@@ -436,6 +492,9 @@ impl TableView {
         self.tall = v;
     }
     fn tall_row_h(&self) -> f32 {
+        if let Some(g) = self.grid {
+            return g.row_h;
+        }
         if self.tall {
             ROW_H_ART
         } else {
@@ -463,6 +522,18 @@ impl TableView {
         self.cards = on;
     }
 
+    /// Wear a measured card-grid geometry (see [`CardGrid`]). Implies [`Self::cards`]: a grid of
+    /// plates is what the pack describes.
+    pub fn card_grid(&mut self, grid: CardGrid) {
+        self.cards = true;
+        self.grid = Some(grid);
+    }
+
+    /// The measured pack, when this table has one (the column count is [`Self::cols`]).
+    pub(crate) fn card_grid_metrics(&self) -> Option<CardGrid> {
+        self.grid
+    }
+
     pub(crate) fn cols(&self) -> usize {
         self.cols.max(1)
     }
@@ -471,7 +542,11 @@ impl TableView {
     /// is `2 * SIDE` in both shapes, so `1` column is the width every caller always had).
     pub(crate) fn cell_width(&self, frame_w: f32) -> f32 {
         let cols = self.cols() as f32;
-        ((frame_w - 2.0 * SIDE - (cols - 1.0) * theme::space::MD) / cols).max(0.0)
+        let (side, gap) = match self.grid {
+            Some(g) => (g.side, g.col_gap),
+            None => (SIDE, theme::space::MD),
+        };
+        ((frame_w - 2.0 * side - (cols - 1.0) * gap) / cols).max(0.0)
     }
 
     /// The width to hand [`Self::row_columns`]/[`Self::label_width`] for one cell — the row's TEXT
@@ -490,7 +565,11 @@ impl TableView {
     /// Cell `col`'s left edge inside `frame` — the one formula the draw, the hit test and the
     /// focus projection share.
     fn cell_x(&self, frame: Rect, col: usize) -> f32 {
-        frame.x + SIDE + col as f32 * (self.cell_width(frame.w) + theme::space::MD)
+        let (side, gap) = match self.grid {
+            Some(g) => (g.side, g.col_gap),
+            None => (SIDE, theme::space::MD),
+        };
+        frame.x + side + col as f32 * (self.cell_width(frame.w) + gap)
     }
 
     /// Which column global row `target` occupies (row-major, restarting at 0 in each section).
@@ -536,6 +615,7 @@ impl TableView {
             tall: false,
             cols: 1,
             cards: false,
+            grid: None,
             header_ink: theme::TEXT_TERTIARY,
             hl_top: Spring::at(0.0),
             hl_bot: Spring::at(0.0),
@@ -561,7 +641,7 @@ impl TableView {
     /// walk [`row_rect`](Self::row_rect), [`hit_row`](Self::hit_row) and `ui::geom::Table::place`
     /// share (spec §7.1). `None` for a header index, a separator, or an index out of range.
     pub fn row_frame(&self, frame: Rect, i: i32) -> Option<Rect> {
-        let top0 = frame.y + TOP_PAD;
+        let top0 = frame.y + self.pads().0;
         let scroll = self.scroll.pos;
         let mut out = None;
         self.walk(|cy, gi, _, col| {
@@ -603,7 +683,7 @@ impl TableView {
         if !frame.contains(mx, my) {
             return None;
         }
-        let top0 = frame.y + TOP_PAD;
+        let top0 = frame.y + self.pads().0;
         let scroll = self.scroll.pos;
         let mut hit = None;
         self.walk(|cy, gi, _, col| {
@@ -699,7 +779,8 @@ impl TableView {
         if self.n_rows() == 0 {
             return 120.0;
         }
-        self.content_h() + TOP_PAD + BOT_PAD
+        let (top_pad, _, _) = self.pads();
+        self.content_h() + top_pad + BOT_PAD
     }
 
     /// Intrinsic panel width for complete labels at the table's own typography. Action menus
@@ -864,17 +945,26 @@ impl TableView {
     /// tall as its tallest cell, so a [ROW_H] beside a two-line [ROW_H_TALL] cannot overlap the
     /// next band. With one column this is the walk this widget always had. Cheap; the lists are
     /// short.
+    /// The air above the first band, and the two band heights a group boundary occupies.
+    fn pads(&self) -> (f32, f32, f32) {
+        match self.grid {
+            Some(g) => (g.top_pad, g.header_h, g.div_h),
+            None => (TOP_PAD, HDR_H, DIV_H),
+        }
+    }
+
     fn walk(&self, mut f: impl FnMut(f32, i32, usize, usize)) {
         let cols = self.cols();
+        let (_, hdr_h, div_h) = self.pads();
         let mut y = 0.0f32;
         let mut gi = 0i32;
         for (si, sec) in self.sections.iter().enumerate() {
             if si > 0 {
-                y += DIV_H;
+                y += div_h;
             }
             if !sec.header.is_empty() {
                 f(y, -1, si, 0);
-                y += HDR_H;
+                y += hdr_h;
             }
             let mut i = 0;
             while i < sec.rows.len() {
@@ -917,13 +1007,14 @@ impl TableView {
     }
     fn content_h(&self) -> f32 {
         let cols = self.cols();
+        let (_, hdr_h, div_h) = self.pads();
         let mut y = 0.0f32;
         for (si, sec) in self.sections.iter().enumerate() {
             if si > 0 {
-                y += DIV_H;
+                y += div_h;
             }
             if !sec.header.is_empty() {
-                y += HDR_H;
+                y += hdr_h;
             }
             let mut i = 0;
             while i < sec.rows.len() {
@@ -994,7 +1085,10 @@ impl TableView {
         // **The lit row is the chrome's one tone.** It was `ACCENT` — the warm off-white of the old
         // mockup — which is why every menu's hover still read #FFCEA3 after the palette moved
         // (the owner's 2026-11-10 pass: "el hover del menú ... debería tener #7373CB").
-        self.draw_with_selection_fill(p, frame, measure, theme::CHROME_LIT);
+        // **The second comp's focus plate is white at 16%** (`.sm-server.is-focused`, and the same
+        // weight on its cards), not the violet `#7373cb` the app lit its menus with. One token for
+        // every table in the app: a menu, a picker and a list all light the same way.
+        self.draw_with_selection_fill(p, frame, measure, theme::ROW_FOCUS_FILL);
     }
 
     /// Draw with an owner-supplied selected-row fill, keeping all other table states shared.
@@ -1020,7 +1114,7 @@ impl TableView {
         // old fade masks, a tall two-line edge row is cut uniformly (the fade left its title bright but
         // faded its detail line, which read as a broken clip). Released at the end of this fn.
         p.clip(frame);
-        let top0 = frame.y + TOP_PAD;
+        let top0 = frame.y + self.pads().0;
         let scroll = self.scroll.pos;
         let vis_top = frame.y;
         let vis_bot = frame.y + frame.h;
@@ -1035,6 +1129,18 @@ impl TableView {
             crate::ui::ACCENT_INK
         };
         let cards = self.cards;
+        // **The measured pack, or the app's own numbers.** Every expression below reads one of
+        // these, so a table either wears the mockup's geometry in full or the couch ladder in full
+        // — there is no half-dressed state to reason about.
+        let pack = self.grid;
+        let pad = pack.map_or(CONTENT_PAD, |g| g.pad);
+        let row_gap = pack.map_or(CARD_GAP, |g| g.row_gap);
+        let card_rad = pack.map_or(CARD_RAD, |g| g.rad);
+        let card_fill = pack.map_or(theme::TABLE_CARD_FILL, |g| g.fill);
+        let card_ring = pack.map_or(theme::HAIRLINE, |g| g.ring);
+        let focus_fill = pack.map_or_else(|| theme::with_a(selection_fill, CARD_FOCUS_A), |g| g.focus_fill);
+        let focus_ring = pack.map_or(theme::TABLE_CARD_RING, |g| g.focus_ring);
+        let dot_w = pack.map_or(STATUS_DOT_W, |g| g.dot_w);
         let cell_w = self.cell_width(frame.w);
         let cell_text_w = self.cell_budget_w(frame.w);
 
@@ -1065,14 +1171,20 @@ impl TableView {
                 // wash's family, and the ink on top stays the reading ink.
                 let card = Rect::new(
                     pill.x,
-                    pill.y + CARD_GAP * 0.5,
+                    pill.y + row_gap * 0.5,
                     pill.w,
-                    (pill.h - CARD_GAP).max(1.0),
+                    (pill.h - row_gap).max(1.0),
                 );
+                // `.set-row.is-focused { transform: scale(1.012) }` — the plate and its ring grow
+                // about the card's own centre, which is what makes the focused card read as lifted.
+                let card = match pack {
+                    Some(g) => card.scaled(g.focus_scale),
+                    None => card,
+                };
                 // The caller's fill is the family's LIT tone; over a card it is worn as a tint,
                 // so the label on top keeps reading ink.
-                gp.rrect(card, CARD_RAD, CARD_RAD, theme::with_a(selection_fill, CARD_FOCUS_A));
-                gp.rring(card, CARD_RAD, CARD_RING_W, theme::TABLE_CARD_RING);
+                gp.rrect(card, card_rad, card_rad, focus_fill);
+                gp.rring(card, card_rad, CARD_RING_W, focus_ring);
             } else {
                 gp.rrect(pill, PILL_RAD, PILL_RAD, selection_fill);
             }
@@ -1088,16 +1200,22 @@ impl TableView {
             // whole frame when there is one column). Every row-local expression below hangs off
             // these two, which is what keeps the grid from growing a second layout.
             let cell_x = self.cell_x(frame, col);
-            let content_x = cell_x + CONTENT_PAD;
-            let text_right = cell_x + cell_w - CONTENT_PAD;
+            let content_x = cell_x + pad;
+            let text_right = cell_x + cell_w - pad;
             if gi == -1 {
                 // panel/section header (+ hairline divider above later sections); scissor-clipped to `frame`
                 if sy + HDR_H > vis_top && sy < vis_bot {
                     // fades out at the bottom edge before its caps are cut (`bottom_edge_alpha`)
                     let p = p.alpha(edge_alpha(sy + HDR_H - HDR_INK_PAD, vis_bot, HDR_INK_PAD));
                     let sec = &self.sections[si];
-                    let hair_x = frame.x + SIDE + CONTENT_PAD;
-                    let hair_w = frame.w - 2.0 * (SIDE + CONTENT_PAD);
+                    let (hx, hw) = match pack {
+                        // The comp puts a group label flush with the card's own left edge; the
+                        // rows' inner padding is the CARD's, and a label wearing it reads indented.
+                        Some(g) => (frame.x + g.side, frame.w - 2.0 * g.side),
+                        None => (frame.x + SIDE + CONTENT_PAD, frame.w - 2.0 * (SIDE + CONTENT_PAD)),
+                    };
+                    let hair_x = hx;
+                    let hair_w = hw;
                     // No hairline between groups: the mockup separates them with the spaced-caps
                     // label and its own air, which is what keeps the settings grid reading as
                     // cards rather than as a ruled form. (`hair_x`/`hair_w` stay because the
@@ -1111,8 +1229,8 @@ impl TableView {
                     //
                     // `to_uppercase`, not `to_ascii_uppercase`: a header is a machine name or a
                     // library name and can be any script — the share measured here is Cyrillic.
-                    let hsz = theme::size::CAPTION;
-                    let cap_y = sy + HEADER_CAP_INSET;
+                    let hsz = pack.map_or(theme::size::CAPTION, |g| g.header_sz);
+                    let cap_y = sy + pack.map_or(HEADER_CAP_INSET, |g| g.header_inset);
                     let (cap_top, baseline) = crate::text::text_cap_band(hsz, 0);
                     let header_band = Rect::new(
                         hair_x,
@@ -1121,9 +1239,12 @@ impl TableView {
                         baseline - cap_top,
                     );
                     if let Ok(cs) = CString::new(spaced_caps(&sec.header)) {
-                        Label::new(cs.as_ptr(), hsz, theme::CHROME_LIT)
-                            .v(VAlign::CapTop)
-                            .draw(p, header_band);
+                        let header_ink = pack.map_or(theme::CHROME_LIT, |g| g.header_ink);
+                        let mut lab = Label::new(cs.as_ptr(), hsz, header_ink).v(VAlign::CapTop);
+                        if let Some(g) = pack {
+                            lab = lab.face(g.header_role);
+                        }
+                        lab.draw(p, header_band);
                     }
                     // trailing accessory, one rung down and on the header's own baseline. Elided,
                     // because it is the run that gives way (see `Section::accessory`).
@@ -1178,9 +1299,9 @@ impl TableView {
             // consecutive cards leave air between them — a contiguous band is what makes a list
             // read as a form rather than as a grid of objects.
             if self.cards {
-                let card = Rect::new(cell_x, sy + CARD_GAP * 0.5, cell_w, (h - CARD_GAP).max(1.0));
-                p.rrect(card, CARD_RAD, CARD_RAD, theme::TABLE_CARD_FILL);
-                p.rring(card, CARD_RAD, CARD_RING_W, theme::HAIRLINE);
+                let card = Rect::new(cell_x, sy + row_gap * 0.5, cell_w, (h - row_gap).max(1.0));
+                p.rrect(card, card_rad, card_rad, card_fill);
+                p.rring(card, card_rad, CARD_RING_W, card_ring);
             }
             // **`list_focused` gates the INK, not just the pill.** `ink` is near-black and is only
             // legible ON the accent pill; suppressing the pill while still flipping the ink drew
@@ -1268,11 +1389,11 @@ impl TableView {
             // step is the ink's ALONE — the run itself is bold (see [`VALUE_BOLD`], which all three
             // calls below take so the measure and the paint can never be two different faces).
             // **The status dot**, before the read-out: state, not a choice (see `Row::status`).
-            let dot = if row.status { STATUS_DOT_W + STATUS_DOT_GAP } else { 0.0 };
+            let dot = if row.status { dot_w + STATUS_DOT_GAP } else { 0.0 };
             if row.status {
                 let cy = cyc;
                 p.rect(
-                    Rect::new(text_right - trailing - dot + STATUS_DOT_GAP * 0.5, cy - STATUS_DOT_W * 0.5, STATUS_DOT_W, STATUS_DOT_W),
+                    Rect::new(text_right - trailing - dot + STATUS_DOT_GAP * 0.5, cy - dot_w * 0.5, dot_w, dot_w),
                     0.0,
                     theme::STATUS_DOT,
                     theme::STATUS_DOT,
@@ -1281,9 +1402,12 @@ impl TableView {
             }
             trailing += dot;
             if let Some(v) = row.readout() {
-                let ink = row_value_ink(row, focused, cards);
+                let ink = match pack {
+                    Some(g) if !row.dim && !row.value_dim => g.value_ink,
+                    _ => row_value_ink(row, focused, cards),
+                };
                 // the value gives way before the label (`row_columns`): elided to its column
-                let vsz = theme::size::LABEL;
+                let vsz = pack.map_or(theme::size::LABEL, |g| g.value_sz);
                 let value_w = self.row_columns(row, cell_text_w, measure).value_w;
                 let v = crate::text::elide_by(v, value_w, false, |t| {
                     measure.width_str(t, vsz, VALUE_BOLD != 0)
@@ -1307,14 +1431,15 @@ impl TableView {
             // (layout ≠ paint — the old fixed offsets left the two lines cramped after centring).
             let two_line = !row.detail.is_empty();
             // two-line rows follow the table's size class too (compact = BODY regular titles)
-            let (tsz, tbold) = if self.compact {
-                (theme::size::BODY, 0)
-            } else {
-                (theme::size::HEADLINE, 1)
+            let (tsz, tbold) = match pack {
+                Some(g) => (g.title_sz, 1),
+                None if self.compact => (theme::size::BODY, 0),
+                None => (theme::size::HEADLINE, 1),
             };
+            let dsz = pack.map_or(theme::size::CAPTION, |g| g.detail_sz);
             let (title_y, detail_y) = if two_line {
                 let (t_top, t_base) = crate::text::text_cap_band(tsz, tbold);
-                let (d_top, d_base) = crate::text::text_cap_band(theme::size::CAPTION, 0);
+                let (d_top, d_base) = crate::text::text_cap_band(dsz, 0);
                 let (t_cap, d_cap) = (t_base - t_top, d_base - d_top); // cap heights
                 let pair_gap = ROW_SUB_GAP; // title baseline → detail cap-top
                 let pair_top = sy + (h - (t_cap + pair_gap + d_cap)) * 0.5; // title cap-top
@@ -1324,10 +1449,10 @@ impl TableView {
             };
             // PLACE 2 — the label over its optional sub-line. Compact tables read their single-line
             // labels at BODY regular.
-            let (lsz, lbold) = if self.compact {
-                (theme::size::BODY, 0)
-            } else {
-                (theme::size::HEADLINE, 1)
+            let (lsz, lbold) = match pack {
+                Some(g) => (g.title_sz, 1),
+                None if self.compact => (theme::size::BODY, 0),
+                None => (theme::size::HEADLINE, 1),
             };
             let text_w = self.label_width(row, cell_text_w, measure);
             let lbl = crate::text::elide_by(&row.label, text_w, false, |t| {
@@ -1352,22 +1477,26 @@ impl TableView {
             if !row.detail.is_empty() {
                 let sub = if focused && !cards {
                     theme::scrim_black(0.6)
-                } else {
+                } else if row.dim {
                     dimc
+                } else {
+                    pack.map_or(dimc, |g| g.detail_ink)
                 };
                 let detail = crate::text::elide_by(&row.detail, text_w, false, |t| {
-                    measure.width_str(t, theme::size::CAPTION, false)
+                    measure.width_str(t, dsz, false)
                 });
                 if let Ok(cd) = CString::new(detail) {
-                    p.text(
-                        cd.as_ptr(),
-                        label_x,
-                        detail_y,
-                        theme::size::CAPTION,
-                        sub,
-                        0,
-                        0,
-                    );
+                    match pack {
+                        Some(g) => {
+                            Label::new(cd.as_ptr(), dsz, sub)
+                                .face(g.detail_role)
+                                .v(VAlign::CapTop)
+                                .draw(p, Rect::new(label_x, detail_y, text_w.max(1.0), dsz as f32 * 1.6));
+                        }
+                        None => {
+                            p.text(cd.as_ptr(), label_x, detail_y, dsz, sub, 0, 0);
+                        }
+                    }
                 }
             }
         });

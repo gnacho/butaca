@@ -34,13 +34,61 @@ use crate::ui::screen::{
     At, Dir, DrawFrame, Enter, FocusSource, FocusTarget, Focusable, GroupSpec, HitSource, Placed,
     RenderStrategy, Screen, ScreenEvent, Step,
 };
-use crate::ui::table::{Row, Section, TableView};
+use crate::ui::table::{CardGrid, Row, Section, TableView};
 use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::{theme, Painter, Rect};
 
 use super::super::family::{table_focus, InnerHost, SettingsPage, ALERT_GROUP};
 use super::super::registry::{word, AppFx, PreferenceCmd, ALERT};
 use super::preference_name;
+
+/// **The Settings page's own geometry, measured off the redesign mockup's DOM at 1920x1080.**
+///
+/// The mockup sets this page at 17/14/15.5 with a 13px gold group header, while the app's couch
+/// ladder runs 32/24/26 — a television read from three metres needs the ladder, and the comp does
+/// not. This page is held against the comp pixel for pixel, so it wears the comp's numbers: that
+/// trade is recorded in the plan with the top bar's material, and the pack keeps it to ONE page.
+///
+/// The vertical rhythm is the comp's too: a group's label sits 8px into its 38px band, its first
+/// card 18px under the label, consecutive cards 12 apart, and the next label 42 under a card.
+fn mockup_grid() -> CardGrid {
+    use crate::ui::{theme, table::CardGrid};
+    CardGrid {
+        side: 0.0,
+        col_gap: 26.0,
+        row_gap: 12.0,
+        row_h: 87.0,
+        rad: 18.0,
+        pad: 24.0,
+        top_pad: 0.0,
+        header_h: 38.0,
+        div_h: 28.0,
+        // The comp's label box starts 8 into the band and its caps sit ~4.5 into that box, so the
+        // cap-top the painter draws lands at 243 from the page's top.
+        header_inset: 12.5,
+        fill: theme::with_a(theme::CHROME_TEXT, 0.043),
+        ring: theme::with_a(theme::CHROME_TEXT, 0.08),
+        focus_fill: theme::with_a(theme::CHROME_TEXT, 0.14),
+        focus_ring: theme::with_a(theme::CHROME_TEXT, 0.35),
+        focus_scale: 1.012,
+        dot_w: 9.0,
+        header_sz: 13,
+        header_ink: theme::CHROME_GOLD,
+        // `.set-group` is **800** and `.set-row .sl span` is **500**: the app's ladder has neither.
+        header_role: crate::text::FontRole::Avatar,
+        detail_role: crate::text::FontRole::InterfaceSub,
+        title_sz: 17,
+        title_ink: theme::CHROME_INK,
+        detail_sz: 14,
+        detail_ink: theme::CHROME_MUTED,
+        value_sz: 16,
+        value_ink: theme::CHROME_TEXT,
+    }
+}
+
+/// `.page-title { font-size:44px }` and `.page-sub { font-size:16px }` — the comp's own rungs.
+const MOCKUP_TITLE_SZ: std::os::raw::c_int = 44;
+const MOCKUP_COPY_SZ: std::os::raw::c_int = 16;
 
 /// The page's recorded shape. It was `PreferencesV2` when this was *Video & playback*; the page
 /// now carries the server and interface rows as well, and which page the surface's stack has at
@@ -192,6 +240,7 @@ pub(crate) struct RootPage {
     state: State,
     parent_row: i32,
     copy: String,
+    root_copy: String,
     pending: Option<Pending>,
     /// The "Show recently added" switch's optimistic value until its write lands (#297). Kept
     /// outside [`State`] on purpose: this page's logical state is a recorded shape, and the
@@ -226,6 +275,7 @@ impl RootPage {
             },
             parent_row: 0,
             copy: String::new(),
+            root_copy: String::new(),
             pending: None,
             pending_recent: None,
             pending_idle: None,
@@ -254,6 +304,21 @@ impl RootPage {
         } else {
             &self.table
         }
+    }
+
+    /// The mockup's selector hangs from the row that opened it instead of replacing the page.
+    fn picker_frame(&self) -> Rect {
+        let table = Self::layout().content;
+        let anchor = self
+            .table
+            .row_frame(table, self.parent_row)
+            .unwrap_or(Rect::new(table.x, table.y, table.w, 1.0));
+        crate::ui::widgets::anchored_menu(
+            anchor,
+            520.0,
+            self.picker_table.measured_height().min(520.0),
+            false,
+        )
     }
 
     fn active_mut(&mut self) -> &mut TableView {
@@ -294,12 +359,39 @@ impl RootPage {
         }
         match level {
             Some(_) => "",
-            None => crate::i18n::msg::settings_root_jellyfin_copy(),
+            None => &self.root_copy,
         }
     }
 
+    /// The mockup's real second line: the active profile, the build that is running and the
+    /// no-telemetry commitment. It carries no placeholder identity or version.
+    fn root_subtitle(profile: &str) -> String {
+        let profile = if profile.is_empty() {
+            crate::i18n::msg::settings_audio_not_set()
+        } else {
+            profile
+        };
+        crate::i18n::msg::settings_root_subtitle(profile, crate::server::identity::VERSION)
+    }
+
     fn view(&self) -> TableScreen<'_> {
-        self.view_at(self.state.picker)
+        match self.state.picker {
+            Some(_) => self.picker_view(self.picker_frame()),
+            None => self.view_at(None),
+        }
+    }
+
+    /// One picker as a compact panel over the root: the same table and title, a frame anchored to
+    /// the parent row, and no second route.
+    fn picker_view(&self, frame: Rect) -> TableScreen<'_> {
+        let layout = Self::layout();
+        TableScreen::new(
+            Header::new(layout, None, "", ""),
+            &self.picker_table,
+            GroupId(0),
+            self.entry,
+        )
+        .with_frame(frame)
     }
 
     /// One level of the page: the row list (`None`) or a picker, each with its own title. The
@@ -311,7 +403,11 @@ impl RootPage {
         };
         let layout = Self::layout();
         TableScreen::new(
-            Header::new(layout, None, title, self.header_copy(level)).with_back_disc(),
+            Header::new(layout, None, title, self.header_copy(level))
+            .with_title_size(MOCKUP_TITLE_SZ)
+            .with_copy_size(MOCKUP_COPY_SZ)
+            .with_title_display()
+            .with_back_disc(),
             table,
             GroupId(0),
             self.entry,
@@ -529,6 +625,7 @@ impl RootPage {
 
         // Servidor: the account this television uses, the door to another one, and the way out.
         let (user, url) = Self::server_line();
+        self.root_copy = Self::root_subtitle(&user);
         let connected = !user.is_empty();
         let value = if user.is_empty() {
             crate::i18n::msg::settings_audio_not_set().to_string()
@@ -675,7 +772,7 @@ impl RootPage {
         // every row is its own plate. The PICKER stays a one-column list, because a popover of
         // options is one column on one ground.
         self.table.grid(2);
-        self.table.cards(true);
+        self.table.card_grid(mockup_grid());
         self.table.set_sections(vec![server, playback, audio, interface], list_sel, false);
         if let Some(field) = self.state.picker {
             let current = self.current_value(field);
@@ -983,7 +1080,7 @@ impl Machine<InnerHost> for RootPage {
                 }
                 let h = Self::layout().content.h;
                 self.table.update(t.dt(), h);
-                self.picker_table.update(t.dt(), h);
+                self.picker_table.update(t.dt(), self.picker_frame().h);
                 let open = self.state.picker.is_some();
                 self.submenu.tick(open, *t, &mut fx.present());
                 if !open && self.submenu.resting(false) {
@@ -1094,22 +1191,28 @@ impl Screen<InnerHost> for RootPage {
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
-        let open = self.state.picker.is_some();
-        if self.submenu.resting(open) {
-            let mut v = self.view();
-            crate::ui::screen::Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
+        // The root stays on screen under every picker, as the mockup does.
+        let root_stops = self.draw_level(f, None, f.painter);
+        let level = self.state.picker.or(self.leaving);
+        if let Some(field) = level {
+            let open = self.state.picker == Some(field);
+            let panel_p = if open { f.painter } else { self.submenu.child(f.painter) };
+            let frame = self.picker_frame();
+            crate::ui::widgets::panel_ground(
+                panel_p,
+                frame,
+                20.0,
+                f.underlay,
+            );
+            let mut view = self.picker_view(frame);
+            let mut inner = DrawFrame::with_navigation(f.cx, panel_p, f.navigation());
+            crate::ui::screen::Part::<InnerHost>::draw(&mut view, &mut inner, Rect::FULL);
+            let panel_stops = inner.into_stops();
+            for s in if open { panel_stops } else { root_stops } {
+                f.stop(Painter::root(), s);
+            }
         } else {
-            // Mid-push: the row list in the parent role, the picker (or the one leaving) in the
-            // child role; only the level focus acts on contributes stops.
-            let (parent_p, child_p) = (self.submenu.parent(f.painter), self.submenu.child(f.painter));
-            let parent = self.draw_level(f, None, parent_p);
-            let child = self
-                .state
-                .picker
-                .or(self.leaving)
-                .map(|field| self.draw_level(f, Some(field), child_p))
-                .unwrap_or_default();
-            for s in if open { child } else { parent } {
+            for s in root_stops {
                 f.stop(Painter::root(), s);
             }
         }
@@ -1493,5 +1596,54 @@ mod tests {
         assert_eq!(page.table.sections[0].rows.len(), 3, "server, add, disconnect");
         assert_eq!(page.table.sections[2].rows.len(), 3, "the three subtitle rows");
         assert_eq!(page.table.sections[3].rows.len(), 3, "language, legal, about");
+    }
+
+    #[test]
+    fn a_picker_is_anchored_to_its_row_and_leaves_the_root_page_visible() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("settings-anchored-picker");
+        let mut page = RootPage::new(EntryId(0));
+        let quality = row_of(&page, crate::i18n::msg::settings_playback_quality());
+        with_fx(|fx| page.activate(quality as usize, fx));
+        assert_eq!(page.state.picker, Some(Field::Quality));
+        let anchor = page
+            .table
+            .row_frame(RootPage::layout().content, page.parent_row)
+            .expect("the opening row has a rect");
+        let frame = page.picker_frame();
+        assert_eq!(frame.w, 520.0, "the mockup's compact selector width");
+        // The panel hangs off the row that opened it: under it when there is room, above it at the
+        // screen foot — and pinned to the screen's own edge when neither fits, which the measured
+        // 87px cards now make the case for the first playback rows.
+        let under = frame.y == anchor.y + anchor.h + crate::ui::theme::space::MD;
+        let above = frame.y + frame.h + crate::ui::theme::space::MD == anchor.y;
+        let pinned = frame.y == crate::ui::theme::space::XL;
+        assert!(
+            under || above || pinned,
+            "the panel hangs off its row, or is pinned to the screen edge: anchor {anchor:?} frame {frame:?}"
+        );
+        assert_eq!(page.view().table.frame.y, frame.y,
+            "focus geometry follows the anchored panel, not the old full-level frame");
+        with_fx(|fx| page.close_picker(fx));
+    }
+
+    #[test]
+    fn the_page_header_uses_the_real_profile_version_and_display_title() {
+        let _serial = crate::testlock::serial();
+        let _session = crate::server::session::TempSession::new("settings-root-subtitle");
+        let page = RootPage::new(EntryId(0));
+        let copy = RootPage::root_subtitle("Synthetic owner");
+        assert!(copy.contains("Synthetic owner"), "the active profile is the subject");
+        assert!(copy.contains(crate::server::identity::VERSION),
+            "the running build version is real");
+        let view = page.view_at(None);
+        assert_eq!(
+            view.header.title_size, MOCKUP_TITLE_SZ,
+            "the mockup sets this page's title at 44, not at the ladder's DISPLAY 48: the comp is \
+             the contract for this one page"
+        );
+        assert_eq!(view.header.copy, page.root_copy,
+            "the root draws its captured real subtitle rather than the old generic paragraph");
+        assert!(view.header.copy.contains(crate::server::identity::VERSION));
     }
 }

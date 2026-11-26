@@ -771,15 +771,13 @@ fn the_shared_surface_back_control_is_clickable_and_dismisses() {
     let (mut d, mut rig, _) = booted();
     let id = open_modal(&mut d, &mut rig, Style::Compact, 16);
     d.draw(&mut rig, true);
+    // **The second comp draws no Back control in the bar**, so the chip's frame answers nothing:
+    // there is no shared disc to click. The surface still dismisses, and the case below is the
+    // remote's BACK doing it rather than a control.
     let frame = crate::ui::widgets::CHIP_FRAME;
     let hit = d.input.hit.resolve(Some(id), PointerKind::Click, frame.cx(), frame.cy(), None);
-    assert_eq!(hit.activate.map(|(key, _)| key.elem), Some(crate::ui::table_screen::CRUMB_ELEM));
-    let r = d.frame(&mut rig, tick(32), vec![crate::ui::machine::InputEvent {
-        at: tick(32), source: crate::ui::machine::Source::Replay,
-        kind: crate::ui::machine::InputKind::Click {
-            x: frame.cx(), y: frame.cy(), hit: Some(crate::ui::table_screen::CRUMB_ELEM),
-        },
-    }], vec![], &mut NoTap);
+    assert_eq!(hit.activate, None, "no control sits over the profile chip any more");
+    let r = d.frame(&mut rig, tick(32), vec![key(Key::Back, tick(32))], vec![], &mut NoTap);
     assert!(!r.back_at_root);
     assert_eq!(d.nav.modals.top().unwrap().phase, Phase::Closing);
 }

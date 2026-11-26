@@ -813,7 +813,11 @@ ICONS     = $(if $(filter stable,$(FLAVOR)),pkg/icon.png pkg/largeIcon.png,$(ICO
 # and in `.claude/hooks/outbound-guard.py`'s PRIVATE_FILES — it carries a live credential.
 LAB_FILES = $(if $(LAB),pkg/lab.json,)
 APP_FILES = pkg/butaca $(APPINFO) $(ICONS) pkg/splash.png \
-            pkg/appfont.ttf pkg/appfont-bold.ttf pkg/appfont-cjk.ttf pkg/OFL.txt \
+            pkg/appfont.ttf pkg/appfont-bold.ttf pkg/appfont-cjk.ttf \
+            pkg/appfont-manrope-400.ttf pkg/appfont-manrope-600.ttf pkg/appfont-manrope-700.ttf \
+            pkg/appfont-brand-700.ttf pkg/appfont-clock-700.ttf pkg/appfont-manrope-800.ttf pkg/appfont-manrope-500.ttf \
+            pkg/appfont-manrope-500-sub.ttf \
+            pkg/appfont-fraunces-600.ttf pkg/appfont-fraunces-700.ttf pkg/OFL.txt \
             THIRD-PARTY-NOTICES.md LICENSING.md \
             $(LAB_FILES) \
             $(FFMPEG_STAGED) $(LIBASS_STAGED)

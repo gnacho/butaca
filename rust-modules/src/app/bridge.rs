@@ -256,11 +256,6 @@ pub(crate) struct Bridge {
     /// bar's one reachable owner: the only `Rig::draw_chrome` implementation, and the only place
     /// `update_home_chrome` is called from.
     strip: crate::ui::widgets::StripRender,
-    /// The Butaca wordmark, uploaded once on the render thread. `0` is "not loaded yet"; a
-    /// missing asset degrades to a text wordmark rather than an empty corner.
-    logo_tex: u32,
-    logo_px: (u32, u32),
-    logo_tried: bool,
     home_commands: std::collections::VecDeque<HomeCmd>,
     library_commands: std::collections::VecDeque<crate::screens::registry::LibraryCmd>,
     /// Requests the owned screens made of the loop this frame (§14), drained by [`frame`]'s caller.
@@ -431,9 +426,6 @@ impl Bridge {
             chrome: super::chrome::ChromeSnapshot::default(),
             chrome_selection: 0,
             strip: crate::ui::widgets::StripRender::new(),
-            logo_tex: 0,
-            logo_px: (0, 0),
-            logo_tried: false,
             home_commands: std::collections::VecDeque::new(),
             library_commands: std::collections::VecDeque::new(),
             reqs: Vec::new(),
@@ -700,14 +692,19 @@ impl Bridge {
         let route = &route;
         let search = *route == AppArg::Search;
         let favorites = matches!(route, AppArg::Content(ContentArg::Collection(id)) if id.is_favorites());
-        if matches!(route, AppArg::Home | AppArg::Library) || search || favorites {
-            d.nav.tabs.strip_fallback = Some(if search {
-                crate::ui::dispatch::STRIP_BASE + 3
-            } else if favorites {
-                crate::ui::dispatch::STRIP_BASE + 6
-            } else {
-                crate::screens::home::STRIP_HOME_ELEM
-            });
+        // Detail also wears the bar (mockup fidelity phase 1): the same strip, with no pill
+        // selected — it is not a tab destination, so `strip_fallback` stays `None`.
+        let detail = matches!(route, AppArg::Content(ContentArg::Detail { .. }));
+        if matches!(route, AppArg::Home | AppArg::Library) || search || favorites || detail {
+            if !detail {
+                d.nav.tabs.strip_fallback = Some(if search {
+                    crate::ui::dispatch::STRIP_BASE + 3
+                } else if favorites {
+                    crate::ui::dispatch::STRIP_BASE + 6
+                } else {
+                    crate::screens::home::STRIP_HOME_ELEM
+                });
+            }
             if let Some(io) = &self.home_io {
                 refresh_chrome(&mut self.chrome, &self.measure, self.directory.view(),
                     Some((&io.profile, &io.preferences)));
@@ -1211,23 +1208,6 @@ impl Bridge {
     /// dozen small allocations this otherwise costs at the loop rate.
     /// The video plane's EDGE, from `Player::set_video_plane_bound` and from nowhere else
     /// (spec §16 risk 10). Reaches both the dispatcher's present gate and this rig's own copy.
-    /// Upload the original Butaca wordmark once. A failed read leaves `logo_tex` at zero and the
-    /// bar simply omits the mark; it never blocks the chrome pass.
-    fn prepare_chrome_logo(&mut self) {
-        if self.logo_tried { return; }
-        self.logo_tried = true;
-        let path = crate::paths::in_app_dir("butaca-name.png");
-        let Ok(png) = std::fs::read(&path) else { return };
-        let (mut w, mut h): (std::os::raw::c_int, std::os::raw::c_int) = (0, 0);
-        let px = crate::img::img_decode_rgba(png.as_ptr(), png.len() as _, &mut w, &mut h);
-        if px.is_null() { return; }
-        if w > 0 && h > 0 {
-            self.logo_tex = crate::img::img_upload_rgba(px, w, h);
-            self.logo_px = (w as u32, h as u32);
-        }
-        crate::img::img_free(px);
-    }
-
     pub(crate) fn publish_video_plane(&mut self, bound: bool) {
         self.video_plane = bound;
     }
@@ -1259,23 +1239,36 @@ impl Rig<AppHost> for Bridge {
         glass: Option<&mut crate::ui::frame::glass::GlassPlan>) {
         if !Self::draws_chrome_for(arg) { return; }
         let Some(glass) = glass else { return };
-        self.prepare_chrome_logo();
         let p = crate::ui::Painter::root().alpha(nav.chrome_alpha);
-        // **The brand leaves with the page** (owner, 2026-11-10). It is drawn outside every page's
-        // own frame, so it cannot ride the page's alpha: the page states how far it has left its
-        // head in its own `DrawFrame` (`DrawFrame::scrolled_to`), the dispatcher carries that into
-        // this presentation, and this is the one reader. The strip, the clock and the gear stay -
-        // the bar is still the bar; only the wordmark goes.
-        let brand = crate::ui::widgets::brand_alpha(nav.page_scroll);
-        if self.logo_tex != 0 && self.logo_px.0 > 0 && self.logo_px.1 > 0 && brand > 0.004 {
-            let h = 46.0;
-            let w = h * self.logo_px.0 as f32 / self.logo_px.1 as f32;
-            let logo = crate::ui::Rect::new(crate::ui::consts::MARGIN_X,
-                crate::ui::widgets::TOP_BAR_Y
-                    + (crate::ui::widgets::TAB_PILL_H - h) * 0.5,
-                w, h);
-            p.alpha(brand).tex(self.logo_tex, logo, 0.0, crate::ui::theme::TEXT_PRIMARY);
-        }
+        // **The second comp's bar is a SLAB, not a band**: `#topbar { height:79px;
+        // background: rgba(16,16,16,.82); border-bottom:1px solid rgba(255,255,255,.07) }`. One
+        // even plate with a hairline under it, where the first comp had 109px of gradient fading
+        // into the artwork — and NO wordmark: the row starts with the avatar and the nav, so
+        // nothing up here fades with the page any more.
+        let plate = crate::ui::theme::with_a(
+            crate::ui::theme::CHROME_GROUND,
+            crate::ui::theme::CHROME_GROUND_A,
+        );
+        p.rect(
+            crate::ui::Rect::new(0.0, 0.0, crate::ui::consts::SCR_W, crate::ui::widgets::TOP_BAR_H),
+            0.0,
+            plate,
+            plate,
+            0.0,
+        );
+        let hair = crate::ui::theme::with_a(crate::ui::theme::CHROME_INK, 0.07);
+        p.rect(
+            crate::ui::Rect::new(
+                0.0,
+                crate::ui::widgets::TOP_BAR_H - 1.0,
+                crate::ui::consts::SCR_W,
+                1.0,
+            ),
+            0.0,
+            hair,
+            hair,
+            0.0,
+        );
         if let Some(instance) = self.chrome.instance().map(|label| label.as_ptr()) {
             let badge = crate::ui::widgets::CircleButton::new(instance)
                 .frame(crate::ui::widgets::INSTANCE_FRAME)
@@ -1284,25 +1277,32 @@ impl Rig<AppHost> for Bridge {
         }
         let chrome = self.chrome.read(self.strip.chip_expand_pos());
         self.strip.draw(chrome.labels, p, glass.tab_band_mut());
+        let bar_face = glass.tab_face();
+        crate::ui::widgets::profile_chip_with(p, chrome.profile, chrome.chip_expand, bar_face);
+        // The mockup's clock: 17px/700 `--muted`, right-aligned on the 56px margin (`1864`) and
+        // centred on the bar's line. It sits 18px right of the gear, which is what puts the gear's
+        // own left edge at `GEAR_X`.
         let clock = clock_text();
         let clock_frame = crate::ui::Rect::new(
-            crate::ui::widgets::SETTINGS_GEAR_FRAME.x - 154.0,
-            crate::ui::widgets::SETTINGS_GEAR_FRAME.y,
-            130.0,
-            crate::ui::widgets::SETTINGS_GEAR_FRAME.h,
+            crate::ui::consts::SCR_W - crate::ui::widgets::CHROME_MARGIN_X - crate::ui::widgets::CLOCK_W,
+            crate::ui::widgets::TOP_BAR_LINE_Y,
+            crate::ui::widgets::CLOCK_W,
+            crate::ui::widgets::CHIP_D,
         );
-        crate::ui::label::Label::new(clock.as_ptr(), crate::ui::theme::size::BODY,
-            crate::ui::theme::TEXT_SECONDARY).bold()
+        // `font-variant-numeric: tabular-nums`, which SDL_ttf cannot ask for: the cut the clock is
+        // set in has the tabular figures baked into its cmap, so `21:34` measures the reference's
+        // 47.98 whatever the time is and the box never breathes.
+        crate::ui::label::Label::new(clock.as_ptr(), 17, crate::ui::theme::CHROME_MUTED)
+            .face(crate::text::FontRole::Clock)
             .h(crate::ui::label::HAlign::Right)
             .draw(p, clock_frame);
-        let gear = crate::ui::widgets::CircleButton::new(std::ptr::null())
-            .frame(crate::ui::widgets::SETTINGS_GEAR_FRAME)
-            .icon(crate::ui::icons::Icon::Settings)
-            .focused(self.strip.gear_focused());
-        // Idle gear sits back at a partial alpha (the owner's 2026-11-10 pass: "transparencia al
-        // icono de ajustes"); focused, it comes fully forward.
-        let gear_alpha = if self.strip.gear_focused() { 1.0 } else { 0.55 };
-        crate::ui::View::draw(&gear, &crate::ui::Env::inert(), p.alpha(gear_alpha));
+        // The idle gear is the mockup's `--muted` glyph at full strength on its own 55% disc: the
+        // owner's earlier "transparencia al icono de ajustes" predates this reference.
+        crate::ui::widgets::draw_settings_gear(
+            p,
+            crate::ui::widgets::SETTINGS_GEAR_FRAME,
+            self.strip.gear_focused(),
+        );
     }
     /// See [`crate::ui::dispatch::Rig::scrim_chrome_read`] — a scrim lift borrows the SAME
     /// captured profile, labels and unfurl [`Bridge::draw_chrome`] used. The dispatcher adds this

@@ -855,10 +855,9 @@ fn the_continue_watching_caption_promises_time_left_only_when_the_bar_is_drawn()
 }
 
 fn top_band_bottom() -> f32 {
-    let chip = crate::ui::widgets::CHIP_CAP_MAX;
-    assert_eq!(chip.y + chip.h, crate::ui::widgets::TOP_BAR_BOTTOM,
-        "the chip capsule and the tab track are one band");
-    chip.y + chip.h
+    // Page content keeps the television clearance even though the owner moved the visible mockup
+    // bar upward; the two values are deliberately separate.
+    crate::ui::widgets::TOP_BAR_BOTTOM
 }
 fn heading_top(row: usize, focus_row: usize, scroll: f32) -> f32 {
     let lift = if row == focus_row {

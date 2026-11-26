@@ -221,6 +221,34 @@ impl Drop for SigninAnchor {
     }
 }
 
+/// **What each configured server calls itself**: the dotted version `/System/Info/Public` reports,
+/// keyed by the url AS THE CONFIG FILE SPELLS IT (the dialog reads the same string back out of that
+/// file, so the two match without canonicalising anything).
+///
+/// It is filled where the app already talks to the server — the boot probe and the sign-in form —
+/// and read by the account dialog's row copy (`192.168.1.10 · Jellyfin 10.9`). Keeping it a memo
+/// rather than a probe is what stops a DRAW PASS from opening a socket: under replay nothing fills
+/// it, nothing reads it, and no unrecorded request is possible.
+static SERVER_VERSIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+fn versions() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    SERVER_VERSIONS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Record what a server answered. Called off the draw thread, once per connection.
+pub(crate) fn note_server_version(url: &str, version: &str) {
+    let mut map = versions().lock().unwrap_or_else(|e| e.into_inner());
+    map.insert(url.to_string(), version.to_string());
+}
+
+/// The version this process has seen for `url`, if it has connected since it started.
+pub(crate) fn known_server_version(url: &str) -> Option<String> {
+    let map = versions().lock().unwrap_or_else(|e| e.into_inner());
+    map.get(url).cloned()
+}
+
 pub(crate) fn client() -> Option<&'static JfClient> {
     *CLIENT.read().unwrap_or_else(|e| e.into_inner())
 }

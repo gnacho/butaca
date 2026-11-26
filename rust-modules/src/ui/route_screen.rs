@@ -739,6 +739,14 @@ pub(crate) struct RouteLayout {
     pub(crate) narrative: Rect,
     pub(crate) content: Rect,
     pub(crate) action: Rect,
+    /// The air between the title's last line and the copy's first — `MD` on every route, and the
+    /// mockup's own 10 on the Settings page, whose 44px title and 16px sub-line leave 62px between
+    /// the two boxes rather than the ladder's 24.
+    pub(crate) copy_gap: f32,
+    /// **Where the copy's box starts, when the page states it** instead of flowing off the title's
+    /// measured line box. `0.0` = flow. The Settings page needs this: the mockup gives the title a
+    /// 62px BOX while a 44px Fraunces line measures 72, so a flowing copy lands 20px low.
+    pub(crate) copy_y: f32,
 }
 
 impl RouteLayout {
@@ -770,6 +778,8 @@ impl RouteLayout {
             narrative,
             content,
             action,
+            copy_gap: theme::space::MD,
+            copy_y: 0.0,
         }
     }
 
@@ -779,9 +789,36 @@ impl RouteLayout {
     /// root rather than the second column of a different layout.
     pub(crate) const SETTINGS_MEASURE: f32 = 1616.0;
 
-    /// The Settings family's centred column, at its own measure.
+    /// **The Settings page's box, measured off the redesign mockup's DOM** (1920x1080): margins of
+    /// 56 — the same 56 the top bar's avatar and clock already sit on — the title at 120, the
+    /// sub-line at 182 and the card grid at 230, with the page's 80px foot.
+    ///
+    /// It is NOT the app's 96px [`SAFE`] frame, and that is deliberate: this page is held against a
+    /// comp whose own gutter is 56, and the bar it sits under was already moved there. The trade is
+    /// recorded in `plans/butaca-mockup-fidelity/plan.md` beside the bar's fixed material.
     pub(crate) fn settings() -> Self {
-        Self::centered(Self::SETTINGS_MEASURE)
+        const MARGIN: f32 = 56.0;
+        const W: f32 = 1920.0 - 2.0 * MARGIN;
+        /// The mockup's `.page-title` BOX is at 120; its caps start 12 lower, and the label draws
+        /// cap-top at the rect it is handed, so the narrative rect carries the ink's own y.
+        const TITLE_INK_Y: f32 = 132.0;
+        /// The mockup's `.page-title` box: 44px of display type plus its 8px foot.
+        const TITLE_H: f32 = 62.0;
+        /// `.page-sub`: two 24px lines under the title.
+        const SUB_H: f32 = 48.0;
+        const GRID_Y: f32 = 230.0;
+        const FOOT: f32 = 80.0;
+        Self {
+            narrative: Rect::new(MARGIN, TITLE_INK_Y, W, TITLE_H),
+            content: Rect::new(MARGIN, GRID_Y, W, 1080.0 - FOOT - GRID_Y),
+            // This page draws no action row; the band is where the ladder puts it so a future
+            // status overlay still lands inside the page's own box.
+            action: Rect::new(MARGIN, 1080.0 - FOOT - ACTION_H, W, ACTION_H),
+            copy_gap: 10.0,
+            // `.page-sub`'s ink sits at 186 on the comp; the copy block draws its first line's cap
+            // top at the rect it is handed, so the rect carries the ink's y.
+            copy_y: 186.0,
+        }
     }
 
     /// **A CENTRED content column** — the Settings root's shape (#297): the title block and the
@@ -805,7 +842,7 @@ impl RouteLayout {
         // the first card. One line plus the group's own step is what the mockup measures.
         let head = CRUMB_BAND
             + theme::space::SM
-            + theme::size::HERO as f32
+            + theme::size::DISPLAY as f32
             + theme::space::MD
             + theme::size::LABEL as f32
             + theme::space::XS;
@@ -813,7 +850,7 @@ impl RouteLayout {
         let action = Rect::new(x, top + head, w, ACTION_H);
         let content_top = top + head + theme::space::MD;
         let content = Rect::new(x, content_top, w, (bottom - content_top).max(0.0));
-        Self { narrative, content, action }
+        Self { narrative, content, action, copy_gap: theme::space::MD, copy_y: 0.0 }
     }
 
     /// Allocate enough narrative width for an unbreakable title word at HERO size, while
@@ -1007,7 +1044,7 @@ impl RouteLayout {
         let w = word_w.max(h).min(crate::ui::consts::SAFE.w);
         let right = crate::ui::consts::SCR_W - crate::ui::consts::MARGIN_X
             - crate::ui::widgets::TAB_TRACK_PAD;
-        Rect::new(right - w, crate::ui::widgets::TOP_BAR_Y, w, h)
+        Rect::new(right - w, crate::ui::widgets::TOP_BAR_LINE_Y, w, h)
     }
 
     /// The crumb as it is DRAWN. `focused` is the D-pad's: the crumb is a focus stop on every
@@ -1055,7 +1092,16 @@ impl RouteLayout {
     /// constant grades the constant. Building the view here lets it grade the thing that is drawn.
     /// App-owned titles and questions wrap completely; following content uses their measured height.
     pub(crate) fn narrative_title(title: &str) -> TextView<'_> {
-        TextView::new(title, theme::size::HERO, theme::TEXT_HEADING)
+        Self::narrative_title_sized(title, theme::size::HERO)
+    }
+
+    /// The same title flow at an explicitly chosen rung. A centred route may use a smaller display
+    /// title without forking the wrapping, leading or measurement rules.
+    pub(crate) fn narrative_title_sized(
+        title: &str,
+        size: std::os::raw::c_int,
+    ) -> TextView<'_> {
+        TextView::new(title, size, theme::TEXT_HEADING)
             .bold()
             .break_long_words()
             .leading(TITLE_LEADING)
@@ -1080,16 +1126,47 @@ impl RouteLayout {
         measure: &dyn Measure,
         focused: bool,
     ) {
+        self.draw_narrative_sized(
+            p,
+            back_to,
+            title,
+            theme::size::HERO,
+            crate::text::FontRole::Interface,
+            copy,
+            copy_size,
+            measure,
+            focused,
+        );
+    }
+
+    /// [`Self::draw_narrative`] with an explicit title rung and role. Everything after the title
+    /// still flows from the measured result, so a smaller title tightens the whole narrative band.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_narrative_sized(
+        self,
+        p: Painter,
+        back_to: Option<&str>,
+        title: &str,
+        title_size: std::os::raw::c_int,
+        title_role: crate::text::FontRole,
+        copy: &str,
+        copy_size: std::os::raw::c_int,
+        measure: &dyn Measure,
+        focused: bool,
+    ) {
         let top = self.narrative_top(back_to.is_some());
         if let Some(back_to) = back_to {
             self.draw_crumb(p, self.narrative.y, back_to, measure, focused);
         }
 
-        let title = Self::narrative_title(title);
+        let mut title = Self::narrative_title_sized(title, title_size);
+        if title_role == crate::text::FontRole::Display {
+            title = title.display();
+        }
         let title_h = title.measure_h(self.narrative.w);
         title.draw(p, Rect::new(self.narrative.x, top, self.narrative.w, title_h));
 
-        let copy_top = top + title_h + theme::space::MD;
+        let copy_top = if self.copy_y > 0.0 { self.copy_y } else { top + title_h + self.copy_gap };
         // The narrative band's foot IS the copy's floor on a centred route, whose band is sized
         // from the copy it holds (issue #415); the `XL` step below it belongs to the two-column
         // routes, where the band ends at the action row.
@@ -1421,8 +1498,9 @@ mod tests {
         let word = "Inicio";
         for l in [RouteLayout::screen(), RouteLayout::centered(1200.0)] {
             let rect = l.home_rect(word, &measure);
-            assert!(inside_safe(rect), "the word is required chrome: {rect:?}");
             let back = crate::ui::widgets::CHIP_FRAME;
+            assert_eq!(rect.y, back.y,
+                "the Home word belongs to the same owner-authorized mockup top band");
             assert_eq!(
                 rect.y, back.y,
                 "same band as the Back control, not the action row"

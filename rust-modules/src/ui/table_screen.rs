@@ -51,6 +51,8 @@ pub struct Header<'a> {
     pub crumb: Option<&'a str>,
     pub title: &'a str,
     pub copy: &'a str,
+    pub title_size: std::os::raw::c_int,
+    pub title_role: crate::text::FontRole,
     pub copy_size: std::os::raw::c_int,
     /// **Wear the shared Back disc instead of the `‹ where BACK goes` crumb.** The disc is the
     /// control the detail page, a collection, a person and the player already draw
@@ -68,6 +70,8 @@ impl<'a> Header<'a> {
             crumb,
             title,
             copy,
+            title_size: theme::size::HERO,
+            title_role: crate::text::FontRole::Interface,
             copy_size: theme::size::LABEL,
             back_disc: false,
         }
@@ -85,14 +89,46 @@ impl<'a> Header<'a> {
         self
     }
 
+    /// Use a smaller display rung for the title without changing the shared narrative flow.
+    pub fn with_title_size(mut self, sz: std::os::raw::c_int) -> Self {
+        self.title_size = sz;
+        self
+    }
+
+    /// Draw the title in the Fraunces display face (the Settings root's display title).
+    pub fn with_title_display(mut self) -> Self {
+        self.title_role = crate::text::FontRole::Display;
+        self
+    }
+
     /// The one drawing routine, for both loops. `focused` lights the crumb when the D-pad is on it.
     pub fn paint(&self, p: Painter, measure: &dyn Measure, focused: bool) {
         if self.back_disc {
             crate::ui::widgets::draw_back_control(p, focused);
-            self.layout.draw_narrative(p, None, self.title, self.copy, self.copy_size, measure, false);
+            self.layout.draw_narrative_sized(
+                p,
+                None,
+                self.title,
+                self.title_size,
+                self.title_role,
+                self.copy,
+                self.copy_size,
+                measure,
+                false,
+            );
             return;
         }
-        self.layout.draw_narrative(p, self.crumb, self.title, self.copy, self.copy_size, measure, focused);
+        self.layout.draw_narrative_sized(
+            p,
+            self.crumb,
+            self.title,
+            self.title_size,
+            self.title_role,
+            self.copy,
+            self.copy_size,
+            measure,
+            focused,
+        );
     }
 
     /// The crumb's box - what the pointer clicks and what the keyboard lands on - or `None` when

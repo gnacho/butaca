@@ -179,6 +179,21 @@ pub trait Measure {
     fn cap_h(&self, sz: i32) -> f32;
     fn line_h(&self, sz: i32) -> f32;
 
+    /// [`width`](Self::width) in an explicit [`crate::text::FontRole`]. The default ignores the
+    /// role; the live-font and replay capabilities override it so a display-role run (Fraunces)
+    /// never reuses an interface-role (Manrope) metric or vice versa.
+    fn width_role(&self, s: &CStr, sz: i32, bold: bool, _role: crate::text::FontRole) -> f32 {
+        self.width(s, sz, bold)
+    }
+    /// [`cap_h`](Self::cap_h) in an explicit role, same default contract as [`width_role`].
+    fn cap_h_role(&self, sz: i32, _role: crate::text::FontRole) -> f32 {
+        self.cap_h(sz)
+    }
+    /// [`line_h`](Self::line_h) in an explicit role, same default contract as [`width_role`].
+    fn line_h_role(&self, sz: i32, _role: crate::text::FontRole) -> f32 {
+        self.line_h(sz)
+    }
+
     /// A drawable, ellipsised run through this capability. Native fonts may retain fitted runs;
     /// replay and recording use the supplied metrics on every call, including missing-key checks.
     fn fit_line(&self, s: &str, budget: f32, sz: i32, bold: bool) -> std::rc::Rc<CStr> {
@@ -194,6 +209,13 @@ pub trait Measure {
     fn width_str(&self, s: &str, sz: i32, bold: bool) -> f32 {
         std::ffi::CString::new(s)
             .map(|c| self.width(&c, sz, bold))
+            .unwrap_or(0.0)
+    }
+
+    /// [`width_str`](Self::width_str) in an explicit role, for display-role wrapping.
+    fn width_str_role(&self, s: &str, sz: i32, bold: bool, role: crate::text::FontRole) -> f32 {
+        std::ffi::CString::new(s)
+            .map(|c| self.width_role(&c, sz, bold, role))
             .unwrap_or(0.0)
     }
 

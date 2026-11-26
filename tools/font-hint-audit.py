@@ -38,9 +38,25 @@ except ImportError:
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 THEME = os.path.join(REPO, "rust-modules", "src", "ui", "theme.rs")
+# Every shipped LATIN face, so a face swap cannot dodge the gate. Manrope is the interface
+# primary, Fraunces the display primary, Inter the retained script fallback. `pkg/appfont-cjk.ttf`
+# is deliberately NOT audited here: it never draws Latin in this app (see the module docstring).
 FONTS = {
-    "bold": os.path.join(REPO, "pkg", "appfont-bold.ttf"),
     "regular": os.path.join(REPO, "pkg", "appfont.ttf"),
+    "bold": os.path.join(REPO, "pkg", "appfont-bold.ttf"),
+    "manrope-regular": os.path.join(REPO, "pkg", "appfont-manrope-400.ttf"),
+    "manrope-bold": os.path.join(REPO, "pkg", "appfont-manrope-700.ttf"),
+    "fraunces-regular": os.path.join(REPO, "pkg", "appfont-fraunces-600.ttf"),
+    "fraunces-bold": os.path.join(REPO, "pkg", "appfont-fraunces-700.ttf"),
+    # The two cuts the supplied design mockup is set in: `#mainnav button { font: 600 17px
+    # Manrope }` and the wordmark's Fraunces 700 at optical size 30. Audited like every other
+    # shipped latin face, so a swap cannot dodge the ladder here either.
+    "manrope-medium": os.path.join(REPO, "pkg", "appfont-manrope-600.ttf"),
+    "fraunces-brand": os.path.join(REPO, "pkg", "appfont-brand-700.ttf"),
+    # Manrope 700 with its tabular figures baked into the cmap: the clock's cut.
+    "manrope-clock": os.path.join(REPO, "pkg", "appfont-clock-700.ttf"),
+    # Manrope 800: the avatar initial's weight, the mockup's `#avatar { font-weight: 800 }`.
+    "manrope-extrabold": os.path.join(REPO, "pkg", "appfont-manrope-800.ttf"),
 }
 # Named carve-outs living outside the ladder (see theme.rs's size-module doc).
 CARVEOUTS = {54: "HUD_TITLE_SZ (bold)", 36: "subtitle caption (bold)"}
@@ -48,7 +64,30 @@ CARVEOUTS = {54: "HUD_TITLE_SZ (bold)", 36: "subtitle caption (bold)"}
 # sites (26) are bar-heavy by one solid pixel even under LIGHT hinting; both are low-
 # prominence roles and every remedy (size nudge) costs scale hierarchy. Anything NOT in
 # this set that measures bar-heavy is a regression and fails the audit.
-ACCEPTED = {("regular", 22), ("regular", 26)}
+#
+# Manrope (2026-11-23) carries a capital F whose top bar is one solid pixel heavier than its stem
+# at the listed rungs — a typeface proportion, not a hinting regression, and the same +1px class
+# the Inter exceptions above already accept. The interface face draws the whole ladder, so its
+# entries cover every flagged rung.
+ACCEPTED = {
+    ("regular", 22), ("regular", 26),
+    ("manrope-regular", 20), ("manrope-regular", 26), ("manrope-regular", 32),
+    ("manrope-regular", 40), ("manrope-regular", 48), ("manrope-regular", 54),
+    ("manrope-bold", 20), ("manrope-bold", 32), ("manrope-bold", 36),
+    # Manrope 600 (2026-11-25) is the SAME typeface at the weight the design mockup sets its top
+    # navigation in, so it carries the same capital F proportion the 400 and 700 cuts are already
+    # accepted for — one solid pixel of bar over stem, not a hinting change. Nothing in the product
+    # draws this face above 17px, but the sweep is the ladder, not the call sites.
+    ("manrope-medium", 20), ("manrope-medium", 22), ("manrope-medium", 28),
+    ("manrope-medium", 32), ("manrope-medium", 48),
+    # The clock's tabular cut is the same Manrope 700 the app already ships, with the digits
+    # remapped, so it lands on the same accepted rungs the 700 cut does.
+    ("manrope-clock", 20), ("manrope-clock", 32), ("manrope-clock", 36),
+    # Manrope 800 is the same typeface one notch heavier still, so it carries the same capital-F
+    # proportion the 400/600/700 cuts are accepted for. The product draws it at exactly one size.
+    ("manrope-extrabold", 22), ("manrope-extrabold", 28), ("manrope-extrabold", 32),
+    ("manrope-extrabold", 48),
+}
 
 
 def ladder():

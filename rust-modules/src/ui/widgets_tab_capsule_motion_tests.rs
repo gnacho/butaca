@@ -518,28 +518,69 @@ fn a_bright_ground_gets_no_lift_at_all() {
     }
 }
 
-/// The clamp is the whole licence for the rule: the solve above sized the scrim against a BLACK
-/// tint, and a lighter face spends the contrast it bought. Whatever the lift does, the idle
-/// label still clears its floor.
+/// **The bar's weight is the reference's on every ground, and this records what that costs.**
+///
+/// The supplied mockup's `#mainnav` is a FIXED `rgba(19,11,7,.55)`; it does not solve for the
+/// artwork behind it. The bar followed the solve until 2026-11-25, and the solve's LIGHT LIFT is
+/// what made it wash out over a bright hero — the one thing the reference never does. So the solve
+/// now spans `[.55, .55]`: `track_alpha_for` cannot leave the reference's weight, and the ink is the
+/// reference's `--muted`.
+///
+/// **Owner's decision, recorded rather than implied:** the app's old 4.5:1 floor does not apply to
+/// this bar. It was reachable only because the old material paired a LIGHT ink with that light
+/// lift; against an ink this mid-toned no alpha short of ~0.97 (a black slab) clears 4.5:1 over a
+/// white ground. What the bar guarantees instead is the reference's own relationship, which this
+/// pins from above AND below so a silent re-solve in either direction fails here.
 #[test]
-fn the_lift_never_spends_the_labels_contrast() {
+fn the_bar_keeps_the_references_weight_on_every_ground() {
     for i in 0..=40 {
         let lum = i as f32 / 40.0;
         let ground = [lum, lum, lum];
-        let a = track_alpha_for(ground);
-        let g = track_lift(ground, a);
-        let face = [
-            ground[0] * (1.0 - a) + g * a,
-            ground[1] * (1.0 - a) + g * a,
-            ground[2] * (1.0 - a) + g * a,
-            1.0,
-        ];
-        let c = contrast(theme::TEXT_READING, face);
         assert!(
-            c >= TRACK_INK_CONTRAST - 0.01,
-            "ground {lum}: α={a} lift={g} leaves the idle label at {c:.2}:1"
+            (track_alpha_for(ground) - theme::TAB_GLASS_TOP[3]).abs() < 1e-6,
+            "ground {lum}: the bar solved to {} instead of the reference's {}",
+            track_alpha_for(ground),
+            theme::TAB_GLASS_TOP[3]
         );
     }
+    // **What the reference's ink reads over the brightest ground a hero can have**, measured here
+    // rather than argued: the bar is .55 of `--bg` over the artwork, so a white frame leaves the
+    // face at ~0.49 and the reference's own `--muted` on it at ~1.4:1. Over the mockup's own dark
+    // hero the same pair reads ~4:1 — that is the reference's design, and it depends on the
+    // artwork, which this app does not own. Recorded so nobody discovers it from a photograph and
+    // so a change of mind is one token (`TAB_GLASS_TOP`/`TAB_TRACK_A_TOP`), not an archaeology.
+    let bright = [1.0f32, 1.0f32, 1.0f32];
+    let a = track_alpha_for(bright);
+    let ground = theme::CHROME_GROUND;
+    let face = [
+        bright[0] * (1.0 - a) + ground[0] * a,
+        bright[1] * (1.0 - a) + ground[1] * a,
+        bright[2] * (1.0 - a) + ground[2] * a,
+        1.0,
+    ];
+    // **Mockup 2 changed the pair, and this pins ITS number.** The first comp paired a mid-tone
+    // `--muted` with a light lift, which is why the product's floor was waived for this bar at
+    // ~1.4:1. The second comp's bar is neutral dark at 82% and its ink is WHITE at 55%, so the pair
+    // composites to ~4.6:1 over a white hero — the floor is met, and a re-solve in either direction
+    // (a lighter bar, a dimmer ink) breaks it here rather than in a photograph.
+    let ka = theme::CHROME_MUTED[3];
+    let ink = [
+        face[0] * (1.0 - ka) + theme::CHROME_MUTED[0] * ka,
+        face[1] * (1.0 - ka) + theme::CHROME_MUTED[1] * ka,
+        face[2] * (1.0 - ka) + theme::CHROME_MUTED[2] * ka,
+        1.0,
+    ];
+    let c = contrast(ink, face);
+    assert!(
+        c >= TRACK_INK_CONTRAST,
+        "the bar's muted ink over a white ground reads {c:.2}:1 — below the {TRACK_INK_CONTRAST} \
+         floor the second comp's neutral bar clears"
+    );
+    // The chip's NAME is still the product's light ink, and THAT keeps the floor on the same face.
+    assert!(
+        contrast(theme::TEXT_PRIMARY, face) >= TRACK_INK_CONTRAST,
+        "the profile name over the bar's face must still clear the product's floor"
+    );
 }
 
 /// **The floor above is the TRACK's, over the track's own ground — and the band's other surface
@@ -587,21 +628,15 @@ fn the_bands_face_carries_no_promise_about_the_chips_own_ground() {
         contrast(theme::TEXT_READING, face_over(dark, a)) >= TRACK_INK_CONTRAST,
         "the track's own ink is served — that is the contract this one is measured against"
     );
-    // …and the same face, under the chip, over a bright corner of the same hero.
+    // …and the same face, under the chip, over a bright corner of the same hero. The bar no longer
+    // solves (see `the_bar_keeps_the_references_weight_on_every_ground`), so this is the reference's
+    // .55 over L*92 art — the chip's light name still clears the floor there, and it is the number
+    // the screenshot of that corner shows.
     let bright = grey_at(92.0);
     let chip = contrast(theme::TEXT_PRIMARY, face_over(bright, a));
     assert!(
-        (1.7..2.1).contains(&chip),
-        "the chip's name over L*92 art with the track solved dark reads {chip:.2}:1 — if this \
-         moved, in either direction, re-read `BarMaterial`"
-    );
-    let was = {
-        let v = bright * (1.0 - theme::TAB_TRACK_A_TOP);
-        contrast(theme::TEXT_PRIMARY, [v, v, v, 1.0])
-    };
-    assert!(
-        was > 9.0,
-        "the flat capsule this replaced cleared every ground: {was:.2}:1"
+        chip >= TRACK_INK_CONTRAST,
+        "the chip's name over L*92 art reads {chip:.2}:1"
     );
 }
 

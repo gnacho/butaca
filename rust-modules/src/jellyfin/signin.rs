@@ -147,6 +147,7 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
                         "jellyfin: signed in as {} — server {}",
                         ok.user_name, ok.server_id
                     ));
+                    client.learn_server_version(&url);
                     super::install(client);
                     if add_server {
                         super::boot::append_server(&url, &ok.user_name, &ok.token, &device_id);

@@ -1124,6 +1124,11 @@ pub(crate) unsafe fn construct(
     } else {
         crate::dev::scenarios::settings_boot_value()
     };
+    let settingspicker_boot = if controlled {
+        None
+    } else {
+        crate::dev::scenarios::settingspicker_boot_value()
+    };
     let settings_osc = !controlled && crate::dev::scenarios::settingsosc_armed();
     let settings_osc_last = 0u32;
     let settings_osc_down = true;
@@ -1363,6 +1368,9 @@ pub(crate) unsafe fn construct(
     let replay_left: u32 = if controlled { 0 } else { replay_budget(crate::dev::scenarios::replay_trigger_value().as_deref()) };
     let grid_tried = false;
     let settings_tried = settings_boot.is_none();
+    let settingspicker_tried = settingspicker_boot.is_none();
+    let settingspicker_step = 0u8;
+    let settingspicker_last_ms = 0u32;
     let seek_tried = false;
     // /tmp/butaca-autoseek seek script (see the parse site): pending steps, the tick of
     // the last fired step, the gap between steps, and the last REQUESTED target (the base
@@ -1485,6 +1493,9 @@ pub(crate) unsafe fn construct(
             replay_left,
             grid_tried,
             settings_tried,
+            settingspicker_tried,
+            settingspicker_step,
+            settingspicker_last_ms,
             seek_tried,
             seek_script,
             seek_script_at,
@@ -1516,6 +1527,7 @@ pub(crate) unsafe fn construct(
                 lib_switch,
                 search_osc,
                 settings_boot,
+                settingspicker_boot,
                 settings_osc,
                 modal_osc,
                 legal_doc,

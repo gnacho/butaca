@@ -40,7 +40,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
             .iter()
             .map(|member| member.elem)
             .collect::<Vec<_>>(),
-        vec![base, base + 1, base + 2, base + 6, base + 3, base + 7, base + 8]
+        vec![base + 4, base, base + 1, base + 2, base + 6, base + 3, base + 7, base + 8]
     );
     let seat = |d: &mut Dispatcher<AppHost>, elem| {
         d.emit(
@@ -65,13 +65,13 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
         );
         assert_eq!(
             d.focus(),
-            Some(FocusKey { entry, elem: base }),
-            "Home is the strip's left end, not a wrapping stop"
+            Some(FocusKey { entry, elem: base + 4 }),
+            "the profile chip is the strip's left end, not a wrapping stop"
         );
     }
     assert!(
-        content_probe(&d, &rig).contains("pill=0"),
-        "Home is a remembered pill"
+        content_probe(&d, &rig).contains("pill=-1"),
+        "the profile chip is not a pill, so no pill is armed while it holds focus"
     );
     frame(
         &mut d,
@@ -114,7 +114,7 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
             .strip
             .iter()
             .position(|member| member.elem == search.elem),
-        Some(4),
+        Some(5),
         "Search's displayed slot is not its stable control identity"
     );
     rig.take_library_reqs();
