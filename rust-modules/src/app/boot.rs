@@ -896,7 +896,7 @@ pub(crate) unsafe fn construct(
     };
     crate::log(&format!("session: boot id_len={} scale={}", session.client_id.len(), session.subtitle_scale()));
     #[cfg(not(test))]
-    crate::i18n::initialize(session.language, controlled);
+    crate::i18n::initialize(controlled);
     let forced_login = !controlled && crate::dev::scenarios::login_forced();
     let session_init = match &initial {
         Some(initial) => initial.session.clone(),
@@ -1139,11 +1139,6 @@ pub(crate) unsafe fn construct(
     // itself has no end the app reports.
     let modal_osc = !controlled && crate::dev::scenarios::modalosc_armed();
     let modal_osc_last = 0u32;
-    // dev: /tmp/butaca-legaldoc — with `butaca-settings=legal`, press OK on the Legal
-    // index ONCE so the boot lands on a pushed DOCUMENT (the reader over the frozen ground),
-    // which no boot trigger reached before: `fps:legal-document`.
-    let legal_doc = !controlled && crate::dev::scenarios::legaldoc_armed();
-    let legal_doc_tried = false;
     // dev: /tmp/butaca-alert — with `butaca-settings=privacy`, open the "Delete all local
     // data?" DECISION ALERT once the privacy panel is up. It is the one shared yes/no alert in
     // the app and nothing headless could reach it: `fps:decision-alert`. Opening it is all this
@@ -1471,7 +1466,6 @@ pub(crate) unsafe fn construct(
             settings_osc_last,
             settings_osc_down,
             modal_osc_last,
-            legal_doc_tried,
             alert_tried,
             alert_step,
             account_osc_last,
@@ -1530,7 +1524,6 @@ pub(crate) unsafe fn construct(
                 settingspicker_boot,
                 settings_osc,
                 modal_osc,
-                legal_doc,
                 alert_boot,
                 account_osc,
                 onboard_osc,

@@ -40,7 +40,6 @@ use crate::ui::{theme, Painter, Rect};
 
 use super::super::family::{table_focus, InnerHost, SettingsPage, ALERT_GROUP};
 use super::super::registry::{word, AppFx, PreferenceCmd, ALERT};
-use super::preference_name;
 
 /// **The Settings page's own geometry, measured off the redesign mockup's DOM at 1920x1080.**
 ///
@@ -174,12 +173,6 @@ enum Action {
     AddServer,
     /// Close this server's session.
     SignOut,
-    /// Walk to the interface language page.
-    Language,
-    /// Walk to the Legal index.
-    Legal,
-    /// Walk to About Butaca.
-    About,
 }
 
 struct State {
@@ -620,7 +613,6 @@ impl RootPage {
         let mut server = Section::new(crate::i18n::msg::settings_servers_group());
         let mut playback = Section::new(crate::i18n::msg::settings_playback_section());
         let mut audio = Section::new(crate::i18n::msg::settings_audio_title());
-        let mut interface = Section::new(crate::i18n::msg::settings_interface_section());
         let mut triples: Vec<(Row, Action, String)> = Vec::new();
 
         // Servidor: the account this television uses, the door to another one, and the way out.
@@ -717,35 +709,6 @@ impl RootPage {
         triples.push(self.field_row(Field::SubtitlePosition));
         triples.push(self.field_row(Field::SubtitleBackground));
 
-        // Interfaz: the three doors out of this page. They are the mockup's, and each one pushes a
-        // page of the surface's own stack (About included: see `screens::legal`).
-        let language = preference_name(crate::i18n::saved_preference()).to_string();
-        triples.push((
-            Row::new(crate::i18n::msg::settings_language_title())
-                .detail(crate::i18n::msg::settings_language_detail())
-                .value(&language)
-                .chevron(true)
-                .dim(self.state.busy),
-            Action::Language,
-            language,
-        ));
-        triples.push((
-            Row::new(crate::i18n::msg::settings_legal_title())
-                .detail(crate::i18n::msg::settings_legal_detail())
-                .chevron(true)
-                .dim(self.state.busy),
-            Action::Legal,
-            String::new(),
-        ));
-        triples.push((
-            Row::new(crate::i18n::msg::settings_about_title())
-                .detail(crate::i18n::msg::settings_about_detail())
-                .chevron(true)
-                .dim(self.state.busy),
-            Action::About,
-            String::new(),
-        ));
-
         let mut list_values = Vec::new();
         let mut list_actions = Vec::new();
         for (row, action, value) in triples {
@@ -753,7 +716,6 @@ impl RootPage {
                 Group::Servers => server = server.row(row),
                 Group::Playback => playback = playback.row(row),
                 Group::Audio => audio = audio.row(row),
-                Group::Interface => interface = interface.row(row),
             }
             list_values.push(value);
             list_actions.push(action);
@@ -773,7 +735,7 @@ impl RootPage {
         // options is one column on one ground.
         self.table.grid(2);
         self.table.card_grid(mockup_grid());
-        self.table.set_sections(vec![server, playback, audio, interface], list_sel, false);
+        self.table.set_sections(vec![server, playback, audio], list_sel, false);
         if let Some(field) = self.state.picker {
             let current = self.current_value(field);
             let mut section = Section::new("");
@@ -868,9 +830,6 @@ impl RootPage {
             Action::Servers => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
             Action::AddServer => fx.push(Fx::App(AppFx::Loop(super::super::registry::LoopReq::JfQuickConnect))),
             Action::SignOut => fx.push(Fx::App(AppFx::Loop(super::super::registry::LoopReq::JfDisconnectServer))),
-            Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
-            Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
-            Action::About => fx.push(Fx::Nav(NavOp::Push(SettingsPage::About))),
         }
         fx.invalidate(crate::ui::present::Provenance::Input);
     }
@@ -935,7 +894,6 @@ enum Group {
     Servers,
     Playback,
     Audio,
-    Interface,
 }
 
 /// Which group a row belongs to. **The one predicate the paint order and the section split
@@ -944,7 +902,6 @@ enum Group {
 fn group_of(action: &Action) -> Group {
     match action {
         Action::Servers | Action::AddServer | Action::SignOut => Group::Servers,
-        Action::Language | Action::Legal | Action::About => Group::Interface,
         Action::Open(field) if field.is_subtitle() => Group::Audio,
         _ => Group::Playback,
     }
@@ -1516,9 +1473,6 @@ mod tests {
                 Action::SignOut => {
                     assert_eq!(row.label, crate::i18n::msg::settings_servers_disconnect())
                 }
-                Action::Language => assert_eq!(row.label, crate::i18n::msg::settings_language_title()),
-                Action::Legal => assert_eq!(row.label, crate::i18n::msg::settings_legal_title()),
-                Action::About => assert_eq!(row.label, crate::i18n::msg::settings_about_title()),
                 Action::Pick(_) => panic!("row {i}: the row list holds no picker option"),
             }
         }
@@ -1568,11 +1522,11 @@ mod tests {
         crate::route::restore_show_recently_added(false);
     }
 
-    /// **The mockup's four groups, in its order, and every row on the page.** The groups are the
+    /// **The page's three groups, in their order, and every row on the page.** The groups are the
     /// grid's pairing unit, so the section list is what decides where the two-column layout breaks
     /// — and the crash this guards against is a group label that a translated string leaves empty.
     #[test]
-    fn the_page_is_the_mockups_four_groups_in_order() {
+    fn the_page_is_its_three_groups_in_order() {
         let _serial = crate::testlock::serial();
         let _session = crate::server::session::TempSession::new("settings-groups");
         let page = RootPage::new(EntryId(0));
@@ -1583,9 +1537,8 @@ mod tests {
                 crate::i18n::msg::settings_servers_group(),
                 crate::i18n::msg::settings_playback_section(),
                 crate::i18n::msg::settings_audio_title(),
-                crate::i18n::msg::settings_interface_section(),
             ],
-            "the mockup's four groups, each with its own word"
+            "each group with its own word"
         );
         assert_eq!(page.table.cols(), 2, "the mockup pairs rows in two columns");
         assert_eq!(
@@ -1595,7 +1548,6 @@ mod tests {
         );
         assert_eq!(page.table.sections[0].rows.len(), 3, "server, add, disconnect");
         assert_eq!(page.table.sections[2].rows.len(), 3, "the three subtitle rows");
-        assert_eq!(page.table.sections[3].rows.len(), 3, "language, legal, about");
     }
 
     #[test]

@@ -122,25 +122,6 @@ pub(super) fn scratch_session(tag: &str) -> crate::server::session::TempSession 
     crate::server::session::TempSession::new(tag)
 }
 
-/// Run the push spring to rest on 16 ms frames — bounded, so a spring that never settles
-/// fails the test rather than hanging the suite.
-pub(super) fn settle(s: &mut RouteSurface) {
-    for i in 1..600u32 {
-        step(
-            s,
-            ScreenEvent::Tick(Tick {
-                ms: i * 16,
-                dt_us: 16_000,
-            }),
-            None,
-        );
-        if s.at_rest() {
-            return;
-        }
-    }
-    panic!("the push spring never settled");
-}
-
 /// A BACK press as the dispatcher delivers one. `at_edge` is `false` because this harness
 /// has no engine to have produced an edge rule; the surface's arm is deliberately blind to
 /// the flag (see its comment), so the two roads are one event here.

@@ -2950,7 +2950,7 @@ pub(crate) fn owns_input(d: &Dispatcher<AppHost>) -> bool {
 }
 
 /// The topmost surface's heartbeat word, for the dev triggers that have to wait for a particular
-/// page of the family to be up (`butaca-legaldoc`, `butaca-alert`).
+/// page of the family to be up (`butaca-alert`).
 pub(crate) fn surface_word(d: &Dispatcher<AppHost>) -> Option<&'static str> {
     d.top_surface_name()
 }

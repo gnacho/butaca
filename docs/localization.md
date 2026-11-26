@@ -81,14 +81,14 @@ scripts requiring shaping or bidirectional layout need renderer work before bein
 
 ## Runtime behavior
 
-Settings → Language defaults to the television's UI language. Explicit English, Spanish and
-Belarusian choices apply the next time the app starts. The running UI and server request language
-remain unchanged until then; playback is not interrupted. The contribution action displays this
-guide's URL and QR code for opening on another device.
+The interface follows the television's own UI language. There is no in-app language setting and no
+stored preference: Spanish and Belarusian UI locales use their catalogs, and every other UI
+language resolves to English. Because nothing is persisted, signing out, deleting local data or
+reinstalling cannot change the language, and changing the set's language needs no app-side step.
 
 At boot, the native Settings Service supplies `localeInfo.locales.UI`, `locales.FMT` and `clock`.
-UI resolution is saved override, TV UI language, process locale, then English. Unsupported UI
-languages use English. Missing formatting settings use the resolved UI language's regional
+UI resolution is TV UI language, process locale, then English. Unsupported UI languages use
+English. Missing formatting settings use the resolved UI language's regional
 default. Numeric Gregorian dates and numbers use the formatting locale; playback clocks remain
 durations. Locale data and catalogs are bundled, so translating the UI requires no network.
 
@@ -96,8 +96,8 @@ Server requests carry the resolved UI language in the language header. Servers m
 own stored language. This preference does not change media audio/subtitle selection or library
 sorting. Launcher metadata follows webOS's system language independently of the app override.
 
-Controlled record/replay runs use the captured session's language preference; System resolves to
-English and regional formatting is pinned to en-US/24-hour in both modes. They do not read live
+Controlled record/replay runs resolve to English, and regional formatting is pinned to
+en-US/24-hour in both modes. They do not read live
 TV settings or simulator language environment variables. Use ordinary simulator launches for
 language screenshots.
 

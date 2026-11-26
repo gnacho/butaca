@@ -1750,10 +1750,9 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   `/tmp/butaca-libswitch` (cycle every switch: tabs, sort menu, unwatched, filter→genre), the three
   Settings-family scene triggers added 2026-09-06 for the frame-TIME gates (`worst_ceiling_ms` /
   `stall_ceiling_ms`, graded from `worstframe=` and `FRAMEDROP`): `/tmp/butaca-modalosc` (with
-  `butaca-settings=root`, open and dismiss Settings every 1.5 s — `fps:modal-ramp`),
-  `/tmp/butaca-legaldoc` (with `=legal`, one OK on the index so the boot lands on a pushed
-  document — `fps:legal-document`) and `/tmp/butaca-alert` (with `=privacy`, open the
-  "Delete all local data?" decision alert, deleting nothing — `fps:decision-alert`); and the
+  `butaca-settings=root`, open and dismiss Settings every 1.5 s — `fps:modal-ramp`) and
+  `/tmp/butaca-alert` (open the "Delete all local data?" decision alert, deleting nothing —
+  `fps:decision-alert`); and the
   Search pair: `/tmp/butaca-search[=<query>]` (boot straight into Search with the field already
   holding `<query>` — the seed is not a convenience, since neither the harness nor `sim-shot` can
   type and the TV's own keyboard is raised by a user, so without it every headless look at this

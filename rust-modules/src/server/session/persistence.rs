@@ -32,7 +32,6 @@ pub(crate) enum CanonicalRead {
     },
     Cleared {
         revision: u64,
-        language: crate::i18n::Preference,
     },
     /// Preferences remain available while credentials and offline profile activation stay closed.
     Locked {
@@ -129,7 +128,6 @@ pub(crate) fn load() -> CanonicalRead {
                 },
                 crate::storage::RecordState::Cleared => CanonicalRead::Cleared {
                     revision: record.revision,
-                    language: super::install_preferences::load().unwrap_or_default(),
                 },
             },
             Err(error) => CanonicalRead::Blocked(error),
@@ -169,7 +167,6 @@ pub(crate) fn load_helper_with(transport: &mut dyn client::Transport) -> Canonic
             if snapshot.state.status == Status::Cleared {
                 return CanonicalRead::Cleared {
                     revision: snapshot.state.revision,
-                    language: super::public_session(&snapshot.state.public).language,
                 };
             }
             if snapshot.state.migrations.session.progress != MigrationProgress::Complete {
@@ -513,41 +510,6 @@ pub(super) fn commit_clear_with(transport: &mut dyn client::Transport) -> Canoni
         HelperLoad::Present(snapshot) => expected(snapshot),
     };
     helper_commit_for_app_with(transport, expectation, operation, WireMutation::ClearTenure {})
-}
-
-/// "Delete all local data": reset only the install language that sign-out's ClearTenure retained.
-/// The helper CAS and Cleared validation prevent this public write from recreating any account
-/// domain or auth envelope.
-pub(super) fn reset_cleared_language_with(transport: &mut dyn client::Transport) -> CanonicalCommit {
-    let loaded = match client::load_with(transport) {
-        Ok(value) => value,
-        Err(error) => return CanonicalCommit::Failed(helper_error(error)),
-    };
-    let HelperLoad::Present(snapshot) = loaded else {
-        return CanonicalCommit::Durable { revision: 0, verified: true, protection: None };
-    };
-    if snapshot.state.status != Status::Cleared {
-        return CanonicalCommit::Failed(StoreError::InvalidSchema);
-    }
-    let mut public = snapshot.state.public.clone();
-    let changed = public.preferences.as_object_mut().is_some_and(|preferences| preferences.remove("language").is_some());
-    if !changed {
-        return CanonicalCommit::Durable { revision: snapshot.state.revision, verified: true, protection: None };
-    }
-    let operation = match Generation::random() {
-        Ok(value) => value,
-        Err(_) => return CanonicalCommit::Failed(StoreError::HelperUnavailable),
-    };
-    let payload = match serde_json::to_value(public) {
-        Ok(value) => value,
-        Err(_) => return CanonicalCommit::Failed(StoreError::InvalidSchema),
-    };
-    helper_commit_for_app_with(transport, expected(&snapshot), operation,
-        WireMutation::UpdatePreferences { payload })
-}
-
-pub(super) fn reset_cleared_language() -> CanonicalCommit {
-    reset_cleared_language_with(&mut client::NativeTransport)
 }
 
 fn helper_commit_for_app_with(

@@ -6,14 +6,14 @@
 //! справаздачы, звесткі пра прыватнасць і лака…"), invisible in the simulator because its newer
 //! SDL_ttf sums fractional advances while the device rounds each glyph to a whole pixel.
 //! [`crate::fontcov::advances::ShippedMeasure`] measures the shipped faces the device's way, so
-//! these assertions are about the television, not the Mac. The Legal notices and Privacy & data
-//! pages carry the same guard in their own modules (`legal.rs`, `consent_text_fit_tests.rs`).
+//! these assertions are about the television, not the Mac. The first-run consent pages carry the
+//! same guard in their own module (`consent_text_fit_tests.rs`).
 
 use super::*;
 use crate::fontcov::advances::{ShippedMeasure, HEADROOM};
 use crate::i18n::{language_on_this_thread_for_test, msg, Preference};
 use crate::ui::route_screen::RouteLayout;
-use crate::ui::table::{Row, TableView};
+use crate::ui::table::{Row, Section, TableView};
 
 const LANGUAGES: [Preference; 3] = [Preference::En, Preference::Es, Preference::Be];
 
@@ -21,17 +21,6 @@ const LANGUAGES: [Preference; 3] = [Preference::En, Preference::Es, Preference::
 fn overflowing(page: &str, table: &TableView, out: &mut Vec<String>) {
     let frame_w = RouteLayout::screen().sectioned_table().w;
     out.extend(table.elided_rows(frame_w, &ShippedMeasure, HEADROOM).into_iter().map(|e| format!("{page}: {e}")));
-}
-
-#[test]
-fn every_language_row_fits_its_column_in_every_language() {
-    let mut out = Vec::new();
-    for language in LANGUAGES {
-        let _guard = language_on_this_thread_for_test(language);
-        let tag = language.tag();
-        overflowing(&format!("{tag} language"), &LanguagePage::new(EntryId(0)).table, &mut out);
-    }
-    assert!(out.is_empty(), "rows the television would end in an ellipsis:\n  {}", out.join("\n  "));
 }
 
 /// **#297: the root is a two-column grid, so a row is elided to a CELL, not to the page.** The

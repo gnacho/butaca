@@ -29,7 +29,6 @@ pub(crate) mod item_menu;
 pub(crate) mod library;
 pub(crate) mod search;
 pub(crate) mod family;
-pub(crate) mod legal;
 pub(crate) mod jf_login; // Jellyfin sign-in - a server/user/password form, not a QR
 pub(crate) mod onboard;
 pub(crate) mod plaintext_question;

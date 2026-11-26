@@ -359,21 +359,6 @@
       "comment": "The shared Home-source picker opened as a Settings editor. Filters on route=home overlay=onboard rather than the old route=onboard: the picker is now a PAGE of the Settings family surface (`SettingsPage::Favourites`), not its own route, so `app.route` never leaves Home. Until 2026-09-07 this scene selected on overlay=settings — the family's ROOT word — because `bridge::overlay_word` prints whatever the topmost page's `Screen::name` answers, and the Home-sources editor answered the SAME `settings` word the root page does; the scene's heartbeat was therefore BYTE-IDENTICAL to settings-root/settings-idle, so a boot-target regression that left this run stuck on the root (a renamed `butaca-settings=home` value, or a future bug in the boot-target match in `app/run.rs`) still produced >=5 matching samples and PASSED, at the wrong screen. `OnboardScreen::name` now answers its own `onboard` word while mounted inside the family (word chosen to match the FIRST-RUN mounting of the identical screen, which already prints route=onboard with no overlay — one screen, two positions, one name) and `bridge::overlay_word` maps it, so this scene can no longer be satisfied by any other page of the family. settingsosc moves the real source TableView and grades the clean BACK composition over Settings rather than treating the visually similar first-run route as sufficient coverage; the dirty Done replacement is a pure state contract covered by the onboard unit suite."
     },
     {
-      "name": "settings-legal",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "legal",
-      "loop_floor": 50,
-      "fps_floor": 50,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "triggers": {
-        "butaca-settings": "legal",
-        "butaca-settingsosc": true
-      },
-      "comment": "The Legal index route opened through Settings. Focus alternates in the real document list while continuous invalidation exposes the cost of the shared route composition and frozen ambient underlay; actual fps=, not merely loop=, is required to remain at least 50/s."
-    },
-    {
       "name": "settings-idle",
       "tier": "ui",
       "route": "home",
@@ -503,22 +488,6 @@
       },
       "comment": "100 pages pushed with NO pop in between (rotating Detail/Person through the real nav_push, opportunistically refreshing Person from the live cast row exactly as push-100 does, falling back to re-pushing Detail — never Library — until cast data lands), then 100 pops back to the root one page at a time — 200 `bench:` lines total, each ONE nav op (`dir=push|pop`) rather than push-100's open+close round trip. Library is NOT in the rotation: its only entry point (app::bridge::nav_tab -> NavOp::SelectTab) retires every entry above the root and mints at most one new one over it, so rotating it in would collapse the very depth this scene exists to build rather than deepen it — see dev::scenarios::bench::DeepBench's module doc. Found while building this scene: NavStack (ui/containers/stack.rs) bounds only the MOUNTED body count at CAP=16 (the oldest body below the top is evicted — Screen torn down, Unmount delivered — once more than 15 stay live below a new top), never the logical stack depth itself, which is unbounded; every Entry (id, arg, ReturnState) is retained regardless, so depth=100 pushes 100 real entries but only ever mounts <=16 of them at once, and a Pop past CAP remounts from the retained ReturnState. bench_depth_rss_kb grades exactly that: the deepest point minus the unwound root is the retained per-level state, which must stay small once eviction is doing its job. butaca-framedrop is required for the same reason as push-100/modal-100.",
       "_ceiling_note": "bench_missed_max=0 for push-100's reason. The RSS gates are absolute and end-state because a growth figure measured from step 10 moves with whatever step 10 happened to hold: two runs read 68104 and 81732 kB there against 86856/86296 kB at the root. bench_depth_rss_kb=16384 bounds maxdepth minus the unwound root. bench_root_rss_kb=98304 is the measured ~86.5 MB root plus a margin a little over one 8.3 MB FrameCache, well inside the package's requiredMemory of 160 MB. MEASURED 2026-09-28 on the television, panel off: depth rss 176 kB (87156 at max depth, 86980 at root); 18 missed refreshes in 13 of 200 steps (worst_ms p50 17.6, p95 28.1), the same held-image GPU waits push-100 records. Unfixed, and left failing."
-    },
-    {
-      "name": "legal-document",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "legal",
-      "loop_floor": 30,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "fps_ceiling": 5,
-      "worst_ceiling_ms": 33,
-      "comment": "A pushed legal DOCUMENT (the reader over the frozen ground), reached by one OK on the index (butaca-legaldoc). It must settle (fps_ceiling) and no settled-screen frame may exceed a vsync pair. BASELINE 2026-09-06 panel-ON (TV session 1): worst robust_max=2.3 ms; the ceiling stands.",
-      "triggers": {
-        "butaca-settings": "legal",
-        "butaca-legaldoc": true
-      }
     },
     {
       "name": "page-panel",

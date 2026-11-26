@@ -237,8 +237,8 @@ presentation in a design pass.
 
 ## The route family says where BACK goes ONCE, as a crumb
 
-Every Settings-family route — Settings, Privacy & data, Legal notices, a legal document, About, the
-Home-sources editor, the first-run consent pair — draws a caption line above its title: a
+Every Settings-family route — Settings, the server picker, the Home-sources editor, the first-run
+consent pair — draws a caption line above its title: a
 left-pointing chevron (`Icon::ChevronLeft`, the mirror of the row chevron and sharing its `ink_x`
 entry) and the name of the place BACK returns to. `RouteLayout::draw_narrative` takes it as
 `Option<&str>` so a new route cannot forget to answer. **`None` means "BACK does not go anywhere

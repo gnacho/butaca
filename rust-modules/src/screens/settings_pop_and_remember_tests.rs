@@ -16,7 +16,7 @@ fn only_current_inner_instance_can_project_remembered_selection() {
         crate::catalog::HubsSnapshot::empty_for_test().view());
     step(&mut s, ScreenEvent::Mount, None);
     let covered = s.inner.top().unwrap().inst.as_ref().unwrap().id;
-    forwarded(&mut s, Fx::Nav(NavOp::Push(SettingsPage::Legal)));
+    forwarded(&mut s, Fx::Nav(NavOp::Push(SettingsPage::Servers)));
     let active = s.inner.top().unwrap().inst.as_ref().unwrap().id;
     assert_ne!(covered, active);
     for (source, accepted) in [(covered, false), (active, true)] {
@@ -37,9 +37,9 @@ fn only_current_inner_instance_can_project_remembered_selection() {
 
 /// **A Pop that would empty the inner stack is the surface's dismissal, not a surface left up
 /// with no page in it.** The configuration is the real one:
-/// `/tmp/butaca-settings=privacy` roots the surface AT Privacy & data, and that page's
-/// Done (`consent::band_commit`'s Settings arm) emits a bare `Fx::Nav(NavOp::Pop)` — correct
-/// when Privacy sits over the Settings root, and one entry too many here. `NavStack` has no
+/// a surface rooted AT a page of its own (`/tmp/butaca-settings=servers`), whose own Done
+/// emits a bare `Fx::Nav(NavOp::Pop)` — correct when that page sits over the Settings root,
+/// and one entry too many here. `NavStack` has no
 /// depth guard of its own, so before the fix this retired the only entry and left `top_mut()`
 /// at `None` while `at_rest()` stayed true: scrim and ground still drawn, input still owned,
 /// no page, no hit stops, and no key that could reach it. `onboard::leave`'s settings arm and
@@ -52,8 +52,7 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
         EntryId(7),
         InstanceId(0),
         Family::Settings,
-        SettingsPage::Legal,
-    
+        SettingsPage::Servers,
         crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);

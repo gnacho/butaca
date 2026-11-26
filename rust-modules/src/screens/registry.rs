@@ -72,7 +72,6 @@ pub(crate) enum PreferenceCmd {
     UpNextWindow { seconds: i64, reply: std::sync::mpsc::Sender<bool> },
     /// What a server-marked intro or credits segment does when the playhead reaches it (#370).
     MarkerPolicy { policy: crate::server::session::MarkerPolicy, reply: std::sync::mpsc::Sender<bool> },
-    Language { language: crate::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
 }
 
 /// **What the item context menu asks of the loop**, once its own `step` has resolved the pressed
@@ -1261,7 +1260,6 @@ pub(crate) mod word {
     pub(crate) const COLLECTION: &str = "collection";
     pub(crate) const SETTINGS: &str = "settings";
     pub(crate) const PRIVACY: &str = "privacy";
-    pub(crate) const LEGAL: &str = "legal";
     pub(crate) const ONBOARD: &str = "onboard";
     /// Jellyfin sign-in (`screens::jf_login::JfLoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
@@ -1612,7 +1610,7 @@ pub(crate) enum AppArg {
     Settings(SettingsPage),
 }
 
-pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Playback,Favourites,Legal,About,Document(u8),Language,Contribute},LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
+pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Favourites,Servers},LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
@@ -2143,7 +2141,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::images::SHAPE,
     crate::screens::preplay_window::SHAPE[0],
     crate::screens::preplay_window::SHAPE[1],
-    "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
+    "LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::screens::settings::SHAPE,
 ];
 

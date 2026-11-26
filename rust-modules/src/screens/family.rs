@@ -57,23 +57,13 @@ pub(crate) fn pre_home_ground(hubs: crate::catalog::HubsView<'_>) -> SessionGrou
         watch: Default::default(), from_session: live.is_none(), seed }
 }
 
-/// A page of the surface's own stack (§6.2: root → Privacy | Legal | Favourites → Document).
+/// A page of the surface's own stack (§6.2: root → Favourites).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SettingsPage {
     /// The Settings root (`ui::settings`'s table).
     Root,
-    /// Install-wide language choice, applied next launch.
-    Language,
-    /// Translation contribution guide with an offline QR link.
-    Contribute,
     /// Favorite libraries — the onboard screen in Settings mode.
     Favourites,
-    /// The Legal index.
-    Legal,
-    /// About Butaca, a document pushed straight from the root.
-    About,
-    /// One Legal document, by index into `screens::legal`'s page list.
-    Document(u8),
     /// The Jellyfin flavor's server picker (list of configured servers, OK switches).
     Servers,
 }
@@ -85,12 +75,7 @@ impl ScreenArg for SettingsPage {
     fn id(&self) -> ScreenId {
         ScreenId(match self {
             SettingsPage::Root => 100,
-            SettingsPage::Language => 110,
-            SettingsPage::Contribute => 111,
             SettingsPage::Favourites => 101,
-            SettingsPage::Legal => 103,
-            SettingsPage::About => 104,
-            SettingsPage::Document(_) => 105,
             SettingsPage::Servers => 112,
         })
     }
@@ -119,30 +104,15 @@ impl LogicalState for SettingsPage {
     fn write(&self, w: &mut Canon) {
         w.discriminant(ScreenArg::id(self).0);
         w.u8(match self {
-            SettingsPage::Root
-            | SettingsPage::Language
-            | SettingsPage::Contribute
-            | SettingsPage::Favourites
-            | SettingsPage::Legal => 0,
-            SettingsPage::About => 0,
-            SettingsPage::Servers => 0,
-            SettingsPage::Document(i) => *i,
+            SettingsPage::Root | SettingsPage::Favourites | SettingsPage::Servers => 0,
         });
     }
     fn probe(&self, out: &mut String) {
         out.push_str(match self {
             SettingsPage::Root => "root",
-            SettingsPage::Language => "language",
-            SettingsPage::Contribute => "contribute",
             SettingsPage::Favourites => "favourites",
-            SettingsPage::Legal => "legal",
-            SettingsPage::About => "about",
             SettingsPage::Servers => "servers",
-            SettingsPage::Document(_) => "document",
         });
-        if let SettingsPage::Document(i) = self {
-            out.push_str(&format!("[{i}]"));
-        }
     }
 }
 
@@ -292,30 +262,13 @@ mod tests {
     fn every_settings_page_variant_has_its_own_screen_id() {
         let pages = [
             SettingsPage::Root,
-            SettingsPage::Language,
-            SettingsPage::Contribute,
             SettingsPage::Favourites,
-            SettingsPage::Legal,
-            SettingsPage::About,
-            SettingsPage::Document(0),
             SettingsPage::Servers,
         ];
         let mut ids: Vec<u32> = pages.iter().map(|p| crate::ui::screen::ScreenArg::id(p).0).collect();
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), pages.len(), "two SettingsPage variants must not share a ScreenId");
-    }
-
-    /// `Document`/`Preview`/`ConsentStage` carry an index that does not change WHICH kind of page
-    /// they are — the id is the variant's, not the index's — so two different documents still
-    /// name the same `ScreenId` (which is exactly right: `NavStack::apply`'s `NavOp::Root` arm
-    /// compares `same_instance`, not `id()`, for identity, and `id()` alone is only ever a KIND).
-    #[test]
-    fn an_indexed_variant_s_id_does_not_vary_with_its_index() {
-        use crate::ui::screen::ScreenArg;
-        assert_eq!(SettingsPage::Document(0).id(), SettingsPage::Document(5).id());
-        // …but `same_instance` still tells them apart, since it is bare equality here:
-        assert!(!SettingsPage::Document(0).same_instance(&SettingsPage::Document(1)));
     }
 }
 

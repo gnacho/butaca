@@ -1757,8 +1757,8 @@ section closed anything at all.
 with ~203 display literals across 45 files and no string ownership story, and the native UI was
 locale-blind apart from a best-effort language-header read from the POSIX locale environment.
 Both are gone. The app's own text comes from bundled catalogs (English, Spanish, Belarusian), the
-UI language resolves from a saved Settings → Language override, then the TV UI language reported
-by the native Settings Service, then the process locale, then English, and
+UI language resolves from the TV UI language reported by the native Settings Service, then the
+process locale, then English (there is no in-app override any more), and
 the retired client's identity module sent that resolved language in a language header, and nothing
 sends one today.
 [`docs/localization.md`](localization.md) is the current account of runtime behaviour and of its

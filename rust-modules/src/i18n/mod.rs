@@ -5,9 +5,6 @@ use icu_plurals::{PluralCategory, PluralRules};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::OnceLock;
 
-pub(crate) const CONTRIBUTE_URL: &str =
-    "https://github.com/gnacho/butaca/blob/main/docs/localization.md";
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Preference {
@@ -38,18 +35,6 @@ impl Preference {
             Self::En => "en",
             Self::Es => "es",
             Self::Be => "be",
-        }
-    }
-    /// Serde's `skip_serializing_if`: System is what an absent preference already means.
-    pub(crate) fn is_system(&self) -> bool {
-        *self == Self::System
-    }
-    pub(crate) fn native_name(self) -> &'static str {
-        match self {
-            Self::System => msg::core_system_default(),
-            Self::En => "English",
-            Self::Es => "Español",
-            Self::Be => "Беларуская",
         }
     }
 }
@@ -218,35 +203,6 @@ pub(crate) fn normalize(s: &str) -> Option<String> {
     (l.id.language.as_str() != "und").then(|| l.to_string())
 }
 static CURRENT: OnceLock<LocaleContext> = OnceLock::new();
-static SAVED_PREFERENCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-/// The confirmed next-launch setting. Reading it never touches credential storage.
-pub(crate) fn saved_preference() -> Preference {
-    match SAVED_PREFERENCE.load(std::sync::atomic::Ordering::Acquire) {
-        1 => Preference::En,
-        2 => Preference::Es,
-        3 => Preference::Be,
-        _ => Preference::System,
-    }
-}
-
-pub(crate) fn set_saved_preference(value: Preference) {
-    let value = match value {
-        Preference::System => 0,
-        Preference::En => 1,
-        Preference::Es => 2,
-        Preference::Be => 3,
-    };
-    SAVED_PREFERENCE.store(value, std::sync::atomic::Ordering::Release);
-}
-
-#[cfg(test)]
-pub(crate) fn saved_preference_for_test(value: Preference) -> Preference {
-    crate::testlock::assert_held("saved language preference");
-    let previous = saved_preference();
-    set_saved_preference(value);
-    previous
-}
 
 #[cfg(test)]
 thread_local! {
@@ -305,10 +261,12 @@ pub(crate) fn current() -> &'static LocaleContext {
     }
 }
 #[cfg(not(test))]
-pub(crate) fn initialize(preference: Preference, controlled: bool) {
-    set_saved_preference(preference);
-    // Record/replay must not depend on the TV or process environment. The preference is part
-    // of the captured session; System resolves to English and formatting is fixed in both modes.
+pub(crate) fn initialize(controlled: bool) {
+    // The interface follows the television. There is no stored preference: the only door to a
+    // language is the set's own UI locale, and English is what an unfamiliar one resolves to.
+    let preference = Preference::System;
+    // Record/replay must not depend on the TV or process environment. System resolves to English
+    // and formatting is fixed in both modes.
     if controlled {
         let _ = CURRENT.set(LocaleContext::resolve(
             preference,

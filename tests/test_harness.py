@@ -864,10 +864,9 @@ class FpsIdentity(unittest.TestCase):
 
     def test_settings_scenes_carry_the_50_fps_contract_and_idle_inverse(self):
         scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
-        # settings-privacy went with the Privacy & data page itself (replaced by the
-        # delete-all-local-data row); only root and legal scenes remain.
-        for name, overlay in (("settings-root", "settings"),
-                              ("settings-legal", "legal")):
+        # settings-privacy went with the Privacy & data page itself, and the legal scenes went
+        # with the Legal index and its documents; only the settled root remains.
+        for name, overlay in (("settings-root", "settings"),):
             with self.subTest(scene=name):
                 scene = scenes[name]
                 self.assertEqual(scene["route"], "home")
@@ -1057,7 +1056,7 @@ class ColdOpenGate(unittest.TestCase):
 class FrameCeilingsManifest(unittest.TestCase):
     def test_the_new_scenes_declare_a_ceiling_and_a_known_route_word(self):
         scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
-        for name in ("modal-ramp", "legal-document", "page-panel", "decision-alert", "cold-open"):
+        for name in ("modal-ramp", "page-panel", "decision-alert", "cold-open"):
             s = scenes[name]
             self.assertIsNotNone(run.frame_ceiling_threshold(s), name)
         self.assertEqual(scenes["cold-open"].get("warmup_s"), 0,

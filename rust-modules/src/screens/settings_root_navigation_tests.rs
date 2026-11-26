@@ -155,17 +155,14 @@ fn quick_connect_requests_the_jellyfin_flow_without_pushing_a_settings_page() {
     assert!(!out.iter().any(|st| matches!(st.fx, Fx::Nav(_))));
 }
 
-/// The navigation rows of the one page push the pages the family already had, and the two
-/// account rows still go through the loop's own requests.
+/// The page's one navigation row pushes the page the family already had, and the account
+/// rows still go through the loop's own requests.
 #[test]
 fn navigation_rows_push_their_existing_pages_and_sign_out_disconnects() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("root-preference-actions");
     for (label, wanted) in [
         (crate::i18n::msg::settings_servers_current(), SettingsPage::Servers),
-        (crate::i18n::msg::settings_language_title(), SettingsPage::Language),
-        (crate::i18n::msg::settings_legal_title(), SettingsPage::Legal),
-        (crate::i18n::msg::settings_about_title(), SettingsPage::About),
     ] {
         let mut root = RootPage::new(EntryId(0));
         let mut out = Vec::new();
