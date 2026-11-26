@@ -2184,13 +2184,12 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // All six drive the SAME screens through the same door the remote does: a synthesised
         // `InputEvent` with `Source::Script`, queued on `app.inputs` for the dispatcher's next
         // frame. **Every interval is unchanged**, because these scenes' gates are read against a
-        // cadence (`fps:modal-ramp`, `decision-alert`, `settings-*`): 1500 ms
+        // cadence (`fps:modal-ramp`, `settings-*`): 1500 ms
         // for the modal ramp, 520 ms for the three focus sweeps. Bodies live in
         // `crate::dev::scenarios` now; this frame still runs them at the same phase boundary.
         crate::dev::scenarios::modal_osc_tick(app, fr.now);
         // dev: /tmp/butaca-modalbench — `crate::dev::scenarios::modal_bench_tick`.
         crate::dev::scenarios::modal_bench_tick(app, fr.now);
-        crate::dev::scenarios::alert_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::settings_osc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::onboard_osc_tick(app, fr.now, fr.dt);
         // (`legal::update` / `consent::update` / `settings::update` stood here, self-gated on

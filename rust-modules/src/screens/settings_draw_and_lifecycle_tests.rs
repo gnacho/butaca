@@ -156,7 +156,7 @@ fn every_settings_row_carries_a_detail_that_fits_its_cell() {
             checked += 1;
         }
     }
-    assert!(checked >= 15, "expected the mockup's whole row set, got {checked}");
+    assert!(checked >= 14, "expected the whole row set, got {checked}");
     let over = page
         .table
         .elided_rows(RootPage::layout().content.w, &ShippedMeasure, HEADROOM);

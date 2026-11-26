@@ -1056,7 +1056,7 @@ class ColdOpenGate(unittest.TestCase):
 class FrameCeilingsManifest(unittest.TestCase):
     def test_the_new_scenes_declare_a_ceiling_and_a_known_route_word(self):
         scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
-        for name in ("modal-ramp", "page-panel", "decision-alert", "cold-open"):
+        for name in ("modal-ramp", "page-panel", "cold-open"):
             s = scenes[name]
             self.assertIsNotNone(run.frame_ceiling_threshold(s), name)
         self.assertEqual(scenes["cold-open"].get("warmup_s"), 0,

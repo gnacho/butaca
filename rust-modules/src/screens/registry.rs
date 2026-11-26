@@ -1259,7 +1259,6 @@ pub(crate) mod word {
     pub(crate) const PERSON: &str = "person";
     pub(crate) const COLLECTION: &str = "collection";
     pub(crate) const SETTINGS: &str = "settings";
-    pub(crate) const PRIVACY: &str = "privacy";
     pub(crate) const ONBOARD: &str = "onboard";
     /// Jellyfin sign-in (`screens::jf_login::JfLoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
@@ -2298,7 +2297,11 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// **Bumped 2026-11-25** for the account menu: the design mockup's server dialog has no
 /// scrollable list, so `AccountMenu`'s shape lost its `TableViewMotion` — a schema transition, and
 /// the replay fixtures were re-recorded with it.
-const SCREEN_SHAPES_PIN: u64 = 0x25d8_c79f_d788_c47b;
+///
+/// **Bumped 2026-11-26** for the Settings page losing its Interface group: the language picker,
+/// the legal index/documents and About are gone, so the surface's inner stack can no longer hold
+/// them. A schema transition, and the replay fixtures were re-recorded with it.
+const SCREEN_SHAPES_PIN: u64 = 0x888f_00fc_388d_20d8;
 
 #[cfg(test)]
 mod arg_tests {

@@ -543,22 +543,6 @@
       }
     },
     {
-      "name": "decision-alert",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "privacy",
-      "loop_floor": 30,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "fps_ceiling": 5,
-      "worst_ceiling_ms": 40,
-      "comment": "The shared yes/no alert (Delete all local data?, butaca-alert) over the privacy panel over Settings over Home — three modal layers, the deepest composition a bar page carries. Opening it deletes nothing. BASELINE 2026-09-06 panel-ON (TV session 1): worst robust_max=3.0 ms (max=3.7); the ceiling stands.",
-      "triggers": {
-        "butaca-settings": "privacy",
-        "butaca-alert": true
-      }
-    },
-    {
       "name": "cold-open",
       "tier": "ui",
       "route": "detail",

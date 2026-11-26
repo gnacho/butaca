@@ -36,19 +36,19 @@ fn mounting_the_surface_names_its_root_page() {
     assert_eq!(s.kind, Family::Settings);
 }
 
-/// The root is the mockup's one page: four groups, every row visible. It used to be four
+/// The root is the mockup's one page: three groups, every row visible. It used to be four
 /// door-cards with the playback knobs one level in, which is exactly what the owner reported as
-/// "no están los ajustes como el mockup".
+/// "no están los ajustes como el mockup"; the Interface group went when the language became the
+/// television's and the licence and About documents stayed in the repository.
 #[test]
-fn the_root_is_the_mockups_one_page_of_four_groups() {
+fn the_root_is_the_mockups_one_page_of_three_groups() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("jellyfin-root-rows");
     let root = RootPage::new(EntryId(0));
     let headers: Vec<&str> = root.table.sections.iter().map(|s| s.header.as_str()).collect();
-    assert_eq!(headers.len(), 4, "servidor, reproducción, audio y subtítulos, interfaz");
+    assert_eq!(headers.len(), 3, "servidor, reproducción, audio y subtítulos");
     assert_eq!(root.table.sections[0].rows.len(), 3, "server, add another, disconnect");
     assert_eq!(root.table.sections[2].rows.len(), 3, "the three subtitle rows");
-    assert_eq!(root.table.sections[3].rows.len(), 3, "language, legal, about");
     assert!(root.table.sections[1].rows.len() >= 7,
         "quality, direct play, audio sync, next episode, skip, recently added, screensaver");
     assert_eq!(root.table.cols(), 2, "the mockup's two-column grid");
