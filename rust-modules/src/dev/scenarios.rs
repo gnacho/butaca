@@ -57,8 +57,6 @@ pub(crate) struct DevFlags {
     pub(crate) settingspicker_boot: Option<String>,
     pub(crate) settings_osc: bool,
     pub(crate) modal_osc: bool,
-    pub(crate) legal_doc: bool,
-    pub(crate) alert_boot: bool,
     pub(crate) account_osc: bool,
     pub(crate) onboard_osc: bool,
     pub(crate) nav_osc: bool,
@@ -86,10 +84,6 @@ pub(crate) struct Scenarios {
     pub(crate) settings_osc_last: u32,
     pub(crate) settings_osc_down: bool,
     pub(crate) modal_osc_last: u32,
-    pub(crate) legal_doc_tried: bool,
-    pub(crate) alert_tried: bool,
-    /// how many DOWN presses `butaca-alert` has spent walking to the delete row.
-    pub(crate) alert_step: u8,
     pub(crate) account_osc_last: u32,
     pub(crate) account_osc_down: bool,
     pub(crate) onboard_osc_last: u32,
@@ -380,14 +374,6 @@ pub(crate) fn settingsosc_armed() -> bool {
 /// `/tmp/butaca-modalosc`.
 pub(crate) fn modalosc_armed() -> bool {
     crate::dev::flag("modalosc")
-}
-/// `/tmp/butaca-legaldoc`.
-pub(crate) fn legaldoc_armed() -> bool {
-    crate::dev::flag("legaldoc")
-}
-/// `/tmp/butaca-alert`.
-pub(crate) fn alert_armed() -> bool {
-    crate::dev::flag("alert")
 }
 /// `/tmp/butaca-acctosc`.
 pub(crate) fn acctosc_armed() -> bool {
@@ -936,9 +922,6 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
             let page = match app.scenarios.dev.settings_boot.as_deref().map(str::trim).unwrap_or("root") {
                 "" | "root" => crate::screens::family::SettingsPage::Root,
                 "home" => crate::screens::family::SettingsPage::Favourites,
-                "legal" => crate::screens::family::SettingsPage::Legal,
-                "language" => crate::screens::family::SettingsPage::Language,
-                "contribute" => crate::screens::family::SettingsPage::Contribute,
                 // The playback knobs moved onto the Settings root itself, so the old
                 // `settings-boot=playback` target opens that page rather than a page of its own.
                 "playback" => crate::screens::family::SettingsPage::Root,
@@ -2319,37 +2302,6 @@ pub(crate) fn deep_bench_tick(app: &mut App, now: u32) {
             crate::log(&format!("bench: kind=deep done cycles={n} rss_root_kb={}", read_rss_kb()));
             app.scenarios.deep_bench = None;
         }
-    }
-}
-
-/// `/tmp/butaca-legaldoc` (with `butaca-settings=legal`) — one OK on the Legal index.
-pub(crate) fn legal_doc_tick(app: &mut App, now: u32, dt: f32) {
-    if app.scenarios.dev.legal_doc
-        && !app.scenarios.legal_doc_tried
-        && crate::app::bridge::surface_word(&app.pages) == Some(crate::screens::registry::word::LEGAL)
-    {
-        app.scenarios.legal_doc_tried = true;
-        let tick = Tick { ms: now, dt_us: (dt * 1_000_000.0) as u32 };
-        app.inputs.extend(crate::app::bridge::script_key(Key::Ok, tick));
-    }
-}
-
-/// `/tmp/butaca-alert` (with `butaca-settings=privacy`) — walk to and open the decision alert.
-pub(crate) fn alert_tick(app: &mut App, now: u32, dt: f32) {
-    if app.scenarios.dev.alert_boot
-        && !app.scenarios.alert_tried
-        && crate::app::bridge::surface_word(&app.pages) == Some(crate::screens::registry::word::PRIVACY)
-    {
-        const ALERT_WALK: u8 = 16;
-        let key = if app.scenarios.alert_step < ALERT_WALK {
-            app.scenarios.alert_step += 1;
-            Key::Down
-        } else {
-            app.scenarios.alert_tried = true;
-            Key::Ok
-        };
-        let tick = Tick { ms: now, dt_us: (dt * 1_000_000.0) as u32 };
-        app.inputs.extend(crate::app::bridge::script_key(key, tick));
     }
 }
 

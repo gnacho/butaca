@@ -27,14 +27,6 @@
   "value": "Optional reports, privacy information and local data.",
   "description": "Settings, account, onboarding or privacy UI: settings.privacy.detail"
  },
- "settings.legal.title": {
-  "value": "Legal notices",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.title"
- },
- "settings.legal.detail": {
-  "value": "Privacy, licences, source code, trademarks and contact.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.detail"
- },
  "settings.system.section": {
   "value": "System",
   "description": "Settings, account, onboarding or privacy UI: settings.system.section"
@@ -54,14 +46,6 @@
  "settings.trailers.detail": {
   "value": "After a moment on a title, play its trailer with sound.",
   "description": "Settings, account, onboarding or privacy UI: settings.trailers.detail"
- },
- "settings.about.title": {
-  "value": "About Butaca",
-  "description": "Settings, account, onboarding or privacy UI: settings.about.title"
- },
- "settings.about.detail": {
-  "value": "Version, copyright and project information.",
-  "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
  },
  "settings.libraries.count": {
   "value": {
@@ -154,46 +138,6 @@
    "last": "str",
    "names": "str"
   }
- },
- "settings.language.title": {
-  "value": "Language",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.title"
- },
- "settings.language.detail": {
-  "value": "Choose the language used by Butaca.",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.detail"
- },
- "settings.language.system": {
-  "value": "System default",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.system"
- },
- "settings.language.copy": {
-  "value": "Choose the app language for everyone on this television. Changes apply after restarting Butaca.",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.copy"
- },
- "settings.language.pending": {
-  "value": "Restart Butaca to apply this change.",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.pending"
- },
- "settings.language.save_failed": {
-  "value": "Could not save the language. Try again.",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.save_failed"
- },
- "settings.language.help": {
-  "value": "Help translate the app.",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.help"
- },
- "settings.language.contribute": {
-  "value": "Contribute on GitHub",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.contribute"
- },
- "settings.language.contribute_copy": {
-  "value": "Scan the code with your phone to read the translation guide and contribute on GitHub.",
-  "description": "Settings, account, onboarding or privacy UI: settings.language.contribute_copy"
- },
- "settings.language.contribute_body": {
-  "value": "Translation guide",
-  "description": "Caption above the translation guide address; the canonical URL is drawn separately and must never be translated."
  },
  "settings.consent.crash.title": {
   "value": "Share crash reports?",
@@ -330,153 +274,6 @@
  "settings.delete": {
   "value": "Delete",
   "description": "Settings, account, onboarding or privacy UI: settings.delete"
- },
- "settings.legal.privacy.title": {
-  "value": "Privacy policy",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.title"
- },
- "settings.legal.opensource.title": {
-  "value": "Open-source licences",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.title"
- },
- "settings.legal.ffmpeg.title": {
-  "value": "FFmpeg & source offer",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.title"
- },
- "settings.legal.source.title": {
-  "value": "Butaca source code",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.source.title"
- },
- "settings.legal.trademarks.title": {
-  "value": "Trademarks & non-affiliation",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.title"
- },
- "settings.legal.contact.title": {
-  "value": "Privacy & security contact",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.title"
- },
- "settings.legal.privacy.subtitle": {
-  "value": "How Butaca handles local data and optional reports.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.subtitle"
- },
- "settings.legal.opensource.subtitle": {
-  "value": "Components, copyright holders and licence texts.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.subtitle"
- },
- "settings.legal.ffmpeg.subtitle": {
-  "value": "LGPL notice, replaceability and corresponding source.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.subtitle"
- },
- "settings.legal.source.subtitle": {
-  "value": "Project source, build scripts and release materials.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.source.subtitle"
- },
- "settings.legal.trademarks.subtitle": {
-  "value": "Independent-client status and trademark attribution.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.subtitle"
- },
- "settings.legal.contact.subtitle": {
-  "value": "How to ask a privacy question or report a vulnerability.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.subtitle"
- },
- "settings.legal.section": {
-  "value": "Legal",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.section"
- },
- "settings.legal.copy": {
-  "value": "Read the notices that apply to this build, its open-source components and its relationship with LG.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.copy"
- },
- "settings.about.subtitle": {
-  "value": "A native media client built for LG webOS.",
-  "description": "Settings, account, onboarding or privacy UI: settings.about.subtitle"
- },
- "settings.legal.privacy.responsible": {
-  "value": "RESPONSIBLE FOR BUTACA DATA",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible"
- },
- "settings.legal.privacy.responsible_body": {
-  "value": "Gleb Linnik is responsible only for the data Butaca stores locally on this television.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible_body"
- },
- "settings.legal.privacy.servers": {
-  "value": "JELLYFIN SERVERS",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers"
- },
- "settings.legal.privacy.servers_body": {
-  "value": "To sign you in, browse and play media, report progress and use server features, Butaca talks directly to the Jellyfin server you configure, and to nothing else. Those requests are handled by that server and by whoever operates it. The developer of Butaca receives none of them.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers_body"
- },
- "settings.legal.privacy.local": {
-  "value": "ON THIS TELEVISION",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local"
- },
- "settings.legal.privacy.local_body": {
-  "value": "Butaca keeps, for each server you sign in to, an access token, the address of that server and a device identifier the server uses to recognise this television. It also keeps your playback preferences, the language of the interface, and local technical logs: a small rotating event log, an append-only crash log and a stderr log. Your password is never stored: it is used once to obtain the token and written nowhere.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local_body"
- },
- "settings.legal.privacy.noreports": {
-  "value": "NO REPORTS, NO ANALYTICS",
-  "description": "Section heading in the privacy notice: this build sends no crash reports or analytics."
- },
- "settings.legal.privacy.noreports_body": {
-  "value": "This build sends no crash reports, no analytics and no telemetry anywhere. There is no account with the developer, no identifier attached to this television, and no question to answer on first run, because there is nothing to opt into. The only traffic it generates is to the server you configured.",
-  "description": "Body of the no-reports section of the privacy notice: this build sends no telemetry and its only traffic goes to the server the user configured."
- },
- "settings.legal.privacy.retention": {
-  "value": "RETENTION",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention"
- },
- "settings.legal.privacy.retention_body": {
-  "value": "Your sign-in, the servers registered with it and their tokens, and the device identifier are removed when you sign out. The event log and the stderr log are truncated at every launch, and the crash log only grows until Delete all local data removes it.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention_body"
- },
- "settings.legal.privacy.uninstall": {
-  "value": "UNINSTALLING",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall"
- },
- "settings.legal.privacy.uninstall_body": {
-  "value": "Removing Butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Your app language preference is also kept there. Use Delete all local data BEFORE uninstalling if you want nothing of Butaca left on this television.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall_body"
- },
- "settings.legal.privacy.contact": {
-  "value": "CONTACT",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.contact"
- },
- "settings.legal.privacy.contact_body": {
-  "value": "Privacy questions: github.com/gnacho/butaca/issues",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.contact_body"
- },
- "settings.legal.ffmpeg.body": {
-  "value": "This software uses libraries from the FFmpeg project under the LGPLv2.1. FFmpeg is copyright (c) the FFmpeg developers; Butaca does not own FFmpeg.\n\nThe FFmpeg libraries are unmodified and loaded dynamically, and may be replaced with an interface-compatible build. The complete corresponding FFmpeg 9.0 source, exact configure line and build script are published with every Butaca release.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.body"
- },
- "settings.legal.trademarks.body": {
-  "value": "LG and webOS are trademarks of LG Electronics Inc.\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.body"
- },
- "settings.legal.contact.body": {
-  "value": "Privacy questions may be sent to github.com/gnacho/butaca/issues.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for gnacho/butaca. Please do not include access tokens, server addresses or personal media information in a report.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.body"
- },
- "settings.legal.opensource.body": {
-  "value": "Butaca is open-source software licensed under GPL-3.0-or-later. Copyright (c) 2026 Gleb Linnik and contributors. You may modify and redistribute it under these terms. There is no warranty, to the extent permitted by law.\n\nThird-party components retain their own licences. The package includes THIRD-PARTY-NOTICES.md and licence texts for the Rust runtime and crates, FFmpeg, NanoSVG, fonts and icons. Platform libraries have separate terms.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.opensource.body"
- },
- "settings.legal.source.body": {
-  "value": "Source for build {build}:\n\nhttps://github.com/gnacho/butaca/tree/{build}\n\nLocal migration candidates may contain unpublished changes. Their matching source snapshot is provided with the candidate evidence. A published binary must be accompanied by its version-specific complete source bundle and build instructions; a moving branch is not the corresponding-source record. See LICENSING.md in the package.",
-  "description": "Settings, account, onboarding or privacy UI: settings.legal.source.body",
-  "args": {
-   "build": "str"
-  }
- },
- "settings.about.body": {
-  "value": "Version {version}\nBuild {build}\n\nOpen source under GPL-3.0-or-later\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
-  "description": "About page body: version, build, licence, and the unofficial-app notice. Authorship and the source link live in Legal, not here.",
-  "args": {
-   "build": "str",
-   "version": "str"
-  }
  },
  "settings.consent.preview.crash_intro": {
   "value": "Crashes / Errors — what is actually sent to Sentry in Germany, and only when error reporting is on. Random and build-specific values are placeholders; fixed classes below are representative values from the closed domains in the Privacy notice. Nothing else is sent. The crash report identifier is random, is created only when crash reports are enabled, and is shown here as a placeholder.\n\n",
@@ -852,10 +649,6 @@
   "value": "your servers",
   "description": "Settings, consent or sign-in UI: settings.login.your_servers"
  },
- "settings.language.saving": {
-  "value": "Saving language…",
-  "description": "Settings, consent or sign-in UI: settings.language.saving"
- },
  "settings.audio.error_retry": {
   "value": "{reason} Select Retry.",
   "description": "Settings, consent or sign-in UI: settings.audio.error_retry",
@@ -869,10 +662,6 @@
   "args": {
    "id": "str"
   }
- },
- "settings.legal.privacy.plaintext_body": {
-  "description": "In-app privacy disclosure, aligned with PRIVACY.md.",
-  "value": "Butaca allows an unencrypted connection only to a literal IP address on your local network, never to a hostname or a remote address."
  },
  "settings.consent.preview.incident": {
   "value": "\n\nSign-in problem report (automatically only when error reporting is on; otherwise only when you press Send report, and then without the crash report identifier):\n",
@@ -1125,10 +914,6 @@
  "settings.playback.skip_markers_auto": {
   "value": "Skip automatically",
   "description": "Settings, consent or sign-in UI: settings.playback.skip_markers_auto"
- },
- "settings.interface.section": {
-  "value": "Interface",
-  "description": "Settings root: the group header for the interface rows (language, legal, about)."
  },
  "settings.servers.current": {
   "value": "Jellyfin server",

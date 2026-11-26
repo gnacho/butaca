@@ -53,10 +53,10 @@ use crate::ui::fixture::{key, tick, FixtureMeasure};
 use crate::ui::machine::{InputOwner, TimerId};
 use crate::ui::present::Present;
 
-/// The dispatcher's own mounter: the surface for anything but [`SettingsPage::About`],
+/// The dispatcher's own mounter: the surface for anything but [`SettingsPage::Servers`],
 /// which stands in for whatever page the application has UNDER Settings. The root stack
-/// needs a body and this test is not about which one; a document is the family's most
-/// inert page (its `prepare` is empty and it draws nothing without a `DrawFrame`).
+/// needs a body and this test is not about which one; the server list is the family's most
+/// inert page (a table of what is already configured, no async work of its own).
 struct SurfaceMounter;
 
 impl Mounter<InnerHost> for SurfaceMounter {
@@ -76,7 +76,7 @@ impl Mounter<InnerHost> for SurfaceMounter {
             _ => EntryId(0),
         };
         match arg {
-            SettingsPage::About => mount_page(entry, SettingsPage::About, cx, fx),
+            SettingsPage::Servers => mount_page(entry, SettingsPage::Servers, cx, fx),
             other => Box::new(RouteSurface::new(entry, id, Family::Settings, *other,
                 crate::catalog::HubsSnapshot::empty_for_test().view())),
         }
@@ -174,7 +174,7 @@ fn frame(
 fn opened() -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
     let mut d: Dispatcher<InnerHost> = Dispatcher::new();
     let mut rig = SurfaceRig::new();
-    d.request(MachineId::Nav, NavOp::Root(SettingsPage::About));
+    d.request(MachineId::Nav, NavOp::Root(SettingsPage::Servers));
     frame(&mut d, &mut rig, 0, vec![]);
     d.nav.next_style = Style::Opaque { snapshot: true };
     d.request(MachineId::Nav, NavOp::Present(SettingsPage::Root));
@@ -219,7 +219,7 @@ fn consent_opened_on(
     mut rig: SurfaceRig,
 ) -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
     let mut d = Dispatcher::new();
-    d.request(MachineId::Nav, NavOp::Root(SettingsPage::About));
+    d.request(MachineId::Nav, NavOp::Root(SettingsPage::Servers));
     frame(&mut d, &mut rig, 0, vec![]);
     d.nav.next_style = Style::Opaque { snapshot: true };
     d.request(MachineId::Nav, NavOp::Present(page));

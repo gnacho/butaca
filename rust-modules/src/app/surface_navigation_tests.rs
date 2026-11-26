@@ -38,7 +38,7 @@ fn a_page_arg_wears_the_chrome_its_own_table_says() {
     assert_eq!(AppArg::Settings(SettingsPage::Root).chrome(), Chrome::TabBar);
     // …and the root payload is a boot address, never an identity: the two Settings arguments
     // below are ONE screen, which is what stops a dev boot target minting a second surface.
-    assert!(AppArg::Settings(SettingsPage::Root).same_instance(&AppArg::Settings(SettingsPage::Legal)));
+    assert!(AppArg::Settings(SettingsPage::Root).same_instance(&AppArg::Settings(SettingsPage::Servers)));
 }
 
 /// **Every route mounts a screen that NAMES the heartbeat word** (§15.2).

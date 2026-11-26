@@ -128,16 +128,11 @@ struct PendingErase {
     retry_at: u32,
     /// Consecutive clears that reported a surviving credential; drives [`erase_retry_delay`].
     incomplete: u32,
-    /// The install language the first attempt read before clearing. A retry carries it, because
-    /// once the credential file is gone a re-read can no longer see what to retain.
-    language: Option<crate::i18n::Preference>,
 }
 
 struct EraseWorkerOutcome {
     complete: bool,
     failures: Vec<String>,
-    /// The next-launch language after this erase: retained by sign-out, System after delete-all.
-    language: crate::i18n::Preference,
 }
 
 pub(crate) struct SessionAdapter {
@@ -454,7 +449,6 @@ impl SessionAdapter {
             if diagnostics { crate::storage::diagnostics::disable(); }
             self.erasures.push_back(PendingErase {
                 epoch, all_local, diagnostics, ticket: None, retry_at: crate::app::clock::now(), incomplete: 0,
-                language: None,
             });
             self.submit_erase();
             None
@@ -466,19 +460,17 @@ impl SessionAdapter {
         let now = crate::app::clock::now();
         // SDL's millisecond counter wraps; the retry is due within the forward half-range.
         if pending.ticket.is_some() || now.wrapping_sub(pending.retry_at) >= u32::MAX / 2 { return; }
-        let (diagnostics, all_local, language) = (pending.diagnostics, pending.all_local, pending.language);
+        let diagnostics = pending.diagnostics;
         pending.ticket = crate::storage_worker::submit(move || {
-            let erasure = crate::server::session::clear_for_erase(all_local, language);
+            let erasure = crate::server::session::clear_for_erase();
             let cleared = matches!(erasure.outcome,
                 crate::server::session::ClearOutcome::Durable { legacy_swept: true });
-            // A sign-out that could not retain the language retries, carrying it; delete-all
-            // reports a language it could not reset among its leftovers instead.
-            let complete = cleared && (all_local || erasure.preference_failures.is_empty());
+            let complete = cleared;
             if !complete {
                 crate::log("session: queued clear incomplete; retaining revocation and retrying");
             }
             crate::server::session::revoke_cached_session();
-            let mut failures: Vec<String> = if diagnostics {
+            let failures: Vec<String> = if diagnostics {
                 crate::storage::diagnostics::finish_disable(crate::paths::runtime_dir())
                     .err()
                     .into_iter()
@@ -486,10 +478,9 @@ impl SessionAdapter {
             } else {
                 Vec::new()
             };
-            if all_local { failures.extend(erasure.preference_failures); }
             crate::ui::idle::wake();
             crate::ui::present::wake_from_worker();
-            EraseWorkerOutcome { complete, failures, language: erasure.retained_language }
+            EraseWorkerOutcome { complete, failures }
         }).ok();
         pending.retry_at = now.wrapping_add(STORAGE_RETRY_MS);
     }
@@ -508,15 +499,11 @@ impl SessionAdapter {
             Ok(outcome) if !outcome.complete => {
                 let pending = self.erasures.front_mut()?;
                 pending.ticket = None;
-                pending.language = Some(outcome.language);
                 pending.incomplete = pending.incomplete.saturating_add(1);
                 pending.retry_at = crate::app::clock::now().wrapping_add(erase_retry_delay(pending.incomplete));
                 return None;
             }
-            Ok(outcome) => {
-                crate::i18n::set_saved_preference(outcome.language);
-                outcome.failures
-            }
+            Ok(outcome) => outcome.failures,
         };
         let pending = self.erasures.pop_front().expect("pending clear");
         let leftovers = self.finish_erase(pending.all_local, meta, worker_failures);
@@ -643,7 +630,7 @@ mod tests {
         let mut adapter = SessionAdapter::live_resources_for_test(&mt);
         if erase {
             adapter.erasures.push_back(PendingErase { epoch: 1, all_local: false, diagnostics: false, ticket: None,
-                retry_at: crate::app::clock::now(), incomplete: 0, language: None });
+                retry_at: crate::app::clock::now(), incomplete: 0 });
         } else {
             enqueue_test_commit(&mut adapter, queued_plan(&crate::server::session::Session::default()));
         }
@@ -715,7 +702,7 @@ mod tests {
         let mt = unsafe { crate::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt);
         adapter.erasures.push_back(PendingErase { epoch: 1, all_local: false, diagnostics: false, ticket: None,
-            retry_at: crate::app::clock::now().wrapping_add(STORAGE_RETRY_MS), incomplete: 0, language: None });
+            retry_at: crate::app::clock::now().wrapping_add(STORAGE_RETRY_MS), incomplete: 0 });
         enqueue_test_commit(&mut adapter, queued_plan(&crate::server::session::Session::default()));
         adapter.submit_commit();
         assert!(adapter.commits.front().unwrap().ticket.is_none(), "erase retains its FIFO position");
@@ -772,11 +759,6 @@ mod tests {
         assert_eq!(adapter.resource_test_io.as_ref().unwrap().erase_sweeps, [true],
             "finish_erase ran the all-local sweep");
     }
-
-    /// PR #265 review: the app language is install-wide ("all users on this TV"), so the erase
-    /// queue's ordinary sign-out must keep it across a relaunch while revoking every credential.
-    /// Only "Delete all local data" returns it to System, both on disk and as the confirmed
-    /// next-launch preference the Language screen shows.
 
     #[test]
     fn erase_retry_delay_doubles_to_its_cap() {
@@ -941,7 +923,7 @@ mod tests {
         assert!(begin.find("crate::server::session::revoke_cached_session()").unwrap() < submitted);
         let worker = source.split("fn submit_erase(").nth(1).unwrap()
             .split("pub(crate) fn take_erased(").next().unwrap();
-        assert!(worker.contains("crate::server::session::clear_for_erase(all_local, language)"));
+        assert!(worker.contains("crate::server::session::clear_for_erase()"));
     }
 }
 

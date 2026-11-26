@@ -11,12 +11,6 @@ pub(super) fn execute(command: PreferenceCmd) {
                 crate::ui::idle::invalidate();
             });
         }
-        PreferenceCmd::Language { language, reply } => {
-            let _ = crate::storage_worker::submit_retained(move || {
-                let _ = reply.send(crate::server::session::set_language(language));
-                crate::ui::idle::invalidate();
-            });
-        }
         PreferenceCmd::DirectPlay { mode, reply } => {
             let _ = crate::storage_worker::submit_retained(move || {
                 let _ = reply.send(crate::route::set_direct_play_mode(mode));

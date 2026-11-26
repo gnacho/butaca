@@ -896,7 +896,7 @@ pub(crate) unsafe fn construct(
     };
     crate::log(&format!("session: boot id_len={} scale={}", session.client_id.len(), session.subtitle_scale()));
     #[cfg(not(test))]
-    crate::i18n::initialize(session.language, controlled);
+    crate::i18n::initialize(controlled);
     let forced_login = !controlled && crate::dev::scenarios::login_forced();
     let session_init = match &initial {
         Some(initial) => initial.session.clone(),
@@ -1139,25 +1139,6 @@ pub(crate) unsafe fn construct(
     // itself has no end the app reports.
     let modal_osc = !controlled && crate::dev::scenarios::modalosc_armed();
     let modal_osc_last = 0u32;
-    // dev: /tmp/butaca-legaldoc — with `butaca-settings=legal`, press OK on the Legal
-    // index ONCE so the boot lands on a pushed DOCUMENT (the reader over the frozen ground),
-    // which no boot trigger reached before: `fps:legal-document`.
-    let legal_doc = !controlled && crate::dev::scenarios::legaldoc_armed();
-    let legal_doc_tried = false;
-    // dev: /tmp/butaca-alert — with `butaca-settings=privacy`, open the "Delete all local
-    // data?" DECISION ALERT once the privacy panel is up. It is the one shared yes/no alert in
-    // the app and nothing headless could reach it: `fps:decision-alert`. Opening it is all this
-    // does — nothing is deleted, and Cancel is what a BACK would press.
-    let alert_boot = !controlled && crate::dev::scenarios::alert_armed();
-    let alert_tried = false;
-    // …and the DOWN presses that walk to the delete row before the OK that opens it. A count
-    // rather than an index: the row is the LAST of the privacy table, whose length is that
-    // screen's own business, and DOWN at the last row of a document with no action band is an
-    // `Outcome::Edge` — i.e. idempotent — so any count comfortably past the table's length lands
-    // exactly on it whatever the table becomes. One press per frame, for the reason every other
-    // oscillator here steps at a human cadence: a whole table walked inside one frame would be a
-    // slow frame, and this scene's gates (`worst_ceiling_ms`, `stall_ceiling_ms`) include warmup.
-    let alert_step = 0u8;
     // The profile menu freezes its host and uses one cached backdrop. Drive the menu's own
     // TableView for a strict FPS scene; reusing `homeosc` would now correctly move nothing and
     // would grade the idle keepalive rather than the popover.
@@ -1471,9 +1452,6 @@ pub(crate) unsafe fn construct(
             settings_osc_last,
             settings_osc_down,
             modal_osc_last,
-            legal_doc_tried,
-            alert_tried,
-            alert_step,
             account_osc_last,
             account_osc_down,
             onboard_osc_last,
@@ -1530,8 +1508,6 @@ pub(crate) unsafe fn construct(
                 settingspicker_boot,
                 settings_osc,
                 modal_osc,
-                legal_doc,
-                alert_boot,
                 account_osc,
                 onboard_osc,
                 nav_osc,

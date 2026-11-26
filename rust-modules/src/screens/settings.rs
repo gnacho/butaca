@@ -40,17 +40,15 @@ use crate::ui::machine::{
     Stamped, Tick,
 };
 use crate::ui::present::Provenance;
-use crate::ui::route_screen::{RouteLayout, RoutePush};
+use crate::ui::route_screen::RoutePush;
 use super::family::SessionGround as RouteGround;
 use crate::ui::screen::{
     At, Dir, DrawFrame, Enter, FocusSource, FocusTarget, Focusable, GroupSpec, HitSource, Mounter,
     Placed, RenderStrategy, ReturnState, Screen, ScreenEvent, Step,
 };
-use crate::ui::table::{Row, Section, TableView};
-use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::{theme, Painter, Rect};
 
-use super::family::{inner_cx, table_focus, InnerHost, SettingsPage};
+use super::family::{inner_cx, InnerHost, SettingsPage};
 use super::registry::{word, AppFx, DirectoryLike};
 
 mod page;
@@ -460,11 +458,6 @@ fn mount_page(
 ) -> Box<dyn Screen<InnerHost>> {
     match arg {
         SettingsPage::Root => Box::new(RootPage::new(entry)),
-        SettingsPage::Language => Box::new(LanguagePage::new(entry)),
-        SettingsPage::Contribute => Box::new(super::legal::DocumentPage::contribute(entry)),
-        SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
-        SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
-        SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
         SettingsPage::Servers => Box::new(super::servers::ServersPage::new(entry)),
     }
@@ -1007,176 +1000,3 @@ mod pop_and_remember_tests;
 #[cfg(test)]
 #[path = "settings_composed_tests.rs"]
 mod composed_tests;
-
-// The picker persists an installation preference, while the immutable LocaleContext continues
-// to render the current session. Choosing a language never remounts a screen or resets playback.
-fn preference_name(preference: crate::i18n::Preference) -> &'static str {
-    if preference == crate::i18n::Preference::System {
-        crate::i18n::msg::settings_language_system()
-    } else {
-        preference.native_name()
-    }
-}
-
-const LANGUAGES: [crate::i18n::Preference; 4] = [
-    crate::i18n::Preference::System, crate::i18n::Preference::En,
-    crate::i18n::Preference::Es, crate::i18n::Preference::Be,
-];
-
-struct LanguagePage {
-    entry: EntryId,
-    table: TableView,
-    state: LanguageState,
-    save: Option<(crate::i18n::Preference, std::sync::mpsc::Receiver<bool>)>,
-}
-
-struct LanguageState {
-    selected: crate::i18n::Preference,
-    sel: i32,
-    failed: bool,
-    busy: bool,
-}
-
-impl LogicalState for LanguageState {
-    fn write(&self, w: &mut Canon) {
-        w.u32(self.sel as u32).u8(LANGUAGES.iter().position(|p| *p == self.selected).unwrap_or(0) as u8).bool(self.failed).bool(self.busy);
-    }
-    fn probe(&self, out: &mut String) {
-        out.push_str(&format!("language selected={} sel={} failed={} busy={}", self.selected.tag(), self.sel, self.failed, self.busy));
-    }
-}
-
-impl LanguagePage {
-    fn new(entry: EntryId) -> Self {
-        let selected = crate::i18n::saved_preference();
-        let sel = LANGUAGES.iter().position(|language| *language == selected).unwrap_or(0) as i32;
-        let mut page = Self { entry, table: TableView::new(), state: LanguageState { selected, sel, failed: false, busy: false }, save: None };
-        page.rebuild();
-        page
-    }
-
-    fn pending(&self) -> bool {
-        self.state.selected != crate::i18n::current().preference()
-    }
-
-    fn rebuild(&mut self) {
-        let mut choices = Section::new("");
-        for language in LANGUAGES {
-            choices = choices.row(Row::new(preference_name(language)).checked(language == self.state.selected).dim(self.state.busy));
-        }
-        let contribution = Section::new("").row(
-            Row::new(crate::i18n::msg::settings_language_contribute())
-                .detail(crate::i18n::msg::settings_language_help()).chevron(true));
-        self.table.compact = false;
-        self.table.set_sections(vec![choices, contribution], self.state.sel, false);
-        self.table.list_focused = true;
-    }
-
-    fn view(&self) -> TableScreen<'_> {
-        let copy = if self.state.busy {
-            crate::i18n::msg::settings_language_saving()
-        } else if self.state.failed {
-            crate::i18n::msg::settings_language_save_failed()
-        } else if self.pending() {
-            crate::i18n::msg::settings_language_pending()
-        } else {
-            crate::i18n::msg::settings_language_copy()
-        };
-        TableScreen::new(Header::new(RouteLayout::screen(), Some(crate::i18n::msg::settings_title()),
-            crate::i18n::msg::settings_language_title(), copy).with_back_disc(), &self.table, GroupId(0), self.entry).with_home()
-    }
-
-    fn activate(&mut self, row: u32, fx: &mut Effects<'_, InnerHost>) {
-        if row == LANGUAGES.len() as u32 {
-            fx.push(Fx::Nav(NavOp::Push(SettingsPage::Contribute)));
-        } else if let Some(&preference) = LANGUAGES.get(row as usize) {
-            if self.state.busy || preference == self.state.selected { return; }
-            let (reply, receipt) = std::sync::mpsc::channel();
-            self.save = Some((preference, receipt));
-            self.state.busy = true;
-            self.state.failed = false;
-            fx.push(Fx::App(AppFx::Preferences(super::registry::PreferenceCmd::Language {
-                language: preference, reply,
-            })));
-            self.rebuild();
-        }
-    }
-
-    fn poll_save(&mut self) -> bool {
-        let Some((preference, receipt)) = &self.save else { return false; };
-        let success = match receipt.try_recv() {
-            Ok(success) => success,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
-        };
-        if success { self.state.selected = *preference; }
-        self.state.failed = !success;
-        self.state.busy = false;
-        self.save = None;
-        self.rebuild();
-        true
-    }
-}
-
-impl Machine<InnerHost> for LanguagePage {
-    type Ev = ScreenEvent<InnerHost>;
-    fn step(&mut self, ev: &Self::Ev, cx: &Cx<'_, InnerHost>, fx: &mut Effects<'_, InnerHost>) -> Handled {
-        match ev {
-            ScreenEvent::Mount => {
-                // The generic modal Enter runs before queued mount effects. Remembering a
-                // row afterward cannot move its already-seated cursor, so request an explicit
-                // Enter just as first-run consent does. A child return does not remount this
-                // page and still restores the surface's remembered contribution row.
-                fx.push(Fx::Deliver(
-                    MachineId::Instance(InstanceId(0)),
-                    Delivery::Screen(ScreenEvent::Enter(Enter::Fresh {
-                        focus: FocusTarget::Elem(FocusKey {
-                            entry: self.entry,
-                            elem: self.state.sel as u32,
-                        }),
-                    })),
-                ));
-                Handled::Yes
-            }
-            ScreenEvent::Tick(t) => {
-                if self.poll_save() { fx.invalidate(crate::ui::present::Provenance::Input); }
-                self.table.update(t.dt(), RouteLayout::screen().sectioned_table().h);
-                Handled::Yes
-            }
-            ScreenEvent::FocusMoved { to, .. } => {
-                table_focus(&mut self.table, to.elem); self.state.sel = self.table.sel; Handled::Yes
-            }
-            ScreenEvent::Activate(row) => { self.activate(*row, fx); Handled::Yes }
-            ScreenEvent::Input(crate::ui::machine::InputEvent { kind: crate::ui::machine::InputKind::Key {
-                key: Key::Right, at_edge: true, .. }, .. }) => {
-                if let Some(k) = cx.focus.current {
-                    if self.table.row_opens(k.elem as i32) { self.activate(k.elem, fx); }
-                }
-                Handled::Yes
-            }
-            _ => Handled::No,
-        }
-    }
-}
-
-crate::focusable_via_view!(LanguagePage, InnerHost, view);
-
-impl Screen<InnerHost> for LanguagePage {
-    fn name(&self) -> &'static str { "language" }
-    fn state(&self) -> &dyn LogicalState { &self.state }
-    fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> { Some(Cow::Borrowed(crate::i18n::msg::settings_title())) }
-    fn back_control(&self, cx: &Cx<'_, InnerHost>) -> Option<crate::ui::Rect> {
-        self.view().crumb_rect(cx.measure)
-    }
-    fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
-    fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
-        crate::ui::screen::Part::<InnerHost>::draw(&mut self.view(), f, Rect::FULL);
-    }
-    fn render(&self) -> RenderStrategy { RenderStrategy::Page }
-    fn focus_source(&self) -> FocusSource { FocusSource::Engine }
-    fn hit_source(&self) -> HitSource { HitSource::Engine }
-}
-
-#[cfg(test)]
-#[path = "settings_language_tests.rs"]
-mod language_tests;
