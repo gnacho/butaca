@@ -5567,6 +5567,21 @@ impl TabStrip {
             // box-shadow:0 6px 24px -6px rgba(170,92,195,.6) }`. The white at 16% is the MENUS'
             // focus face (server cards, settings cards); the bar's row lights in its accent.
             TabGround::Tracked { .. } => {
+                // `box-shadow: 0 6px 24px -6px rgba(170,92,195,.6)` — the comp lifts its focused
+                // tab on a violet penumbra, which is what makes the plate read as sitting OVER the
+                // bar rather than being a flat swatch of it.
+                let (fx, fw) = self.foc.span();
+                let a = self.foc.alpha();
+                if a > 0.004 && fw > 0.5 {
+                    let r = Rect::new(fx, top + 2.0, fw, (h - 4.0).max(1.0)).scaled(TAB_FOCUS_SCALE);
+                    p.alpha(a).shadow(
+                        r,
+                        TAB_PILL_RAD,
+                        TAB_FOCUS_GLOW_BLUR,
+                        TAB_FOCUS_GLOW_DY,
+                        theme::with_a(theme::TAB_FOCUS_FILL, TAB_FOCUS_GLOW_A),
+                    );
+                }
                 cap(&self.foc, theme::TAB_FOCUS_FILL, None, TAB_FOCUS_SCALE, false)
             }
         }
@@ -5673,6 +5688,10 @@ pub(crate) const TAB_TRACK_PAD: f32 = 0.0;
 pub(crate) const TAB_PILL_RAD: f32 = 10.0;
 /// `#mainnav button.is-focused { transform: scale(1.07) }`.
 const TAB_FOCUS_SCALE: f32 = 1.07;
+/// …and its `box-shadow: 0 6px 24px -6px rgba(170,92,195,.6)`, as one soft violet penumbra.
+const TAB_FOCUS_GLOW_BLUR: f32 = 24.0;
+const TAB_FOCUS_GLOW_DY: f32 = 6.0;
+const TAB_FOCUS_GLOW_A: f32 = 0.6;
 /// The y below which a screen's content is clear of the shared top chrome — the tab track's bottom
 /// edge ([`TOP_BAR_Y`] + the pill height + the track's inset). Exposed so a screen that lets art
 /// overflow UPWARD out of its layout band ([`crate::ui::hero_logo`]) can ASSERT its clearance in a
