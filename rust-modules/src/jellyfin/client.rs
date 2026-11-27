@@ -477,6 +477,16 @@ impl JfClient {
         Some([with_token, "Accept: application/json".to_string()])
     }
 
+    pub(crate) fn play_on_authorization(&self) -> Option<String> {
+        self.authed_headers().map(|[authorization, _]| authorization)
+    }
+
+    pub(crate) fn post_play_on_capabilities(&self) -> bool {
+        let body = serde_json::from_slice(super::play_on::protocol::capabilities_body())
+            .expect("the static Play On capabilities are valid JSON");
+        self.post_status("/Sessions/Capabilities/Full", &body)
+    }
+
     /// One authed GET, parsed. `None` covers transport failure, non-2xx and unparseable JSON
     /// alike: the failure granularity the earlier stores were written against (`Option` from
     /// `fetch_built`), so the adapters land without new error plumbing. The log line names the

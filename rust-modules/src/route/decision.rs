@@ -40,6 +40,8 @@ struct PlaybackRequest {
     /// with the request so the session can be described whole; a RETRY deliberately ignores it
     /// (`request_play_inner`), because by then the live selection is the truth.
     start_tracks: StartTracks,
+    /// Jellyfin MediaSource selected by a remote PlayNow. Ordinary local plays leave this None.
+    media_source_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +55,13 @@ struct RetryContext {
     /// rescue ([`retry_current_play`]) of a playback that was enhanced: an enhanced `start.mkv`
     /// that failed to open is the one failure a plain retry would repeat verbatim.
     suppress_enhancement: bool,
+}
+
+fn retry_start_tracks(retry: &RetryContext) -> StartTracks {
+    StartTracks {
+        audio_sid: retry.audio_sid,
+        sub_sid: retry.sub_sid,
+    }
 }
 
 /// Everything the main thread needs to resolve and render the playback in progress, in one struct.
@@ -5195,6 +5204,7 @@ impl ResolveEnv {
             sub_sid: cur_sub_sid(ps),
             subtitle_override: None,
             cached_item: meta.cached_playing(sid, rk),
+            media_source_id: None,
             quality: quality(),
             direct_play_mode: direct_play_mode(),
             src_kbps: resolve_src_kbps(meta.current(), sid, rk),
@@ -5404,10 +5414,42 @@ pub(crate) fn request_play_with_tracks(
             ctx: ctx.to_owned(),
             preview: false,
             start_tracks: start,
+            media_source_id: None,
         },
+        None,
         None,
         false,
     )
+}
+
+/// Remote PlayNow enters the same resolver with its selected source and PlayingItem already coherent.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn request_play_prepared(
+    ps: &mut PlaybackSession,
+    meta: &mut crate::stores::metadata::MetadataStore,
+    sid: ServerId,
+    rk: &str,
+    part: &str,
+    vcodec: &str,
+    acodec: &str,
+    title: &str,
+    ctx: &str,
+    start: StartTracks,
+    playing: crate::metadata::PlayingItem,
+) -> bool {
+    let request = PlaybackRequest {
+        sid,
+        rk: rk.to_owned(),
+        part: part.to_owned(),
+        vcodec: vcodec.to_owned(),
+        acodec: acodec.to_owned(),
+        title: title.to_owned(),
+        ctx: ctx.to_owned(),
+        preview: false,
+        start_tracks: start,
+        media_source_id: Some(part.to_owned()),
+    };
+    request_play_inner(ps, meta, request, Some(playing), None, false)
 }
 
 /// Same resolve door as [`request_play`], flagged as a preview. Does not push a route. Resume is
@@ -5435,10 +5477,23 @@ pub(crate) fn request_preview(
             ctx: crate::metadata::TRAILER_CONTEXT.to_owned(),
             preview: true,
             start_tracks: StartTracks::NONE,
+            media_source_id: None,
         },
+        None,
         None,
         false,
     )
+}
+
+fn attach_prepared_item(
+    env: &mut ResolveEnv,
+    request: &PlaybackRequest,
+    prepared: Option<crate::metadata::PlayingItem>,
+) {
+    env.media_source_id = request.media_source_id.clone();
+    if request.media_source_id.is_some() || prepared.is_some() {
+        env.cached_item = prepared;
+    }
 }
 
 /// Common async request transaction. A retry waits for the real stop's server work on THIS worker
@@ -5448,6 +5503,7 @@ fn request_play_inner(
     ps: &mut PlaybackSession,
     meta: &mut crate::stores::metadata::MetadataStore,
     request: PlaybackRequest,
+    prepared_item: Option<crate::metadata::PlayingItem>,
     retry: Option<RetryContext>,
     drain_previous: bool,
 ) -> bool {
@@ -5512,6 +5568,7 @@ fn request_play_inner(
     let contract_revision = desired_contract_revision();
     // captured HERE, on the main thread, and moved into the worker — see ResolveEnv
     let mut env = ResolveEnv::snapshot(ps, meta.view(), sid, rk);
+    attach_prepared_item(&mut env, &request, prepared_item);
     env.omit_queue_continuous = crate::metadata::context_omits_queue_continuous(ctx);
     env.set_preview(request.preview);
     // The pre-playback window's pick (issue #367) belongs to the START of an item and to nothing
@@ -5529,6 +5586,7 @@ fn request_play_inner(
         // retry is the SAME item: override the fresh defaults with the selection captured before
         // that reset so a rescue does not silently turn subtitles/audio back to server default.
         env.direct_play_mode = retry.direct_play_mode;
+        env.start_tracks = retry_start_tracks(&retry);
         env.audio_sid = retry.audio_sid;
         env.sub_sid = retry.sub_sid;
         env.subtitle_override = Some(retry.sub_sid);
@@ -5666,7 +5724,7 @@ pub(crate) fn retry_current_play(
         "playback retry: resolving item again at quality {:?}",
         quality(),
     ));
-    request_play_inner(ps, meta, request, Some(retry_context_with(ps, resume_ns, direct_play)), true)
+    request_play_inner(ps, meta, request, None, Some(retry_context_with(ps, resume_ns, direct_play)), true)
 }
 
 /// [`rescue_retry_context`] with the failed attempt's Direct Play mode optionally replaced — the
@@ -5806,7 +5864,7 @@ return None; // superseded while in flight
             crate::player::log(
                 "playback resolve: desired contract changed in flight; discarding and resolving the latest contract",
             );
-            let _ = request_play_inner(ps, meta, request, Some(retry), false);
+            let _ = request_play_inner(ps, meta, request, None, Some(retry), false);
         } else {
             cancel_playback_request(ps, has_url(ps));
         }
@@ -5853,6 +5911,14 @@ return None; // superseded while in flight
 /// to set and are carried across it explicitly — the HUD strings, the `/identity` cache when this
 /// plan learned no id, and the codec quartet when the plan resolved no video codec — and each says
 /// below why it stays.
+fn should_restore_server_sidecar(
+    sub_render_ordinal: Option<i32>,
+    subtitle_explicit_off: bool,
+    transcoding: bool,
+) -> bool {
+    sub_render_ordinal.is_none() && !transcoding && !subtitle_explicit_off
+}
+
 fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, plan: Plan, rk: &str) -> Option<RouteStartTransaction> {
     // ACTIVE_ENCODER is the final server-resource owner, even when there is no encoder. A raw
     // Part URL opens/adopts its Streaming Resource under the logical playback id; retaining that
@@ -5987,7 +6053,11 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
     }
     // Restore the external renderer AND the route's stream identity before publishing the
     // start contract, so timeline reports and later audio/quality transcodes keep this pick.
-    if plan.sub_render_ordinal.is_none() && !is_transcoding(ps) {
+    if should_restore_server_sidecar(
+        plan.sub_render_ordinal,
+        plan.subtitle_explicit_off,
+        is_transcoding(ps),
+    ) {
         if let Some(id) = crate::player::sidecar::restore_server_selection(cur_sid(ps), meta.view()) {
             set_subtitle(ps, id);
         }

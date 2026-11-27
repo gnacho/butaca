@@ -650,6 +650,12 @@ fn storage_activation_reply(reply: &str) -> crate::storage::wire::failure::Detai
     }
 }
 
+/// The general category stores this switch as an on/off string.
+#[cfg(any(test, not(feature = "hostsim")))]
+fn platform_screensaver_payload() -> &'static str {
+    r#"{"category":"general","settings":{"screenSaverEnabled":"off"}}"#
+}
+
 /// Best-effort dynamic-service activation hint for the storage helper.
 ///
 /// The helper publishes readiness from its startup path, so neither a successful method reply nor
@@ -672,8 +678,10 @@ fn storage_activation_reply(reply: &str) -> crate::storage::wire::failure::Detai
 pub(crate) fn suppress_platform_screensaver() {
     // `activitymanager` owns the idle/blank policy on webOS 4+. Writing it is a call, not a file
     // edit, so a refusal comes back as a reply rather than as a silent difference.
-    let payload = "{\"settings\":{\"screenSaverEnabled\":false}}";
-    match ls2::call_once("luna://com.webos.settingsservice/setSystemSettings", payload) {
+    match ls2::call_once(
+        "luna://com.webos.settingsservice/setSystemSettings",
+        platform_screensaver_payload(),
+    ) {
         Ok(reply) => crate::log(&format!("screensaver: platform saver off -> {reply}")),
         Err(ls2::Fail::Timeout) => crate::log("screensaver: platform saver call timed out"),
         Err(ls2::Fail::Setup { stage, code, .. }) => {
@@ -1675,6 +1683,19 @@ mod os_release_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_screensaver_disable_uses_the_general_string_setting() {
+        let payload: serde_json::Value =
+            serde_json::from_str(platform_screensaver_payload()).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "category": "general",
+                "settings": {"screenSaverEnabled": "off"}
+            })
+        );
+    }
 
     #[test]
     fn storage_activation_reply_keeps_only_status_and_numeric_error_code() {

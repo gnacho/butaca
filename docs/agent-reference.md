@@ -32,6 +32,32 @@ break the loop for everyone. App id `com.butaca` — and since 2026-08-21 a seco
 install, `com.butaca.debug`, can sit beside it on the same set (`FLAVOR`, below;
 `docs/two-installs.md`).
 
+## Server control and Jellyfin Play On
+
+The authenticated `jellyfin::client::JfClient` owns the server origin, device identity and token.
+`jellyfin/play_on` turns that session into a Jellyfin Play On destination: one persistent worker
+connects to `/socket`, posts `Sessions/Capabilities/Full` with Video, Play and Playstate only,
+answers keepalive and retries with bounded backoff. The token stays in the MediaBrowser
+Authorization header. The socket path is fixed and the existing plaintext credential gate applies
+before any connection.
+
+`net/websocket.rs` owns the libcurl connect-only transport. TCP and TLS are completed by libcurl,
+then the app performs the HTTP upgrade and speaks bounded RFC 6455 frames through
+`curl_easy_send`/`curl_easy_recv`. The active socket uses the CURLINFO_SOCKET type class, not
+CURLINFO_LONG. No new TLS or WebSocket dependency is involved.
+
+Workers never touch navigation or Starfish. Validated commands enter a bounded generation-tagged
+queue drained by `app::play_on` on the main thread. PlayNow selects one item and prepares a single
+coherent MediaSource, codec set and track list before entering the ordinary resolver. Playstate
+uses the existing transport, commit-seek and exit requests. Replacing the client or signing out
+closes the socket and invalidates queued commands. Controlled recording and replay never start
+this worker.
+
+Host tests cover protocol validation, framing, real loopback libcurl transport, capabilities,
+worker teardown, source selection and generation rejection. They do not prove discovery by an
+official Jellyfin client, LG playback behavior or a real reconnect on webOS. Those require the ARM
+CI artifact and a guest/mock device session.
+
 ## Build / deploy / run
 
 The `Makefile` is the entire dev loop. Requires the **webOS NDK** (install with `make

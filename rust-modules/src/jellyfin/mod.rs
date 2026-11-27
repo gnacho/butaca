@@ -47,6 +47,15 @@
 //! considered weakening of the transport floor for this backend alone, and it is why the
 //! onboarding asks for an IP literal rather than a hostname.
 //!
+//! ## Play On
+//!
+//! `play_on` owns one authenticated `/socket` worker for the installed client. It publishes only
+//! Video, Play and Playstate capabilities, answers keepalive, bounds reconnect backoff and sends
+//! validated commands through a bounded generation-tagged queue. `app::play_on` drains that queue
+//! on the main thread and enters the ordinary playback doors. PlayNow carries a prepared
+//! `PlayingItem` so its MediaSource, codecs and tracks cannot come from different sources. Signing
+//! out or replacing the client closes the socket and invalidates every queued command.
+//!
 //! ## Units, spelled out once
 //!
 //! Jellyfin measures times in **ticks of 100 ns** (`RunTimeTicks`, `PlaybackPositionTicks`); the
@@ -77,6 +86,7 @@ pub(crate) mod images;
 pub(crate) mod intros;
 mod dto;
 pub(crate) mod profile;
+pub(crate) mod play_on;
 pub(crate) mod search;
 pub(crate) mod quick_connect;
 pub(crate) mod signin;

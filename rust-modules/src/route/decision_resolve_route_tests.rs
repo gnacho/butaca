@@ -1439,6 +1439,7 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
         ctx: "S01 E02".into(),
         preview: false,
         start_tracks: StartTracks::NONE,
+        media_source_id: None,
     };
     {
         let s = &mut ps;
@@ -1824,4 +1825,97 @@ fn retry_after_start_failure_suppresses_enhancement() {
     );
 
     crate::player::restore_audio_enhancements(crate::playback::AudioEnhancements::NONE);
+}
+
+#[test]
+fn play_on_prepared_item_enters_the_resolve_environment() {
+    let request = PlaybackRequest {
+        sid: ServerId::UNSET,
+        rk: "movie".into(),
+        part: "alternate-source".into(),
+        vcodec: "hevc".into(),
+        acodec: "eac3".into(),
+        title: "Remote film".into(),
+        ctx: String::new(),
+        preview: false,
+        start_tracks: StartTracks::NONE,
+        media_source_id: Some("alternate-source".into()),
+    };
+    let mut prepared = crate::metadata::PlayingItem::with_subs(Vec::new());
+    prepared.rk = "movie".into();
+    prepared.container = "mkv".into();
+    let mut env = ResolveEnv::default();
+    attach_prepared_item(&mut env, &request, Some(prepared));
+    assert_eq!(env.media_source_id.as_deref(), Some("alternate-source"));
+    let cached = env.cached_item.unwrap();
+    assert_eq!(cached.rk, "movie");
+    assert_eq!(cached.container, "mkv");
+}
+
+#[test]
+fn play_on_retry_source_invalidates_the_default_cached_item() {
+    let request = PlaybackRequest {
+        sid: ServerId::UNSET,
+        rk: "movie".into(),
+        part: "alternate-source".into(),
+        vcodec: "hevc".into(),
+        acodec: "eac3".into(),
+        title: "Remote film".into(),
+        ctx: String::new(),
+        preview: false,
+        start_tracks: StartTracks::NONE,
+        media_source_id: Some("alternate-source".into()),
+    };
+    let mut cached = crate::metadata::PlayingItem::with_subs(Vec::new());
+    cached.rk = "movie".into();
+    cached.container = "mp4".into();
+    let mut env = ResolveEnv {
+        cached_item: Some(cached),
+        ..Default::default()
+    };
+    attach_prepared_item(&mut env, &request, None);
+    assert_eq!(env.media_source_id.as_deref(), Some("alternate-source"));
+    assert!(env.cached_item.is_none());
+}
+
+#[test]
+fn play_on_retry_preserves_audio_and_subtitle_choices() {
+    let retry = RetryContext {
+        resume_ns: 10,
+        audio_sid: 17,
+        sub_sid: 23,
+        sub_offset_ms: 0,
+        direct_play_mode: DirectPlayMode::Auto,
+        suppress_enhancement: false,
+    };
+    assert_eq!(
+        retry_start_tracks(&retry),
+        StartTracks {
+            audio_sid: 17,
+            sub_sid: 23,
+        }
+    );
+    assert_eq!(
+        retry_start_tracks(&RetryContext {
+            sub_sid: 0,
+            ..retry
+        })
+        .subtitle(),
+        Some(0)
+    );
+}
+
+#[test]
+fn play_on_explicit_off_blocks_server_sidecar_restore() {
+    let plan = Plan {
+        subtitle_explicit_off: true,
+        ..Default::default()
+    };
+    assert!(!should_restore_server_sidecar(
+        plan.sub_render_ordinal,
+        plan.subtitle_explicit_off,
+        false,
+    ));
+    assert!(should_restore_server_sidecar(None, false, false));
+    assert!(!should_restore_server_sidecar(None, false, true));
 }
